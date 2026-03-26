@@ -330,7 +330,8 @@ const Admin = () => {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="license" className="text-sm text-muted-foreground">Licença (slug)</Label>
-                  <Input id="license" value={form.license} onChange={(e) => setForm({ ...form, license: e.target.value })} placeholder="ex: ayla-viana" className="bg-secondary border-border" required />
+                  <Input id="license" value={form.license} readOnly className="bg-secondary/50 border-border text-muted-foreground cursor-not-allowed" />
+                  <p className="text-xs text-muted-foreground">Gerado automaticamente a partir do nome</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="phone" className="text-sm text-muted-foreground">WhatsApp (com DDD)</Label>
