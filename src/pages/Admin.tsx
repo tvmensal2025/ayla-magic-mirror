@@ -18,7 +18,7 @@ const Admin = () => {
   const [activeTab, setActiveTab] = useState<"dashboard" | "dados" | "links" | "preview">("dashboard");
   const [userId, setUserId] = useState<string | null>(null);
   const [form, setForm] = useState({
-    name: "", license: "", phone: "", cadastro_url: "", igreen_id: "",
+    name: "", license: "", phone: "", cadastro_url: "", igreen_id: "", licenciada_cadastro_url: "",
   });
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
@@ -42,7 +42,7 @@ const Admin = () => {
     const { data } = await supabase.from("consultants").select("*").eq("id", uid).maybeSingle();
     if (data) {
       const c = data as Consultant;
-      setForm({ name: c.name, license: c.license, phone: c.phone, cadastro_url: c.cadastro_url, igreen_id: c.igreen_id || "" });
+      setForm({ name: c.name, license: c.license, phone: c.phone, cadastro_url: c.cadastro_url, igreen_id: c.igreen_id || "", licenciada_cadastro_url: (c as any).licenciada_cadastro_url || "" });
       if (c.photo_url) setPhotoPreview(c.photo_url);
     }
     setLoading(false);
@@ -70,6 +70,7 @@ const Admin = () => {
       const payload: any = {
         id: userId, name: form.name, license: form.license.toLowerCase().replace(/\s+/g, "-"),
         phone: form.phone.replace(/\D/g, ""), cadastro_url: form.cadastro_url, igreen_id: form.igreen_id || null,
+        licenciada_cadastro_url: form.licenciada_cadastro_url || null,
       };
       if (photo_url) payload.photo_url = photo_url;
       const { error } = await supabase.from("consultants").upsert(payload, { onConflict: "id" });
@@ -347,8 +348,12 @@ const Admin = () => {
                 </div>
               </div>
               <div className="mt-4 space-y-2">
-                <Label htmlFor="cadastro_url" className="text-sm text-muted-foreground">Link de cadastro iGreen</Label>
+                <Label htmlFor="cadastro_url" className="text-sm text-muted-foreground">Link de cadastro iGreen (Conta de Energia)</Label>
                 <Input id="cadastro_url" value={form.cadastro_url} onChange={(e) => setForm({ ...form, cadastro_url: e.target.value })} placeholder="https://digital.igreenenergy.com.br/?id=..." className="bg-secondary border-border" required />
+              </div>
+              <div className="mt-4 space-y-2">
+                <Label htmlFor="licenciada_cadastro_url" className="text-sm text-muted-foreground">Link de cadastro Licença</Label>
+                <Input id="licenciada_cadastro_url" value={form.licenciada_cadastro_url} onChange={(e) => setForm({ ...form, licenciada_cadastro_url: e.target.value })} placeholder="https://..." className="bg-secondary border-border" />
               </div>
             </div>
 

@@ -20,6 +20,7 @@ export type Database = {
           created_at: string | null
           id: string
           igreen_id: string | null
+          licenciada_cadastro_url: string | null
           license: string
           name: string
           phone: string
@@ -30,6 +31,7 @@ export type Database = {
           created_at?: string | null
           id: string
           igreen_id?: string | null
+          licenciada_cadastro_url?: string | null
           license: string
           name: string
           phone: string
@@ -40,6 +42,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           igreen_id?: string | null
+          licenciada_cadastro_url?: string | null
           license?: string
           name?: string
           phone?: string

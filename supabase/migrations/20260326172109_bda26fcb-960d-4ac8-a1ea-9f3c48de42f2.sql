@@ -1,0 +1,1 @@
+ALTER TABLE public.consultants ADD COLUMN IF NOT EXISTS licenciada_cadastro_url text;
