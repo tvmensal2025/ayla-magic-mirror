@@ -1,14 +1,21 @@
+import { trackClickEvent } from "@/hooks/useTrackEvent";
+
 interface LicHeroSectionProps {
   cadastroUrl?: string;
   whatsappUrl?: string;
+  consultantId?: string;
 }
 
 const DEFAULT_CADASTRO = "https://digital.igreenenergy.com.br/?id=126928&sendcontract=true";
 const DEFAULT_WHATSAPP = "https://api.whatsapp.com/send?phone=5515981077416&text=Ol%C3%A1,%20gostaria%20de%20mais%20informa%C3%A7%C3%B5es%20sobre%20a%20oportunidade%20de%20Licenciado%20iGreen%20Energy";
 
-const LicHeroSection = ({ cadastroUrl, whatsappUrl }: LicHeroSectionProps) => {
+const LicHeroSection = ({ cadastroUrl, whatsappUrl, consultantId }: LicHeroSectionProps) => {
   const CADASTRO = cadastroUrl || DEFAULT_CADASTRO;
   const WHATSAPP = whatsappUrl || DEFAULT_WHATSAPP;
+
+  const handleClick = (target: string) => {
+    if (consultantId) trackClickEvent(consultantId, target, "licenciada");
+  };
 
   return (
     <section className="relative py-12 md:py-20">
@@ -26,7 +33,7 @@ const LicHeroSection = ({ cadastroUrl, whatsappUrl }: LicHeroSectionProps) => {
           </video>
         </div>
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <a href={WHATSAPP} target="_blank" rel="noopener noreferrer" className="btn-cta">
+          <a href={WHATSAPP} target="_blank" rel="noopener noreferrer" className="btn-cta" onClick={() => handleClick("whatsapp")}>
             Quero ser Licenciado
           </a>
         </div>
