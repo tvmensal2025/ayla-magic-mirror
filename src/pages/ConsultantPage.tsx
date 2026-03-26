@@ -1,5 +1,6 @@
 import { useParams } from "react-router-dom";
 import { useConsultant } from "@/hooks/useConsultant";
+import { useTrackView } from "@/hooks/useTrackView";
 import HeroSection from "@/components/HeroSection";
 import AboutSection from "@/components/AboutSection";
 import HowItWorksSection from "@/components/HowItWorksSection";

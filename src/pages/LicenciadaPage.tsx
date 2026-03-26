@@ -1,5 +1,6 @@
 import { useParams } from "react-router-dom";
 import { useConsultant } from "@/hooks/useConsultant";
+import { useTrackView } from "@/hooks/useTrackView";
 import LicHeroSection from "@/components/licenciada/LicHeroSection";
 import LicAboutSection from "@/components/licenciada/LicAboutSection";
 import LicWhySection from "@/components/licenciada/LicWhySection";
