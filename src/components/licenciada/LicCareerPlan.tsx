@@ -30,6 +30,7 @@ const LicCareerPlan = () => (
   <section>
     <div className="section-container">
       <h2 className="section-heading mb-12">Plano de Carreira iGreen Energy</h2>
+      <img src="/images/plano-carreira.webp" alt="Plano de Carreira iGreen Energy" loading="lazy" className="rounded-xl w-full max-w-3xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
       <div className="max-w-4xl mx-auto space-y-10">
         {levels.map((level, i) => (
           <div key={i} className="bg-card rounded-xl p-6 md:p-8 border border-border" style={{ boxShadow: 'var(--shadow-card)' }}>

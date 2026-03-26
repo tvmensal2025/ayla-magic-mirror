@@ -15,7 +15,7 @@ const LicConexaoClub = () => (
       <p className="text-center text-foreground/80 text-lg max-w-3xl mx-auto mb-12">
         Serviço prestado pela iGreen que conecta o cliente ao iGreen Club, nosso clube de descontos em mais de 30 mil estabelecimentos em todo o Brasil
       </p>
-      <img src="/images/igreen-club-1.jpeg" alt="iGreen Club" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/conexao-club.webp" alt="iGreen Club" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
 
       <h3 className="section-heading text-2xl md:text-3xl mb-8">iGreen Club</h3>
       <div className="max-w-3xl mx-auto space-y-4 mb-12">
@@ -23,11 +23,7 @@ const LicConexaoClub = () => (
       </div>
 
       <h3 className="section-heading text-xl md:text-2xl mb-8">Confira algumas lojas onde clientes e licenciados iGreen têm descontos exclusivos</h3>
-      <div className="grid sm:grid-cols-3 gap-6 max-w-4xl mx-auto mb-12">
-        <img src="/images/igreen-club-1.jpeg" alt="Lojas parceiras" loading="lazy" className="rounded-xl w-full shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
-        <img src="/images/igreen-club-2.jpeg" alt="Lojas parceiras" loading="lazy" className="rounded-xl w-full shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
-        <img src="/images/igreen-club-3.jpeg" alt="Lojas parceiras" loading="lazy" className="rounded-xl w-full shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
-      </div>
+      <img src="/images/lojas-igreen-club.webp" alt="Lojas parceiras iGreen Club" loading="lazy" className="rounded-xl w-full max-w-4xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
 
       <div className="green-divider mb-12" />
       <h3 className="section-heading text-2xl md:text-3xl mb-8">Como você é remunerado com a Conexão Club (Individual)?</h3>

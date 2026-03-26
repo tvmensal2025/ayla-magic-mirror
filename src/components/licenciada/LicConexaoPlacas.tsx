@@ -8,7 +8,7 @@ const LicConexaoPlacas = () => (
       <p className="text-center text-foreground/80 text-lg max-w-3xl mx-auto mb-12">
         Serviço prestado pela iGreen que conecta o cliente a um de nossos fornecedores para a compra e instalação de placas solares para economia de até 95% na conta de luz, válido em todo o Brasil
       </p>
-      <img src="/images/feed-1.jpeg" alt="Conexão Placas" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/conexao-placas.webp" alt="Conexão Placas" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
 
       <h3 className="section-heading text-2xl md:text-3xl mb-8">Como você é remunerado com a Conexão Placas?</h3>
       <div className="max-w-3xl mx-auto">

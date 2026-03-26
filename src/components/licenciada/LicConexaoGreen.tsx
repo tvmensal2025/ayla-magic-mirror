@@ -37,7 +37,7 @@ const LicConexaoGreen = () => (
         Serviço prestado pela iGreen que conecta o cliente a uma de nossas usinas solares, oferecendo um desconto de até 15% na conta de luz todos os meses gratuitamente
       </p>
 
-      <img src="/images/feed-1.jpeg" alt="Conexão Green" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/conexao-green.webp" alt="Conexão Green" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
 
       <h3 className="section-heading text-2xl md:text-3xl mb-10">Como funciona a Conexão Green</h3>
       <div className="grid md:grid-cols-2 gap-10 items-start mb-16">

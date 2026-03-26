@@ -14,7 +14,7 @@ const LicConexaoClubPJ = () => (
       <p className="text-center text-foreground/80 text-lg max-w-3xl mx-auto mb-12">
         Serviço prestado pela iGreen que conecta empresas interessadas em fidelizar clientes e colaboradores por meio dos benefícios exclusivos do iGreen Club
       </p>
-      <img src="/images/igreen-club-2.jpeg" alt="Conexão Club PJ" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/club-pj.webp" alt="Conexão Club PJ" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
 
       <div className="max-w-3xl mx-auto space-y-4 mb-12">
         {pjItems.map((item, i) => <div key={i} className="benefit-item"><span>{item}</span></div>)}
