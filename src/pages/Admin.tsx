@@ -70,6 +70,7 @@ const Admin = () => {
       const payload: any = {
         id: userId, name: form.name, license: form.license.toLowerCase().replace(/\s+/g, "-"),
         phone: form.phone.replace(/\D/g, ""), cadastro_url: form.cadastro_url, igreen_id: form.igreen_id || null,
+        licenciada_cadastro_url: form.licenciada_cadastro_url || null,
       };
       if (photo_url) payload.photo_url = photo_url;
       const { error } = await supabase.from("consultants").upsert(payload, { onConflict: "id" });
