@@ -23,11 +23,7 @@ const LicConexaoClub = () => (
       </div>
 
       <h3 className="section-heading text-xl md:text-2xl mb-8">Confira algumas lojas onde clientes e licenciados iGreen têm descontos exclusivos</h3>
-      <div className="grid sm:grid-cols-3 gap-6 max-w-4xl mx-auto mb-12">
-        <img src="/images/igreen-club-1.jpeg" alt="Lojas parceiras" loading="lazy" className="rounded-xl w-full shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
-        <img src="/images/igreen-club-2.jpeg" alt="Lojas parceiras" loading="lazy" className="rounded-xl w-full shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
-        <img src="/images/igreen-club-3.jpeg" alt="Lojas parceiras" loading="lazy" className="rounded-xl w-full shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
-      </div>
+      <img src="/images/lojas-igreen-club.webp" alt="Lojas parceiras iGreen Club" loading="lazy" className="rounded-xl w-full max-w-4xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
 
       <div className="green-divider mb-12" />
       <h3 className="section-heading text-2xl md:text-3xl mb-8">Como você é remunerado com a Conexão Club (Individual)?</h3>

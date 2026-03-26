@@ -8,7 +8,7 @@ const LicConexaoLivre = () => (
       <p className="text-center text-foreground/80 text-lg max-w-3xl mx-auto mb-12">
         Serviço prestado pela iGreen que conecta o cliente de média e alta tensão (como indústrias e grandes complexos comerciais) ao mercado livre de energia, oferecendo um desconto de até 30% na sua conta de luz, válido em todo o Brasil
       </p>
-      <img src="/images/feed-1.jpeg" alt="Conexão Livre" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/conexao-livre.webp" alt="Conexão Livre" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
 
       <h3 className="section-heading text-2xl md:text-3xl mb-8">Como você é remunerado com a Conexão Livre?</h3>
       <div className="max-w-3xl mx-auto">
