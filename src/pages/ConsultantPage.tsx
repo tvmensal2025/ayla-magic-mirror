@@ -1,5 +1,6 @@
 import { useParams } from "react-router-dom";
 import { useConsultant } from "@/hooks/useConsultant";
+import { useTrackView } from "@/hooks/useTrackView";
 import HeroSection from "@/components/HeroSection";
 import AboutSection from "@/components/AboutSection";
 import HowItWorksSection from "@/components/HowItWorksSection";
@@ -17,6 +18,7 @@ import SEOHead from "@/components/SEOHead";
 const ConsultantPage = () => {
   const { licenca } = useParams<{ licenca: string }>();
   const { data: consultant, isLoading } = useConsultant(licenca || "");
+  useTrackView(consultant?.id, "client");
 
   if (isLoading) return <LoadingScreen />;
 
