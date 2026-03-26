@@ -163,7 +163,7 @@ const Admin = () => {
         {activeTab === "dashboard" && (
           <div className="space-y-6">
             {/* Stats Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <StatCard
                 icon={<Eye className="w-5 h-5" />}
                 label="Total de Visualizações"
@@ -182,7 +182,31 @@ const Admin = () => {
                 value={analytics?.totalLicenciada ?? 0}
                 color="primary"
               />
+              <StatCard
+                icon={<MousePointerClick className="w-5 h-5" />}
+                label="Cliques nos Botões"
+                value={analytics?.totalClicks ?? 0}
+                color="accent"
+              />
             </div>
+
+            {/* Clicks by target */}
+            {analytics?.clicksByTarget && Object.keys(analytics.clicksByTarget).length > 0 && (
+              <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
+                <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
+                  <MousePointerClick className="w-4 h-4 text-primary" /> Cliques por Botão
+                </h3>
+                <p className="text-xs text-muted-foreground mb-4">Quais botões seus visitantes mais clicam</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {Object.entries(analytics.clicksByTarget).map(([target, count]) => (
+                    <div key={target} className="bg-secondary rounded-xl p-4 text-center">
+                      <p className="text-2xl font-bold font-heading text-foreground">{count}</p>
+                      <p className="text-xs text-muted-foreground capitalize">{target}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Area Chart */}
             <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
@@ -252,6 +276,105 @@ const Admin = () => {
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full" style={{ background: "hsl(30, 100%, 50%)" }} />
                   <span className="text-xs text-muted-foreground">Licenciado</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Hourly + Device + UTM row */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Hourly Distribution */}
+              <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
+                <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-primary" /> Horários de Pico
+                </h3>
+                <p className="text-xs text-muted-foreground mb-4">Visitas por hora do dia</p>
+                <div className="h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={analytics?.hourly || []} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(120, 8%, 18%)" />
+                      <XAxis
+                        dataKey="hour"
+                        tick={{ fill: "hsl(120, 5%, 65%)", fontSize: 10 }}
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(h) => `${h}h`}
+                      />
+                      <YAxis
+                        tick={{ fill: "hsl(120, 5%, 65%)", fontSize: 10 }}
+                        tickLine={false}
+                        axisLine={false}
+                        allowDecimals={false}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          background: "hsl(120, 8%, 8%)",
+                          border: "1px solid hsl(120, 8%, 18%)",
+                          borderRadius: "12px",
+                          fontSize: "13px",
+                          color: "hsl(0, 0%, 95%)",
+                        }}
+                        labelFormatter={(h) => `${h}:00`}
+                      />
+                      <Bar dataKey="views" name="Visitas" fill="hsl(130, 100%, 36%)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Device Distribution */}
+              <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
+                <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-primary" /> Dispositivos
+                </h3>
+                <p className="text-xs text-muted-foreground mb-4">De onde seus visitantes acessam</p>
+                <div className="space-y-3">
+                  {(analytics?.devices || []).map((d) => {
+                    const total = analytics?.total || 1;
+                    const pct = Math.round((d.count / total) * 100);
+                    const labels: Record<string, string> = { mobile: "📱 Mobile", tablet: "📱 Tablet", desktop: "💻 Desktop", desconhecido: "❓ Outro" };
+                    return (
+                      <div key={d.device}>
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="text-foreground">{labels[d.device] || d.device}</span>
+                          <span className="text-muted-foreground">{d.count} ({pct}%)</span>
+                        </div>
+                        <div className="w-full bg-secondary rounded-full h-2">
+                          <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {(!analytics?.devices || analytics.devices.length === 0) && (
+                    <p className="text-sm text-muted-foreground text-center py-4">Sem dados ainda</p>
+                  )}
+                </div>
+              </div>
+
+              {/* UTM Sources */}
+              <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
+                <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-primary" /> Origem do Tráfego
+                </h3>
+                <p className="text-xs text-muted-foreground mb-4">De onde vêm seus visitantes</p>
+                <div className="space-y-3">
+                  {(analytics?.utmSources || []).map((u) => {
+                    const total = analytics?.total || 1;
+                    const pct = Math.round((u.count / total) * 100);
+                    return (
+                      <div key={u.source}>
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="text-foreground capitalize">{u.source}</span>
+                          <span className="text-muted-foreground">{u.count} ({pct}%)</span>
+                        </div>
+                        <div className="w-full bg-secondary rounded-full h-2">
+                          <div className="bg-accent h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {(!analytics?.utmSources || analytics.utmSources.length === 0) && (
+                    <p className="text-sm text-muted-foreground text-center py-4">Sem dados ainda</p>
+                  )}
                 </div>
               </div>
             </div>
