@@ -408,7 +408,7 @@ const Admin = () => {
               </div>
               <iframe
                 src={`/${slug}`}
-                className="w-full border-0"
+                className="w-full border-0 pointer-events-none"
                 style={{ height: "70vh", minHeight: "400px" }}
                 title="Preview da landing page"
               />
