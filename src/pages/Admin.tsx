@@ -326,7 +326,11 @@ const Admin = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="name" className="text-sm text-muted-foreground">Nome completo</Label>
-                  <Input id="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Seu nome" className="bg-secondary border-border" required />
+                  <Input id="name" value={form.name} onChange={(e) => {
+                    const newName = e.target.value;
+                    const slug = newName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+                    setForm({ ...form, name: newName, license: slug });
+                  }} placeholder="Seu nome" className="bg-secondary border-border" required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="license" className="text-sm text-muted-foreground">Licença (slug)</Label>
