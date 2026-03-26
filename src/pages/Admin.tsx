@@ -348,8 +348,12 @@ const Admin = () => {
                 </div>
               </div>
               <div className="mt-4 space-y-2">
-                <Label htmlFor="cadastro_url" className="text-sm text-muted-foreground">Link de cadastro iGreen</Label>
+                <Label htmlFor="cadastro_url" className="text-sm text-muted-foreground">Link de cadastro iGreen (Conta de Energia)</Label>
                 <Input id="cadastro_url" value={form.cadastro_url} onChange={(e) => setForm({ ...form, cadastro_url: e.target.value })} placeholder="https://digital.igreenenergy.com.br/?id=..." className="bg-secondary border-border" required />
+              </div>
+              <div className="mt-4 space-y-2">
+                <Label htmlFor="licenciada_cadastro_url" className="text-sm text-muted-foreground">Link de cadastro Licença</Label>
+                <Input id="licenciada_cadastro_url" value={form.licenciada_cadastro_url} onChange={(e) => setForm({ ...form, licenciada_cadastro_url: e.target.value })} placeholder="https://..." className="bg-secondary border-border" />
               </div>
             </div>
 
