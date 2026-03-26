@@ -15,7 +15,7 @@ const LicConexaoClub = () => (
       <p className="text-center text-foreground/80 text-lg max-w-3xl mx-auto mb-12">
         Serviço prestado pela iGreen que conecta o cliente ao iGreen Club, nosso clube de descontos em mais de 30 mil estabelecimentos em todo o Brasil
       </p>
-      <img src="/images/igreen-club-1.jpeg" alt="iGreen Club" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/conexao-club.webp" alt="iGreen Club" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
 
       <h3 className="section-heading text-2xl md:text-3xl mb-8">iGreen Club</h3>
       <div className="max-w-3xl mx-auto space-y-4 mb-12">
