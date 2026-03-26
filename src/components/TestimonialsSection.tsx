@@ -16,6 +16,20 @@ const TestimonialsSection = () => {
           Satisfeitos com os descontos na conta de luz
         </p>
 
+        {/* Video Testimonials */}
+        <div className="grid sm:grid-cols-2 gap-6 mb-12 max-w-4xl mx-auto">
+          <div className="rounded-xl overflow-hidden border border-border" style={{ boxShadow: 'var(--shadow-card)' }}>
+            <video controls preload="metadata" className="w-full aspect-video">
+              <source src="/videos/depoimento-1.mp4" type="video/mp4" />
+            </video>
+          </div>
+          <div className="rounded-xl overflow-hidden border border-border" style={{ boxShadow: 'var(--shadow-card)' }}>
+            <video controls preload="metadata" className="w-full aspect-video">
+              <source src="/videos/depoimento-2.mp4" type="video/mp4" />
+            </video>
+          </div>
+        </div>
+
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {testimonials.map((t, i) => (
             <div
