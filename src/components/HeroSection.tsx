@@ -1,14 +1,21 @@
+import { trackClickEvent } from "@/hooks/useTrackEvent";
+
 interface HeroSectionProps {
   cadastroUrl?: string;
   whatsappUrl?: string;
+  consultantId?: string;
 }
 
 const DEFAULT_CADASTRO_URL = "https://digital.igreenenergy.com.br/?id=126928&sendcontract=true";
 const DEFAULT_WHATSAPP_URL = "https://api.whatsapp.com/send?phone=5515981077416&text=Ol%C3%A1,%20gostaria%20de%20mais%20informa%C3%A7%C3%B5es%20sobre%20o%20desconto%20na%20conta%20de%20luz%20oferecido%20pela%20iGreen%20Energy";
 
-const HeroSection = ({ cadastroUrl, whatsappUrl }: HeroSectionProps) => {
+const HeroSection = ({ cadastroUrl, whatsappUrl, consultantId }: HeroSectionProps) => {
   const CADASTRO = cadastroUrl || DEFAULT_CADASTRO_URL;
   const WHATSAPP = whatsappUrl || DEFAULT_WHATSAPP_URL;
+
+  const handleClick = (target: string) => {
+    if (consultantId) trackClickEvent(consultantId, target, "client");
+  };
 
   return (
     <section className="relative py-12 md:py-20">
@@ -41,10 +48,10 @@ const HeroSection = ({ cadastroUrl, whatsappUrl }: HeroSectionProps) => {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <a href={CADASTRO} target="_blank" rel="noopener noreferrer" className="btn-cta">
+          <a href={CADASTRO} target="_blank" rel="noopener noreferrer" className="btn-cta" onClick={() => handleClick("cadastro")}>
             Faça seu cadastro
           </a>
-          <a href={WHATSAPP} target="_blank" rel="noopener noreferrer" className="btn-whatsapp">
+          <a href={WHATSAPP} target="_blank" rel="noopener noreferrer" className="btn-whatsapp" onClick={() => handleClick("whatsapp")}>
             Atendimento no WhatsApp
           </a>
         </div>

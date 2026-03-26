@@ -211,24 +211,83 @@ export type Database = {
         }
         Relationships: []
       }
-      page_views: {
+      page_events: {
         Row: {
           consultant_id: string
           created_at: string
+          device_type: string | null
+          event_target: string | null
+          event_type: string
           id: string
           page_type: string
+          utm_campaign: string | null
+          utm_medium: string | null
+          utm_source: string | null
         }
         Insert: {
           consultant_id: string
           created_at?: string
+          device_type?: string | null
+          event_target?: string | null
+          event_type?: string
           id?: string
           page_type?: string
+          utm_campaign?: string | null
+          utm_medium?: string | null
+          utm_source?: string | null
         }
         Update: {
           consultant_id?: string
           created_at?: string
+          device_type?: string | null
+          event_target?: string | null
+          event_type?: string
           id?: string
           page_type?: string
+          utm_campaign?: string | null
+          utm_medium?: string | null
+          utm_source?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "page_events_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      page_views: {
+        Row: {
+          consultant_id: string
+          created_at: string
+          device_type: string | null
+          id: string
+          page_type: string
+          utm_campaign: string | null
+          utm_medium: string | null
+          utm_source: string | null
+        }
+        Insert: {
+          consultant_id: string
+          created_at?: string
+          device_type?: string | null
+          id?: string
+          page_type?: string
+          utm_campaign?: string | null
+          utm_medium?: string | null
+          utm_source?: string | null
+        }
+        Update: {
+          consultant_id?: string
+          created_at?: string
+          device_type?: string | null
+          id?: string
+          page_type?: string
+          utm_campaign?: string | null
+          utm_medium?: string | null
+          utm_source?: string | null
         }
         Relationships: [
           {
