@@ -18,7 +18,7 @@ const Admin = () => {
   const [activeTab, setActiveTab] = useState<"dashboard" | "dados" | "links" | "preview">("dashboard");
   const [userId, setUserId] = useState<string | null>(null);
   const [form, setForm] = useState({
-    name: "", license: "", phone: "", cadastro_url: "", igreen_id: "",
+    name: "", license: "", phone: "", cadastro_url: "", igreen_id: "", licenciada_cadastro_url: "",
   });
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
