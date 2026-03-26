@@ -6,5 +6,6 @@ export interface Consultant {
   cadastro_url: string;
   photo_url: string | null;
   igreen_id: string | null;
+  licenciada_cadastro_url: string | null;
   created_at: string;
 }
