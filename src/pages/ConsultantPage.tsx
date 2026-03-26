@@ -18,6 +18,7 @@ import SEOHead from "@/components/SEOHead";
 const ConsultantPage = () => {
   const { licenca } = useParams<{ licenca: string }>();
   const { data: consultant, isLoading } = useConsultant(licenca || "");
+  useTrackView(consultant?.id, "client");
 
   if (isLoading) return <LoadingScreen />;
 
