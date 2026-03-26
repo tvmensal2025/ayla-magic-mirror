@@ -15,6 +15,7 @@ const LicLicenseSection = () => (
       <p className="text-center text-foreground/80 text-xl font-heading font-bold mb-12">
         Seja nosso licenciado e mude sua realidade financeira
       </p>
+      <img src="/images/licenca-kit.webp" alt="Kit Licença iGreen Energy" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
       <div className="max-w-3xl mx-auto space-y-4">
         {licenseItems.map((item, i) => (
           <div key={i} className="benefit-item text-lg"><span>{item}</span></div>

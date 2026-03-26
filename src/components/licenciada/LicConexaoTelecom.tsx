@@ -9,8 +9,11 @@ const LicConexaoTelecom = () => (
         A solução para clientes que buscam telefonia com planos acessíveis e internet de alta velocidade, com a maior cobertura 5G do Brasil
       </p>
 
+      <img src="/images/conexao-telecom.webp" alt="Conexão Telecom" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-8 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/conexao-telecom-2.webp" alt="Planos Conexão Telecom" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+
       <p className="text-foreground/80 text-center max-w-3xl mx-auto mb-8">
-        Para todos os planos oferecidos, os valores das comissões permanecem iguais, independentemente do plano escolhido
+        Para todos os planos oferecidos, os valores das comissões permanecem iguais, independentemente do plano escolhido. Assim, o licenciado tem total liberdade para oferecer ao cliente a opção que melhor se adequa às suas necessidades
       </p>
 
       <h3 className="section-heading text-2xl md:text-3xl mb-8">Como você é remunerado com a Conexão Telecom?</h3>
