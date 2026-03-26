@@ -1,0 +1,132 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&family=Open+Sans:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  scroll-behavior: smooth;
+}
+
+@layer base {
+  :root {
+    --background: 120 10% 4%;
+    --foreground: 0 0% 95%;
+
+    --card: 120 8% 8%;
+    --card-foreground: 0 0% 95%;
+
+    --popover: 120 8% 8%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: 130 100% 36%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 120 8% 12%;
+    --secondary-foreground: 0 0% 95%;
+
+    --muted: 120 5% 15%;
+    --muted-foreground: 120 5% 65%;
+
+    --accent: 30 100% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 120 8% 18%;
+    --input: 120 8% 18%;
+    --ring: 130 100% 36%;
+
+    --radius: 0.75rem;
+
+    --gradient-green: linear-gradient(135deg, hsl(130, 100%, 36%), hsl(170, 80%, 45%));
+    --gradient-dark: linear-gradient(180deg, hsl(120, 10%, 4%), hsl(120, 15%, 8%));
+    --shadow-green: 0 0 30px hsl(130 100% 36% / 0.3);
+    --shadow-card: 0 10px 40px hsl(0 0% 0% / 0.3);
+
+    --font-heading: 'Montserrat', sans-serif;
+    --font-body: 'Open Sans', sans-serif;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+}
+
+@layer components {
+  .section-heading {
+    @apply text-3xl md:text-4xl lg:text-5xl font-extrabold text-center uppercase tracking-tight;
+    color: hsl(var(--accent));
+    font-family: var(--font-heading);
+  }
+
+  .section-container {
+    @apply max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-24;
+  }
+
+  .btn-cta {
+    @apply inline-flex items-center justify-center px-8 py-4 text-lg font-bold uppercase rounded-lg transition-all duration-300;
+    background: var(--gradient-green);
+    color: hsl(var(--primary-foreground));
+    box-shadow: var(--shadow-green);
+    font-family: var(--font-heading);
+  }
+
+  .btn-cta:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 40px hsl(130 100% 36% / 0.5);
+  }
+
+  .btn-whatsapp {
+    @apply inline-flex items-center justify-center px-8 py-4 text-lg font-bold uppercase rounded-lg transition-all duration-300 border-2;
+    border-color: hsl(var(--primary));
+    color: hsl(var(--primary));
+    font-family: var(--font-heading);
+  }
+
+  .btn-whatsapp:hover {
+    background: hsl(var(--primary) / 0.1);
+    transform: translateY(-2px);
+  }
+
+  .green-divider {
+    @apply w-full h-1;
+    background: var(--gradient-green);
+  }
+
+  .benefit-item {
+    @apply flex items-start gap-3 text-foreground/90;
+  }
+
+  .benefit-item::before {
+    content: '✅';
+    flex-shrink: 0;
+  }
+
+  .video-placeholder {
+    @apply w-full aspect-video rounded-xl overflow-hidden flex items-center justify-center;
+    background: var(--gradient-green);
+    box-shadow: var(--shadow-green);
+  }
+}

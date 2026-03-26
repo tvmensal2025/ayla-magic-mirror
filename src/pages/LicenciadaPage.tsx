@@ -1,0 +1,77 @@
+import { useParams } from "react-router-dom";
+import { useConsultant } from "@/hooks/useConsultant";
+import LicHeroSection from "@/components/licenciada/LicHeroSection";
+import LicAboutSection from "@/components/licenciada/LicAboutSection";
+import LicWhySection from "@/components/licenciada/LicWhySection";
+import LicBenefitsSection from "@/components/licenciada/LicBenefitsSection";
+import LicProductsIntro from "@/components/licenciada/LicProductsIntro";
+import LicConexaoGreen from "@/components/licenciada/LicConexaoGreen";
+import LicConexaoLivre from "@/components/licenciada/LicConexaoLivre";
+import LicConexaoSolar from "@/components/licenciada/LicConexaoSolar";
+import LicConexaoPlacas from "@/components/licenciada/LicConexaoPlacas";
+import LicConexaoClub from "@/components/licenciada/LicConexaoClub";
+import LicConexaoClubPJ from "@/components/licenciada/LicConexaoClubPJ";
+import LicConexaoExpansao from "@/components/licenciada/LicConexaoExpansao";
+import LicConexaoTelecom from "@/components/licenciada/LicConexaoTelecom";
+import LicCareerPlan from "@/components/licenciada/LicCareerPlan";
+import LicLicenseSection from "@/components/licenciada/LicLicenseSection";
+import LicConsultantSection from "@/components/licenciada/LicConsultantSection";
+import WhatsAppFloat from "@/components/WhatsAppFloat";
+import LoadingScreen from "@/components/LoadingScreen";
+import SEOHead from "@/components/SEOHead";
+
+const LicenciadaPage = () => {
+  const { licenca } = useParams<{ licenca: string }>();
+  const { data: consultant, isLoading } = useConsultant(licenca || "");
+
+  if (isLoading) return <LoadingScreen />;
+
+  if (!consultant) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-center px-4">
+        <div>
+          <img src="/images/logo-colorida-igreen.png" alt="iGreen" className="w-32 mx-auto mb-6 opacity-50" />
+          <h1 className="text-3xl font-bold font-heading text-foreground mb-4">Licenciado não encontrado</h1>
+          <p className="text-muted-foreground">Verifique o link e tente novamente.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const whatsappUrl = `https://api.whatsapp.com/send?phone=${consultant.phone}&text=${encodeURIComponent("Olá, gostaria de mais informações sobre a oportunidade de Licenciado iGreen Energy")}`;
+
+  return (
+    <>
+      <SEOHead
+        title={`Licenciada ${consultant.name} – iGreen Energy`}
+        description={`Descubra como se tornar um Licenciado iGreen Energy com ${consultant.name} e receba comissões recorrentes`}
+      />
+      <div className="min-h-screen">
+        <LicHeroSection cadastroUrl={consultant.cadastro_url} whatsappUrl={whatsappUrl} />
+        <LicAboutSection />
+        <LicWhySection />
+        <LicBenefitsSection />
+        <LicProductsIntro />
+        <LicConexaoGreen />
+        <LicConexaoLivre />
+        <LicConexaoSolar />
+        <LicConexaoPlacas />
+        <LicConexaoClub />
+        <LicConexaoClubPJ />
+        <LicConexaoExpansao />
+        <LicConexaoTelecom />
+        <LicCareerPlan />
+        <LicLicenseSection />
+        <LicConsultantSection
+          name={consultant.name}
+          whatsappUrl={whatsappUrl}
+          photoUrl={consultant.photo_url}
+          igreenId={consultant.igreen_id}
+        />
+      </div>
+      <WhatsAppFloat url={whatsappUrl} />
+    </>
+  );
+};
+
+export default LicenciadaPage;
