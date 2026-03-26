@@ -208,6 +208,35 @@ export type Database = {
         }
         Relationships: []
       }
+      page_views: {
+        Row: {
+          consultant_id: string
+          created_at: string
+          id: string
+          page_type: string
+        }
+        Insert: {
+          consultant_id: string
+          created_at?: string
+          id?: string
+          page_type?: string
+        }
+        Update: {
+          consultant_id?: string
+          created_at?: string
+          id?: string
+          page_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "page_views_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       settings: {
         Row: {
           key: string
