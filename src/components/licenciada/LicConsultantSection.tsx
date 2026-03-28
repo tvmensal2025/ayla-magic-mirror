@@ -1,10 +1,12 @@
 import consultantDefault from "@/assets/consultant.jpg";
+import { trackClickEvent } from "@/hooks/useTrackEvent";
 
 interface LicConsultantSectionProps {
   name?: string;
   whatsappUrl?: string;
   photoUrl?: string | null;
   igreenId?: string | null;
+  consultantId?: string;
 }
 
 const DEFAULT_WHATSAPP = "https://api.whatsapp.com/send?phone=5515981077416&text=Ol%C3%A1,%20gostaria%20de%20mais%20informa%C3%A7%C3%B5es%20sobre%20a%20oportunidade%20de%20Licenciado%20iGreen%20Energy";
@@ -14,8 +16,13 @@ const LicConsultantSection = ({
   whatsappUrl,
   photoUrl,
   igreenId = "126928",
+  consultantId,
 }: LicConsultantSectionProps) => {
   const WHATSAPP = whatsappUrl || DEFAULT_WHATSAPP;
+
+  const handleClick = () => {
+    if (consultantId) trackClickEvent(consultantId, "whatsapp", "licenciada");
+  };
   const photo = photoUrl || consultantDefault;
   const displayId = igreenId || "126928";
 
