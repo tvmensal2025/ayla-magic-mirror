@@ -53,6 +53,11 @@ const Admin = () => {
         cadastro_url: id ? `https://digital.igreenenergy.com.br/?id=${id}&sendcontract=true` : c.cadastro_url,
         licenciada_cadastro_url: id ? `https://expansao.igreenenergy.com.br/?id=${id}&checkout=true` : (c as any).licenciada_cadastro_url || "",
       });
+      setForm(prev => ({
+        ...prev,
+        facebook_pixel_id: c.facebook_pixel_id || "",
+        google_analytics_id: c.google_analytics_id || "",
+      }));
       if (c.photo_url) setPhotoPreview(c.photo_url);
     }
     setLoading(false);
