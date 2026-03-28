@@ -100,11 +100,11 @@ const LicHeroSection = ({ cadastroUrl, whatsappUrl, consultantId }: LicHeroSecti
         {/* Social proof stats */}
         <div className="grid grid-cols-3 gap-6 md:gap-12 max-w-3xl mx-auto mt-16 pt-12 border-t border-border">
           <div>
-            <AnimatedCounter target={500} suffix="+" />
-            <p className="stat-label text-xs md:text-sm mt-2 text-muted-foreground uppercase tracking-wider font-heading">Mil clientes</p>
+            <AnimatedCounter target={170} suffix="mil+" />
+            <p className="stat-label text-xs md:text-sm mt-2 text-muted-foreground uppercase tracking-wider font-heading">Clientes ativos</p>
           </div>
           <div>
-            <AnimatedCounter target={500} suffix="+" />
+            <AnimatedCounter target={100} suffix="+" />
             <p className="stat-label text-xs md:text-sm mt-2 text-muted-foreground uppercase tracking-wider font-heading">Usinas solares</p>
           </div>
           <div>
