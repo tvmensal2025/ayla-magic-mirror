@@ -8,16 +8,21 @@ const pjItems = [
 ];
 
 const LicConexaoClubPJ = () => (
-  <section className="bg-secondary">
+  <section className="section-gradient">
     <div className="section-container">
-      <h2 className="section-heading mb-4">6. Conexão Club PJ (Empresarial)</h2>
-      <p className="text-center text-foreground/80 text-lg max-w-3xl mx-auto mb-12">
-        Serviço prestado pela iGreen que conecta empresas interessadas em fidelizar clientes e colaboradores por meio dos benefícios exclusivos do iGreen Club
-      </p>
-      <img src="/images/club-pj.webp" alt="Conexão Club PJ" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <div className="text-center mb-12">
+        <div className="product-number mx-auto mb-4">6</div>
+        <h2 className="section-heading mb-4">Conexão Club PJ (Empresarial)</h2>
+        <p className="text-foreground/70 text-lg max-w-3xl mx-auto">
+          Serviço prestado pela iGreen que conecta empresas interessadas em fidelizar clientes e colaboradores por meio dos benefícios exclusivos do iGreen Club
+        </p>
+      </div>
+      <img src="/images/club-pj.webp" alt="Conexão Club PJ" loading="lazy" className="rounded-2xl w-full max-w-2xl mx-auto mb-14 shadow-lg transition-transform duration-500 hover:scale-[1.02]" style={{ boxShadow: 'var(--shadow-card)' }} />
 
-      <div className="max-w-3xl mx-auto space-y-4 mb-12">
-        {pjItems.map((item, i) => <div key={i} className="benefit-item"><span>{item}</span></div>)}
+      <div className="glass-card max-w-3xl mx-auto mb-12">
+        <div className="space-y-4">
+          {pjItems.map((item, i) => <div key={i} className="benefit-item"><span>{item}</span></div>)}
+        </div>
       </div>
 
       <h3 className="section-heading text-2xl md:text-3xl mb-8">Como você é remunerado com a Conexão Club PJ (Empresarial)?</h3>

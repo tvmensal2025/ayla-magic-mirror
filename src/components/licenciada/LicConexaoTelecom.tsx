@@ -2,17 +2,20 @@ import CommissionBlock from "./CommissionBlock";
 import CareerTable from "./CareerTable";
 
 const LicConexaoTelecom = () => (
-  <section className="bg-secondary">
+  <section className="section-gradient">
     <div className="section-container">
-      <h2 className="section-heading mb-4">8. Conexão Telecom</h2>
-      <p className="text-center text-foreground/80 text-lg max-w-3xl mx-auto mb-12">
-        A solução para clientes que buscam telefonia com planos acessíveis e internet de alta velocidade, com a maior cobertura 5G do Brasil
-      </p>
+      <div className="text-center mb-12">
+        <div className="product-number mx-auto mb-4">8</div>
+        <h2 className="section-heading mb-4">Conexão Telecom</h2>
+        <p className="text-foreground/70 text-lg max-w-3xl mx-auto">
+          A solução para clientes que buscam telefonia com planos acessíveis e internet de alta velocidade, com a maior cobertura 5G do Brasil
+        </p>
+      </div>
 
-      <img src="/images/conexao-telecom.webp" alt="Conexão Telecom" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-8 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
-      <img src="/images/conexao-telecom-2.webp" alt="Planos Conexão Telecom" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/conexao-telecom.webp" alt="Conexão Telecom" loading="lazy" className="rounded-2xl w-full max-w-2xl mx-auto mb-8 shadow-lg transition-transform duration-500 hover:scale-[1.02]" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/conexao-telecom-2.webp" alt="Planos Conexão Telecom" loading="lazy" className="rounded-2xl w-full max-w-2xl mx-auto mb-14 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
 
-      <p className="text-foreground/80 text-center max-w-3xl mx-auto mb-8">
+      <p className="text-foreground/70 text-center max-w-3xl mx-auto mb-12">
         Para todos os planos oferecidos, os valores das comissões permanecem iguais, independentemente do plano escolhido. Assim, o licenciado tem total liberdade para oferecer ao cliente a opção que melhor se adequa às suas necessidades
       </p>
 
