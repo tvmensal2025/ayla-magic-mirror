@@ -17,6 +17,8 @@ import LicConexaoTelecom from "@/components/licenciada/LicConexaoTelecom";
 import LicCareerPlan from "@/components/licenciada/LicCareerPlan";
 import LicLicenseSection from "@/components/licenciada/LicLicenseSection";
 import LicConsultantSection from "@/components/licenciada/LicConsultantSection";
+import LicUrgencyBanner from "@/components/licenciada/LicUrgencyBanner";
+import LicIntermediateCTA from "@/components/licenciada/LicIntermediateCTA";
 import WhatsAppFloat from "@/components/WhatsAppFloat";
 import LoadingScreen from "@/components/LoadingScreen";
 import SEOHead from "@/components/SEOHead";
