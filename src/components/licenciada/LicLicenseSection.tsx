@@ -9,16 +9,21 @@ const licenseItems = [
 ];
 
 const LicLicenseSection = () => (
-  <section className="bg-secondary">
-    <div className="section-container">
+  <section className="section-gradient relative overflow-hidden">
+    <div className="absolute inset-0 pointer-events-none opacity-[0.04]" style={{ background: 'radial-gradient(circle at 50% 0%, hsl(130, 100%, 36%), transparent 60%)' }} />
+    <div className="section-container relative z-10">
+      <div className="badge-green mx-auto mb-6">Licença</div>
       <h2 className="section-heading mb-4">Licença iGreen Energy</h2>
-      <p className="text-center text-foreground/80 text-xl font-heading font-bold mb-12">
+      <p className="text-center text-foreground/70 text-xl font-heading font-bold mb-14">
         Seja nosso licenciado e mude sua realidade financeira
       </p>
-      <img src="/images/licenca-kit.webp" alt="Kit Licença iGreen Energy" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/licenca-kit.webp" alt="Kit Licença iGreen Energy" loading="lazy" className="rounded-2xl w-full max-w-2xl mx-auto mb-14 shadow-lg transition-transform duration-500 hover:scale-[1.02]" style={{ boxShadow: 'var(--shadow-green-lg)' }} />
       <div className="max-w-3xl mx-auto space-y-4">
         {licenseItems.map((item, i) => (
-          <div key={i} className="benefit-item text-lg"><span>{item}</span></div>
+          <div key={i} className="glass-card !p-4 !rounded-xl flex items-start gap-3">
+            <span className="text-lg mt-0.5 shrink-0">✅</span>
+            <span className="text-foreground/90 text-lg leading-relaxed">{item}</span>
+          </div>
         ))}
       </div>
     </div>

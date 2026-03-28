@@ -20,30 +20,56 @@ const LicConsultantSection = ({
   const displayId = igreenId || "126928";
 
   return (
-    <section>
-      <div className="green-divider" />
-      <div className="section-container">
-        <h2 className="section-heading mb-2">Licenciada e Líder de Expansão iGreen Energy</h2>
-        <p className="text-center text-primary font-heading font-bold text-lg mb-10">ID {displayId}</p>
+    <section className="relative overflow-hidden">
+      <div className="green-divider-glow" />
 
-        <div className="grid md:grid-cols-2 gap-10 items-center max-w-4xl mx-auto">
-          <img src={photo} alt={`${name} - Licenciada iGreen Energy`} loading="lazy" className="rounded-xl w-full max-w-sm mx-auto shadow-lg" style={{ boxShadow: 'var(--shadow-green)' }} />
+      {/* Background glow */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full opacity-[0.06]" style={{ background: 'radial-gradient(circle, hsl(130, 100%, 36%), transparent 70%)' }} />
+      </div>
+
+      <div className="section-container relative z-10">
+        <div className="badge-green mx-auto mb-6">Sua consultora</div>
+        <h2 className="section-heading mb-2">Licenciada e Líder de Expansão iGreen Energy</h2>
+        <p className="text-center font-heading font-bold text-lg mb-12" style={{ color: 'hsl(var(--primary))' }}>ID {displayId}</p>
+
+        <div className="grid md:grid-cols-2 gap-12 items-center max-w-4xl mx-auto">
+          <div className="relative group">
+            <div className="absolute -inset-4 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" style={{ background: 'radial-gradient(circle, hsl(130 100% 36% / 0.15), transparent 70%)' }} />
+            <img
+              src={photo}
+              alt={`${name} - Licenciada iGreen Energy`}
+              loading="lazy"
+              className="rounded-2xl w-full max-w-sm mx-auto shadow-lg relative z-10 transition-transform duration-500 group-hover:scale-[1.02]"
+              style={{ boxShadow: 'var(--shadow-green)' }}
+            />
+          </div>
           <div>
-            <div className="space-y-4 mb-8">
-              <div className="benefit-item"><span>Estou muito feliz com seu interesse em conhecer melhor a iGreen Energy e será um grande prazer tê-lo(a) conosco</span></div>
-              <div className="benefit-item"><span>Estou à disposição para tirar todas as suas dúvidas e fornecer o melhor suporte. Pode contar comigo!</span></div>
-              <div className="benefit-item"><span>Envie uma mensagem para meu WhatsApp clicando no botão abaixo e comece hoje mesmo a faturar com todos os 8 produtos oferecidos pela iGreen Energy</span></div>
+            <h3 className="font-heading font-bold text-2xl mb-6 text-foreground">{name}</h3>
+            <div className="space-y-4 mb-10">
+              <div className="glass-card !p-4 !rounded-xl flex items-start gap-3">
+                <span className="text-lg shrink-0">✅</span>
+                <span className="text-foreground/90">Estou muito feliz com seu interesse em conhecer melhor a iGreen Energy e será um grande prazer tê-lo(a) conosco</span>
+              </div>
+              <div className="glass-card !p-4 !rounded-xl flex items-start gap-3">
+                <span className="text-lg shrink-0">✅</span>
+                <span className="text-foreground/90">Estou à disposição para tirar todas as suas dúvidas e fornecer o melhor suporte. Pode contar comigo!</span>
+              </div>
+              <div className="glass-card !p-4 !rounded-xl flex items-start gap-3">
+                <span className="text-lg shrink-0">✅</span>
+                <span className="text-foreground/90">Envie uma mensagem para meu WhatsApp clicando no botão abaixo e comece hoje mesmo a faturar com todos os 8 produtos</span>
+              </div>
             </div>
-            <a href={WHATSAPP} target="_blank" rel="noopener noreferrer" className="btn-cta text-center w-full block">
-              Falar no WhatsApp
+            <a href={WHATSAPP} target="_blank" rel="noopener noreferrer" className="btn-cta-lg text-center w-full block animate-pulse-green">
+              🚀 Falar no WhatsApp
             </a>
           </div>
         </div>
       </div>
 
-      <footer className="bg-secondary py-8 text-center">
+      <footer className="bg-card/50 py-10 text-center mt-16 border-t border-border">
         <img src="/images/logo-colorida-igreen.png" alt="iGreen Energy" loading="lazy" className="mx-auto mb-4 w-36" />
-        <p className="text-muted-foreground font-heading text-sm">
+        <p className="text-muted-foreground font-heading text-sm tracking-wider">
           {name.toUpperCase()} | LICENCIADA E LÍDER DE EXPANSÃO IGREEN ENERGY ID {displayId}
         </p>
       </footer>

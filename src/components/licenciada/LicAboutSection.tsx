@@ -8,14 +8,27 @@ const aboutItems = [
 
 const LicAboutSection = () => (
   <section className="relative">
-    <div className="green-divider" />
+    <div className="green-divider-glow" />
     <div className="section-container">
-      <h2 className="section-heading mb-12">Somos a iGreen Energy</h2>
-      <div className="grid md:grid-cols-2 gap-10 items-center">
-        <img src="/images/feed-10.jpeg" alt="Usina Solar iGreen Energy" loading="lazy" className="rounded-xl w-full shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
-        <div className="space-y-4">
+      <div className="badge-green mx-auto mb-6">Quem somos</div>
+      <h2 className="section-heading mb-14">Somos a iGreen Energy</h2>
+      <div className="grid md:grid-cols-2 gap-12 items-center">
+        <div className="relative group">
+          <div className="absolute -inset-4 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" style={{ background: 'radial-gradient(circle, hsl(130 100% 36% / 0.1), transparent 70%)' }} />
+          <img
+            src="/images/feed-10.jpeg"
+            alt="Usina Solar iGreen Energy"
+            loading="lazy"
+            className="rounded-2xl w-full shadow-lg relative z-10 transition-transform duration-500 group-hover:scale-[1.02]"
+            style={{ boxShadow: 'var(--shadow-card)' }}
+          />
+        </div>
+        <div className="space-y-5">
           {aboutItems.map((item, i) => (
-            <div key={i} className="benefit-item"><span>{item}</span></div>
+            <div key={i} className="glass-card !p-4 !rounded-xl flex items-start gap-3">
+              <span className="text-lg mt-0.5 shrink-0">✅</span>
+              <span className="text-foreground/90 leading-relaxed">{item}</span>
+            </div>
           ))}
         </div>
       </div>

@@ -2,13 +2,16 @@ import CommissionBlock from "./CommissionBlock";
 import CareerTable from "./CareerTable";
 
 const LicConexaoPlacas = () => (
-  <section className="bg-secondary">
+  <section className="section-gradient">
     <div className="section-container">
-      <h2 className="section-heading mb-4">4. Conexão Placas</h2>
-      <p className="text-center text-foreground/80 text-lg max-w-3xl mx-auto mb-12">
-        Serviço prestado pela iGreen que conecta o cliente a um de nossos fornecedores para a compra e instalação de placas solares para economia de até 95% na conta de luz, válido em todo o Brasil
-      </p>
-      <img src="/images/conexao-placas.webp" alt="Conexão Placas" loading="lazy" className="rounded-xl w-full max-w-2xl mx-auto mb-12 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <div className="text-center mb-12">
+        <div className="product-number mx-auto mb-4">4</div>
+        <h2 className="section-heading mb-4">Conexão Placas</h2>
+        <p className="text-foreground/70 text-lg max-w-3xl mx-auto">
+          Serviço prestado pela iGreen que conecta o cliente a um de nossos fornecedores para a compra e instalação de placas solares para economia de até 95% na conta de luz, válido em todo o Brasil
+        </p>
+      </div>
+      <img src="/images/conexao-placas.webp" alt="Conexão Placas" loading="lazy" className="rounded-2xl w-full max-w-2xl mx-auto mb-14 shadow-lg transition-transform duration-500 hover:scale-[1.02]" style={{ boxShadow: 'var(--shadow-card)' }} />
 
       <h3 className="section-heading text-2xl md:text-3xl mb-8">Como você é remunerado com a Conexão Placas?</h3>
       <div className="max-w-3xl mx-auto">
