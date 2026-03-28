@@ -14,6 +14,7 @@ import ConsultantSection from "@/components/ConsultantSection";
 import WhatsAppFloat from "@/components/WhatsAppFloat";
 import LoadingScreen from "@/components/LoadingScreen";
 import SEOHead from "@/components/SEOHead";
+import PixelInjector from "@/components/PixelInjector";
 
 const ConsultantPage = () => {
   const { licenca } = useParams<{ licenca: string }>();
