@@ -511,23 +511,68 @@ const Admin = () => {
 
         {/* Links Tab */}
         {activeTab === "links" && (
-          <div className="space-y-4">
-            <LinkCard
-              emoji="🏠"
-              title="Landing Page — Cliente"
-              description="Para captar clientes que querem desconto na conta de luz"
-              url={`https://${baseUrl}/${slug}`}
-              onCopy={copyLink}
-              previewUrl={`/${slug}`}
-            />
-            <LinkCard
-              emoji="💼"
-              title="Landing Page — Licenciado"
-              description="Para recrutar novos licenciados para sua equipe"
-              url={`https://${baseUrl}/licenciada/${slug}`}
-              onCopy={copyLink}
-              previewUrl={`/licenciada/${slug}`}
-            />
+          <div className="space-y-6">
+            {/* Main Links */}
+            <div className="space-y-4">
+              <h2 className="font-heading font-bold text-foreground text-lg flex items-center gap-2">
+                <LinkIcon className="w-5 h-5 text-primary" /> Links Principais
+              </h2>
+              <LinkCard
+                emoji="🏠"
+                title="Landing Page — Cliente"
+                description="Para captar clientes que querem desconto na conta de luz"
+                url={`https://${baseUrl}/${slug}`}
+                onCopy={copyLink}
+                previewUrl={`/${slug}`}
+              />
+              <LinkCard
+                emoji="💼"
+                title="Landing Page — Licenciado"
+                description="Para recrutar novos licenciados para sua equipe"
+                url={`https://${baseUrl}/licenciada/${slug}`}
+                onCopy={copyLink}
+                previewUrl={`/licenciada/${slug}`}
+              />
+            </div>
+
+            {/* Tracking Links */}
+            {[
+              { pageLabel: "Cliente", pagePath: slug, emoji: "🏠" },
+              { pageLabel: "Licenciado", pagePath: `licenciada/${slug}`, emoji: "💼" },
+            ].map((page) => (
+              <div key={page.pagePath} className="space-y-3">
+                <h2 className="font-heading font-bold text-foreground text-lg flex items-center gap-2">
+                  <Globe className="w-5 h-5 text-primary" /> Links de Rastreamento — {page.emoji} {page.pageLabel}
+                </h2>
+                <p className="text-xs text-muted-foreground -mt-1">Compartilhe o link certo em cada rede social para saber de onde vem seu tráfego</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { source: "whatsapp", label: "WhatsApp", icon: "💬", color: "bg-[hsl(142,70%,45%)]" },
+                    { source: "instagram", label: "Instagram", icon: "📸", color: "bg-[hsl(330,80%,55%)]" },
+                    { source: "facebook", label: "Facebook", icon: "📘", color: "bg-[hsl(220,80%,55%)]" },
+                    { source: "youtube", label: "YouTube", icon: "🎬", color: "bg-[hsl(0,80%,50%)]" },
+                    { source: "tiktok", label: "TikTok", icon: "🎵", color: "bg-[hsl(270,80%,55%)]" },
+                    { source: "google", label: "Google", icon: "🔍", color: "bg-[hsl(45,90%,50%)]" },
+                  ].map((s) => {
+                    const fullUrl = `https://${baseUrl}/${page.pagePath}?utm_source=${s.source}`;
+                    return (
+                      <div key={s.source} className="bg-card rounded-xl border border-border p-4 flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg shrink-0 ${s.color} bg-opacity-20`}>
+                          {s.icon}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-foreground">{s.label}</p>
+                          <p className="text-xs text-muted-foreground truncate">{fullUrl.replace("https://", "")}</p>
+                        </div>
+                        <Button size="sm" variant="outline" onClick={() => copyLink(fullUrl)} className="gap-1 shrink-0 rounded-lg text-xs">
+                          <Copy className="w-3 h-3" /> Copiar
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
