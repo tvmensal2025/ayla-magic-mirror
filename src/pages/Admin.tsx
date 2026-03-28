@@ -44,7 +44,15 @@ const Admin = () => {
     const { data } = await supabase.from("consultants").select("*").eq("id", uid).maybeSingle();
     if (data) {
       const c = data as Consultant;
-      setForm({ name: c.name, license: c.license, phone: c.phone, cadastro_url: c.cadastro_url, igreen_id: c.igreen_id || "", licenciada_cadastro_url: (c as any).licenciada_cadastro_url || "" });
+      const id = c.igreen_id || "";
+      setForm({
+        name: c.name,
+        license: c.license,
+        phone: c.phone,
+        igreen_id: id,
+        cadastro_url: id ? `https://digital.igreenenergy.com.br/?id=${id}&sendcontract=true` : c.cadastro_url,
+        licenciada_cadastro_url: id ? `https://expansao.igreenenergy.com.br/?id=${id}&checkout=true` : (c as any).licenciada_cadastro_url || "",
+      });
       if (c.photo_url) setPhotoPreview(c.photo_url);
     }
     setLoading(false);
