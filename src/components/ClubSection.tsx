@@ -21,15 +21,16 @@ const ClubSection = () => (
         </div>
 
         <h3 className="section-heading text-xl md:text-2xl mb-8">
-          Confira algumas lojas com descontos exclusivos
+          Confira algumas lojas onde os clientes iGreen tem descontos exclusivos
         </h3>
 
-        <div className="max-w-3xl mx-auto rounded-2xl overflow-hidden relative" style={{ boxShadow: 'var(--shadow-green-lg)' }}>
-          <div className="absolute inset-0 rounded-2xl border border-primary/20 z-10 pointer-events-none" />
-          <video controls className="w-full aspect-video relative z-0">
-            <source src="/videos/igreen-club.mp4" type="video/mp4" />
-            Seu navegador não suporta vídeos.
-          </video>
+        <div className="max-w-3xl mx-auto rounded-2xl overflow-hidden border-4 border-primary">
+          <img
+            src="/images/lojas-parceiras.png"
+            alt="Lojas parceiras iGreen Club - Pague Menos, Casas Bahia, Netshoes, Movida, Vivara, Electrolux, Magalu, Philips, Cinemark e mais"
+            className="w-full"
+            loading="lazy"
+          />
         </div>
       </div>
     </div>
