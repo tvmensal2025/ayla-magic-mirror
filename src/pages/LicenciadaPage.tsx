@@ -88,6 +88,7 @@ const LicenciadaPage = () => {
           whatsappUrl={whatsappUrl}
           photoUrl={consultant.photo_url}
           igreenId={consultant.igreen_id}
+          consultantId={consultant.id}
         />
       </div>
       <WhatsAppFloat url={whatsappUrl} />
