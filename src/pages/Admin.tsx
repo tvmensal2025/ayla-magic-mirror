@@ -491,16 +491,24 @@ const Admin = () => {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="igreen_id" className="text-sm text-muted-foreground">ID iGreen</Label>
-                  <Input id="igreen_id" value={form.igreen_id} onChange={(e) => setForm({ ...form, igreen_id: e.target.value })} placeholder="ex: 126928" className="bg-secondary border-border" />
+                  <Input id="igreen_id" value={form.igreen_id} onChange={(e) => {
+                    const id = e.target.value;
+                    setForm({
+                      ...form,
+                      igreen_id: id,
+                      cadastro_url: id ? `https://digital.igreenenergy.com.br/?id=${id}&sendcontract=true` : "",
+                      licenciada_cadastro_url: id ? `https://expansao.igreenenergy.com.br/?id=${id}&checkout=true` : "",
+                    });
+                  }} placeholder="ex: 126928" className="bg-secondary border-border" />
                 </div>
               </div>
               <div className="mt-4 space-y-2">
                 <Label htmlFor="cadastro_url" className="text-sm text-muted-foreground">Link de cadastro iGreen (Conta de Energia)</Label>
-                <Input id="cadastro_url" value={form.cadastro_url} onChange={(e) => setForm({ ...form, cadastro_url: e.target.value })} placeholder="https://digital.igreenenergy.com.br/?id=..." className="bg-secondary border-border" required />
+                <Input id="cadastro_url" value={form.cadastro_url} readOnly className="bg-secondary/50 border-border text-muted-foreground cursor-not-allowed" />
               </div>
               <div className="mt-4 space-y-2">
                 <Label htmlFor="licenciada_cadastro_url" className="text-sm text-muted-foreground">Link de cadastro Licença</Label>
-                <Input id="licenciada_cadastro_url" value={form.licenciada_cadastro_url} onChange={(e) => setForm({ ...form, licenciada_cadastro_url: e.target.value })} placeholder="https://..." className="bg-secondary border-border" />
+                <Input id="licenciada_cadastro_url" value={form.licenciada_cadastro_url} readOnly className="bg-secondary/50 border-border text-muted-foreground cursor-not-allowed" />
               </div>
             </div>
 
