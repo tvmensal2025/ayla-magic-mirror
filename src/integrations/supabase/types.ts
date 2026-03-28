@@ -18,6 +18,8 @@ export type Database = {
         Row: {
           cadastro_url: string
           created_at: string | null
+          facebook_pixel_id: string | null
+          google_analytics_id: string | null
           id: string
           igreen_id: string | null
           licenciada_cadastro_url: string | null
@@ -29,6 +31,8 @@ export type Database = {
         Insert: {
           cadastro_url: string
           created_at?: string | null
+          facebook_pixel_id?: string | null
+          google_analytics_id?: string | null
           id: string
           igreen_id?: string | null
           licenciada_cadastro_url?: string | null
@@ -40,6 +44,8 @@ export type Database = {
         Update: {
           cadastro_url?: string
           created_at?: string | null
+          facebook_pixel_id?: string | null
+          google_analytics_id?: string | null
           id?: string
           igreen_id?: string | null
           licenciada_cadastro_url?: string | null
