@@ -17,6 +17,7 @@ const Admin = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<"dashboard" | "dados" | "links" | "preview">("dashboard");
+  const [qrModal, setQrModal] = useState<{ url: string; label: string } | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "", license: "", phone: "", cadastro_url: "", igreen_id: "", licenciada_cadastro_url: "",
