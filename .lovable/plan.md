@@ -1,85 +1,66 @@
 
 
-## Plano: Sistema Multi-Tenant de Landing Pages com Supabase
+## Plano: Pixel de Rastreamento por Consultor + Melhorias Extras
 
-### Resumo
-Transformar a landing page atual em um sistema multi-tenant onde cada consultor iGreen tem sua própria página personalizada via URL `/:licenca`, com painel admin para edição de dados, usando Supabase para banco de dados, autenticação e storage.
+### O que muda para o consultor
+Cada consultor poderá, no painel Admin (aba Dados), colar seu **Facebook/Meta Pixel ID** e **Google Analytics ID (GA4)**. Esses pixels serão carregados automaticamente nas páginas públicas dele (cliente e licenciada).
 
-### 1. Banco de Dados — Migration SQL
+### 1. Banco de Dados — Migration
 
-Criar tabela `consultants`:
+Adicionar duas colunas à tabela `consultants`:
 
 ```sql
-CREATE TABLE public.consultants (
-  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  name text NOT NULL,
-  license text UNIQUE NOT NULL,
-  phone text NOT NULL,
-  cadastro_url text NOT NULL,
-  photo_url text,
-  igreen_id text,
-  created_at timestamptz DEFAULT now()
-);
-
--- RLS: leitura pública, edição pelo próprio consultor
-ALTER TABLE public.consultants ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Public read" ON public.consultants FOR SELECT USING (true);
-CREATE POLICY "Owner update" ON public.consultants FOR UPDATE TO authenticated USING (id = auth.uid());
-CREATE POLICY "Owner insert" ON public.consultants FOR INSERT TO authenticated WITH CHECK (id = auth.uid());
+ALTER TABLE public.consultants
+  ADD COLUMN facebook_pixel_id text,
+  ADD COLUMN google_analytics_id text;
 ```
 
-Criar bucket `consultant-photos` (público) para upload de fotos.
+### 2. Tipo TypeScript
 
-### 2. Rotas (App.tsx)
+Atualizar `src/types/consultant.ts` para incluir os novos campos:
+- `facebook_pixel_id: string | null`
+- `google_analytics_id: string | null`
 
-```text
-/:licenca      → Landing page pública do consultor
-/auth          → Login / Cadastro
-/admin         → Painel de edição (protegido)
-/              → Redireciona para /auth ou mostra página padrão
-```
+### 3. Painel Admin — Aba Dados
 
-### 3. Página `/auth` — Login e Cadastro
-- Formulário de email/senha usando `supabase.auth.signUp` e `signInWithPassword`
-- Após login, redireciona para `/admin`
+Adicionar dois campos de input no formulário:
+- **Facebook Pixel ID** — placeholder: "Ex: 123456789012345"
+- **Google Analytics ID (GA4)** — placeholder: "Ex: G-XXXXXXXXXX"
 
-### 4. Página `/admin` — Painel do Consultor
-- Protegida por autenticação (redireciona para `/auth` se não logado)
-- Formulário para editar: nome, licença (slug), telefone, URL de cadastro, ID iGreen
-- Upload de foto via Supabase Storage (`consultant-photos`)
-- Ao salvar, faz upsert na tabela `consultants`
-- Mostra preview do link público: `igreen.institutodossonhos.com.br/{licenca}`
+Salvar junto com os demais dados no upsert.
 
-### 5. Refatoração dos Componentes
-- `HeroSection` e `ConsultantSection` passam a receber props com dados do consultor (`name`, `phone`, `cadastro_url`, `photo_url`, `igreen_id`)
-- Os links de WhatsApp e cadastro são gerados dinamicamente a partir dos dados do consultor
+### 4. Componente `PixelInjector`
 
-### 6. Rota `/:licenca` — Landing Page Dinâmica
-- Nova página `ConsultantPage.tsx` que:
-  - Lê o parâmetro `licenca` da URL
-  - Busca dados do consultor no Supabase (`SELECT * FROM consultants WHERE license = :licenca`)
-  - Renderiza todas as seções existentes passando os dados como props
-  - Mostra 404 se consultor não encontrado
+Criar `src/components/PixelInjector.tsx` que recebe `facebookPixelId` e `googleAnalyticsId` como props e:
+- Injeta o script do **Meta Pixel** (`fbq('init', id)` + `fbq('track', 'PageView')`) no `<head>`
+- Injeta o script do **Google Analytics** (`gtag.js`) no `<head>`
+- Remove os scripts ao desmontar (cleanup)
+
+### 5. Páginas Públicas
+
+Adicionar `<PixelInjector>` em:
+- `src/pages/ConsultantPage.tsx`
+- `src/pages/LicenciadaPage.tsx`
+
+Passando os IDs do consultor carregado.
+
+### 6. Outras melhorias possíveis (sugestões)
+
+| Ideia | Descrição |
+|-------|-----------|
+| **TikTok Pixel** | Mesmo padrão — campo extra + injeção de script |
+| **Cor personalizada** | Consultor escolhe cor primária da página |
+| **Mensagem WhatsApp customizada** | Consultor edita o texto padrão do WhatsApp |
+| **Domínio personalizado** | Consultor usa seu próprio domínio apontando para a página |
 
 ### Arquivos a criar/editar
 
 | Ação | Arquivo |
 |------|---------|
-| Criar | `src/pages/Auth.tsx` |
-| Criar | `src/pages/Admin.tsx` |
-| Criar | `src/pages/ConsultantPage.tsx` |
-| Editar | `src/App.tsx` (novas rotas) |
-| Editar | `src/components/HeroSection.tsx` (receber props) |
-| Editar | `src/components/ConsultantSection.tsx` (receber props) |
-| Migration | Tabela `consultants` + RLS |
-| Storage | Bucket `consultant-photos` |
-
-### Detalhes Técnicos
-
-- **Auth**: Supabase Auth com email/senha, listener `onAuthStateChange`
-- **Storage**: Bucket público `consultant-photos`, upload via `supabase.storage.from('consultant-photos').upload()`
-- **Tipo do consultor**: Interface TypeScript `Consultant` com todos os campos
-- **Hook customizado**: `useConsultant(license)` para buscar dados do consultor
-- **Proteção de rota**: Componente `ProtectedRoute` que verifica sessão antes de renderizar `/admin`
+| Migration | Adicionar colunas `facebook_pixel_id`, `google_analytics_id` |
+| Editar | `src/types/consultant.ts` |
+| Criar | `src/components/PixelInjector.tsx` |
+| Editar | `src/pages/Admin.tsx` (formulário) |
+| Editar | `src/pages/ConsultantPage.tsx` |
+| Editar | `src/pages/LicenciadaPage.tsx` |
 
