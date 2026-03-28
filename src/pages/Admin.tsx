@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import type { Consultant } from "@/types/consultant";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area, PieChart, Pie, Cell, Legend,
 } from "recharts";
 import { Eye, Users, Copy, ExternalLink, LogOut, Save, Camera, BarChart3, LinkIcon, Settings, Monitor, MousePointerClick, Clock, Smartphone, Globe } from "lucide-react";
 
@@ -350,32 +350,54 @@ const Admin = () => {
                 </div>
               </div>
 
-              {/* UTM Sources */}
+              {/* UTM Sources - Pie Chart */}
               <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
                 <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
                   <Globe className="w-4 h-4 text-primary" /> Origem do Tráfego
                 </h3>
                 <p className="text-xs text-muted-foreground mb-4">De onde vêm seus visitantes</p>
-                <div className="space-y-3">
-                  {(analytics?.utmSources || []).map((u) => {
-                    const total = analytics?.total || 1;
-                    const pct = Math.round((u.count / total) * 100);
-                    return (
-                      <div key={u.source}>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-foreground capitalize">{u.source}</span>
-                          <span className="text-muted-foreground">{u.count} ({pct}%)</span>
-                        </div>
-                        <div className="w-full bg-secondary rounded-full h-2">
-                          <div className="bg-accent h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {(!analytics?.utmSources || analytics.utmSources.length === 0) && (
-                    <p className="text-sm text-muted-foreground text-center py-4">Sem dados ainda</p>
-                  )}
-                </div>
+                {analytics?.utmSources && analytics.utmSources.length > 0 ? (
+                  <div className="h-48">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={analytics.utmSources.map((u) => ({ name: u.source, value: u.count }))}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={40}
+                          outerRadius={70}
+                          paddingAngle={3}
+                          dataKey="value"
+                          stroke="none"
+                        >
+                          {analytics.utmSources.map((_, i) => (
+                            <Cell key={i} fill={["hsl(130,100%,36%)", "hsl(30,100%,50%)", "hsl(200,100%,50%)", "hsl(280,80%,60%)", "hsl(0,80%,55%)"][i % 5]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{
+                            background: "hsl(120, 8%, 8%)",
+                            border: "1px solid hsl(120, 8%, 18%)",
+                            borderRadius: "12px",
+                            fontSize: "13px",
+                            color: "hsl(0, 0%, 95%)",
+                          }}
+                          formatter={(value: number, name: string) => {
+                            const total = analytics?.total || 1;
+                            return [`${value} (${Math.round((value / total) * 100)}%)`, name];
+                          }}
+                        />
+                        <Legend
+                          iconType="circle"
+                          iconSize={8}
+                          formatter={(value: string) => <span className="text-xs text-muted-foreground capitalize">{value}</span>}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">Sem dados ainda</p>
+                )}
               </div>
             </div>
 
