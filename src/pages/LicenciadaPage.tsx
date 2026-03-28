@@ -17,6 +17,8 @@ import LicConexaoTelecom from "@/components/licenciada/LicConexaoTelecom";
 import LicCareerPlan from "@/components/licenciada/LicCareerPlan";
 import LicLicenseSection from "@/components/licenciada/LicLicenseSection";
 import LicConsultantSection from "@/components/licenciada/LicConsultantSection";
+import LicUrgencyBanner from "@/components/licenciada/LicUrgencyBanner";
+import LicIntermediateCTA from "@/components/licenciada/LicIntermediateCTA";
 import WhatsAppFloat from "@/components/WhatsAppFloat";
 import LoadingScreen from "@/components/LoadingScreen";
 import SEOHead from "@/components/SEOHead";
@@ -50,14 +52,29 @@ const LicenciadaPage = () => {
       />
       <div className="min-h-screen">
         <LicHeroSection cadastroUrl={consultant.licenciada_cadastro_url || consultant.cadastro_url} whatsappUrl={whatsappUrl} consultantId={consultant.id} />
+        <LicUrgencyBanner />
         <LicAboutSection />
         <LicWhySection />
         <LicBenefitsSection />
+        <LicIntermediateCTA
+          whatsappUrl={whatsappUrl}
+          consultantId={consultant.id}
+          headline="Não deixe essa oportunidade passar!"
+          subtext="Quem começou há 1 ano já construiu uma renda recorrente sólida. O próximo pode ser você."
+          emoji="⏰"
+        />
         <LicProductsIntro />
         <LicConexaoGreen />
         <LicConexaoLivre />
         <LicConexaoSolar />
         <LicConexaoPlacas />
+        <LicIntermediateCTA
+          whatsappUrl={whatsappUrl}
+          consultantId={consultant.id}
+          headline="Você já viu o potencial. Agora é a hora de agir."
+          subtext="Cada dia que passa é dinheiro que você deixa na mesa. Entre agora e comece a faturar com 8 produtos diferentes."
+          emoji="💰"
+        />
         <LicConexaoClub />
         <LicConexaoClubPJ />
         <LicConexaoExpansao />

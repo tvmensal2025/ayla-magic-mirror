@@ -14,7 +14,10 @@ const LicBenefitsSection = () => (
   <section>
     <div className="section-container">
       <div className="badge-green mx-auto mb-6">Vantagens</div>
-      <h2 className="section-heading mb-14">Benefícios dos licenciados iGreen Energy</h2>
+      <h2 className="section-heading mb-4">Benefícios dos licenciados iGreen Energy</h2>
+      <p className="text-center text-muted-foreground mb-14 max-w-2xl mx-auto">
+        Enquanto você lê isso, outros já estão faturando. <strong className="text-foreground">Não espere mais.</strong>
+      </p>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-6xl mx-auto">
         {benefits.map((b, i) => (
           <div key={i} className="glass-card group cursor-default">
