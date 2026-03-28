@@ -68,7 +68,7 @@ const LicHeroSection = ({ cadastroUrl, whatsappUrl, consultantId }: LicHeroSecti
         <img src="/images/logo-colorida-igreen.png" alt="iGreen Energy Logo" className="mx-auto mb-8 w-48 md:w-64 animate-fade-in" />
 
         <h1 className="font-heading font-black mb-6 text-3xl md:text-4xl lg:text-[3.2rem] leading-[1.15] max-w-5xl mx-auto text-foreground">
-          Últimas vagas abertas para se tornar um licenciado iGreen Energy e receber{" "}
+          Seja um Licenciado iGreen Energy e receba{" "}
           <span className="relative inline-block" style={{ color: 'hsl(var(--primary))' }}>
             comissões recorrentes e vitalícias
             <span className="absolute -bottom-1 left-0 w-full h-1 rounded-full" style={{ background: 'var(--gradient-green)' }} />
@@ -77,13 +77,13 @@ const LicHeroSection = ({ cadastroUrl, whatsappUrl, consultantId }: LicHeroSecti
         </h1>
 
         <p className="text-foreground/70 text-lg md:text-xl max-w-3xl mx-auto mb-8 leading-relaxed">
-          Essa é a sua chance de entrar no mercado de energia solar que mais cresce no Brasil. Quem entrou primeiro já está faturando — <strong className="text-foreground">não fique de fora.</strong>
+          O mercado de energia solar está explodindo no Brasil. Quem está aproveitando agora já está faturando — <strong className="text-foreground">esse é o seu momento.</strong>
         </p>
 
         <div className="flex items-center justify-center gap-2 mb-12">
-          <span className="inline-block w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: 'hsl(0 85% 50%)' }} />
-          <span className="text-sm font-heading font-bold uppercase tracking-wider" style={{ color: 'hsl(0 85% 60%)' }}>
-            Vagas limitadas — Inscrições podem encerrar a qualquer momento
+          <span className="inline-block w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: 'hsl(var(--primary))' }} />
+          <span className="text-sm font-heading font-bold uppercase tracking-wider" style={{ color: 'hsl(var(--primary))' }}>
+            Aproveite agora — O momento é este
           </span>
         </div>
 
