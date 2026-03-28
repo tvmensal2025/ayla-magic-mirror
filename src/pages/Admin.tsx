@@ -566,9 +566,14 @@ const Admin = () => {
                           <p className="text-sm font-bold text-foreground">{s.label}</p>
                           <p className="text-xs text-muted-foreground truncate">{fullUrl.replace("https://", "")}</p>
                         </div>
-                        <Button size="sm" variant="outline" onClick={() => copyLink(fullUrl)} className="gap-1 shrink-0 rounded-lg text-xs">
-                          <Copy className="w-3 h-3" /> Copiar
-                        </Button>
+                        <div className="flex gap-1.5 shrink-0">
+                          <Button size="sm" variant="outline" onClick={() => setQrModal({ url: fullUrl, label: `${s.label} — ${page.pageLabel}` })} className="gap-1 rounded-lg text-xs px-2">
+                            <QrCode className="w-3 h-3" />
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => copyLink(fullUrl)} className="gap-1 rounded-lg text-xs">
+                            <Copy className="w-3 h-3" /> Copiar
+                          </Button>
+                        </div>
                       </div>
                     );
                   })}
