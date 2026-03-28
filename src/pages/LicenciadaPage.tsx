@@ -22,6 +22,7 @@ import LicIntermediateCTA from "@/components/licenciada/LicIntermediateCTA";
 import WhatsAppFloat from "@/components/WhatsAppFloat";
 import LoadingScreen from "@/components/LoadingScreen";
 import SEOHead from "@/components/SEOHead";
+import PixelInjector from "@/components/PixelInjector";
 
 const LicenciadaPage = () => {
   const { licenca } = useParams<{ licenca: string }>();
@@ -46,6 +47,7 @@ const LicenciadaPage = () => {
 
   return (
     <>
+      <PixelInjector facebookPixelId={consultant.facebook_pixel_id} googleAnalyticsId={consultant.google_analytics_id} />
       <SEOHead
         title={`Licenciada ${consultant.name} – iGreen Energy`}
         description={`Descubra como se tornar um Licenciado iGreen Energy com ${consultant.name} e receba comissões recorrentes`}

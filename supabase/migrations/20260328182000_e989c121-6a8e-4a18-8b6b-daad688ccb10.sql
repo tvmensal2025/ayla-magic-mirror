@@ -1,0 +1,1 @@
+ALTER TABLE public.consultants ADD COLUMN facebook_pixel_id text, ADD COLUMN google_analytics_id text;

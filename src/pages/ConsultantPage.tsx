@@ -14,6 +14,7 @@ import ConsultantSection from "@/components/ConsultantSection";
 import WhatsAppFloat from "@/components/WhatsAppFloat";
 import LoadingScreen from "@/components/LoadingScreen";
 import SEOHead from "@/components/SEOHead";
+import PixelInjector from "@/components/PixelInjector";
 
 const ConsultantPage = () => {
   const { licenca } = useParams<{ licenca: string }>();
@@ -38,6 +39,7 @@ const ConsultantPage = () => {
 
   return (
     <>
+      <PixelInjector facebookPixelId={consultant.facebook_pixel_id} googleAnalyticsId={consultant.google_analytics_id} />
       <SEOHead
         title={`${consultant.name} – iGreen Energy`}
         description={`Descubra como receber até 15% de desconto na sua conta de luz com ${consultant.name}, consultor(a) iGreen Energy`}

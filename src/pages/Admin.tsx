@@ -20,7 +20,7 @@ const Admin = () => {
   const [qrModal, setQrModal] = useState<{ url: string; label: string } | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [form, setForm] = useState({
-    name: "", license: "", phone: "", cadastro_url: "", igreen_id: "", licenciada_cadastro_url: "",
+    name: "", license: "", phone: "", cadastro_url: "", igreen_id: "", licenciada_cadastro_url: "", facebook_pixel_id: "", google_analytics_id: "",
   });
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
@@ -52,6 +52,8 @@ const Admin = () => {
         igreen_id: id,
         cadastro_url: id ? `https://digital.igreenenergy.com.br/?id=${id}&sendcontract=true` : c.cadastro_url,
         licenciada_cadastro_url: id ? `https://expansao.igreenenergy.com.br/?id=${id}&checkout=true` : (c as any).licenciada_cadastro_url || "",
+        facebook_pixel_id: c.facebook_pixel_id || "",
+        google_analytics_id: c.google_analytics_id || "",
       });
       if (c.photo_url) setPhotoPreview(c.photo_url);
     }
@@ -81,6 +83,8 @@ const Admin = () => {
         id: userId, name: form.name, license: form.license.toLowerCase().replace(/\s+/g, "-"),
         phone: form.phone.replace(/\D/g, ""), cadastro_url: form.cadastro_url, igreen_id: form.igreen_id || null,
         licenciada_cadastro_url: form.licenciada_cadastro_url || null,
+        facebook_pixel_id: form.facebook_pixel_id || null,
+        google_analytics_id: form.google_analytics_id || null,
       };
       if (photo_url) payload.photo_url = photo_url;
       const { error } = await supabase.from("consultants").upsert(payload, { onConflict: "id" });
@@ -517,6 +521,24 @@ const Admin = () => {
               <div className="mt-4 space-y-2">
                 <Label htmlFor="licenciada_cadastro_url" className="text-sm text-muted-foreground">Link de cadastro Licença</Label>
                 <Input id="licenciada_cadastro_url" value={form.licenciada_cadastro_url} readOnly className="bg-secondary/50 border-border text-muted-foreground cursor-not-allowed" />
+              </div>
+            </div>
+
+            {/* Pixel Tracking */}
+            <div className="bg-card rounded-2xl border border-border p-6">
+              <h3 className="font-heading font-bold text-foreground mb-4 flex items-center gap-2">
+                <Globe className="w-5 h-5 text-primary" /> Pixels de Rastreamento
+              </h3>
+              <p className="text-xs text-muted-foreground mb-4">Cole seus IDs para rastrear conversões nas suas páginas</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="facebook_pixel_id" className="text-sm text-muted-foreground">Facebook Pixel ID</Label>
+                  <Input id="facebook_pixel_id" value={form.facebook_pixel_id} onChange={(e) => setForm({ ...form, facebook_pixel_id: e.target.value })} placeholder="Ex: 123456789012345" className="bg-secondary border-border" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="google_analytics_id" className="text-sm text-muted-foreground">Google Analytics ID (GA4)</Label>
+                  <Input id="google_analytics_id" value={form.google_analytics_id} onChange={(e) => setForm({ ...form, google_analytics_id: e.target.value })} placeholder="Ex: G-XXXXXXXXXX" className="bg-secondary border-border" />
+                </div>
               </div>
             </div>
 
