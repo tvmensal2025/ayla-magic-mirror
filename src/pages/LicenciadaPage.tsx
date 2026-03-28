@@ -22,6 +22,7 @@ import LicIntermediateCTA from "@/components/licenciada/LicIntermediateCTA";
 import WhatsAppFloat from "@/components/WhatsAppFloat";
 import LoadingScreen from "@/components/LoadingScreen";
 import SEOHead from "@/components/SEOHead";
+import PixelInjector from "@/components/PixelInjector";
 
 const LicenciadaPage = () => {
   const { licenca } = useParams<{ licenca: string }>();
