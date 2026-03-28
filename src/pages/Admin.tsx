@@ -20,7 +20,7 @@ const Admin = () => {
   const [qrModal, setQrModal] = useState<{ url: string; label: string } | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [form, setForm] = useState({
-    name: "", license: "", phone: "", cadastro_url: "", igreen_id: "", licenciada_cadastro_url: "",
+    name: "", license: "", phone: "", cadastro_url: "", igreen_id: "", licenciada_cadastro_url: "", facebook_pixel_id: "", google_analytics_id: "",
   });
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
