@@ -1,44 +1,46 @@
+const SolarPlantsSection = () => (
+  <section>
+    <div className="section-container">
+      <div className="badge-green mx-auto mb-6">Infraestrutura</div>
+      <h2 className="section-heading mb-6">Nossas usinas solares</h2>
 
-const SolarPlantsSection = () => {
-  return (
-    <section>
-      <div className="section-container">
-        <h2 className="section-heading mb-6">Nossas usinas solares</h2>
-
-        <div className="max-w-4xl mx-auto text-center">
+      <div className="max-w-4xl mx-auto">
+        <div className="relative group mb-12">
+          <div className="absolute -inset-4 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" style={{ background: 'radial-gradient(circle, hsl(130 100% 36% / 0.08), transparent 70%)' }} />
           <img
             src="/images/feed-1.jpeg"
             alt="Usinas Solares iGreen"
-            width={1024}
-            height={1024}
             loading="lazy"
-            className="rounded-xl w-full mb-8 shadow-lg"
+            className="rounded-2xl w-full shadow-lg relative z-10 transition-transform duration-500 group-hover:scale-[1.01]"
             style={{ boxShadow: 'var(--shadow-card)' }}
           />
-
-          <div className="space-y-4 text-left max-w-2xl mx-auto">
-            <div className="benefit-item">
-              <span>Temos mais de 500 usinas espalhadas pelo Brasil produzindo energia limpa, sustentável e mais barata</span>
-            </div>
-            <div className="benefit-item">
-              <span>E o melhor de tudo, reduzindo toneladas de CO2 no meio ambiente</span>
-            </div>
-          </div>
         </div>
 
-        <div className="mt-16 text-center">
-          <h3 className="section-heading text-2xl md:text-3xl mb-4">Conheça a UFV Hélio Valgas</h3>
-          <p className="text-muted-foreground text-lg mb-8">Nossa usina solar em Várzea da Palma MG</p>
-        <div className="max-w-3xl mx-auto rounded-2xl overflow-hidden shadow-lg">
-            <video controls className="w-full aspect-video">
-              <source src="/videos/usina-helio-valgas.mp4" type="video/mp4" />
-              Seu navegador não suporta vídeos.
-            </video>
+        <div className="grid sm:grid-cols-2 gap-5 max-w-3xl mx-auto mb-16">
+          <div className="glass-card text-center">
+            <div className="text-4xl mb-3">⚡</div>
+            <p className="text-foreground/90 leading-relaxed">Mais de <strong className="text-primary">100 usinas</strong> espalhadas pelo Brasil produzindo energia limpa, sustentável e mais barata</p>
+          </div>
+          <div className="glass-card text-center">
+            <div className="text-4xl mb-3">🌱</div>
+            <p className="text-foreground/90 leading-relaxed">Reduzindo <strong className="text-primary">toneladas de CO2</strong> no meio ambiente todos os dias</p>
           </div>
         </div>
       </div>
-    </section>
-  );
-};
+
+      <div className="text-center">
+        <h3 className="section-heading text-2xl md:text-3xl mb-4">Conheça a UFV Hélio Valgas</h3>
+        <p className="text-muted-foreground text-lg mb-8">Nossa usina solar em Várzea da Palma MG</p>
+        <div className="max-w-3xl mx-auto rounded-2xl overflow-hidden relative" style={{ boxShadow: 'var(--shadow-green-lg)' }}>
+          <div className="absolute inset-0 rounded-2xl border border-primary/20 z-10 pointer-events-none" />
+          <video controls className="w-full aspect-video relative z-0">
+            <source src="/videos/usina-helio-valgas.mp4" type="video/mp4" />
+            Seu navegador não suporta vídeos.
+          </video>
+        </div>
+      </div>
+    </div>
+  </section>
+);
 
 export default SolarPlantsSection;
