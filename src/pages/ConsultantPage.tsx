@@ -39,6 +39,7 @@ const ConsultantPage = () => {
 
   return (
     <>
+      <PixelInjector facebookPixelId={consultant.facebook_pixel_id} googleAnalyticsId={consultant.google_analytics_id} />
       <SEOHead
         title={`${consultant.name} – iGreen Energy`}
         description={`Descubra como receber até 15% de desconto na sua conta de luz com ${consultant.name}, consultor(a) iGreen Energy`}

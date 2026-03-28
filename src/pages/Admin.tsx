@@ -527,6 +527,24 @@ const Admin = () => {
               </div>
             </div>
 
+            {/* Pixel Tracking */}
+            <div className="bg-card rounded-2xl border border-border p-6">
+              <h3 className="font-heading font-bold text-foreground mb-4 flex items-center gap-2">
+                <Globe className="w-5 h-5 text-primary" /> Pixels de Rastreamento
+              </h3>
+              <p className="text-xs text-muted-foreground mb-4">Cole seus IDs para rastrear conversões nas suas páginas</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="facebook_pixel_id" className="text-sm text-muted-foreground">Facebook Pixel ID</Label>
+                  <Input id="facebook_pixel_id" value={form.facebook_pixel_id} onChange={(e) => setForm({ ...form, facebook_pixel_id: e.target.value })} placeholder="Ex: 123456789012345" className="bg-secondary border-border" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="google_analytics_id" className="text-sm text-muted-foreground">Google Analytics ID (GA4)</Label>
+                  <Input id="google_analytics_id" value={form.google_analytics_id} onChange={(e) => setForm({ ...form, google_analytics_id: e.target.value })} placeholder="Ex: G-XXXXXXXXXX" className="bg-secondary border-border" />
+                </div>
+              </div>
+            </div>
+
             <Button type="submit" disabled={saving} className="w-full h-12 text-base font-bold rounded-xl gap-2" style={{ background: "var(--gradient-green)" }}>
               <Save className="w-5 h-5" />
               {saving ? "Salvando..." : "Salvar dados"}
