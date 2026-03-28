@@ -217,6 +217,30 @@ export type Database = {
         }
         Relationships: []
       }
+      message_templates: {
+        Row: {
+          consultant_id: string
+          content: string
+          created_at: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          consultant_id: string
+          content: string
+          created_at?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          consultant_id?: string
+          content?: string
+          created_at?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
       page_events: {
         Row: {
           consultant_id: string
@@ -317,6 +341,27 @@ export type Database = {
         Update: {
           key?: string
           value?: string
+        }
+        Relationships: []
+      }
+      whatsapp_instances: {
+        Row: {
+          consultant_id: string
+          created_at: string | null
+          id: string
+          instance_name: string
+        }
+        Insert: {
+          consultant_id: string
+          created_at?: string | null
+          id?: string
+          instance_name: string
+        }
+        Update: {
+          consultant_id?: string
+          created_at?: string | null
+          id?: string
+          instance_name?: string
         }
         Relationships: []
       }
