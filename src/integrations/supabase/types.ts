@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       consultants: {
         Row: {
+          approved: boolean | null
           cadastro_url: string
           created_at: string | null
           facebook_pixel_id: string | null
@@ -32,6 +33,7 @@ export type Database = {
           referred_by: string | null
         }
         Insert: {
+          approved?: boolean | null
           cadastro_url: string
           created_at?: string | null
           facebook_pixel_id?: string | null
@@ -48,6 +50,7 @@ export type Database = {
           referred_by?: string | null
         }
         Update: {
+          approved?: boolean | null
           cadastro_url?: string
           created_at?: string | null
           facebook_pixel_id?: string | null
@@ -597,6 +600,24 @@ export type Database = {
         }
         Relationships: []
       }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
       whatsapp_instances: {
         Row: {
           consultant_id: string
@@ -682,10 +703,16 @@ export type Database = {
       }
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -812,6 +839,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+    },
   },
 } as const
