@@ -143,10 +143,22 @@ export async function uploadAdPhotos(consultantId: string, files: File[]): Promi
   const urls: string[] = [];
   for (const f of files) {
     const path = `${consultantId}/ads/${Date.now()}-${f.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-    const { error } = await supabase.storage.from("consultant-photos").upload(path, f, { upsert: true, contentType: f.type });
-    if (error) throw error;
-    const { data } = supabase.storage.from("consultant-photos").getPublicUrl(path);
-    urls.push(data.publicUrl);
+    try {
+      const { error } = await supabase.storage.from("consultant-photos").upload(path, f, { upsert: true, contentType: f.type });
+      if (error) throw error;
+      const { data } = supabase.storage.from("consultant-photos").getPublicUrl(path);
+      urls.push(data.publicUrl);
+    } catch (directUploadError) {
+      const formData = new FormData();
+      formData.append("file", f);
+      formData.append("consultant_id", consultantId);
+      const { data, error } = await supabase.functions.invoke("upload-ad-photo", { body: formData });
+      if (error) await throwFunctionError(error);
+      if ((data as any)?.error || !(data as any)?.url) {
+        throw new Error((data as any)?.error || (directUploadError as Error)?.message || "Falha ao enviar imagem.");
+      }
+      urls.push((data as any).url);
+    }
   }
   return urls;
 }
