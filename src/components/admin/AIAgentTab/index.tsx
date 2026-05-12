@@ -48,6 +48,7 @@ export function AIAgentTab({ userId }: { userId: string }) {
   const subs: { id: SubTab; label: string; icon: typeof Bot }[] = [
     { id: "atendimentos", label: "Atendimentos", icon: MessagesSquare },
     { id: "agente", label: "Agente & Mídias", icon: Library },
+    { id: "decisoes", label: "Decisões da IA", icon: Brain },
   ];
 
   return (
