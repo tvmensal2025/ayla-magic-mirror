@@ -105,6 +105,7 @@ export function AIAgentTab({ userId }: { userId: string }) {
             <RoteiroColumn userId={userId} />
           </div>
         )}
+        {sub === "decisoes" && <AIDecisionsPanel userId={userId} />}
       </div>
     </div>
   );
