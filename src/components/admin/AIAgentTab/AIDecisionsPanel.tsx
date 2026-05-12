@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Brain, Clock, ArrowRight, AlertCircle, CheckCircle2, Loader2, MessageSquare } from "lucide-react";
+import { Brain, Clock, ArrowRight, AlertCircle, CheckCircle2, Loader2, MessageSquare, ThumbsUp, ThumbsDown } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useToast } from "@/hooks/use-toast";
 
 interface Decision {
   id: string;
