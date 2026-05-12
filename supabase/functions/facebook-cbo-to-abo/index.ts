@@ -17,14 +17,14 @@
 // Pode ser disparado por cron (POST sem body) ou manualmente
 // (POST {"campaign_id":"<id>"}) pra testar uma específica.
 
-import { adminClient, corsHeaders, fbFetch, loadConnection } from "../_shared/fb-graph.ts";
+import { adminClient, corsHeaders, fbFetch, loadCampaignConnection } from "../_shared/fb-graph.ts";
 import { notifyConsultant } from "../_shared/notify-consultant.ts";
 
 interface City { key: string; name: string }
 
 async function migrateOne(row: any): Promise<{ ok: boolean; error?: string; new_campaign_id?: string }> {
   const admin = adminClient();
-  const conn = await loadConnection(row.consultant_id);
+  const conn = await loadCampaignConnection(row.consultant_id);
   if (!conn?.ad_account_id) return { ok: false, error: "Sem conexão Facebook" };
 
   const cities: City[] = Array.isArray(row.cities) ? row.cities : [];
