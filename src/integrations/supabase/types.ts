@@ -447,6 +447,7 @@ export type Database = {
           balance_cents: number
           consultant_id: string
           created_at: string
+          debt_cents: number
           last_synced_at: string | null
           total_spent_cents: number
           total_topped_up_cents: number
@@ -457,6 +458,7 @@ export type Database = {
           balance_cents?: number
           consultant_id: string
           created_at?: string
+          debt_cents?: number
           last_synced_at?: string | null
           total_spent_cents?: number
           total_topped_up_cents?: number
@@ -467,6 +469,7 @@ export type Database = {
           balance_cents?: number
           consultant_id?: string
           created_at?: string
+          debt_cents?: number
           last_synced_at?: string | null
           total_spent_cents?: number
           total_topped_up_cents?: number
