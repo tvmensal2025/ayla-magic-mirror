@@ -130,9 +130,27 @@ export function AIDecisionsPanel({ userId }: { userId: string }) {
                     {d.ai_output.message}
                   </p>
                 )}
-                {d.latency_ms != null && (
-                  <p className="text-[10px] text-muted-foreground mt-1">⚡ {d.latency_ms}ms</p>
-                )}
+                <div className="flex items-center gap-2 mt-1.5">
+                  {d.latency_ms != null && (
+                    <span className="text-[10px] text-muted-foreground">⚡ {d.latency_ms}ms</span>
+                  )}
+                  <div className="ml-auto flex items-center gap-1">
+                    <button
+                      onClick={() => rate(d, "up")}
+                      className={`p-1 rounded hover:bg-emerald-500/10 transition-colors ${d.feedback?.rating === "up" ? "text-emerald-400" : "text-muted-foreground hover:text-emerald-400"}`}
+                      title="Foi perfeito — IA usa como exemplo"
+                    >
+                      <ThumbsUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => rate(d, "down")}
+                      className={`p-1 rounded hover:bg-red-500/10 transition-colors ${d.feedback?.rating === "down" ? "text-red-400" : "text-muted-foreground hover:text-red-400"}`}
+                      title="Não era hora — IA evita esse padrão"
+                    >
+                      <ThumbsDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
