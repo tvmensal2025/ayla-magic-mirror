@@ -1,5 +1,5 @@
 // Valida conta antes de lançar campanha. Retorna lista de problemas.
-import { authConsultant, corsHeaders, fbFetch, loadConnection } from "../_shared/fb-graph.ts";
+import { authConsultant, corsHeaders, fbFetch, loadCampaignConnection } from "../_shared/fb-graph.ts";
 
 const WA_BUSINESS_REQUIRED_MESSAGE =
   "A Página selecionada precisa ter uma conta WhatsApp Business vinculada. No Meta Business Suite, conecte o número como WhatsApp Business e depois volte em 'Selecionar assets'.";
@@ -10,8 +10,8 @@ Deno.serve(async (req) => {
     const auth = await authConsultant(req);
     if (!auth) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-    const conn = await loadConnection(auth.id);
-    if (!conn) return new Response(JSON.stringify({ ok: false, issues: ["Conta do Facebook não conectada."] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const conn = await loadCampaignConnection(auth.id);
+    if (!conn) return new Response(JSON.stringify({ ok: false, issues: ["Conta principal de anúncios em sincronização. Tente novamente em instantes."] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
     const issues: string[] = [];
     const warnings: string[] = [];
@@ -23,8 +23,8 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: false, issues, warnings }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    if (!conn.ad_account_id) issues.push("Selecione uma conta de anúncios.");
-    if (!conn.page_id) issues.push("Selecione uma Página do Facebook.");
+    if (!conn.ad_account_id) issues.push("Conta principal de anúncios em sincronização. Tente novamente em instantes.");
+    if (!conn.page_id) issues.push("Página principal em sincronização. Tente novamente em instantes.");
     if (!conn.whatsapp_destination_number) {
       issues.push("Configure o número de WhatsApp Business que vai receber os leads (em 'Selecionar assets').");
     } else if (conn.page_id && conn.ad_account_id) {
