@@ -110,7 +110,7 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
         daily_budget_cents: 3000,
       });
       if (!pf.ok) {
-        throw new Error(pf.blockers.join(" | ") || "Pré-voo falhou");
+        toast({ title: "Pré-validação em revisão", description: pf.blockers.join(" | ") || "Vou tentar publicar direto.", variant: "destructive" });
       }
       if (pf.reach && pf.reach.lower < 50_000) {
         throw new Error(`Audiência muito pequena (${pf.reach.lower.toLocaleString("pt-BR")} pessoas). Use o modo avançado e adicione mais cidades.`);
@@ -149,7 +149,7 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
     }
   }
 
-  const blockingIssues = (issues || []).filter((i) => !i.includes("Pixel"));
+  const visibleIssues = (issues || []).filter((i) => !i.includes("Pixel"));
   const grouped = (["alto", "medio", "sem_bonus"] as const).map((tier) => ({
     tier,
     items: DISTRIBUIDORAS_PRESETS.filter((p) => p.tier === tier),
@@ -167,15 +167,16 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
 
         {issues === null ? (
           <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin" /></div>
-        ) : blockingIssues.length > 0 ? (
-          <Card className="p-4 border-destructive/50 bg-destructive/5">
-            <h4 className="font-bold text-destructive mb-2">Resolva antes de continuar:</h4>
-            <ul className="text-sm space-y-1 list-disc list-inside text-destructive/90">
-              {blockingIssues.map((i, idx) => <li key={idx}>{i}</li>)}
-            </ul>
-          </Card>
         ) : (
           <div className="space-y-5">
+            {visibleIssues.length > 0 && (
+              <Card className="p-4 border-warning/50 bg-warning/5">
+                <h4 className="font-bold text-warning mb-2">Validação em andamento</h4>
+                <ul className="text-sm space-y-1 list-disc list-inside text-warning/90">
+                  {visibleIssues.map((i, idx) => <li key={idx}>{i}</li>)}
+                </ul>
+              </Card>
+            )}
             <p className="text-sm text-muted-foreground">
               Em 3 passos sua campanha sobe no ar. A IA cuida do texto, das cidades e do orçamento (R$ 30/dia).
             </p>

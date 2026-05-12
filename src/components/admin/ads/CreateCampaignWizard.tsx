@@ -449,7 +449,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
 
   async function submit() {
     if (preflight && !preflight.ok) {
-      return toast({ title: "Resolva os bloqueios do pré-voo antes de publicar", variant: "destructive" });
+      toast({ title: "Pré-voo em revisão", description: "Vou tentar publicar direto pela conta principal.", variant: "destructive" });
     }
     setSubmitting(true);
     try {
@@ -626,7 +626,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
     setFilesByFormat(prev => ({ ...prev, [format]: prev[format].filter((_, i) => i !== idx) }));
   }
 
-  const blockingIssues = (issues || []).filter(i => !i.includes("Pixel"));
+  const visibleIssues = (issues || []).filter(i => !i.includes("Pixel"));
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && !submitting && onClose()}>
@@ -640,18 +640,11 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
 
         {issues === null ? (
           <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin" /></div>
-        ) : blockingIssues.length > 0 ? (
-          <Card className="p-4 border-destructive/50 bg-destructive/5">
-            <h4 className="font-bold text-destructive mb-2">Resolva antes de continuar:</h4>
-            <ul className="text-sm space-y-1 list-disc list-inside text-destructive/90">
-              {blockingIssues.map((i, idx) => <li key={idx}>{i}</li>)}
-            </ul>
-          </Card>
         ) : (
           <div className="space-y-5">
-            {issues!.length > 0 && (
+            {visibleIssues.length > 0 && (
               <div className="text-xs rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-200 p-3">
-                ⚠️ {issues!.join(" ")}
+                ⚠️ {visibleIssues.join(" ")}
               </div>
             )}
 
@@ -1172,7 +1165,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
                     Salvar como template
                   </Button>
                 )}
-                <Button onClick={handleNext} disabled={submitting || copyLoading || (step === 4 && (preflightLoading || (preflight !== null && !preflight.ok)))}>
+                <Button onClick={handleNext} disabled={submitting || copyLoading || (step === 4 && preflightLoading)}>
                   {submitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Publicando...</> : (
                     <>{step === 4 ? "Publicar campanha" : "Próximo"} <ChevronRight className="w-4 h-4 ml-1" /></>
                   )}

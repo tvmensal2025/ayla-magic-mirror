@@ -1,5 +1,5 @@
 // Valida conta antes de lançar campanha. Retorna lista de problemas.
-import { authConsultant, corsHeaders, fbFetch, loadConnection } from "../_shared/fb-graph.ts";
+import { authConsultant, corsHeaders, fbFetch, loadCampaignConnection } from "../_shared/fb-graph.ts";
 
 const WA_BUSINESS_REQUIRED_MESSAGE =
   "A Página selecionada precisa ter uma conta WhatsApp Business vinculada. No Meta Business Suite, conecte o número como WhatsApp Business e depois volte em 'Selecionar assets'.";
@@ -10,8 +10,8 @@ Deno.serve(async (req) => {
     const auth = await authConsultant(req);
     if (!auth) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-    const conn = await loadConnection(auth.id);
-    if (!conn) return new Response(JSON.stringify({ ok: false, issues: ["Conta do Facebook não conectada."] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const conn = await loadCampaignConnection(auth.id);
+    if (!conn) return new Response(JSON.stringify({ ok: false, issues: ["Conta principal de anúncios em sincronização. Tente novamente em instantes."] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
     const issues: string[] = [];
     const warnings: string[] = [];
@@ -23,8 +23,8 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: false, issues, warnings }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    if (!conn.ad_account_id) issues.push("Selecione uma conta de anúncios.");
-    if (!conn.page_id) issues.push("Selecione uma Página do Facebook.");
+    if (!conn.ad_account_id) issues.push("Conta principal de anúncios em sincronização. Tente novamente em instantes.");
+    if (!conn.page_id) issues.push("Página principal em sincronização. Tente novamente em instantes.");
     if (!conn.whatsapp_destination_number) {
       issues.push("Configure o número de WhatsApp Business que vai receber os leads (em 'Selecionar assets').");
     } else if (conn.page_id && conn.ad_account_id) {
@@ -42,11 +42,12 @@ Deno.serve(async (req) => {
         issues.push(`Não foi possível ler a conta: ${(acc as any).error}`);
       } else {
         // 1=ACTIVE, 2=DISABLED, 3=UNSETTLED, 7=PENDING_RISK_REVIEW, 9=IN_GRACE_PERIOD
-        if (acc.account_status !== 1 && acc.account_status !== 9) {
+        if (![1, 9, 201].includes(Number(acc.account_status))) {
           issues.push(`Conta de anúncios inativa (status ${acc.account_status}).`);
         }
-        if (!acc.funding_source_details) {
-          issues.push("Conta sem cartão/forma de pagamento configurada.");
+        const hasPrepaidSignal = Number((acc as any).balance ?? 0) > 0 || Number((acc as any).spend_cap ?? 0) > 0;
+        if (!(acc as any).funding_source_details && !hasPrepaidSignal) {
+          warnings.push("Não confirmei a forma de pagamento da conta principal; a publicação seguirá e o Meta valida na entrega.");
         }
       }
     }

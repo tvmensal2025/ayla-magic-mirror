@@ -8,7 +8,7 @@
 //     `platform_facebook_account` (compartilhada por todos os consultores).
 //   - sem body / { scope: "consultant" } → comportamento legado: cria
 //     audiência na ad_account do próprio consultor (mantido por compat).
-import { adminClient, authConsultant, corsHeaders, fbFetch, loadConnection, loadPlatformAccount, sha256Hex } from "../_shared/fb-graph.ts";
+import { adminClient, authConsultant, corsHeaders, fbFetch, loadCampaignConnection, loadPlatformAccount, sha256Hex } from "../_shared/fb-graph.ts";
 
 function normPhone(p: string | null | undefined): string {
   if (!p) return "";
@@ -159,7 +159,7 @@ Deno.serve(async (req) => {
     // ============================================================
     const auth = await authConsultant(req);
     if (!auth) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    const conn = await loadConnection(auth.id);
+    const conn = await loadCampaignConnection(auth.id);
     if (!conn?.ad_account_id) {
       return new Response(JSON.stringify({ error: "Conexão Facebook incompleta." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }

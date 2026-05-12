@@ -1,5 +1,5 @@
 // Sincroniza métricas das campanhas ativas. Roda via cron a cada 30 min.
-import { adminClient, FB_GRAPH, fbFetch, loadConnection } from "../_shared/fb-graph.ts";
+import { adminClient, FB_GRAPH, fbFetch, loadCampaignConnection } from "../_shared/fb-graph.ts";
 import { notifyConsultant } from "../_shared/notify-consultant.ts";
 
 const corsHeaders = {
@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
     for (const c of campaigns) {
       try {
         if (!tokenCache[c.consultant_id]) {
-          const conn = await loadConnection(c.consultant_id);
+          const conn = await loadCampaignConnection(c.consultant_id);
           if (!conn) continue;
           tokenCache[c.consultant_id] = conn.token;
         }
