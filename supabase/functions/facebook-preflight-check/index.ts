@@ -1,6 +1,6 @@
 // Pré-voo da campanha: valida token, conta, número WA, e pede reach estimate à Meta.
 // Retorna issues bloqueantes + estimativa de alcance — chamado antes de publicar.
-import { authConsultant, corsHeaders, FB_GRAPH, fbFetch, loadConnection } from "../_shared/fb-graph.ts";
+import { authConsultant, corsHeaders, FB_GRAPH, fbFetch, loadCampaignConnection } from "../_shared/fb-graph.ts";
 
 interface PreflightBody {
   cities?: { key: string; name: string }[];
@@ -15,8 +15,8 @@ Deno.serve(async (req) => {
     const auth = await authConsultant(req);
     if (!auth) return json({ error: "Unauthorized" }, 401);
 
-    const conn = await loadConnection(auth.id);
-    if (!conn) return json({ ok: false, blockers: ["Conta Facebook não conectada"], warnings: [], reach: null }, 200);
+    const conn = await loadCampaignConnection(auth.id);
+    if (!conn) return json({ ok: false, blockers: ["Conta principal de anúncios em sincronização. Tente novamente em instantes."], warnings: [], reach: null }, 200);
 
     const body = (await req.json().catch(() => ({}))) as PreflightBody;
     const blockers: string[] = [];
