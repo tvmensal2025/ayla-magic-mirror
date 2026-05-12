@@ -141,7 +141,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         });
 
         if (aiResp.ok) {
-          const { decision } = await aiResp.json();
+          const aiBody = await aiResp.json();
+          const decision = aiBody?.decision;
+          const media = aiBody?.media; // { id, url, kind, label } | null
           const tool = decision?.tool;
           const args = decision?.args || {};
 
@@ -166,8 +168,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             return { reply, updates };
           }
           if (tool === "send_media") {
-            // Não temos mídia escolhida aqui ainda — manda só a legenda como texto
-            reply = args.caption || "Te mando uma prova rapidinho!";
+            // Send the media now via Evolution; reply carries the caption (or empty)
+            if (media?.url) {
+              const kind = ["audio", "video", "image"].includes(media.kind) ? media.kind : "document";
+              try {
+                await sendMedia(remoteJid, media.url, args.caption || "", kind);
+              } catch (e) {
+                console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);
+              }
+            }
+            reply = ""; // caption already attached to media
             return { reply, updates };
           }
           if (tool === "mark_lost") {

@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import {
   Loader2,
@@ -15,6 +17,7 @@ import {
   FileText,
   Globe,
   User,
+  Tag,
 } from "lucide-react";
 
 type Kind = "audio" | "video" | "image" | "document" | "text";
@@ -28,7 +31,31 @@ type Media = {
   text_content: string | null;
   active: boolean;
   priority: number;
+  step_tags: string[];
+  intent_tags: string[];
 };
+
+const STEP_OPTIONS: { value: string; label: string }[] = [
+  { value: "abertura", label: "Boas-vindas" },
+  { value: "descoberta", label: "Descoberta" },
+  { value: "pitch", label: "Apresentar economia" },
+  { value: "prova_social", label: "Prova social / depoimento" },
+  { value: "objecao_preco", label: "Objeção: preço" },
+  { value: "objecao_confianca", label: "Objeção: é golpe?" },
+  { value: "objecao_burocracia", label: "Objeção: burocracia" },
+  { value: "fechamento", label: "Fechamento" },
+  { value: "pedir_documento", label: "Pedir documento" },
+  { value: "followup", label: "Follow-up (lead sumiu)" },
+  { value: "any", label: "Qualquer momento" },
+];
+
+const INTENT_OPTIONS: { value: string; label: string }[] = [
+  { value: "todos", label: "Todos os perfis" },
+  { value: "conta_alta", label: "Conta alta (>R$500)" },
+  { value: "conta_media", label: "Conta média (R$200–500)" },
+  { value: "conta_baixa", label: "Conta baixa (<R$200)" },
+  { value: "lead_frio", label: "Lead frio (>3 dias)" },
+];
 
 const QUOTA_BYTES = 100 * 1024 * 1024; // 100 MB
 
@@ -162,23 +189,95 @@ export function MediaColumn({ userId }: { userId: string }) {
   }
 
   async function cloneToMine(m: Media) {
-    const { error } = await supabase.from("ai_media_library").insert({
-      consultant_id: userId,
-      is_public: false,
-      kind: m.kind,
-      label: m.label,
-      url: m.url,
-      text_content: m.text_content,
-      step_tags: ["any"],
-      intent_tags: [],
-      active: true,
-      priority: m.priority,
-    });
+    const { error } = await supabase.rpc("fork_public_ai_media" as any, { _media_id: m.id });
     if (error) toast({ title: "Erro", description: error.message, variant: "destructive" });
     else {
-      toast({ title: "✅ Copiado para sua biblioteca" });
+      toast({ title: "✅ Adicionado à sua biblioteca" });
       setView("mine");
     }
+  }
+
+  async function updateTags(m: Media, patch: Partial<Pick<Media, "step_tags" | "intent_tags">>) {
+    const { error } = await supabase
+      .from("ai_media_library")
+      .update(patch)
+      .eq("id", m.id);
+    if (error) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      return;
+    }
+    setItems((prev) => prev.map((x) => (x.id === m.id ? { ...x, ...patch } : x)));
+  }
+
+  function TagEditor({ m }: { m: Media }) {
+    const stepTags = m.step_tags || [];
+    const intentTags = m.intent_tags || [];
+    const summary =
+      stepTags.length === 0
+        ? "Sem tags"
+        : stepTags
+            .map((t) => STEP_OPTIONS.find((o) => o.value === t)?.label || t)
+            .slice(0, 2)
+            .join(", ") + (stepTags.length > 2 ? ` +${stepTags.length - 2}` : "");
+    return (
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-border/60 text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors max-w-[150px] truncate"
+            title="Configurar quando enviar"
+          >
+            <Tag className="w-3 h-3 shrink-0" />
+            <span className="truncate">{summary}</span>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-72 p-3 space-y-3" align="end">
+          <div>
+            <p className="text-xs font-semibold mb-2 text-foreground">Quando enviar?</p>
+            <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+              {STEP_OPTIONS.map((opt) => {
+                const checked = stepTags.includes(opt.value);
+                return (
+                  <label key={opt.value} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={(v) => {
+                        const next = v
+                          ? [...stepTags, opt.value]
+                          : stepTags.filter((t) => t !== opt.value);
+                        updateTags(m, { step_tags: next });
+                      }}
+                    />
+                    <span>{opt.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+          <div className="border-t border-border pt-3">
+            <p className="text-xs font-semibold mb-2 text-foreground">Para qual perfil?</p>
+            <div className="space-y-1.5">
+              {INTENT_OPTIONS.map((opt) => {
+                const checked = intentTags.includes(opt.value);
+                return (
+                  <label key={opt.value} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={(v) => {
+                        const next = v
+                          ? [...intentTags, opt.value]
+                          : intentTags.filter((t) => t !== opt.value);
+                        updateTags(m, { intent_tags: next });
+                      }}
+                    />
+                    <span>{opt.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+    );
   }
 
   const usagePct = Math.min(100, (usedBytes / QUOTA_BYTES) * 100);
@@ -288,6 +387,7 @@ export function MediaColumn({ userId }: { userId: string }) {
                 </div>
                 {view === "mine" ? (
                   <>
+                    <TagEditor m={m} />
                     <Badge
                       variant={m.active ? "default" : "outline"}
                       className={`text-[10px] ${m.active ? "bg-primary/15 text-primary border-primary/20" : ""}`}

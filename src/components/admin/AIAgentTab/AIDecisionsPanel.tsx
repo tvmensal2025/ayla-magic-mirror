@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Brain, Clock, ArrowRight, AlertCircle, CheckCircle2, Loader2, MessageSquare } from "lucide-react";
+import { Brain, Clock, ArrowRight, AlertCircle, CheckCircle2, Loader2, MessageSquare, ThumbsUp, ThumbsDown } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useToast } from "@/hooks/use-toast";
 
 interface Decision {
   id: string;
@@ -14,6 +15,7 @@ interface Decision {
   ai_output: any;
   latency_ms: number | null;
   created_at: string;
+  feedback?: { rating?: "up" | "down"; note?: string } | null;
   customer_name?: string | null;
 }
 
@@ -29,13 +31,28 @@ const TOOL_LABELS: Record<string, { label: string; color: string; icon: any }> =
 export function AIDecisionsPanel({ userId }: { userId: string }) {
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+
+  async function rate(d: Decision, rating: "up" | "down") {
+    const next = { rating, at: new Date().toISOString() };
+    const { error } = await supabase
+      .from("ai_decisions" as any)
+      .update({ feedback: next })
+      .eq("id", d.id);
+    if (error) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      return;
+    }
+    setDecisions((prev) => prev.map((x) => (x.id === d.id ? { ...x, feedback: next as any } : x)));
+    toast({ title: rating === "up" ? "👍 IA aprendeu" : "👎 Anotado", description: rating === "up" ? "Vai usar como exemplo." : "Vai evitar esse padrão." });
+  }
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const { data } = await supabase
         .from("ai_decisions" as any)
-        .select("id, customer_id, phase, tool_called, reasoning, user_input, ai_output, latency_ms, created_at")
+        .select("id, customer_id, phase, tool_called, reasoning, user_input, ai_output, latency_ms, created_at, feedback")
         .eq("consultant_id", userId)
         .order("created_at", { ascending: false })
         .limit(50);
@@ -113,9 +130,27 @@ export function AIDecisionsPanel({ userId }: { userId: string }) {
                     {d.ai_output.message}
                   </p>
                 )}
-                {d.latency_ms != null && (
-                  <p className="text-[10px] text-muted-foreground mt-1">⚡ {d.latency_ms}ms</p>
-                )}
+                <div className="flex items-center gap-2 mt-1.5">
+                  {d.latency_ms != null && (
+                    <span className="text-[10px] text-muted-foreground">⚡ {d.latency_ms}ms</span>
+                  )}
+                  <div className="ml-auto flex items-center gap-1">
+                    <button
+                      onClick={() => rate(d, "up")}
+                      className={`p-1 rounded hover:bg-emerald-500/10 transition-colors ${d.feedback?.rating === "up" ? "text-emerald-400" : "text-muted-foreground hover:text-emerald-400"}`}
+                      title="Foi perfeito — IA usa como exemplo"
+                    >
+                      <ThumbsUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => rate(d, "down")}
+                      className={`p-1 rounded hover:bg-red-500/10 transition-colors ${d.feedback?.rating === "down" ? "text-red-400" : "text-muted-foreground hover:text-red-400"}`}
+                      title="Não era hora — IA evita esse padrão"
+                    >
+                      <ThumbsDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

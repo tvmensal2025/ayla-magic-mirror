@@ -291,8 +291,10 @@ export type Database = {
           consultant_id: string
           created_at: string
           customer_id: string | null
+          feedback: Json | null
           id: string
           latency_ms: number | null
+          media_sent_id: string | null
           model: string | null
           phase: string
           reasoning: string | null
@@ -304,8 +306,10 @@ export type Database = {
           consultant_id: string
           created_at?: string
           customer_id?: string | null
+          feedback?: Json | null
           id?: string
           latency_ms?: number | null
+          media_sent_id?: string | null
           model?: string | null
           phase: string
           reasoning?: string | null
@@ -317,8 +321,10 @@ export type Database = {
           consultant_id?: string
           created_at?: string
           customer_id?: string | null
+          feedback?: Json | null
           id?: string
           latency_ms?: number | null
+          media_sent_id?: string | null
           model?: string | null
           phase?: string
           reasoning?: string | null
@@ -2240,6 +2246,7 @@ export type Database = {
       }
       fork_ad_template: { Args: { _origin_id: string }; Returns: string }
       fork_message_template: { Args: { _origin_id: string }; Returns: string }
+      fork_public_ai_media: { Args: { _media_id: string }; Returns: string }
       get_coverage_summary: {
         Args: never
         Returns: {
