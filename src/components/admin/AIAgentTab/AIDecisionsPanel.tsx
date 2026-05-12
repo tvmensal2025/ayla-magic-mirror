@@ -15,6 +15,7 @@ interface Decision {
   ai_output: any;
   latency_ms: number | null;
   created_at: string;
+  feedback?: { rating?: "up" | "down"; note?: string } | null;
   customer_name?: string | null;
 }
 
