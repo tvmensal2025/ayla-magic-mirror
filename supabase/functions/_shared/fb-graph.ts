@@ -140,6 +140,33 @@ export async function loadConsultantAdSettings(consultantId: string): Promise<{
 }
 
 /**
+ * Conexão usada por campanhas e métricas: sempre usa a conta principal da
+ * plataforma, mesmo quando o consultor tem uma conexão Facebook pessoal parcial.
+ */
+export async function loadCampaignConnection(consultantId: string): Promise<{
+  token: string;
+  ad_account_id: string;
+  page_id: string;
+  pixel_id: string | null;
+  ig_account_id: string | null;
+  whatsapp_phone_number_id: string | null;
+  whatsapp_destination_number: string | null;
+} | null> {
+  const platform = await loadPlatformAccount();
+  if (!platform?.ad_account_id || !platform.page_id) return null;
+  const settings = await loadConsultantAdSettings(consultantId);
+  return {
+    token: platform.token,
+    ad_account_id: platform.ad_account_id,
+    page_id: platform.page_id,
+    pixel_id: platform.pixel_id,
+    ig_account_id: platform.ig_account_id,
+    whatsapp_phone_number_id: null,
+    whatsapp_destination_number: settings?.whatsapp_destination_number ?? null,
+  };
+}
+
+/**
  * Garante que existe wallet pro consultor e retorna o saldo atual.
  */
 export async function getOrCreateWallet(consultantId: string): Promise<{
