@@ -5,6 +5,7 @@
 //                                                     consultando cache `fb_city_cache` primeiro
 //                                                     e gravando o que faltar.
 import { adminClient, authConsultant, corsHeaders, fbFetch, loadConnection } from "../_shared/fb-graph.ts";
+import { loadCampaignConnection } from "../_shared/fb-graph.ts";
 
 interface BulkItem { name: string; uf: string }
 
@@ -33,7 +34,7 @@ Deno.serve(async (req) => {
     if (!auth) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
     const body = await req.json().catch(() => ({}));
-    const conn = await loadConnection(auth.id);
+    const conn = await loadCampaignConnection(auth.id) ?? await loadConnection(auth.id);
     if (!conn) return new Response(JSON.stringify({ error: "Sem conexão Facebook" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
     // ---------- BULK MODE ----------
