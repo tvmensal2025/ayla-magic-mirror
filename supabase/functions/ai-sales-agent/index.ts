@@ -368,6 +368,32 @@ Deno.serve(async (req) => {
 
     const latencyMs = Date.now() - t0;
 
+    // Validate media_id and resolve URL/kind for downstream sender
+    let resolvedMedia: { id: string; url: string; kind: string; label: string } | null = null;
+    if (tool === "send_media") {
+      const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
+      if (!picked || !picked.url) {
+        // Hallucinated id — degrade to send_text with the caption
+        args.reasoning = (args.reasoning || "") + " [media_id inválido — fallback texto]";
+        return new Response(
+          JSON.stringify({
+            decision: {
+              tool: "send_text",
+              args: {
+                message: args.caption || "Posso te explicar melhor?",
+                next_phase: args.next_phase || phase,
+                reasoning: args.reasoning,
+              },
+            },
+            phase,
+            latency_ms: latencyMs,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      resolvedMedia = { id: picked.id, url: picked.url, kind: picked.kind, label: picked.label };
+    }
+
     // Audit (best-effort)
     await supabase.from("ai_decisions").insert({
       customer_id,
@@ -379,11 +405,13 @@ Deno.serve(async (req) => {
       ai_output: args,
       latency_ms: latencyMs,
       model: MODEL,
+      media_sent_id: resolvedMedia?.id || null,
     });
 
     // Apply side-effects (DB updates only — sending message stays in webhook)
     const updates: Record<string, any> = {};
     if (tool === "send_text" && args.next_phase) updates.sales_phase = args.next_phase;
+    if (tool === "send_media" && args.next_phase) updates.sales_phase = args.next_phase;
     if (tool === "advance_to_closing") updates.sales_phase = "fechamento";
     if (tool === "request_handoff") {
       updates.bot_paused = true;
