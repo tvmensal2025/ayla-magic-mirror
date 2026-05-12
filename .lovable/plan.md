@@ -1,139 +1,118 @@
-# Fluxo IA para Fechar a Venda — Camila 2.0
 
-## Diagnóstico do fluxo atual
+# Pacote completo: IA que escolhe áudio/vídeo/texto sozinha
 
-Hoje o `evolution-webhook/handlers/bot-flow.ts` é uma **máquina de estados determinística de 38 steps**, focada em coletar documentos e jogar no portal iGreen. Problemas para conversão:
-
-1. **Não vende, só formulariza.** Pula da boas-vindas direto para "manda foto da conta". Sem qualificação, sem benefício, sem prova social.
-2. **Sem decisão contextual.** Não diferencia lead frio (anúncio Facebook) de lead quente (indicação), nem trata objeção ("é golpe?", "preciso pensar").
-3. **Tudo ou nada.** Se o lead não manda a conta na hora, vira `aguardando_humano` ou trava — sem follow-up, sem rota alternativa.
-4. **Sem memória de intenção.** O `ai_agent_config.system_prompt` existe mas o bot-flow ignora — só usa LLM em casos pontuais (OCR Gemini).
-5. **Saldo zerado / pause já existe** — bom. Falta usar a IA para **resgatar leads pausados** quando há saldo.
+A tabela `ai_media_library` já tem tudo que precisamos (`kind`, `step_tags`, `intent_tags`, `priority`, `is_public`, `consultant_id`). Não precisa criar tabelas novas — só UI, lógica do agente e um campo de feedback.
 
 ---
 
-## Proposta: funil de venda em 5 fases com decisão híbrida
+## 1. UI do consultor — aba "Agente & Mídias"
 
-```text
-┌─────────────────────────────────────────────────────────────────────┐
-│  FASE 1: ABERTURA       → quebra de gelo + qualificação rápida     │
-│  FASE 2: DESCOBERTA     → dor, valor da conta, distribuidora        │
-│  FASE 3: PITCH          → economia personalizada + prova social     │
-│  FASE 4: OBJEÇÃO        → IA decide: responder, mídia, ou humano    │
-│  FASE 5: FECHAMENTO     → coleta documentos no momento certo        │
-└─────────────────────────────────────────────────────────────────────┘
-       ↑                                                          ↓
-       └────────── follow-up automático (T+30min, T+24h) ─────────┘
+Substituir o uploader genérico por um **card por mídia** com 3 dropdowns simples (sem jargão):
+
+- **Tipo** (auto-detectado pelo arquivo): Áudio / Vídeo / Imagem / Texto
+- **Quando enviar?** (multi-select, grava em `step_tags`):
+  - Boas-vindas
+  - Apresentar economia (pitch)
+  - Prova social / depoimento
+  - Objeção: preço / desconto
+  - Objeção: confiança / "é golpe?"
+  - Objeção: burocracia
+  - Pedir documento
+  - Fechamento
+  - Follow-up (lead sumiu)
+- **Para qual perfil?** (multi-select, grava em `intent_tags`):
+  - Todos
+  - Conta alta (>R$500)
+  - Conta média (R$200–500)
+  - Conta baixa (<R$200)
+  - Lead frio (>3 dias sem responder)
+
+Botão **"Usar kit padrão iGreen"** no topo: copia mídias com `is_public=true` para o consultor (fork como já existe em `message_templates`).
+
+Upload em massa: arrastar vários arquivos → modal pede só os 2 dropdowns para cada um. Em ~2min o consultor configura toda a biblioteca.
+
+## 2. Kit padrão iGreen (mídias suas)
+
+Novo subpainel admin "Biblioteca pública iGreen" (super_admin only):
+- Upload das suas mídias para `ai-agent-media` bucket
+- Marca `is_public=true`, `consultant_id=null`
+- Aparece automaticamente para todo consultor com botão "Adicionar à minha biblioteca"
+
+Você sobe os arquivos uma vez, todos os consultores herdam.
+
+## 3. Lógica do agente — escolha automática de mídia
+
+Atualizar `supabase/functions/ai-sales-agent/index.ts`:
+
+**Antes da chamada ao LLM**, carregar mídias candidatas para a fase atual:
+```ts
+const candidatas = await supabase
+  .from('ai_media_library')
+  .select('id,kind,label,url,step_tags,intent_tags,priority')
+  .eq('active', true)
+  .or(`consultant_id.eq.${consultantId},is_public.eq.true`)
+  .contains('step_tags', [salesPhase])
+  .order('priority', { ascending: false });
 ```
 
-**Arquitetura híbrida:** estados rígidos só para coleta de dados sensíveis (CPF, conta, doc). Tudo antes e entre coletas é **LLM com tool-calling** decidindo a próxima ação.
+Filtrar por perfil do lead (conta alta/baixa/frio) e injetar no prompt como lista numerada. A tool `send_media` recebe só o `media_id` — o LLM escolhe **qual** das opções, mas só pode escolher entre as que existem (zero alucinação).
 
----
+**Regras de cadência** (hard-coded, fora do LLM, em `bot-flow.ts`):
+- Máx 1 áudio a cada 3 mensagens da IA
+- Máx 1 vídeo por conversa até o cliente responder
+- Nunca 2 mídias seguidas sem texto do cliente entre elas
+- Se cliente mandou áudio → próxima resposta deve ser áudio (espelho)
+- Se cliente mandou texto curto (<20 chars) → resposta texto curto
 
-## Detalhamento por fase
+Tracking via `ai_decisions.ai_output` (já existe) — campo `media_sent_id` + `cadence_state`.
 
-### Fase 1 — Abertura (substitui `welcome` e `menu_inicial`)
-- **Decisão da IA:** detecta origem do lead (`customers.lead_source.utm_source`).
-  - `facebook_ads` → "Vi que você se interessou pelo anúncio de economia na conta de luz…"
-  - `indicacao` → usa nome do indicador (já em `customer_referred_by_name`).
-  - `organico` → abertura neutra + qualificação.
-- **Pergunta única:** "Sua conta de luz vem por qual distribuidora? (CPFL, Enel, Cemig…)"
-- **Saída:** `qualified_distribuidora` ou `out_of_area` (se distribuidora não atendida → mensagem honesta + tag no CRM).
+## 4. Painel "Decisões da IA" — botão "Ensinar a IA"
 
-### Fase 2 — Descoberta
-- Pergunta o **valor médio da conta** (sem pedir foto ainda — barreira menor).
-- IA classifica:
-  - `< R$ 200` → ticket baixo, oferta resumida + 1 tentativa.
-  - `R$ 200–600` → fluxo padrão.
-  - `> R$ 600` → marca `high_value`, prioriza no CRM, oferece falar com humano se quiser.
-- Pergunta a dor: "O que mais te incomoda na conta hoje?" → grava em `customers.pain_point` (campo novo).
+No `AIDecisionsPanel.tsx` existente, adicionar em cada decisão:
+- Preview da mídia enviada (player inline)
+- Botão 👍 "Foi perfeito" / 👎 "Não era hora"
+- Quando 👎: modal pede "o que era melhor?" (dropdown das outras mídias da fase)
 
-### Fase 3 — Pitch personalizado
-- IA calcula economia estimada (12% × valor informado) e responde:
-  > "Com R$ {valor}, você economizaria cerca de R$ {valor*0.12}/mês = R$ {valor*0.12*12}/ano. Sem obra, sem mudança de fiação, mesma energia da rede."
-- **Mídia inteligente:** consulta `ai_media_library` por `intent_tags=['pitch','prova']` filtrando por `step_tags=['fase_pitch']` e envia o vídeo/áudio mais relevante (ex: depoimento de cliente da mesma distribuidora).
+Feedback grava em nova coluna `ai_decisions.feedback` (jsonb: `{rating, suggested_media_id, note}`). Os 10 últimos feedbacks 👍 viram exemplos few-shot no system prompt do consultor → IA aprende o estilo dele sem o consultor escrever uma linha.
 
-### Fase 4 — Tratamento de objeção (coração da decisão)
-LLM com tool-calling. Tools disponíveis:
+## 5. Para o cliente final — experiência previsível
 
-| Tool                       | Quando usar                                  |
-|----------------------------|----------------------------------------------|
-| `send_media(intent)`       | Pediu prova → manda depoimento/print         |
-| `send_text(message)`       | Resposta simples                             |
-| `request_handoff(reason)`  | Lead quente confuso, pediu humano, ou irritado |
-| `schedule_followup(hours)` | "Depois eu vejo" → agenda mensagem em N horas|
-| `advance_to_closing()`     | Sinais de compra detectados                  |
-| `mark_lost(reason)`        | "Não quero", bloqueio, fora do perfil        |
-
-Sinais de compra que a IA deve reconhecer: "como faço?", "quanto demora?", "preciso de quê?", "quero entrar", "vamos lá".
-
-### Fase 5 — Fechamento (volta ao state machine atual)
-Só agora pede conta de luz + documento + CPF. Aproveita os 38 steps atuais **inalterados** — eles funcionam para coleta. Mudança: ao concluir, IA envia áudio de parabéns personalizado.
-
-### Follow-up automático (novo)
-Cron `pg_cron` a cada 15 min:
-- Lead em fase 1–4 sem resposta há **30 min** → 1 mensagem de resgate (IA escolhe ângulo).
-- Sem resposta há **24 h** → 2ª mensagem com mídia diferente.
-- Sem resposta há **72 h** → marca `lost_no_response`, libera saldo de campanha.
-Limite: máx 2 resgates (`customers.rescue_attempts` já existe).
-
----
-
-## Decisão híbrida: quando IA, quando script
-
-| Situação                              | Quem decide        |
-|---------------------------------------|--------------------|
-| Coleta de CPF, RG, conta, OTP         | State machine      |
-| OCR + validação de documento          | Gemini (já existe) |
-| Resposta livre, objeção, pitch        | **LLM com tools**  |
-| Escolha de mídia para enviar          | **LLM (busca por tags)** |
-| Quando pausar bot e chamar humano     | **LLM**            |
-| Follow-up de resgate                  | **LLM + cron**     |
+Regras aplicadas no envio (em `bot-flow.ts`):
+- Áudios cortados a >30s → recusados no upload com aviso
+- Vídeos sem legenda → aviso amarelo no card ("recomendado adicionar legenda")
+- Toda mídia enviada vem acompanhada de 1 linha de texto-âncora gerada pela IA ("🎥 Veja em 40s como funciona")
 
 ---
 
 ## Detalhes técnicos
 
-**Mudanças de schema (1 migration):**
-- `customers`: `pain_point text`, `qualification_score int`, `intent_signals jsonb`, `next_followup_at timestamptz`.
-- Nova tabela `ai_decisions` (audit): `customer_id`, `phase`, `tool_called`, `reasoning`, `created_at` — para você ver **por que** a IA tomou cada decisão (resolve a queixa de "não dá pra entender").
+**Migration nova** (apenas 1 coluna):
+```sql
+ALTER TABLE ai_decisions ADD COLUMN feedback jsonb;
+ALTER TABLE ai_decisions ADD COLUMN media_sent_id uuid;
+CREATE INDEX idx_ai_media_step_tags ON ai_media_library USING gin(step_tags);
+CREATE INDEX idx_ai_media_intent_tags ON ai_media_library USING gin(intent_tags);
+```
 
-**Edge functions:**
-- `ai-sales-agent` (nova) — recebe contexto do customer + histórico recente de `conversations` + media library disponível, chama Lovable AI Gateway (`google/gemini-3-flash-preview`) com tool-calling, retorna ação. Chamada pelo `evolution-webhook` nas fases 1–4.
-- `ai-followup-cron` (nova) — invocada por `pg_cron` a cada 15 min, varre `customers.next_followup_at <= now()`, dispara `ai-sales-agent` em modo "resgate".
+**Função RPC** para fork do kit público:
+```sql
+CREATE FUNCTION fork_public_ai_media(_media_id uuid) RETURNS uuid ...
+```
+(mesma lógica de `fork_message_template` que já existe).
 
-**evolution-webhook/handlers/bot-flow.ts:**
-- Adicionar branch no topo: se `conversation_step` ∈ {`welcome`, `menu_inicial`, `pos_video`, `objection`, `nurturing`} → delega para `ai-sales-agent` em vez de switch hard-coded.
-- Steps de coleta (aguardando_conta em diante) ficam como estão.
+**Arquivos a editar/criar:**
+- `supabase/functions/ai-sales-agent/index.ts` — carregar candidatas + injetar no prompt + nova tool `send_media_from_library`
+- `supabase/functions/evolution-webhook/handlers/bot-flow.ts` — regras de cadência (mirror, anti-spam)
+- `src/components/admin/AIAgentTab/MediaLibrary.tsx` — novo: cards com 2 dropdowns + upload em massa
+- `src/components/admin/AIAgentTab/PublicMediaKit.tsx` — novo: ver/adicionar mídias do kit iGreen
+- `src/components/admin/AIAgentTab/AIDecisionsPanel.tsx` — adicionar preview + botões 👍/👎
+- `src/pages/SuperAdmin/PublicMediaManager.tsx` — novo: você gerencia o kit público
+- 1 migration: 2 colunas + 2 índices + 1 função RPC
 
-**UI nova em `AIAgentTab`:**
-- Aba "Decisões da IA" mostrando timeline por lead: fase, ferramenta usada, justificativa (texto da IA), resultado. Resolve diretamente a dor de transparência.
-- Configuração de tom/estilo por consultor (já existe `ai_agent_config.tone`, `system_prompt`) — adicionar campo "objetivo de venda" e "objeções frequentes".
-
-**Custo/observabilidade:**
-- Cada turno custa ~1 chamada Gemini Flash (~R$ 0,001). Lead típico: 5–10 turnos = R$ 0,01.
-- Logar em `ai_agent_logs` (já existe) com `latency_ms`, `llm_output`, `handoff_reason`.
-
----
-
-## Métricas de sucesso
-
-| KPI                                | Hoje (estimado) | Meta |
-|------------------------------------|-----------------|------|
-| Lead → conta enviada               | ~25%            | 45%  |
-| Conta enviada → cadastro completo  | ~40%            | 65%  |
-| Tempo médio até fechamento         | 3 dias          | 1 dia|
-| % handoff para humano              | ~30%            | 12%  |
+**Storage:** bucket `ai-agent-media` já existe e é público — pronto para uso.
 
 ---
 
-## Entregáveis (ordem de implementação)
+## Resumo para você
 
-1. **Migration** — campos novos em `customers` + tabela `ai_decisions`.
-2. **Edge function `ai-sales-agent`** com tool-calling.
-3. **Refator `bot-flow.ts`** — delegação para IA nas fases conversacionais; manter coleta determinística.
-4. **Edge function `ai-followup-cron`** + agendamento `pg_cron`.
-5. **UI "Decisões da IA"** em `AIAgentTab` (timeline + config de objetivo/objeções).
-6. **A/B test** — 50% leads no fluxo novo vs antigo por 7 dias, comparar conversão.
-
-Posso começar pelo passo 1+2 (base mínima funcional) ou montar tudo de uma vez. Recomendo passo a passo — entrega valor já no item 2.
+Você sobe seus áudios/vídeos uma única vez no painel super-admin (kit iGreen). Cada consultor abre a aba Agente, clica "Usar kit padrão" e em 1 clique tem 20+ mídias rotuladas. A IA escolhe sozinha qual mandar baseado na fase da venda e no perfil do lead, respeitando regras anti-spam. Consultor vê tudo em "Decisões da IA" e ensina com 👍/👎 — sem nunca tocar em prompt.
