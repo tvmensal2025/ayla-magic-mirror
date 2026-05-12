@@ -42,9 +42,12 @@ Deno.serve(async (req) => {
     const balance_cents = toCents((acc as any).balance);
     const lifetime_amount_spent_cents = toCents((acc as any).amount_spent);
     const spend_cap_cents = toCents((acc as any).spend_cap);
-    const available_cents = spend_cap_cents > 0
-      ? Math.max(0, spend_cap_cents - lifetime_amount_spent_cents)
-      : balance_cents;
+    const prepaidAccount = Number((acc as any).account_status) === 9 || balance_cents > 0;
+    const available_cents = prepaidAccount
+      ? balance_cents
+      : spend_cap_cents > 0
+        ? Math.max(0, spend_cap_cents - lifetime_amount_spent_cents)
+        : balance_cents;
 
     const { data: systemSpend } = await admin
       .from("wallet_transactions")
@@ -73,7 +76,7 @@ Deno.serve(async (req) => {
       lifetime_amount_spent_cents,
       spend_cap_cents,
       available_cents,
-      has_funding: !!(acc as any).funding_source_details,
+      has_funding: !!(acc as any).funding_source_details || prepaidAccount || spend_cap_cents > 0,
       last_system_sync_at,
     });
   } catch (err) {
