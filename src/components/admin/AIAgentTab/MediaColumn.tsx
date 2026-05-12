@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import {
   Loader2,
@@ -15,6 +17,7 @@ import {
   FileText,
   Globe,
   User,
+  Tag,
 } from "lucide-react";
 
 type Kind = "audio" | "video" | "image" | "document" | "text";
@@ -28,7 +31,31 @@ type Media = {
   text_content: string | null;
   active: boolean;
   priority: number;
+  step_tags: string[];
+  intent_tags: string[];
 };
+
+const STEP_OPTIONS: { value: string; label: string }[] = [
+  { value: "abertura", label: "Boas-vindas" },
+  { value: "descoberta", label: "Descoberta" },
+  { value: "pitch", label: "Apresentar economia" },
+  { value: "prova_social", label: "Prova social / depoimento" },
+  { value: "objecao_preco", label: "Objeção: preço" },
+  { value: "objecao_confianca", label: "Objeção: é golpe?" },
+  { value: "objecao_burocracia", label: "Objeção: burocracia" },
+  { value: "fechamento", label: "Fechamento" },
+  { value: "pedir_documento", label: "Pedir documento" },
+  { value: "followup", label: "Follow-up (lead sumiu)" },
+  { value: "any", label: "Qualquer momento" },
+];
+
+const INTENT_OPTIONS: { value: string; label: string }[] = [
+  { value: "todos", label: "Todos os perfis" },
+  { value: "conta_alta", label: "Conta alta (>R$500)" },
+  { value: "conta_media", label: "Conta média (R$200–500)" },
+  { value: "conta_baixa", label: "Conta baixa (<R$200)" },
+  { value: "lead_frio", label: "Lead frio (>3 dias)" },
+];
 
 const QUOTA_BYTES = 100 * 1024 * 1024; // 100 MB
 
