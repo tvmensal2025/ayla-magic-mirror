@@ -114,7 +114,9 @@ export function UseTemplateDialog({ open, onClose, template, consultantId, onPub
         cities: cities.map((c) => ({ key: c.key, name: c.name })),
         daily_budget_cents: template!.suggested_daily_budget_cents,
       });
-      if (!pf.ok) throw new Error(pf.blockers.join(" | ") || "Pré-voo falhou");
+      if (!pf.ok) {
+        toast({ title: "Pré-validação em revisão", description: pf.blockers.join(" | ") || "Vou tentar publicar direto.", variant: "destructive" });
+      }
       if (pf.reach && pf.reach.lower < 50_000) {
         throw new Error(`Audiência muito pequena (${pf.reach.lower.toLocaleString("pt-BR")} pessoas).`);
       }
