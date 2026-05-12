@@ -14,10 +14,14 @@ interface PlatformBalance {
   currency?: string;
   balance_cents?: number;
   amount_spent_cents?: number;
+  system_spend_cents?: number;
+  system_charged_cents?: number;
+  lifetime_amount_spent_cents?: number;
   spend_cap_cents?: number;
   available_cents?: number;
   has_funding?: boolean;
   account_status?: number | null;
+  last_system_sync_at?: string | null;
   error?: string;
 }
 
@@ -180,9 +184,14 @@ export function PlatformFacebookCard() {
               <>
                 <div className="grid grid-cols-2 gap-3">
                   <Stat label="Disponível agora" value={fmt(balance.available_cents, balance.currency)} highlight />
-                  <Stat label="Já gasto" value={fmt(balance.amount_spent_cents, balance.currency)} />
+                  <Stat label="Gasto sincronizado" value={fmt(balance.amount_spent_cents, balance.currency)} />
                   <Stat label="Limite (spend cap)" value={balance.spend_cap_cents ? fmt(balance.spend_cap_cents, balance.currency) : "Sem limite"} />
                   <Stat label="Saldo pré-pago" value={fmt(balance.balance_cents, balance.currency)} />
+                </div>
+                <div className="grid gap-1 text-xs text-muted-foreground">
+                  <p>Status Meta: <span className="text-foreground">{balance.account_status === 1 ? "Ativa" : balance.account_status === 9 ? "Em pré-pagamento" : balance.account_status ? `Código ${balance.account_status}` : "—"}</span></p>
+                  <p>Histórico total da conta Meta: <span className="text-foreground">{fmt(balance.lifetime_amount_spent_cents, balance.currency)}</span></p>
+                  <p>Última sincronização do sistema: <span className="text-foreground">{balance.last_system_sync_at ? new Date(balance.last_system_sync_at).toLocaleString("pt-BR") : "—"}</span></p>
                 </div>
                 {!balance.has_funding && (
                   <p className="text-xs text-warning flex items-center gap-1.5">
