@@ -207,6 +207,62 @@ Deno.serve(async (req) => {
     const { customer, history, persona, tone, customPrompt } = ctx;
     const phase = customer.sales_phase || "abertura";
 
+    // Profile inference for media filtering
+    const bill = Number(customer.electricity_bill_value || 0);
+    const profileTags: string[] = ["any", "todos"];
+    if (bill > 500) profileTags.push("conta_alta");
+    else if (bill >= 200) profileTags.push("conta_media");
+    else if (bill > 0) profileTags.push("conta_baixa");
+
+    // Cadence: last 4 outbound entries — count consecutive media to enforce anti-spam
+    const lastOut = history.filter((h: any) => h.message_direction !== "inbound").slice(-4);
+    const recentMediaCount = lastOut.filter((h: any) =>
+      ["audio", "video", "image"].includes((h.message_type || "").toLowerCase()),
+    ).length;
+    const lastInbound = history.filter((h: any) => h.message_direction === "inbound").slice(-1)[0];
+    const lastInboundKind = (lastInbound?.message_type || "text").toLowerCase();
+
+    // Load candidate media for this phase + profile (consultant own + public)
+    const { data: candidates } = await supabase
+      .from("ai_media_library")
+      .select("id, kind, label, url, step_tags, intent_tags, priority, duration_sec")
+      .eq("active", true)
+      .or(`consultant_id.eq.${customer.consultant_id},is_public.eq.true`)
+      .overlaps("step_tags", [phase, "any"])
+      .order("priority", { ascending: false })
+      .limit(15);
+
+    const eligibleMedia = (candidates || []).filter((m: any) => {
+      const intents = m.intent_tags || [];
+      if (!intents.length) return true;
+      return intents.some((t: string) => profileTags.includes(t));
+    });
+
+    const mediaListLine = eligibleMedia.length
+      ? `\n[MÍDIAS DISPONÍVEIS para fase ${phase}]\n` +
+        eligibleMedia
+          .map(
+            (m: any, i: number) =>
+              `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""}`,
+          )
+          .join("\n") +
+        `\nUse send_media APENAS com um desses media_id.`
+      : `\n[MÍDIAS DISPONÍVEIS]\nNenhuma para esta fase. Use send_text.`;
+
+    const cadenceLine =
+      `\n[CADÊNCIA]\n` +
+      `- Mídias enviadas nas últimas 4 respostas: ${recentMediaCount}\n` +
+      `- Última msg do lead foi do tipo: ${lastInboundKind}\n` +
+      (recentMediaCount >= 2
+        ? `- ⚠️ NÃO envie mídia agora — use send_text para não soar spam.\n`
+        : ``) +
+      (lastInboundKind === "audio"
+        ? `- Lead mandou áudio: prefira responder com áudio também (espelho).\n`
+        : ``) +
+      (lastInbound && (lastInbound.message_text || "").length < 20
+        ? `- Lead foi breve: responda breve também.\n`
+        : ``);
+
     const contextLine =
       `[Contexto do lead]\n` +
       `Nome: ${customer.name || "desconhecido"}\n` +
@@ -218,10 +274,31 @@ Deno.serve(async (req) => {
       `Origem: ${customer.lead_source?.utm_source || "organico"}\n` +
       (customer.customer_referred_by_name
         ? `Indicado por: ${customer.customer_referred_by_name}\n`
-        : "");
+        : "") +
+      mediaListLine +
+      cadenceLine;
+
+    // Load best 👍 feedback as few-shot examples (last 5)
+    const { data: positive } = await supabase
+      .from("ai_decisions")
+      .select("user_input, ai_output, tool_called")
+      .eq("consultant_id", customer.consultant_id)
+      .contains("feedback", { rating: "up" })
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    const fewShotLine = (positive || []).length
+      ? `\n[EXEMPLOS APROVADOS PELO CONSULTOR]\n` +
+        (positive || [])
+          .map(
+            (p: any) =>
+              `Lead: "${(p.user_input || "").slice(0, 80)}" → ${p.tool_called}: "${(p.ai_output?.message || p.ai_output?.caption || "").slice(0, 80)}"`,
+          )
+          .join("\n")
+      : "";
 
     const messages: any[] = [
-      { role: "system", content: systemPrompt(persona, tone, customPrompt) },
+      { role: "system", content: systemPrompt(persona, tone, customPrompt) + fewShotLine },
       { role: "system", content: contextLine },
       ...history.map((m: any) => ({
         role: m.message_direction === "inbound" ? "user" : "assistant",
