@@ -104,6 +104,86 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   const updates: Record<string, any> = {};
 
   // ═══════════════════════════════════════════════════════════════════
+  // 🤖 SALES AI — delegação opcional para LLM com tool-calling.
+  // Ativa quando: ai_agent_config.handoff_rules.use_sales_ai = true
+  // E o step está em fase conversacional (antes da coleta de docs).
+  // Steps de coleta (aguardando_conta em diante) seguem determinísticos.
+  // ═══════════════════════════════════════════════════════════════════
+  const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "aguardando_humano"]);
+  if (
+    !isFile &&
+    !customer.bot_paused &&
+    conversationalSteps.has(step) &&
+    messageText &&
+    messageText.trim().length > 0
+  ) {
+    try {
+      const { data: cfg } = await supabase
+        .from("ai_agent_config")
+        .select("handoff_rules, enabled")
+        .or(`consultant_id.eq.${consultorId},consultant_id.is.null`)
+        .order("consultant_id", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+
+      const useSalesAi = cfg?.enabled !== false && cfg?.handoff_rules?.use_sales_ai === true;
+      if (useSalesAi) {
+        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+        const aiResp = await fetch(`${supabaseUrl}/functions/v1/ai-sales-agent`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceKey}`,
+            apikey: serviceKey,
+          },
+          body: JSON.stringify({ customer_id: customer.id, user_input: messageText }),
+        });
+
+        if (aiResp.ok) {
+          const { decision } = await aiResp.json();
+          const tool = decision?.tool;
+          const args = decision?.args || {};
+
+          if (tool === "send_text" || tool === "advance_to_closing") {
+            reply = args.message || "";
+            if (tool === "advance_to_closing") {
+              updates.conversation_step = "aguardando_conta";
+              if (!reply) {
+                reply = "Perfeito! 📸 Para iniciar seu cadastro, me envie uma *foto ou PDF da sua conta de luz*.";
+              }
+            }
+            return { reply, updates };
+          }
+          if (tool === "request_handoff") {
+            updates.conversation_step = "aguardando_humano";
+            reply = `🧑 Vou chamar o ${nomeRepresentante} aqui pra te atender pessoalmente, ok?`;
+            return { reply, updates };
+          }
+          if (tool === "schedule_followup") {
+            // Mensagem leve agora; cron de follow-up faz o resto
+            reply = "Beleza! Quando quiser continuar é só me chamar 👍";
+            return { reply, updates };
+          }
+          if (tool === "send_media") {
+            // Não temos mídia escolhida aqui ainda — manda só a legenda como texto
+            reply = args.caption || "Te mando uma prova rapidinho!";
+            return { reply, updates };
+          }
+          if (tool === "mark_lost") {
+            reply = "Tranquilo! Se mudar de ideia é só me chamar 💚";
+            return { reply, updates };
+          }
+        } else {
+          console.warn("[bot-flow] ai-sales-agent falhou, caindo no fluxo determinístico", aiResp.status);
+        }
+      }
+    } catch (e: any) {
+      console.warn("[bot-flow] erro ao chamar ai-sales-agent:", e?.message);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // CAPTURA INTELIGENTE: Se o cliente digitar um email válido em
   // QUALQUER step (ex: welcome, menu_inicial), salvar no banco
   // para não perder. Caso da Judite/Erica que digitaram email
