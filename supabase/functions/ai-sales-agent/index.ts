@@ -38,18 +38,22 @@ const tools = [
     function: {
       name: "send_media",
       description:
-        "Pede para enviar uma mídia da biblioteca (vídeo/áudio/imagem) que combine com o intent. O webhook escolherá a mídia.",
+        "Envia uma mídia ESPECÍFICA da biblioteca. Você DEVE escolher um media_id da lista [MÍDIAS DISPONÍVEIS] fornecida no contexto. Não invente IDs.",
       parameters: {
         type: "object",
         properties: {
-          intent_tag: {
+          media_id: {
             type: "string",
-            description: "Tag do intent (pitch, prova, depoimento, economia, etc)",
+            description: "UUID exato de uma mídia listada em [MÍDIAS DISPONÍVEIS]",
           },
-          caption: { type: "string", description: "Legenda curta opcional" },
+          caption: { type: "string", description: "Legenda curta (1 linha) que acompanha a mídia" },
+          next_phase: {
+            type: "string",
+            enum: ["abertura", "descoberta", "pitch", "objecao", "fechamento"],
+          },
           reasoning: { type: "string" },
         },
-        required: ["intent_tag", "reasoning"],
+        required: ["media_id", "reasoning"],
       },
     },
   },
