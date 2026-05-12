@@ -59,6 +59,24 @@ Deno.serve(async (req) => {
           tokenCache[c.consultant_id] = conn.token;
         }
         const token = tokenCache[c.consultant_id];
+
+        // Pré-checa saldo: se já está em débito ou zerou, pausa AGORA antes de buscar insights
+        if (c.status === "active") {
+          const wPre = await getWallet(c.consultant_id);
+          if (wPre && (wPre.balance <= 0 || wPre.debt > 0)) {
+            try {
+              await fbFetch(`${FB_GRAPH}/${c.fb_campaign_id}?status=PAUSED&access_token=${token}`, { method: "POST" });
+              const reason = wPre.debt > 0
+                ? `Auto-pausada: carteira em débito de R$ ${(wPre.debt/100).toFixed(2)} — recarregue para reativar`
+                : `Auto-pausada: saldo zerado — recarregue para reativar`;
+              await admin.from("facebook_campaigns").update({ status: "paused", rejection_reason: reason }).eq("id", c.id);
+              autoPaused++;
+              try { await notifyConsultant(c.consultant_id, "warning", "Campanha pausada — saldo zerado 💳", reason); } catch (_) {}
+              continue;
+            } catch (pe) { console.error("[fb-sync] pre-pause failed", c.fb_campaign_id, (pe as Error).message); }
+          }
+        }
+
         const since = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
         const until = new Date().toISOString().slice(0, 10);
         const url = `${FB_GRAPH}/${c.fb_campaign_id}/insights?fields=impressions,reach,clicks,ctr,cpm,spend,actions,frequency&time_range={"since":"${since}","until":"${until}"}&time_increment=1&access_token=${token}`;
