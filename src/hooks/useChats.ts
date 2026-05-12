@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { findChats, findContacts, getProfilePicture, type EvolutionChat, type EvolutionContact } from "@/services/evolutionApi";
+import { whapiListChats, whapiGetProfilePicture } from "@/services/whapiApi";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 export interface ChatItem {
   remoteJid: string;
@@ -33,6 +36,9 @@ function formatPhoneNumber(raw: string): string {
     if (number.length === 9) return `(${ddd}) ${number.slice(0, 5)}-${number.slice(5)}`;
     if (number.length === 8) return `(${ddd}) ${number.slice(0, 4)}-${number.slice(4)}`;
   }
+  if (raw.length > 8) {
+    return `+${raw.slice(0, 2)} ${raw.slice(2)}`;
+  }
   return raw;
 }
 
@@ -59,7 +65,8 @@ function mapChat(chat: EvolutionChat, contactsMap: Map<string, EvolutionContact>
   const hasName = chat.pushName || chat.lastMessage?.pushName || contact?.pushName || chat.name;
   if (isLid && !hasName && !realPhone) return null;
 
-  const nameSource = chat.pushName || chat.lastMessage?.pushName || contact?.pushName || chat.name;
+  const lastMsgPushName = chat.lastMessage?.key?.fromMe ? undefined : chat.lastMessage?.pushName;
+  const nameSource = chat.pushName || lastMsgPushName || contact?.pushName || chat.name;
   const phoneSource = realPhone || (isLid ? null : rawJidNumber);
   const displayName = nameSource || (phoneSource ? formatPhoneNumber(phoneSource) : `Contato ${rawJidNumber.slice(-4)}`);
 
@@ -77,6 +84,36 @@ function mapChat(chat: EvolutionChat, contactsMap: Map<string, EvolutionContact>
     profilePicUrl: contact?.profilePicUrl || chat.profilePicUrl,
     isGroup: jid.endsWith("@g.us"),
   };
+}
+
+function deduplicateChats(chats: ChatItem[]): ChatItem[] {
+  const map = new Map<string, ChatItem>();
+  for (const chat of chats) {
+    // Resolve the "real phone" key: prefer sendTargetJid (@s.whatsapp.net), fallback to remoteJid
+    const key =
+      (chat.sendTargetJid && chat.sendTargetJid.endsWith("@s.whatsapp.net")
+        ? chat.sendTargetJid
+        : null) ||
+      (chat.remoteJid.endsWith("@s.whatsapp.net") ? chat.remoteJid : null) ||
+      chat.remoteJid; // fallback for pure LID with no alt
+
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, chat);
+    } else {
+      // Merge: keep the one with the most recent message, sum unread, preserve pic
+      const keep = chat.lastMessageTimestamp > existing.lastMessageTimestamp ? chat : existing;
+      const other = keep === chat ? existing : chat;
+      map.set(key, {
+        ...keep,
+        unreadCount: keep.unreadCount + other.unreadCount,
+        profilePicUrl: keep.profilePicUrl || other.profilePicUrl,
+        name: keep.name.startsWith("Contato ") && !other.name.startsWith("Contato ") ? other.name : keep.name,
+        sendTargetJid: keep.sendTargetJid || other.sendTargetJid,
+      });
+    }
+  }
+  return Array.from(map.values());
 }
 
 // Low-concurrency queue
@@ -107,18 +144,21 @@ interface PicCacheEntry {
 
 const GLOBAL_PIC_PAUSE_TTL = 5 * 60 * 1000; // 5 minutes
 
-export function useChats(instanceName: string | null) {
+export function useChats(instanceName: string | null, isWhapi: boolean = false) {
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newMessageAlert, setNewMessageAlert] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const contactsMapRef = useRef<Map<string, EvolutionContact>>(new Map());
   const profilePicCacheRef = useRef<Map<string, PicCacheEntry>>(new Map());
   const fetchingChatsRef = useRef(false);
   const fetchingPicsRef = useRef(false);
   const globalPicPauseUntilRef = useRef(0);
+  const { toast } = useToast();
 
   const fetchContacts = useCallback(async () => {
+    if (isWhapi) { contactsMapRef.current = new Map(); return; }
     if (!instanceName) return;
     try {
       const contacts = await findContacts(instanceName);
@@ -131,20 +171,22 @@ export function useChats(instanceName: string | null) {
     } catch {
       // contacts are optional enrichment
     }
-  }, [instanceName]);
+  }, [instanceName, isWhapi]);
 
   const fetchChats = useCallback(async () => {
-    if (!instanceName) return;
+    if (!isWhapi && !instanceName) return;
     // Prevent overlapping fetches
     if (fetchingChatsRef.current) return;
     fetchingChatsRef.current = true;
 
     try {
       setIsLoading((prev) => (!prev ? true : prev));
-      const raw = await findChats(instanceName);
+      const raw = isWhapi
+        ? await whapiListChats()
+        : await findChats(instanceName!);
       const cache = profilePicCacheRef.current;
 
-      const mapped = (Array.isArray(raw) ? raw : [])
+      const rawMapped = (Array.isArray(raw) ? raw : [])
         .map((c) => {
           const item = mapChat(c, contactsMapRef.current);
           if (!item) return null;
@@ -154,7 +196,9 @@ export function useChats(instanceName: string | null) {
           }
           return item;
         })
-        .filter((c): c is ChatItem => c !== null && !c.isGroup)
+        .filter((c): c is ChatItem => c !== null && !c.isGroup);
+
+      const mapped = deduplicateChats(rawMapped)
         .sort((a, b) => b.lastMessageTimestamp - a.lastMessageTimestamp);
       setChats(mapped);
       setError(null);
@@ -177,12 +221,14 @@ export function useChats(instanceName: string | null) {
         })
         .slice(0, 3);
 
-      if (missingPics.length > 0 && instanceName && now >= globalPicPauseUntilRef.current) {
+      if (missingPics.length > 0 && (isWhapi || instanceName) && now >= globalPicPauseUntilRef.current) {
         fetchingPicsRef.current = true;
         processWithConcurrency(missingPics, 1, async (chat) => {
           const targetJid = chat.sendTargetJid || chat.remoteJid;
           try {
-            const picUrl = await getProfilePicture(instanceName!, targetJid);
+            const picUrl = isWhapi
+              ? await whapiGetProfilePicture(targetJid)
+              : await getProfilePicture(instanceName!, targetJid);
             cache.set(chat.remoteJid, { url: picUrl || null, fetchedAt: Date.now() });
             return { jid: chat.remoteJid, picUrl };
           } catch {
@@ -204,16 +250,43 @@ export function useChats(instanceName: string | null) {
         }).catch(() => { /* non-critical */ })
           .finally(() => { fetchingPicsRef.current = false; });
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao buscar conversas");
+    } catch {
+      // Silently ignore auth / transient errors on polling — next interval will retry
     } finally {
       fetchingChatsRef.current = false;
       setIsLoading(false);
     }
-  }, [instanceName]);
+  }, [instanceName, isWhapi]);
+
+  // Supabase Realtime subscription for inbound messages
+  useEffect(() => {
+    const channel = supabase
+      .channel("conversations-realtime")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "conversations", filter: "message_direction=eq.inbound" },
+        (payload) => {
+          const msg = payload.new as any;
+          if (msg.message_text) {
+            toast({
+              title: "💬 Nova mensagem recebida",
+              description: msg.message_text.slice(0, 80),
+            });
+            setNewMessageAlert(true);
+            // Trigger refetch
+            fetchChats();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [toast, fetchChats]);
 
   useEffect(() => {
-    if (!instanceName) {
+    if (!isWhapi && !instanceName) {
       setChats([]);
       return;
     }
@@ -224,11 +297,29 @@ export function useChats(instanceName: string | null) {
     };
     init();
 
-    intervalRef.current = setInterval(fetchChats, 30000);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+    const startPolling = () => {
+      if (intervalRef.current) return;
+      intervalRef.current = setInterval(fetchChats, 45000);
     };
-  }, [fetchContacts, fetchChats, instanceName]);
+    const stopPolling = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+    startPolling();
 
-  return { chats, isLoading, error, refetch: fetchChats };
+    const onVisibility = () => {
+      if (document.hidden) stopPolling();
+      else { fetchChats(); startPolling(); }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [fetchContacts, fetchChats, instanceName, isWhapi]);
+
+  return { chats, isLoading, error, refetch: fetchChats, newMessageAlert, clearAlert: () => setNewMessageAlert(false) };
 }

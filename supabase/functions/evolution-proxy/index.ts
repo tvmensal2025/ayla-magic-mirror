@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2.100.1";
+import { createClient } from "npm:@supabase/supabase-js@2.49.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -36,6 +36,15 @@ function isConnectionClosedError(body: string): boolean {
   return lower.includes("connection closed") || lower.includes("read messages fail");
 }
 
+function isInstanceNotFoundError(body: string): boolean {
+  const lower = body.toLowerCase();
+  return lower.includes("not found") ||
+    lower.includes("does not exist") ||
+    lower.includes("instance not") ||
+    lower.includes("instância não") ||
+    lower.includes("instancia nao");
+}
+
 function normalizeEvolutionBaseUrl(rawUrl: string | undefined): string {
   const sanitized = (rawUrl || "")
     .trim()
@@ -43,18 +52,13 @@ function normalizeEvolutionBaseUrl(rawUrl: string | undefined): string {
     .replace(/\/+$/g, "");
 
   if (!sanitized) return "";
-
-  if (sanitized.startsWith("http://")) {
-    return `https://${sanitized.slice("http://".length)}`;
-  }
-
   return sanitized;
 }
 
 function getTimeoutMs(path: string): number {
-  if (path.startsWith("instance/connectionState/")) return 8000;
-  if (path === "instance/fetchInstances") return 10000;
-  if (path.startsWith("instance/connect/")) return 15000;
+  if (path.startsWith("instance/connectionState/")) return 12000;
+  if (path === "instance/fetchInstances") return 12000;
+  if (path.startsWith("instance/connect/")) return 20000;
   if (path === "instance/create") return 30000;
   if (path.startsWith("chat/findChats/")) return 20000;
   if (path.startsWith("chat/findMessages/")) return 20000;
@@ -64,7 +68,7 @@ function getTimeoutMs(path: string): number {
 
 function getMaxAttempts(path: string): number {
   if (path.startsWith("instance/connectionState/")) return 1;
-  if (path.startsWith("instance/connect/")) return 1;
+  if (path.startsWith("instance/connect/")) return 2;
   if (path === "instance/create") return 1;
   if (path === "instance/fetchInstances") return 1;
   return 1;
@@ -78,9 +82,58 @@ function isRetriableResponseStatus(status: number): boolean {
   return status === 408 || status === 546 || status === 502 || status === 503 || status === 504;
 }
 
-function createGracefulTimeoutResponse(safePath: string): Response | null {
+// ─── Structured diagnostic responses ───
+// Instead of generic { timeout: true }, return rich diagnostic info
+
+interface DiagnosticPayload {
+  state?: string;
+  timeout?: boolean;
+  reason: "timeout" | "server_slow" | "instance_not_found" | "connection_closed" | "service_unavailable" | "ok";
+  recommendation: "retry" | "wait" | "reconnect_qr" | "safe_reset" | "none";
+  message?: string;
+  retryAfterMs?: number;
+}
+
+function createDiagnosticResponse(safePath: string, reason: DiagnosticPayload["reason"], extra: Record<string, unknown> = {}): Response {
+  const diagnostic: DiagnosticPayload & Record<string, unknown> = {
+    reason,
+    recommendation: "retry",
+    retryAfterMs: 5000,
+    ...extra,
+  };
+
+  // Set recommendation based on reason
+  switch (reason) {
+    case "timeout":
+    case "server_slow":
+      diagnostic.recommendation = "wait";
+      diagnostic.retryAfterMs = 8000;
+      diagnostic.message = "Servidor WhatsApp respondendo lentamente. Aguarde.";
+      break;
+    case "instance_not_found":
+      diagnostic.recommendation = "safe_reset";
+      diagnostic.retryAfterMs = 0;
+      diagnostic.message = "Instância não encontrada. É necessário recriar.";
+      break;
+    case "connection_closed":
+      diagnostic.recommendation = "reconnect_qr";
+      diagnostic.retryAfterMs = 3000;
+      diagnostic.message = "Sessão WhatsApp desconectada. Necessário novo QR Code.";
+      break;
+    case "service_unavailable":
+      diagnostic.recommendation = "wait";
+      diagnostic.retryAfterMs = 15000;
+      diagnostic.message = "Servidor WhatsApp temporariamente indisponível.";
+      break;
+  }
+
+  // Path-specific overrides for connectionState
   if (safePath.startsWith("instance/connectionState/")) {
-    return new Response(JSON.stringify({ state: "unknown", timeout: true }), {
+    return new Response(JSON.stringify({
+      state: reason === "instance_not_found" ? "missing" : "unknown",
+      timeout: reason === "timeout" || reason === "server_slow",
+      diagnostic,
+    }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -94,32 +147,39 @@ function createGracefulTimeoutResponse(safePath: string): Response | null {
   }
 
   if (safePath.startsWith("instance/connect/")) {
-    return new Response(JSON.stringify({ base64: null, timeout: true }), {
+    return new Response(JSON.stringify({
+      base64: null,
+      timeout: reason === "timeout",
+      notReady: true,
+      diagnostic,
+    }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   }
 
   if (safePath === "instance/create") {
-    return new Response(JSON.stringify({ instance: { instanceName: "" }, timeout: true }), {
+    return new Response(JSON.stringify({
+      instance: { instanceName: "" },
+      timeout: true,
+      diagnostic,
+    }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   }
 
   if (isMediaFetchPath(safePath)) {
-    return createGracefulMediaUnavailableResponse({ timeout: true });
+    return createGracefulMediaUnavailableResponse({ timeout: true, diagnostic });
   }
 
-  // Avatar fetches are non-critical — return graceful null instead of 504
   if (safePath.startsWith("chat/fetchProfilePictureUrl/")) {
-    return new Response(JSON.stringify({ profilePictureUrl: null, timeout: true }), {
+    return new Response(JSON.stringify({ profilePictureUrl: null, timeout: true, diagnostic }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  // Chat/message fetches — return empty arrays so frontend never crashes
   if (safePath.startsWith("chat/findChats/") || safePath.startsWith("chat/findMessages/")) {
     return new Response(JSON.stringify([]), {
       status: 200,
@@ -127,24 +187,31 @@ function createGracefulTimeoutResponse(safePath: string): Response | null {
     });
   }
 
-  // Mark-as-read is non-critical
   if (safePath.startsWith("chat/markMessageAsRead/")) {
-    return new Response(JSON.stringify({ message: "Read messages", read: "skipped", timeout: true }), {
+    return new Response(JSON.stringify({ message: "Read messages", read: "skipped", timeout: true, diagnostic }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  // Message-sending routes — return a clear error object instead of 504 so frontend can handle it
   if (safePath.startsWith("message/")) {
-    return new Response(JSON.stringify({ error: "Timeout ao enviar mensagem. Tente novamente.", timeout: true, sent: false }), {
+    return new Response(JSON.stringify({
+      error: "Timeout ao enviar mensagem. Tente novamente.",
+      timeout: true,
+      sent: false,
+      diagnostic,
+    }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  // Default fallback — never return null, always return a graceful response
-  return new Response(JSON.stringify({ error: "Serviço temporariamente indisponível.", timeout: true }), {
+  return new Response(JSON.stringify({
+    error: "Serviço temporariamente indisponível.",
+    timeout: true,
+    unavailable: true,
+    diagnostic,
+  }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
@@ -200,17 +267,7 @@ async function proxyToEvolution(
           continue;
         }
 
-        const gracefulResponse = createGracefulTimeoutResponse(safePath);
-        if (gracefulResponse) {
-          return gracefulResponse;
-        }
-
-        return new Response(bodyPreview, {
-          status: response.status,
-          headers: {
-            "Content-Type": response.headers.get("Content-Type") || "application/json",
-          },
-        });
+        return createDiagnosticResponse(safePath, "service_unavailable");
       }
       return response;
     } catch (networkError) {
@@ -221,11 +278,6 @@ async function proxyToEvolution(
           `[evolution-proxy] Timeout after ${timeoutMs}ms for ${method || "GET"} ${targetUrl} (attempt ${attempt}/${attempts})`,
         );
 
-        const gracefulResponse = createGracefulTimeoutResponse(safePath);
-        if (gracefulResponse) {
-          return gracefulResponse;
-        }
-
         if (attempt < attempts) {
           const delay = getRetryDelay(attempt);
           console.log(`[evolution-proxy] Retrying in ${delay}ms...`);
@@ -233,15 +285,8 @@ async function proxyToEvolution(
           continue;
         }
 
-        // Final attempt timeout — return a clear error instead of throwing
         console.error(`[evolution-proxy] All ${attempts} attempts exhausted for ${safePath}`);
-        return new Response(
-          JSON.stringify({
-            error: "O servidor WhatsApp está demorando para responder. Tente novamente em alguns instantes.",
-            timeout: true,
-          }),
-          { status: 504, headers: { "Content-Type": "application/json" } },
-        );
+        return createDiagnosticResponse(safePath, "timeout");
       }
 
       if (attempt < attempts) {
@@ -279,16 +324,16 @@ Deno.serve(async (req) => {
       );
     }
 
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
+    const authHeader = (req.headers.get("Authorization") || "").trim();
+    if (!authHeader || !authHeader.toLowerCase().startsWith("bearer ")) {
       return new Response(
-        JSON.stringify({ error: "Token de autenticação inválido ou ausente" }),
+        JSON.stringify({ error: "Token de autenticação inválido ou ausente", code: "auth_missing" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
-    const token = authHeader.replace("Bearer ", "");
+    const token = authHeader.replace(/^bearer\s+/i, "").trim();
     const {
       data: { user },
       error: authError,
@@ -297,7 +342,7 @@ Deno.serve(async (req) => {
     if (authError || !user) {
       console.log("[evolution-proxy] Auth failed:", authError?.message);
       return new Response(
-        JSON.stringify({ error: "Token de autenticação inválido ou ausente" }),
+        JSON.stringify({ error: "Token de autenticação inválido ou ausente", code: "auth_invalid" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -343,8 +388,8 @@ Deno.serve(async (req) => {
       evolutionResponse = await proxyToEvolution(safePath, method || "GET", targetUrl, fetchOptions);
     } catch (networkError) {
       console.error("[evolution-proxy] Network error connecting to service", networkError);
-      const gracefulResponse = createGracefulTimeoutResponse(safePath);
-      console.warn(`[evolution-proxy] Falling back to graceful response for ${safePath}`);
+      const gracefulResponse = createDiagnosticResponse(safePath, "service_unavailable");
+      console.warn(`[evolution-proxy] Falling back to diagnostic response for ${safePath}`);
       evolutionResponse = gracefulResponse;
     }
 
@@ -369,12 +414,22 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Detect "instance not found" errors — return structured diagnostic
+    if (evolutionResponse.status >= 400 && isInstanceNotFoundError(responseBody)) {
+      console.warn(`[evolution-proxy] Instance not found on ${safePath}`);
+      const resp = createDiagnosticResponse(safePath, "instance_not_found");
+      const body = await resp.text();
+      return new Response(body, {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Gracefully handle connect/QR errors — instance may still be initializing
-    // Return { base64: null } so the frontend keeps polling instead of crashing
     if (safePath.startsWith("instance/connect/") && evolutionResponse.status >= 400) {
       console.warn(`[evolution-proxy] connect returned ${evolutionResponse.status}, returning graceful null QR`);
       return new Response(
-        JSON.stringify({ base64: null, notReady: true }),
+        JSON.stringify({ base64: null, notReady: true, diagnostic: { reason: "server_slow", recommendation: "wait", retryAfterMs: 5000 } }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -397,7 +452,7 @@ Deno.serve(async (req) => {
 
     // Handle "Connection Closed" and similar transient errors gracefully
     if (evolutionResponse.status >= 400 && isConnectionClosedError(responseBody)) {
-      console.warn(`[evolution-proxy] Connection closed on ${safePath} (status ${evolutionResponse.status}), returning graceful response`);
+      console.warn(`[evolution-proxy] Connection closed on ${safePath} (status ${evolutionResponse.status}), returning diagnostic response`);
 
       if (safePath.startsWith("chat/findMessages/") || safePath.startsWith("chat/findChats/") || safePath.startsWith("chat/findContacts/")) {
         return new Response(JSON.stringify([]), {
@@ -424,13 +479,22 @@ Deno.serve(async (req) => {
         });
       }
       if (safePath.startsWith("instance/connectionState/")) {
-        return new Response(JSON.stringify({ instance: { state: "connecting" }, connectionClosed: true }), {
+        return new Response(JSON.stringify({
+          instance: { state: "close" },
+          connectionClosed: true,
+          diagnostic: { reason: "connection_closed", recommendation: "reconnect_qr", retryAfterMs: 3000, message: "Sessão WhatsApp desconectada." },
+        }), {
           status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      // Generic fallback for any other path with connection closed
-      return new Response(JSON.stringify({ error: "Conexão temporariamente instável.", unavailable: true, connectionClosed: true }), {
+      // Generic fallback
+      return new Response(JSON.stringify({
+        error: "Conexão temporariamente instável.",
+        unavailable: true,
+        connectionClosed: true,
+        diagnostic: { reason: "connection_closed", recommendation: "reconnect_qr" },
+      }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -443,11 +507,15 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error("evolution-proxy error:", error);
     const errMsg = (error as Error).message || "Internal error";
-    // Catch connection-closed errors that bubble up as exceptions
     if (isConnectionClosedError(errMsg)) {
-      console.warn("[evolution-proxy] Connection closed in catch block, returning graceful response");
+      console.warn("[evolution-proxy] Connection closed in catch block, returning diagnostic response");
       return new Response(
-        JSON.stringify({ error: "Conexão temporariamente instável.", unavailable: true, connectionClosed: true }),
+        JSON.stringify({
+          error: "Conexão temporariamente instável.",
+          unavailable: true,
+          connectionClosed: true,
+          diagnostic: { reason: "connection_closed", recommendation: "reconnect_qr" },
+        }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }

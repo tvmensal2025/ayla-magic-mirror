@@ -16,6 +16,7 @@ export interface MessageTemplate {
   media_url: string | null;
   image_url: string | null;
   created_at: string;
+  origin_template_id?: string | null;
 }
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected";
@@ -25,4 +26,31 @@ export interface BulkSendProgress {
   sent: number;
   failed: number;
   inProgress: boolean;
+}
+
+export interface BulkContact {
+  id: string;
+  name: string;
+  phone: string;
+  electricity_bill_value?: number;
+  source: "database" | "pasted" | "imported";
+}
+
+export interface BlockConfig {
+  blockSize: 10 | 20 | 30 | 40 | 50;
+  intervalMinutes: 5 | 10 | 15 | 30 | 60;
+}
+
+export interface BlockProgress {
+  currentBlock: number;
+  totalBlocks: number;
+  sentInBlock: number;
+  failedInBlock: number;
+  totalSent: number;
+  totalFailed: number;
+  totalContacts: number;
+  isPaused: boolean;
+  isWaitingBetweenBlocks: boolean;
+  blockCountdown: number;
+  messageCountdown: number;
 }

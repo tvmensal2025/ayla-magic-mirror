@@ -2,6 +2,7 @@ import { useParams } from "react-router-dom";
 import { useConsultant } from "@/hooks/useConsultant";
 import { useTrackView } from "@/hooks/useTrackView";
 import HeroSection from "@/components/HeroSection";
+
 import AboutSection from "@/components/AboutSection";
 import HowItWorksSection from "@/components/HowItWorksSection";
 import SolarPlantsSection from "@/components/SolarPlantsSection";
@@ -16,11 +17,14 @@ import WhatsAppFloat from "@/components/WhatsAppFloat";
 import LoadingScreen from "@/components/LoadingScreen";
 import SEOHead from "@/components/SEOHead";
 import PixelInjector from "@/components/PixelInjector";
+import { useInstancePhone } from "@/hooks/useInstancePhone";
 
 const ConsultantPage = () => {
   const { licenca } = useParams<{ licenca: string }>();
   const { data: consultant, isLoading } = useConsultant(licenca || "");
   useTrackView(consultant?.id, "client");
+
+  const { data: instancePhone } = useInstancePhone(consultant?.id);
 
   if (isLoading) return <LoadingScreen />;
 
@@ -36,7 +40,13 @@ const ConsultantPage = () => {
     );
   }
 
-  const whatsappUrl = `https://api.whatsapp.com/send?phone=${consultant.phone}&text=${encodeURIComponent("Olá, gostaria de mais informações sobre o desconto na conta de luz oferecido pela iGreen Energy")}`;
+  // Normalizar telefone do perfil com prefixo 55
+  const rawPhone = consultant.phone?.replace(/\D/g, '') || "";
+  const normalizedPhone = rawPhone.startsWith("55") ? rawPhone : `55${rawPhone}`;
+  
+  // Botão de atendimento: priorizar instância
+  const contactPhone = instancePhone || normalizedPhone;
+  const whatsappUrl = `https://api.whatsapp.com/send?phone=${contactPhone}&text=${encodeURIComponent("Olá, gostaria de mais informações sobre o desconto na conta de luz oferecido pela iGreen Energy")}`;
 
   return (
     <>

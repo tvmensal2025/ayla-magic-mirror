@@ -1,24 +1,42 @@
 import { useEffect, useState } from "react";
 
 const LicUrgencyBanner = () => {
+  const DURATION = 24 * 60 * 60 * 1000; // 24h in ms
+  const STORAGE_KEY = "urgency_timer_start";
+
+  const getStartTime = () => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    const now = Date.now();
+    if (saved) {
+      const start = Number(saved);
+      if (now - start < DURATION) return start;
+    }
+    localStorage.setItem(STORAGE_KEY, String(now));
+    return now;
+  };
+
+  const calcTimeLeft = (start: number) => {
+    const diff = Math.max(0, start + DURATION - Date.now());
+    return {
+      hours: Math.floor(diff / (1000 * 60 * 60)),
+      minutes: Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)),
+      seconds: Math.floor((diff % (1000 * 60)) / 1000),
+    };
+  };
+
   const [timeLeft, setTimeLeft] = useState({ hours: 23, minutes: 59, seconds: 59 });
 
   useEffect(() => {
-    // Calculate time until midnight
-    const getTimeUntilMidnight = () => {
-      const now = new Date();
-      const midnight = new Date(now);
-      midnight.setHours(23, 59, 59, 999);
-      const diff = midnight.getTime() - now.getTime();
-      return {
-        hours: Math.floor(diff / (1000 * 60 * 60)),
-        minutes: Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)),
-        seconds: Math.floor((diff % (1000 * 60)) / 1000),
-      };
-    };
-
-    setTimeLeft(getTimeUntilMidnight());
-    const interval = setInterval(() => setTimeLeft(getTimeUntilMidnight()), 1000);
+    let start = getStartTime();
+    setTimeLeft(calcTimeLeft(start));
+    const interval = setInterval(() => {
+      const tl = calcTimeLeft(start);
+      if (tl.hours === 0 && tl.minutes === 0 && tl.seconds === 0) {
+        start = Date.now();
+        localStorage.setItem(STORAGE_KEY, String(start));
+      }
+      setTimeLeft(calcTimeLeft(start));
+    }, 1000);
     return () => clearInterval(interval);
   }, []);
 

@@ -26,6 +26,7 @@ const AdvantagesSection = () => (
             src={phoneApp}
             alt="App iGreen Energy"
             loading="lazy"
+            decoding="async"
             className="rounded-2xl w-full max-w-sm mx-auto relative z-10 transition-transform duration-500 group-hover:scale-[1.02]"
           />
         </div>

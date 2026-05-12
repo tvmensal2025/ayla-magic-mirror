@@ -14,7 +14,7 @@ const ReferralSection = () => (
       <div className="max-w-4xl mx-auto rounded-2xl overflow-hidden relative mb-14" style={{ boxShadow: 'var(--shadow-green-lg)' }}>
         <div className="absolute inset-0 rounded-2xl border border-primary/20 z-10 pointer-events-none" />
         <video controls className="w-full aspect-video relative z-0">
-          <source src="https://igreen-minio.b099mi.easypanel.host/igreen/indicacoes.mp4" type="video/mp4" />
+          <source src="https://zlzasfhcxcznaprrragl.supabase.co/storage/v1/object/public/video%20igreen/cash-back-igreen.mp4" type="video/mp4" />
         </video>
       </div>
 
@@ -25,6 +25,7 @@ const ReferralSection = () => (
             src="/images/cashback-sustentavel.jpeg"
             alt="Cashback Sustentável iGreen Energy"
             loading="lazy"
+            decoding="async"
             className="rounded-2xl w-full shadow-lg relative z-10 transition-transform duration-500 group-hover:scale-[1.02]"
             style={{ boxShadow: 'var(--shadow-card)' }}
           />

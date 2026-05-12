@@ -26,7 +26,7 @@ function VideoCard({ src, index }: { src: string; index: number }) {
         <video
           ref={videoRef}
           controls={playing}
-          preload="metadata"
+          preload="none"
           className="w-full aspect-[9/16] object-cover"
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}

@@ -1,0 +1,2 @@
+ALTER TABLE public.customers DROP CONSTRAINT IF EXISTS customers_status_check;
+ALTER TABLE public.customers ADD CONSTRAINT customers_status_check CHECK (status = ANY (ARRAY['pending'::text, 'data_complete'::text, 'registered_igreen'::text, 'contract_sent'::text, 'approved'::text, 'rejected'::text, 'lead'::text, 'awaiting_signature'::text, 'devolutiva'::text, 'portal_submitting'::text, 'awaiting_otp'::text, 'validating_otp'::text, 'automation_failed'::text, 'complete'::text, 'abandoned'::text, 'cadastro_concluido'::text]));

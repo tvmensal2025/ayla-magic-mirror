@@ -1,0 +1,1 @@
+DELETE FROM network_members WHERE consultant_id = '0063ce99-2be3-44c2-ac63-9caa2407333f';

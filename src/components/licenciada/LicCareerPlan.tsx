@@ -31,7 +31,7 @@ const LicCareerPlan = () => (
     <div className="section-container">
       <div className="badge-green mx-auto mb-6">Carreira</div>
       <h2 className="section-heading mb-14">Plano de Carreira iGreen Energy</h2>
-      <img src="/images/plano-carreira.webp" alt="Plano de Carreira iGreen Energy" loading="lazy" className="rounded-2xl w-full max-w-3xl mx-auto mb-14 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/qualificacoes-igreen.png" alt="Qualificações iGreen Energy" loading="lazy" className="rounded-2xl w-full max-w-4xl mx-auto mb-14 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
       <div className="max-w-4xl mx-auto space-y-6">
         {levels.map((level, i) => (
           <div key={i} className="glass-card relative overflow-hidden group">

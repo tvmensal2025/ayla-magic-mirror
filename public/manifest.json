@@ -1,0 +1,22 @@
+{
+  "name": "iGreen Energy - Painel do Consultor",
+  "short_name": "iGreen",
+  "description": "Painel de gestão para consultores iGreen Energy",
+  "start_url": "/admin",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#22c55e",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/images/logo-colorida-igreen.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/images/logo-colorida-igreen.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

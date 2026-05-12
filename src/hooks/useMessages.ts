@@ -5,6 +5,7 @@ import {
   getBase64FromMediaMessage,
   type EvolutionMessage,
 } from "@/services/evolutionApi";
+import { whapiListMessages } from "@/services/whapiApi";
 import { sendWhatsAppMessage, resolveRecipient } from "@/services/messageSender";
 import { createLogger } from "@/lib/logger";
 
@@ -95,7 +96,8 @@ function mapMessage(msg: EvolutionMessage): ChatMessage {
 export function useMessages(
   instanceName: string | null,
   remoteJid: string | null,
-  preferredSendTargetJid: string | null = null
+  preferredSendTargetJid: string | null = null,
+  isWhapi: boolean = false,
 ) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -116,14 +118,17 @@ export function useMessages(
   }, [remoteJid]);
 
   const fetchMessages = useCallback(async () => {
-    if (!instanceName || !remoteJid) return;
+    if (!remoteJid) return;
+    if (!isWhapi && !instanceName) return;
     // Prevent overlapping fetches
     if (fetchingRef.current) return;
     fetchingRef.current = true;
 
     try {
       setIsLoading((prev) => (!prev ? true : prev));
-      const raw = await findMessages(instanceName, remoteJid, 50);
+      const raw = isWhapi
+        ? await whapiListMessages(remoteJid, 50)
+        : await findMessages(instanceName!, remoteJid, 50);
 
       // Deduplicate by message id
       const seen = new Set<string>();
@@ -146,7 +151,7 @@ export function useMessages(
 
       // Only markAsRead if there's a NEW inbound message we haven't marked yet
       const lastIncoming = [...mapped].reverse().find((m) => !m.fromMe);
-      if (lastIncoming && lastIncoming.id !== lastReadIdRef.current) {
+      if (!isWhapi && lastIncoming && lastIncoming.id !== lastReadIdRef.current && instanceName) {
         lastReadIdRef.current = lastIncoming.id;
         try {
           await markAsRead(instanceName, remoteJid, lastIncoming.id, false);
@@ -160,18 +165,37 @@ export function useMessages(
       fetchingRef.current = false;
       setIsLoading(false);
     }
-  }, [instanceName, remoteJid]);
+  }, [instanceName, remoteJid, isWhapi]);
 
   useEffect(() => {
     setMessages([]);
     fetchMessages();
-    if (instanceName && remoteJid) {
-      intervalRef.current = setInterval(fetchMessages, 15000); // 15s (was 5s)
-    }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+    if (!remoteJid) return;
+    if (!isWhapi && !instanceName) return;
+
+    const startPolling = () => {
+      if (intervalRef.current) return;
+      intervalRef.current = setInterval(fetchMessages, 20000);
     };
-  }, [fetchMessages, instanceName, remoteJid]);
+    const stopPolling = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+    startPolling();
+
+    const onVisibility = () => {
+      if (document.hidden) stopPolling();
+      else { fetchMessages(); startPolling(); }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [fetchMessages, instanceName, remoteJid, isWhapi]);
 
   const resolveSendTargetJid = useCallback(async () => {
     const initialTarget = resolvedSendTargetJid || preferredSendTargetJid || remoteJid;
@@ -187,7 +211,7 @@ export function useMessages(
       return altFromState;
     }
 
-    if (instanceName && remoteJid) {
+    if (!isWhapi && instanceName && remoteJid) {
       try {
         const latest = await findMessages(instanceName, remoteJid, 20);
         const altFromLatest = latest.find((m) => m.key.remoteJidAlt?.endsWith("@s.whatsapp.net"))?.key.remoteJidAlt;
@@ -201,15 +225,17 @@ export function useMessages(
     }
 
     return initialTarget;
-  }, [instanceName, messages, preferredSendTargetJid, remoteJid, resolvedSendTargetJid]);
+  }, [instanceName, messages, preferredSendTargetJid, remoteJid, resolvedSendTargetJid, isWhapi]);
 
   const loadMedia = useCallback(
     async (messageId: string) => {
-      if (!instanceName) return null;
       const msg = messages.find((m) => m.id === messageId);
       if (!msg) return null;
       // Skip if already loaded
       if (msg.mediaUrl?.startsWith("data:")) return msg.mediaUrl;
+      // Whapi já entrega a URL pública diretamente — não há getBase64
+      if (isWhapi) return msg.mediaUrl || null;
+      if (!instanceName) return null;
 
       const result = await getBase64FromMediaMessage(
         instanceName,
@@ -231,12 +257,12 @@ export function useMessages(
       }
       return null;
     },
-    [instanceName, messages]
+    [instanceName, messages, isWhapi]
   );
 
   const sendMessage = useCallback(
     async (text: string) => {
-      if (!instanceName || !remoteJid) {
+      if (!remoteJid || (!isWhapi && !instanceName)) {
         logger.error("sendMessage: missing instanceName or remoteJid", { instanceName, remoteJid });
         return;
       }
@@ -255,10 +281,11 @@ export function useMessages(
 
       try {
         const result = await sendWhatsAppMessage({
-          instanceName,
+          instanceName: instanceName || "",
           phone: recipient,
           mediaCategory: "text",
           text,
+          isWhapi,
         });
 
         if (result.status === "failed") {
@@ -287,7 +314,7 @@ export function useMessages(
         throw err;
       }
     },
-    [instanceName, remoteJid, resolveSendTargetJid]
+    [instanceName, remoteJid, resolveSendTargetJid, isWhapi]
   );
 
   return { messages, isLoading, sendMessage, loadMedia, refetch: fetchMessages, resolveSendTargetJid };

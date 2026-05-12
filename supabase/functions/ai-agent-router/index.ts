@@ -1,0 +1,309 @@
+// AI Agent Router — orquestrador do agente humanizado.
+// Chamado pelo evolution-webhook quando o cliente NÃO está pausado e o consultor
+// tem ai_agent_config.enabled=true.
+//
+// Faz: carrega contexto (cliente + últimas msgs + config + biblioteca de mídias),
+// chama Gemini com saída estruturada, executa as ações decididas pela IA
+// (enviar texto, enviar mídia da library, atualizar step, transferir p/ humano),
+// loga em ai_agent_logs.
+//
+// Body: {
+//   customer_id: string,
+//   instance_name: string,
+//   user_input: string,
+//   user_input_kind: "text" | "audio_transcript" | "image_caption" | "document",
+//   remote_jid: string
+// }
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { aiChat } from "../_shared/ai-gateway.ts";
+import { createEvolutionSender } from "../_shared/evolution-api.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+const EVOLUTION_API_URL = Deno.env.get("EVOLUTION_API_URL") || "";
+const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY") || "";
+
+// Etapas válidas do funil (alinhadas com conversation_step)
+const FUNNEL_STEPS = [
+  "welcome", "qualificacao", "apresentacao", "objecoes",
+  "coleta_conta", "coleta_doc", "coleta_dados",
+  "cadastro_portal", "aguardando_otp", "aguardando_facial",
+  "complete", "handoff_humano",
+] as const;
+
+const DECISION_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    intent: { type: "string", description: "Intenção detectada do cliente em 1-3 palavras" },
+    next_step: { type: "string", enum: [...FUNNEL_STEPS] },
+    reply_text: { type: "string", description: "Texto curto humanizado para enviar. Vazio se for só enviar mídia." },
+    media_to_send_ids: { type: "array", items: { type: "string" }, description: "IDs de ai_media_library a enviar em ordem. Vazio se nenhum." },
+    handoff: { type: "boolean", description: "true se deve transferir para humano agora" },
+    handoff_reason: { type: "string" },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+  },
+  required: ["intent", "next_step", "reply_text", "media_to_send_ids", "handoff", "handoff_reason", "confidence"],
+} as const;
+
+function randInt(min: number, max: number) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const t0 = Date.now();
+
+  try {
+    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { customer_id, instance_name, user_input, user_input_kind = "text", remote_jid } = await req.json();
+    if (!customer_id || !instance_name || !remote_jid) {
+      return new Response(JSON.stringify({ error: "customer_id, instance_name, remote_jid required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // 1) Carregar cliente
+    const { data: customer } = await supabase.from("customers").select("*").eq("id", customer_id).single();
+    if (!customer) return new Response(JSON.stringify({ error: "customer not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+    // 2) Se bot pausado, sair (segurança extra)
+    if (customer.bot_paused) {
+      return new Response(JSON.stringify({ ok: true, skipped: "bot_paused" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    const consultantId = customer.consultant_id;
+
+    // 3) Carregar config do agente (privada do consultor → fallback global)
+    const { data: cfgPrivate } = await supabase
+      .from("ai_agent_config").select("*").eq("consultant_id", consultantId).maybeSingle();
+    const { data: cfgGlobal } = await supabase
+      .from("ai_agent_config").select("*").is("consultant_id", null).maybeSingle();
+    const config = cfgPrivate || cfgGlobal;
+
+    if (!config?.enabled) {
+      return new Response(JSON.stringify({ ok: true, skipped: "agent_disabled" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // 4) Histórico (últimas 12 msgs)
+    const { data: history } = await supabase
+      .from("conversations")
+      .select("message_direction, message_text, created_at")
+      .eq("customer_id", customer_id)
+      .order("created_at", { ascending: false })
+      .limit(12);
+    const historyChrono = (history || []).reverse();
+
+    // 5) Mídias disponíveis: UNION privadas do consultor + públicas (templates)
+    const stepBefore = customer.conversation_step || "welcome";
+    const { data: mediaPrivate } = await supabase
+      .from("ai_media_library")
+      .select("id, kind, label, step_tags, intent_tags, transcript, text_content, url, priority, is_public")
+      .eq("consultant_id", consultantId).eq("active", true);
+    const { data: mediaPublic } = await supabase
+      .from("ai_media_library")
+      .select("id, kind, label, step_tags, intent_tags, transcript, text_content, url, priority, is_public")
+      .eq("is_public", true).eq("active", true);
+    const mediaLibrary = [...(mediaPrivate || []), ...(mediaPublic || [])];
+
+    // Prioriza privadas do consultor sobre públicas para mesma intent
+    const seenIntents = new Set<string>();
+    const relevantMedia = mediaLibrary
+      .filter((m: any) => Array.isArray(m.step_tags) && (m.step_tags.length === 0 || m.step_tags.includes(stepBefore) || m.step_tags.includes("any")))
+      .sort((a: any, b: any) => {
+        // privadas primeiro, depois priority desc
+        if (!!a.is_public !== !!b.is_public) return a.is_public ? 1 : -1;
+        return (b.priority || 0) - (a.priority || 0);
+      })
+      .filter((m: any) => {
+        const key = (m.intent_tags || []).join(",") || m.id;
+        if (seenIntents.has(key)) return false;
+        seenIntents.add(key);
+        return true;
+      });
+
+    // 6) Conhecimento iGreen
+    const { data: knowledge } = await supabase
+      .from("ai_knowledge_sections")
+      .select("title, content")
+      .eq("is_active", true)
+      .order("position");
+
+    // 7) Montar prompt
+    const persona = config.persona_name || "Camila";
+    const tone = config.tone || "humano, breve, cordial";
+    const stepPromptMap = (config.step_prompts || {}) as Record<string, string>;
+    const stepGuide = stepPromptMap[stepBefore] || "";
+    const handoffRules = (config.handoff_rules || {}) as Record<string, any>;
+
+    const systemPrompt = `Você é ${persona}, atendente HUMANA da iGreen Energy. Tom: ${tone}.
+NUNCA revele que é IA/bot. Fale curto, natural, com gírias leves brasileiras quando apropriado. Sem emojis robóticos ("🤖"), sem "Sou seu assistente virtual".
+
+REGRAS DURAS:
+- Siga rigorosamente a ETAPA ATUAL: "${stepBefore}". Não pule etapas sem condição satisfeita.
+- Se já existe áudio/vídeo na biblioteca para essa etapa/intenção, PREFIRA enviar a mídia (mais humano que texto).
+- NUNCA invente preço, prazo, comissão, link. Use só o conhecimento abaixo.
+- Se cliente: pedir humano, ofender, perguntar algo fora do escopo, ou após 3 falhas de entendimento → handoff=true.
+- Para avançar para "cadastro_portal" o cliente precisa ter aceitado a proposta e ter conta de luz + documento enviados.
+
+${config.system_prompt || ""}
+
+ETAPA ATUAL: ${stepBefore}
+${stepGuide ? `Guia da etapa: ${stepGuide}` : ""}
+
+REGRAS DE HANDOFF: ${JSON.stringify(handoffRules)}
+
+CONHECIMENTO iGREEN:
+${(knowledge || []).map((k: any) => `## ${k.title}\n${k.content}`).join("\n\n").slice(0, 4000)}
+
+DADOS DO CLIENTE:
+${JSON.stringify({
+  name: customer.name, cidade: customer.address_city, uf: customer.address_state,
+  conta_valor: customer.electricity_bill_value, distribuidora: customer.distribuidora,
+  step: stepBefore, status: customer.status,
+}, null, 2)}
+
+BIBLIOTECA DE MÍDIAS DISPONÍVEIS PARA ESTA ETAPA (use o id em media_to_send_ids):
+${relevantMedia.map((m: any) => `- id=${m.id} kind=${m.kind} label="${m.label}" intent_tags=${JSON.stringify(m.intent_tags || [])}${m.transcript ? ` transcript="${(m.transcript || "").slice(0, 120)}"` : ""}`).join("\n") || "(nenhuma)"}
+
+RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se for enviar áudio/vídeo, geralmente reply_text fica vazio ou bem curto.`;
+
+    const userMessages = historyChrono.map((m: any) => ({
+      role: m.message_direction === "inbound" ? "user" : "assistant",
+      content: m.message_text || "",
+    } as const));
+
+    // Última mensagem (a recém-recebida) — pode já estar no histórico, anexa label do tipo
+    const lastInboundLabel = user_input_kind === "audio_transcript"
+      ? `[áudio transcrito] ${user_input}`
+      : user_input_kind === "image_caption"
+        ? `[imagem descrita] ${user_input}`
+        : user_input;
+
+    // 8) Chamar IA
+    let decision: any = null;
+    let llmError: string | null = null;
+    try {
+      const result = await aiChat({
+        model: "google/gemini-3-flash-preview",
+        temperature: 0.4,
+        maxTokens: 800,
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...userMessages,
+          { role: "user", content: lastInboundLabel },
+        ],
+        jsonSchema: { name: "AgentDecision", schema: DECISION_SCHEMA as any },
+      });
+      decision = result.json;
+    } catch (e: any) {
+      llmError = e?.message || String(e);
+      console.error("LLM error:", llmError);
+    }
+
+    // 9) Fallback se LLM quebrou
+    if (!decision) {
+      decision = {
+        intent: "fallback",
+        next_step: stepBefore,
+        reply_text: "Tive uma instabilidade aqui, pode repetir, por favor?",
+        media_to_send_ids: [],
+        handoff: false,
+        handoff_reason: "",
+        confidence: 0,
+      };
+    }
+
+    // 10) Executar ações
+    const sender = createEvolutionSender(EVOLUTION_API_URL, EVOLUTION_API_KEY, instance_name);
+    const updates: Record<string, any> = {};
+
+    // Handoff
+    if (decision.handoff) {
+      updates.bot_paused = true;
+      updates.bot_paused_reason = decision.handoff_reason || "ia_decidiu";
+      updates.bot_paused_at = new Date().toISOString();
+      updates.conversation_step = "handoff_humano";
+    } else if (decision.next_step && decision.next_step !== stepBefore) {
+      updates.conversation_step = decision.next_step;
+    }
+
+    // Simulação de digitação
+    const typingMin = config.typing_min_ms ?? 1200;
+    const typingMax = config.typing_max_ms ?? 3500;
+
+    // Enviar mídias primeiro (mais humano: áudio chega antes do texto)
+    const sentMediaIds: string[] = [];
+    for (const mediaId of (decision.media_to_send_ids || []).slice(0, 3)) {
+      const m = (mediaLibrary || []).find((x: any) => x.id === mediaId);
+      if (!m || !m.url) continue;
+      try {
+        await sleep(randInt(typingMin, typingMax));
+        if (m.kind === "audio") {
+          await sender.sendAudio(remote_jid, m.url);
+        } else if (m.kind === "image") {
+          await sender.sendMedia(remote_jid, m.url, "", "image");
+        } else if (m.kind === "video") {
+          await sender.sendMedia(remote_jid, m.url, "", "video");
+        } else if (m.kind === "document") {
+          await sender.sendMedia(remote_jid, m.url, m.label || "", "document");
+        } else if (m.kind === "text" && m.text_content) {
+          await sender.sendText(remote_jid, m.text_content);
+        }
+        sentMediaIds.push(mediaId);
+        // log outbound
+        await supabase.from("conversations").insert({
+          customer_id, message_direction: "outbound",
+          message_text: `[${m.kind}] ${m.label}`, message_type: m.kind,
+          conversation_step: updates.conversation_step || stepBefore,
+        });
+      } catch (e) {
+        console.error("media send error:", e);
+      }
+    }
+
+    // Enviar texto
+    if (decision.reply_text && decision.reply_text.trim()) {
+      await sleep(randInt(typingMin, typingMax));
+      await sender.sendText(remote_jid, decision.reply_text.trim());
+      await supabase.from("conversations").insert({
+        customer_id, message_direction: "outbound",
+        message_text: decision.reply_text.trim(), message_type: "text",
+        conversation_step: updates.conversation_step || stepBefore,
+      });
+    }
+
+    // 11) Persistir updates
+    updates.last_bot_reply_at = new Date().toISOString();
+    if (Object.keys(updates).length > 0) {
+      await supabase.from("customers").update(updates).eq("id", customer_id);
+    }
+
+    // 12) Log
+    await supabase.from("ai_agent_logs").insert({
+      consultant_id: consultantId,
+      customer_id,
+      phone: customer.phone_whatsapp,
+      step_before: stepBefore,
+      step_after: updates.conversation_step || stepBefore,
+      user_input: lastInboundLabel.slice(0, 2000),
+      user_input_kind,
+      llm_output: decision,
+      media_sent_id: sentMediaIds[0] || null,
+      handoff: !!decision.handoff,
+      handoff_reason: decision.handoff_reason || null,
+      latency_ms: Date.now() - t0,
+      error: llmError,
+    });
+
+    return new Response(JSON.stringify({ ok: true, decision, sent_media_ids: sentMediaIds }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (e: any) {
+    console.error("ai-agent-router error:", e);
+    return new Response(JSON.stringify({ error: e?.message || "internal" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
