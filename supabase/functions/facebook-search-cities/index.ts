@@ -4,8 +4,7 @@
 //   { bulk: [{ name, uf }, ...] }                  -> resolve várias cidades de uma vez
 //                                                     consultando cache `fb_city_cache` primeiro
 //                                                     e gravando o que faltar.
-import { adminClient, authConsultant, corsHeaders, fbFetch, loadConnection } from "../_shared/fb-graph.ts";
-import { loadCampaignConnection } from "../_shared/fb-graph.ts";
+import { adminClient, authConsultant, corsHeaders, fbFetch, loadCampaignConnection, loadConnection } from "../_shared/fb-graph.ts";
 
 interface BulkItem { name: string; uf: string }
 
