@@ -62,12 +62,12 @@ export function UseTemplateDialog({ open, onClose, template, consultantId, onPub
     };
   }, [template, preset, consultantName, selectedCity]);
 
-  if (!template) return null;
-
   const targetIds = template?.target_distribuidora_ids ?? [];
-  const allowedPresets = targetIds.length
-    ? DISTRIBUIDORAS_PRESETS.filter((p) => targetIds.includes(p.id))
-    : DISTRIBUIDORAS_PRESETS;
+  const allowedPresets = useMemo(() => (
+    targetIds.length
+      ? DISTRIBUIDORAS_PRESETS.filter((p) => targetIds.includes(p.id))
+      : DISTRIBUIDORAS_PRESETS
+  ), [targetIds.join(",")]);
   const grouped = (["alto", "medio", "sem_bonus"] as const).map((tier) => ({
     tier, items: allowedPresets.filter((p) => p.tier === tier),
   }));
@@ -82,6 +82,8 @@ export function UseTemplateDialog({ open, onClose, template, consultantId, onPub
       setPresetId(allowedPresets[0].id);
     }
   }, [open, step, allowedPresets, presetId]);
+
+  if (!template) return null;
 
   async function publish() {
     if (!preset) return;
