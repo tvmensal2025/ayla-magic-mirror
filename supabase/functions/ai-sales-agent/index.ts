@@ -159,7 +159,7 @@ async function loadContext(supabase: any, customerId: string) {
 
   const { data: history } = await supabase
     .from("conversations")
-    .select("message_direction, message_text, created_at")
+    .select("message_direction, message_text, message_type, created_at")
     .eq("customer_id", customerId)
     .order("created_at", { ascending: false })
     .limit(20);
