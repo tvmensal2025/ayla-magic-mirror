@@ -387,6 +387,7 @@ export function MediaColumn({ userId }: { userId: string }) {
                 </div>
                 {view === "mine" ? (
                   <>
+                    <TagEditor m={m} />
                     <Badge
                       variant={m.active ? "default" : "outline"}
                       className={`text-[10px] ${m.active ? "bg-primary/15 text-primary border-primary/20" : ""}`}
