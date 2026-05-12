@@ -1,86 +1,139 @@
-## Objetivo
+# Fluxo IA para Fechar a Venda — Camila 2.0
 
-Tornar a carteira de anúncios totalmente compreensível: cada linha de gasto explica o que aconteceu (qual campanha, distribuidora, impressões, cliques, leads do período) e o saldo nunca mente — se ficou negativo, mostra "Em débito" e pausa imediatamente as campanhas no Meta.
+## Diagnóstico do fluxo atual
 
----
+Hoje o `evolution-webhook/handlers/bot-flow.ts` é uma **máquina de estados determinística de 38 steps**, focada em coletar documentos e jogar no portal iGreen. Problemas para conversão:
 
-## 1. Movimentações com resumo do dia + drill-down
-
-**UI (`src/components/admin/ads/WalletCard.tsx`)**
-
-Substituir a lista atual de "Últimas movimentações" por um agrupamento por **data + campanha**:
-
-```
-▸ Hoje · CPFL Paulista                      − R$ 6,43
-   318 impressões · 0 cliques · 0 leads · CPL —
-   16 sincronizações nas últimas horas
-```
-
-Cada grupo é expansível (acordeão). Ao abrir, lista as sincronizações individuais que existem hoje (ex.: "20:00 · −R$ 0,31 · Meta R$ 0,26 + 20%"), agora com contexto do que foi pago **(impressões/cliques entre as duas sincronizações, calculado a partir do delta da metric daily quando disponível, ou apenas o horário+valor quando não tiver delta de período)**.
-
-Topups e refunds aparecem como linhas próprias (sem agrupamento).
-
-**Dados**: já temos `wallet_transactions.metadata.date`, `metadata.fb_campaign_id` e join com `facebook_campaigns` (nome, distribuidora) + `facebook_metrics_daily` (impressões/cliques/leads do dia). Tudo somado no cliente — nenhuma migração necessária.
-
-**Service (`src/services/facebookAds.ts`)**
-
-Adicionar `getWalletTransactionsEnriched(consultantId, days)` que:
-- Busca últimas N transações de `wallet_transactions` (já existe).
-- Busca campanhas referenciadas em batch (`in("id", ids)`) → nome + distribuidora.
-- Busca `facebook_metrics_daily` para os pares (campaign_id, date) presentes → impressões/cliques/leads agregados do dia.
-- Devolve estrutura agrupada `{ groups: [{date, campaign, totals, items}], topups: [...] }`.
+1. **Não vende, só formulariza.** Pula da boas-vindas direto para "manda foto da conta". Sem qualificação, sem benefício, sem prova social.
+2. **Sem decisão contextual.** Não diferencia lead frio (anúncio Facebook) de lead quente (indicação), nem trata objeção ("é golpe?", "preciso pensar").
+3. **Tudo ou nada.** Se o lead não manda a conta na hora, vira `aguardando_humano` ou trava — sem follow-up, sem rota alternativa.
+4. **Sem memória de intenção.** O `ai_agent_config.system_prompt` existe mas o bot-flow ignora — só usa LLM em casos pontuais (OCR Gemini).
+5. **Saldo zerado / pause já existe** — bom. Falta usar a IA para **resgatar leads pausados** quando há saldo.
 
 ---
 
-## 2. Descrição mais humana ao gravar o débito
+## Proposta: funil de venda em 5 fases com decisão híbrida
 
-**`supabase/functions/facebook-sync-metrics/index.ts`** (linha ~114)
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│  FASE 1: ABERTURA       → quebra de gelo + qualificação rápida     │
+│  FASE 2: DESCOBERTA     → dor, valor da conta, distribuidora        │
+│  FASE 3: PITCH          → economia personalizada + prova social     │
+│  FASE 4: OBJEÇÃO        → IA decide: responder, mídia, ou humano    │
+│  FASE 5: FECHAMENTO     → coleta documentos no momento certo        │
+└─────────────────────────────────────────────────────────────────────┘
+       ↑                                                          ↓
+       └────────── follow-up automático (T+30min, T+24h) ─────────┘
+```
 
-Trocar `_description` para algo legível:
-```
-"CPFL Paulista · 12/05 14:30 · 23 impressões, 1 clique, 0 leads"
-```
-Calculado a partir do delta entre a leitura anterior e a atual (já temos `prev` carregado para o cálculo de `deltaSpend`). E enriquecer `_metadata` com `delta_impressions`, `delta_clicks`, `delta_leads`, `campaign_name`, `distribuidora` para poder mostrar sem joins extras.
+**Arquitetura híbrida:** estados rígidos só para coleta de dados sensíveis (CPF, conta, doc). Tudo antes e entre coletas é **LLM com tool-calling** decidindo a próxima ação.
 
 ---
 
-## 3. Saldo "Em débito" + auto-pause imediato
+## Detalhamento por fase
 
-### Migração (estrutura)
+### Fase 1 — Abertura (substitui `welcome` e `menu_inicial`)
+- **Decisão da IA:** detecta origem do lead (`customers.lead_source.utm_source`).
+  - `facebook_ads` → "Vi que você se interessou pelo anúncio de economia na conta de luz…"
+  - `indicacao` → usa nome do indicador (já em `customer_referred_by_name`).
+  - `organico` → abertura neutra + qualificação.
+- **Pergunta única:** "Sua conta de luz vem por qual distribuidora? (CPFL, Enel, Cemig…)"
+- **Saída:** `qualified_distribuidora` ou `out_of_area` (se distribuidora não atendida → mensagem honesta + tag no CRM).
 
-Adicionar à `consultant_wallet`:
-- `debt_cents bigint NOT NULL DEFAULT 0` — quanto a plataforma adiantou.
+### Fase 2 — Descoberta
+- Pergunta o **valor médio da conta** (sem pedir foto ainda — barreira menor).
+- IA classifica:
+  - `< R$ 200` → ticket baixo, oferta resumida + 1 tentativa.
+  - `R$ 200–600` → fluxo padrão.
+  - `> R$ 600` → marca `high_value`, prioriza no CRM, oferece falar com humano se quiser.
+- Pergunta a dor: "O que mais te incomoda na conta hoje?" → grava em `customers.pain_point` (campo novo).
 
-Atualizar `debit_consultant_wallet(...)` para:
-- Se `balance_cents >= amount_cents`: comportamento atual.
-- Se faltar saldo: zera `balance_cents`, soma a diferença em `debt_cents`, registra a transação normalmente (com `metadata.debt_added_cents`), retorna 0.
+### Fase 3 — Pitch personalizado
+- IA calcula economia estimada (12% × valor informado) e responde:
+  > "Com R$ {valor}, você economizaria cerca de R$ {valor*0.12}/mês = R$ {valor*0.12*12}/ano. Sem obra, sem mudança de fiação, mesma energia da rede."
+- **Mídia inteligente:** consulta `ai_media_library` por `intent_tags=['pitch','prova']` filtrando por `step_tags=['fase_pitch']` e envia o vídeo/áudio mais relevante (ex: depoimento de cliente da mesma distribuidora).
 
-E nova função `settle_consultant_debt(_consultant_id, _amount_cents)` chamada por `credit_consultant_wallet` no início: abate primeiro o débito, só o que sobra vira saldo.
+### Fase 4 — Tratamento de objeção (coração da decisão)
+LLM com tool-calling. Tools disponíveis:
 
-### Auto-pause real no Meta
+| Tool                       | Quando usar                                  |
+|----------------------------|----------------------------------------------|
+| `send_media(intent)`       | Pediu prova → manda depoimento/print         |
+| `send_text(message)`       | Resposta simples                             |
+| `request_handoff(reason)`  | Lead quente confuso, pediu humano, ou irritado |
+| `schedule_followup(hours)` | "Depois eu vejo" → agenda mensagem em N horas|
+| `advance_to_closing()`     | Sinais de compra detectados                  |
+| `mark_lost(reason)`        | "Não quero", bloqueio, fora do perfil        |
 
-No `facebook-sync-metrics`, **antes** de processar cada campanha, verificar saldo:
-- Se `balance_cents <= 0` (com ou sem débito): chamar Graph API `POST /{campaign_id}?status=PAUSED&access_token=...` e atualizar `facebook_campaigns.status='paused'`. Hoje só faz isso quando hits regras adaptativas (frequência, CPL, etc.) — falta esse caso "saldo zerado".
+Sinais de compra que a IA deve reconhecer: "como faço?", "quanto demora?", "preciso de quê?", "quero entrar", "vamos lá".
 
-### UI da carteira
+### Fase 5 — Fechamento (volta ao state machine atual)
+Só agora pede conta de luz + documento + CPF. Aproveita os 38 steps atuais **inalterados** — eles funcionam para coleta. Mudança: ao concluir, IA envia áudio de parabéns personalizado.
 
-No bloco de saldo:
-- Se `debt_cents > 0`: linha vermelha **"Em débito: R$ X,XX — recarregue para regularizar e reativar campanhas"**.
-- Se `balance_cents <= 0` E há campanha pausada por saldo: badge laranja **"Campanhas pausadas por saldo zerado"** + botão de recarga em destaque.
+### Follow-up automático (novo)
+Cron `pg_cron` a cada 15 min:
+- Lead em fase 1–4 sem resposta há **30 min** → 1 mensagem de resgate (IA escolhe ângulo).
+- Sem resposta há **24 h** → 2ª mensagem com mídia diferente.
+- Sem resposta há **72 h** → marca `lost_no_response`, libera saldo de campanha.
+Limite: máx 2 resgates (`customers.rescue_attempts` já existe).
+
+---
+
+## Decisão híbrida: quando IA, quando script
+
+| Situação                              | Quem decide        |
+|---------------------------------------|--------------------|
+| Coleta de CPF, RG, conta, OTP         | State machine      |
+| OCR + validação de documento          | Gemini (já existe) |
+| Resposta livre, objeção, pitch        | **LLM com tools**  |
+| Escolha de mídia para enviar          | **LLM (busca por tags)** |
+| Quando pausar bot e chamar humano     | **LLM**            |
+| Follow-up de resgate                  | **LLM + cron**     |
 
 ---
 
 ## Detalhes técnicos
 
-| Arquivo | Mudança |
-|---|---|
-| `supabase/migrations/<novo>.sql` | Adiciona `debt_cents` em `consultant_wallet`; recria `debit_consultant_wallet` (mantém assinaturas); adiciona `settle_consultant_debt`; ajusta `credit_consultant_wallet` para abater débito antes. |
-| `supabase/functions/facebook-sync-metrics/index.ts` | (a) descrição/metadata humanizada com deltas; (b) checagem de saldo no início do loop por campanha → pausa no Meta + update DB; (c) invalida cache de wallet após debit. |
-| `supabase/functions/_shared/fb-graph.ts` | (se necessário) helper `pauseFbCampaign(token, fbCampaignId)`. |
-| `src/services/facebookAds.ts` | Novo `getWalletTransactionsEnriched`; tipo `WalletBalance` ganha `debt_cents`. |
-| `src/components/admin/ads/WalletCard.tsx` | UI de débito + lista agrupada com acordeão (usa `<details>` ou `Collapsible` do shadcn). |
-| `src/integrations/supabase/types.ts` | Regenera após migração (automático). |
+**Mudanças de schema (1 migration):**
+- `customers`: `pain_point text`, `qualification_score int`, `intent_signals jsonb`, `next_followup_at timestamptz`.
+- Nova tabela `ai_decisions` (audit): `customer_id`, `phase`, `tool_called`, `reasoning`, `created_at` — para você ver **por que** a IA tomou cada decisão (resolve a queixa de "não dá pra entender").
 
-Sem mudanças de RLS — `consultant_wallet` e `wallet_transactions` já estão protegidos por owner/admin.
+**Edge functions:**
+- `ai-sales-agent` (nova) — recebe contexto do customer + histórico recente de `conversations` + media library disponível, chama Lovable AI Gateway (`google/gemini-3-flash-preview`) com tool-calling, retorna ação. Chamada pelo `evolution-webhook` nas fases 1–4.
+- `ai-followup-cron` (nova) — invocada por `pg_cron` a cada 15 min, varre `customers.next_followup_at <= now()`, dispara `ai-sales-agent` em modo "resgate".
 
-Nada quebra para quem já tinha transações antigas: a descrição nova vale só para futuras sincronizações; as antigas continuam como estão na lista do drill-down.
+**evolution-webhook/handlers/bot-flow.ts:**
+- Adicionar branch no topo: se `conversation_step` ∈ {`welcome`, `menu_inicial`, `pos_video`, `objection`, `nurturing`} → delega para `ai-sales-agent` em vez de switch hard-coded.
+- Steps de coleta (aguardando_conta em diante) ficam como estão.
+
+**UI nova em `AIAgentTab`:**
+- Aba "Decisões da IA" mostrando timeline por lead: fase, ferramenta usada, justificativa (texto da IA), resultado. Resolve diretamente a dor de transparência.
+- Configuração de tom/estilo por consultor (já existe `ai_agent_config.tone`, `system_prompt`) — adicionar campo "objetivo de venda" e "objeções frequentes".
+
+**Custo/observabilidade:**
+- Cada turno custa ~1 chamada Gemini Flash (~R$ 0,001). Lead típico: 5–10 turnos = R$ 0,01.
+- Logar em `ai_agent_logs` (já existe) com `latency_ms`, `llm_output`, `handoff_reason`.
+
+---
+
+## Métricas de sucesso
+
+| KPI                                | Hoje (estimado) | Meta |
+|------------------------------------|-----------------|------|
+| Lead → conta enviada               | ~25%            | 45%  |
+| Conta enviada → cadastro completo  | ~40%            | 65%  |
+| Tempo médio até fechamento         | 3 dias          | 1 dia|
+| % handoff para humano              | ~30%            | 12%  |
+
+---
+
+## Entregáveis (ordem de implementação)
+
+1. **Migration** — campos novos em `customers` + tabela `ai_decisions`.
+2. **Edge function `ai-sales-agent`** com tool-calling.
+3. **Refator `bot-flow.ts`** — delegação para IA nas fases conversacionais; manter coleta determinística.
+4. **Edge function `ai-followup-cron`** + agendamento `pg_cron`.
+5. **UI "Decisões da IA"** em `AIAgentTab` (timeline + config de objetivo/objeções).
+6. **A/B test** — 50% leads no fluxo novo vs antigo por 7 dias, comparar conversão.
+
+Posso começar pelo passo 1+2 (base mínima funcional) ou montar tudo de uma vez. Recomendo passo a passo — entrega valor já no item 2.
