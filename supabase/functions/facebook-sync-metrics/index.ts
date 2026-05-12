@@ -25,11 +25,11 @@ Deno.serve(async (req) => {
     // cache de tokens por consultor (agora vem da plataforma compartilhada)
     const tokenCache: Record<string, string> = {};
     // cache de saldo da carteira por consultor (cents) — pra auto-pause por saldo zerado
-    const walletCache: Record<string, { balance: number; auto_pause_at: number } | null> = {};
+    const walletCache: Record<string, { balance: number; auto_pause_at: number; debt: number } | null> = {};
     async function getWallet(consultantId: string) {
       if (walletCache[consultantId] !== undefined) return walletCache[consultantId];
-      const { data } = await admin.from("consultant_wallet").select("balance_cents,auto_pause_at_cents").eq("consultant_id", consultantId).maybeSingle();
-      walletCache[consultantId] = data ? { balance: Number(data.balance_cents), auto_pause_at: Number(data.auto_pause_at_cents) } : null;
+      const { data } = await admin.from("consultant_wallet").select("balance_cents,auto_pause_at_cents,debt_cents").eq("consultant_id", consultantId).maybeSingle();
+      walletCache[consultantId] = data ? { balance: Number(data.balance_cents), auto_pause_at: Number(data.auto_pause_at_cents), debt: Number((data as any).debt_cents || 0) } : null;
       return walletCache[consultantId];
     }
     // cache de CPL médio do consultor (centavos) — pra auto-pause adaptativo
