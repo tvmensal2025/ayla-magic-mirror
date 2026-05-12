@@ -49,13 +49,14 @@ Deno.serve(async (req) => {
 
     // 3. Ad account ativo + payment + spend cap
     try {
-      const acct = await fbFetch(`/${conn.ad_account_id}?fields=account_status,disable_reason,currency,funding_source,spend_cap,amount_spent&access_token=${conn.token}`);
-      if (acct?.account_status && acct.account_status !== 1) {
+      const acct = await fbFetch(`/${conn.ad_account_id}?fields=account_status,disable_reason,currency,funding_source,balance,spend_cap,amount_spent&access_token=${conn.token}`);
+      if (acct?.account_status && ![1, 9, 201].includes(Number(acct.account_status))) {
         const reasonMap: Record<number, string> = { 2: "desativada", 3: "não confirmada", 7: "em revisão", 8: "pendente fechamento", 9: "em revisão pelo Meta", 100: "pendente revisão de pagamento", 101: "fechada", 201: "qualquer revisão" };
         blockers.push(`Conta de anúncios ${reasonMap[acct.account_status] || `status ${acct.account_status}`}`);
       }
-      if (!acct?.funding_source) {
-        blockers.push("Conta de anúncios sem forma de pagamento — adicione cartão no Meta Business Manager");
+      const hasPrepaidSignal = Number(acct?.balance ?? 0) > 0 || Number(acct?.spend_cap ?? 0) > 0;
+      if (!acct?.funding_source && !hasPrepaidSignal) {
+        warnings.push("Não confirmei a forma de pagamento da conta principal; a publicação seguirá e o Meta valida na entrega.");
       }
       if (acct?.spend_cap && acct?.amount_spent) {
         const remaining = (Number(acct.spend_cap) - Number(acct.amount_spent)) / 100;
