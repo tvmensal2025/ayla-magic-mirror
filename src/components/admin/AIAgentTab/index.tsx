@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
-import { Bot, MessagesSquare, Library, Loader2 } from "lucide-react";
+import { Bot, MessagesSquare, Library, Loader2, Brain } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { LiveConversationsPanel } from "./LiveConversationsPanel";
 import { MediaColumn } from "./MediaColumn";
 import { RoteiroColumn } from "./RoteiroColumn";
+import { AIDecisionsPanel } from "./AIDecisionsPanel";
 
-type SubTab = "atendimentos" | "agente";
+type SubTab = "atendimentos" | "agente" | "decisoes";
 
 export function AIAgentTab({ userId }: { userId: string }) {
   const { toast } = useToast();
@@ -47,6 +48,7 @@ export function AIAgentTab({ userId }: { userId: string }) {
   const subs: { id: SubTab; label: string; icon: typeof Bot }[] = [
     { id: "atendimentos", label: "Atendimentos", icon: MessagesSquare },
     { id: "agente", label: "Agente & Mídias", icon: Library },
+    { id: "decisoes", label: "Decisões da IA", icon: Brain },
   ];
 
   return (
@@ -103,6 +105,7 @@ export function AIAgentTab({ userId }: { userId: string }) {
             <RoteiroColumn userId={userId} />
           </div>
         )}
+        {sub === "decisoes" && <AIDecisionsPanel userId={userId} />}
       </div>
     </div>
   );

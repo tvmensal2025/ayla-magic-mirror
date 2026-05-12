@@ -285,6 +285,56 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_decisions: {
+        Row: {
+          ai_output: Json | null
+          consultant_id: string
+          created_at: string
+          customer_id: string | null
+          id: string
+          latency_ms: number | null
+          model: string | null
+          phase: string
+          reasoning: string | null
+          tool_called: string
+          user_input: string | null
+        }
+        Insert: {
+          ai_output?: Json | null
+          consultant_id: string
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          latency_ms?: number | null
+          model?: string | null
+          phase: string
+          reasoning?: string | null
+          tool_called: string
+          user_input?: string | null
+        }
+        Update: {
+          ai_output?: Json | null
+          consultant_id?: string
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          latency_ms?: number | null
+          model?: string | null
+          phase?: string
+          reasoning?: string | null
+          tool_called?: string
+          user_input?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_decisions_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_knowledge_sections: {
         Row: {
           content: string
@@ -786,6 +836,7 @@ export type Database = {
           id: string
           igreen_code: string | null
           igreen_link: string | null
+          intent_signals: Json | null
           last_bot_reply_at: string | null
           last_rescue_at: string | null
           lead_source: Json | null
@@ -795,6 +846,7 @@ export type Database = {
           media_message_id: string | null
           media_storage: string | null
           name: string | null
+          next_followup_at: string | null
           nivel_licenciado: string | null
           nome_mae: string | null
           nome_pai: string | null
@@ -805,15 +857,18 @@ export type Database = {
           ocr_doc_attempts: number
           otp_code: string | null
           otp_received_at: string | null
+          pain_point: string | null
           phone_contact_confirmed: boolean
           phone_landline: string | null
           phone_whatsapp: string
           portal_submitted_at: string | null
           possui_procurador: boolean | null
+          qualification_score: number | null
           registered_by_igreen_id: string | null
           registered_by_name: string | null
           rescue_attempts: number
           rg: string | null
+          sales_phase: string | null
           senha_pdf: string | null
           status: string
           status_financeiro: string | null
@@ -866,6 +921,7 @@ export type Database = {
           id?: string
           igreen_code?: string | null
           igreen_link?: string | null
+          intent_signals?: Json | null
           last_bot_reply_at?: string | null
           last_rescue_at?: string | null
           lead_source?: Json | null
@@ -875,6 +931,7 @@ export type Database = {
           media_message_id?: string | null
           media_storage?: string | null
           name?: string | null
+          next_followup_at?: string | null
           nivel_licenciado?: string | null
           nome_mae?: string | null
           nome_pai?: string | null
@@ -885,15 +942,18 @@ export type Database = {
           ocr_doc_attempts?: number
           otp_code?: string | null
           otp_received_at?: string | null
+          pain_point?: string | null
           phone_contact_confirmed?: boolean
           phone_landline?: string | null
           phone_whatsapp: string
           portal_submitted_at?: string | null
           possui_procurador?: boolean | null
+          qualification_score?: number | null
           registered_by_igreen_id?: string | null
           registered_by_name?: string | null
           rescue_attempts?: number
           rg?: string | null
+          sales_phase?: string | null
           senha_pdf?: string | null
           status?: string
           status_financeiro?: string | null
@@ -946,6 +1006,7 @@ export type Database = {
           id?: string
           igreen_code?: string | null
           igreen_link?: string | null
+          intent_signals?: Json | null
           last_bot_reply_at?: string | null
           last_rescue_at?: string | null
           lead_source?: Json | null
@@ -955,6 +1016,7 @@ export type Database = {
           media_message_id?: string | null
           media_storage?: string | null
           name?: string | null
+          next_followup_at?: string | null
           nivel_licenciado?: string | null
           nome_mae?: string | null
           nome_pai?: string | null
@@ -965,15 +1027,18 @@ export type Database = {
           ocr_doc_attempts?: number
           otp_code?: string | null
           otp_received_at?: string | null
+          pain_point?: string | null
           phone_contact_confirmed?: boolean
           phone_landline?: string | null
           phone_whatsapp?: string
           portal_submitted_at?: string | null
           possui_procurador?: boolean | null
+          qualification_score?: number | null
           registered_by_igreen_id?: string | null
           registered_by_name?: string | null
           rescue_attempts?: number
           rg?: string | null
+          sales_phase?: string | null
           senha_pdf?: string | null
           status?: string
           status_financeiro?: string | null
