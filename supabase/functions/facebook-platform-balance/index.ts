@@ -1,4 +1,4 @@
-// Retorna saldo/gasto da conta Facebook da plataforma. Apenas admin.
+// Retorna saldo atual da conta Facebook da plataforma + gasto sincronizado pelo sistema. Apenas admin.
 import { adminClient, authConsultant, corsHeaders, fbFetch, loadPlatformAccount } from "../_shared/fb-graph.ts";
 
 function json(body: unknown, status = 200) {
@@ -6,6 +6,11 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+function toCents(v: unknown) {
+  const n = typeof v === "string" ? parseInt(v, 10) : typeof v === "number" ? v : 0;
+  return Number.isFinite(n) ? n : 0;
 }
 
 Deno.serve(async (req) => {
@@ -34,17 +39,26 @@ Deno.serve(async (req) => {
       return json({ connected: true, error: (acc as any).error });
     }
 
-    // Valores vêm como string em centavos da currency da conta (ex: "12345" = 123,45 BRL)
-    const toCents = (v: unknown) => {
-      const n = typeof v === "string" ? parseInt(v, 10) : typeof v === "number" ? v : 0;
-      return Number.isFinite(n) ? n : 0;
-    };
     const balance_cents = toCents((acc as any).balance);
-    const amount_spent_cents = toCents((acc as any).amount_spent);
+    const lifetime_amount_spent_cents = toCents((acc as any).amount_spent);
     const spend_cap_cents = toCents((acc as any).spend_cap);
     const available_cents = spend_cap_cents > 0
-      ? Math.max(0, spend_cap_cents - amount_spent_cents)
+      ? Math.max(0, spend_cap_cents - lifetime_amount_spent_cents)
       : balance_cents;
+
+    const { data: systemSpend } = await admin
+      .from("wallet_transactions")
+      .select("amount_cents,gross_spend_cents,created_at")
+      .eq("type", "spend");
+    const system_spend_cents = ((systemSpend as any[]) || [])
+      .reduce((sum, row) => sum + Number(row.gross_spend_cents ?? row.amount_cents ?? 0), 0);
+    const system_charged_cents = ((systemSpend as any[]) || [])
+      .reduce((sum, row) => sum + Number(row.amount_cents ?? 0), 0);
+    const last_system_sync_at = ((systemSpend as any[]) || [])
+      .map((row) => row.created_at as string | null)
+      .filter(Boolean)
+      .sort()
+      .at(-1) ?? null;
 
     return json({
       connected: true,
@@ -53,10 +67,14 @@ Deno.serve(async (req) => {
       currency: (acc as any).currency ?? "BRL",
       account_status: (acc as any).account_status ?? null,
       balance_cents,
-      amount_spent_cents,
+      amount_spent_cents: system_spend_cents,
+      system_spend_cents,
+      system_charged_cents,
+      lifetime_amount_spent_cents,
       spend_cap_cents,
       available_cents,
       has_funding: !!(acc as any).funding_source_details,
+      last_system_sync_at,
     });
   } catch (err) {
     console.error("[fb-platform-balance]", err);
