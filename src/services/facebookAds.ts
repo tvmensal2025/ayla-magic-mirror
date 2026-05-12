@@ -169,11 +169,12 @@ export interface WalletBalance {
   total_topped_up_cents: number;
   total_spent_cents: number;
   auto_pause_at_cents: number;
+  debt_cents: number;
 }
 export async function getWalletBalance(consultantId: string): Promise<WalletBalance> {
   const { data, error } = await supabase
     .from("consultant_wallet")
-    .select("balance_cents,total_topped_up_cents,total_spent_cents,auto_pause_at_cents")
+    .select("balance_cents,total_topped_up_cents,total_spent_cents,auto_pause_at_cents,debt_cents")
     .eq("consultant_id", consultantId)
     .maybeSingle();
   if (error && (error as any).code !== "PGRST116") throw error;
@@ -182,6 +183,7 @@ export async function getWalletBalance(consultantId: string): Promise<WalletBala
     total_topped_up_cents: Number(data?.total_topped_up_cents ?? 0),
     total_spent_cents: Number(data?.total_spent_cents ?? 0),
     auto_pause_at_cents: Number(data?.auto_pause_at_cents ?? 500),
+    debt_cents: Number((data as any)?.debt_cents ?? 0),
   };
 }
 
@@ -192,16 +194,100 @@ export interface WalletTransaction {
   balance_after_cents: number | null;
   description: string | null;
   created_at: string;
+  campaign_id?: string | null;
+  metadata?: any;
+  gross_spend_cents?: number | null;
 }
 export async function getWalletTransactions(consultantId: string, limit = 30): Promise<WalletTransaction[]> {
   const { data, error } = await supabase
     .from("wallet_transactions")
-    .select("id,type,amount_cents,balance_after_cents,description,created_at")
+    .select("id,type,amount_cents,balance_after_cents,description,created_at,campaign_id,metadata,gross_spend_cents")
     .eq("consultant_id", consultantId)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
   return (data || []) as WalletTransaction[];
+}
+
+export interface WalletGroup {
+  key: string;
+  date: string;
+  campaign_id: string | null;
+  campaign_name: string;
+  distribuidora: string | null;
+  total_amount_cents: number;
+  total_gross_meta_cents: number;
+  impressions: number;
+  clicks: number;
+  leads: number;
+  cpl_cents: number;
+  items: WalletTransaction[];
+}
+export interface WalletFeed {
+  groups: WalletGroup[];
+  others: WalletTransaction[];
+}
+export async function getWalletFeed(consultantId: string, limit = 80): Promise<WalletFeed> {
+  const tx = await getWalletTransactions(consultantId, limit);
+  const spends = tx.filter((t) => t.type === "spend");
+  const others = tx.filter((t) => t.type !== "spend");
+
+  const campaignIds = Array.from(new Set(spends.map((s) => s.campaign_id).filter(Boolean))) as string[];
+  const campaignMap: Record<string, { name: string; distribuidora: string | null }> = {};
+  if (campaignIds.length) {
+    const { data: campaigns } = await supabase
+      .from("facebook_campaigns")
+      .select("id,name,distribuidora")
+      .in("id", campaignIds);
+    for (const c of campaigns || []) campaignMap[c.id] = { name: c.name, distribuidora: (c as any).distribuidora ?? null };
+  }
+
+  const pairKey = (cid: string, date: string) => `${cid}__${date}`;
+  const dailyMap: Record<string, { impressions: number; clicks: number; leads: number }> = {};
+  if (campaignIds.length) {
+    const dates = Array.from(new Set(spends.map((s) => s.metadata?.date).filter(Boolean))) as string[];
+    if (dates.length) {
+      const { data: daily } = await supabase
+        .from("facebook_metrics_daily")
+        .select("campaign_id,date,impressions,clicks,leads")
+        .in("campaign_id", campaignIds)
+        .in("date", dates);
+      for (const d of daily || []) {
+        dailyMap[pairKey(d.campaign_id as string, d.date as string)] = {
+          impressions: Number(d.impressions || 0),
+          clicks: Number(d.clicks || 0),
+          leads: Number(d.leads || 0),
+        };
+      }
+    }
+  }
+
+  const groupsMap: Record<string, WalletGroup> = {};
+  for (const t of spends) {
+    const date = String(t.metadata?.date || t.created_at.slice(0, 10));
+    const cid = t.campaign_id || "_unknown_";
+    const key = `${date}__${cid}`;
+    if (!groupsMap[key]) {
+      const camp = (t.campaign_id && campaignMap[t.campaign_id]) || null;
+      const daily = (t.campaign_id && dailyMap[pairKey(t.campaign_id, date)]) || { impressions: 0, clicks: 0, leads: 0 };
+      groupsMap[key] = {
+        key, date, campaign_id: t.campaign_id || null,
+        campaign_name: camp?.name || "Campanha removida",
+        distribuidora: camp?.distribuidora || null,
+        total_amount_cents: 0, total_gross_meta_cents: 0,
+        impressions: daily.impressions, clicks: daily.clicks, leads: daily.leads,
+        cpl_cents: 0, items: [],
+      };
+    }
+    groupsMap[key].total_amount_cents += t.amount_cents;
+    groupsMap[key].total_gross_meta_cents += Number(t.gross_spend_cents ?? t.metadata?.gross_meta_cents ?? 0);
+    groupsMap[key].items.push(t);
+  }
+  const groups = Object.values(groupsMap)
+    .map((g) => ({ ...g, cpl_cents: g.leads > 0 ? Math.round(g.total_amount_cents / g.leads) : 0 }))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
+  return { groups, others };
 }
 
 export async function createTopupSession(amountCents: number): Promise<{ url: string }> {

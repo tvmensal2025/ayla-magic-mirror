@@ -25,11 +25,11 @@ Deno.serve(async (req) => {
     // cache de tokens por consultor (agora vem da plataforma compartilhada)
     const tokenCache: Record<string, string> = {};
     // cache de saldo da carteira por consultor (cents) — pra auto-pause por saldo zerado
-    const walletCache: Record<string, { balance: number; auto_pause_at: number } | null> = {};
+    const walletCache: Record<string, { balance: number; auto_pause_at: number; debt: number } | null> = {};
     async function getWallet(consultantId: string) {
       if (walletCache[consultantId] !== undefined) return walletCache[consultantId];
-      const { data } = await admin.from("consultant_wallet").select("balance_cents,auto_pause_at_cents").eq("consultant_id", consultantId).maybeSingle();
-      walletCache[consultantId] = data ? { balance: Number(data.balance_cents), auto_pause_at: Number(data.auto_pause_at_cents) } : null;
+      const { data } = await admin.from("consultant_wallet").select("balance_cents,auto_pause_at_cents,debt_cents").eq("consultant_id", consultantId).maybeSingle();
+      walletCache[consultantId] = data ? { balance: Number(data.balance_cents), auto_pause_at: Number(data.auto_pause_at_cents), debt: Number((data as any).debt_cents || 0) } : null;
       return walletCache[consultantId];
     }
     // cache de CPL médio do consultor (centavos) — pra auto-pause adaptativo
@@ -59,6 +59,24 @@ Deno.serve(async (req) => {
           tokenCache[c.consultant_id] = conn.token;
         }
         const token = tokenCache[c.consultant_id];
+
+        // Pré-checa saldo: se já está em débito ou zerou, pausa AGORA antes de buscar insights
+        if (c.status === "active") {
+          const wPre = await getWallet(c.consultant_id);
+          if (wPre && (wPre.balance <= 0 || wPre.debt > 0)) {
+            try {
+              await fbFetch(`${FB_GRAPH}/${c.fb_campaign_id}?status=PAUSED&access_token=${token}`, { method: "POST" });
+              const reason = wPre.debt > 0
+                ? `Auto-pausada: carteira em débito de R$ ${(wPre.debt/100).toFixed(2)} — recarregue para reativar`
+                : `Auto-pausada: saldo zerado — recarregue para reativar`;
+              await admin.from("facebook_campaigns").update({ status: "paused", rejection_reason: reason }).eq("id", c.id);
+              autoPaused++;
+              try { await notifyConsultant(c.consultant_id, "warning", "Campanha pausada — saldo zerado 💳", reason); } catch (_) {}
+              continue;
+            } catch (pe) { console.error("[fb-sync] pre-pause failed", c.fb_campaign_id, (pe as Error).message); }
+          }
+        }
+
         const since = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
         const until = new Date().toISOString().slice(0, 10);
         const url = `${FB_GRAPH}/${c.fb_campaign_id}/insights?fields=impressions,reach,clicks,ctr,cpm,spend,actions,frequency&time_range={"since":"${since}","until":"${until}"}&time_increment=1&access_token=${token}`;
@@ -94,28 +112,46 @@ Deno.serve(async (req) => {
           const cpl = leads > 0 ? Math.round(spend / Number(leads)) : 0;
           totalSpend += spend; totalLeads += Number(leads); totalConv += Number(conv);
           maxFreq = Math.max(maxFreq, parseFloat(row.frequency || "0"));
-          // Lê linha existente pra calcular delta de gasto a debitar da wallet
+          // Lê linha existente pra calcular delta de gasto + atividade incremental no período
           const { data: prev } = await admin
             .from("facebook_metrics_daily")
-            .select("spend_cents,synced_to_wallet_cents")
+            .select("spend_cents,synced_to_wallet_cents,impressions,clicks,leads")
             .eq("campaign_id", c.id)
             .eq("date", date)
             .maybeSingle();
           const alreadyDebited = Number((prev as any)?.synced_to_wallet_cents ?? 0);
           const deltaSpend = Math.max(0, spend - alreadyDebited);
+          const impressionsNow = parseInt(row.impressions || "0");
+          const clicksNow = parseInt(row.clicks || "0");
+          const leadsNow = Number(leads);
+          const dImpressions = Math.max(0, impressionsNow - Number((prev as any)?.impressions || 0));
+          const dClicks = Math.max(0, clicksNow - Number((prev as any)?.clicks || 0));
+          const dLeads = Math.max(0, leadsNow - Number((prev as any)?.leads || 0));
           if (deltaSpend > 0) {
-            // Aplica markup da plataforma sobre o gasto bruto Meta
             const chargeCents = Math.round(deltaSpend * (1 + feePct));
             try {
+              const time = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+              const dateBr = date.split("-").reverse().slice(0, 2).join("/");
+              const activity = [
+                dImpressions > 0 ? `${dImpressions} impr.` : null,
+                dClicks > 0 ? `${dClicks} clique${dClicks > 1 ? "s" : ""}` : null,
+                dLeads > 0 ? `${dLeads} lead${dLeads > 1 ? "s" : ""}` : null,
+              ].filter(Boolean).join(", ") || "sem novas interações";
+              const description = `${c.fb_campaign_id ? "Campanha" : "Anúncio"} • ${dateBr} ${time} • ${activity}`;
               await admin.rpc("debit_consultant_wallet", {
                 _consultant_id: c.consultant_id,
                 _amount_cents: chargeCents,
                 _campaign_id: c.id,
-                _description: `Gasto Facebook ${date} (Meta R$ ${(deltaSpend/100).toFixed(2)} + margem ${(feePct*100).toFixed(0)}%)`,
-                _metadata: { date, fb_campaign_id: c.fb_campaign_id, gross_meta_cents: deltaSpend, fee_percent: feePct },
+                _description: description,
+                _metadata: {
+                  date, fb_campaign_id: c.fb_campaign_id,
+                  gross_meta_cents: deltaSpend, fee_percent: feePct,
+                  delta_impressions: dImpressions, delta_clicks: dClicks, delta_leads: dLeads,
+                  synced_at: new Date().toISOString(),
+                },
                 _gross_spend_cents: deltaSpend,
               });
-              walletCache[c.consultant_id] = undefined as any; // invalida cache
+              walletCache[c.consultant_id] = undefined as any;
             } catch (de) { console.error("[fb-sync] debit failed", c.id, (de as Error).message); }
           }
           await admin.from("facebook_metrics_daily").upsert({
