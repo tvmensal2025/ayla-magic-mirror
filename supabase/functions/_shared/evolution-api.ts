@@ -1,0 +1,332 @@
+/**
+ * Evolution API Helper
+ * Funções para enviar mensagens via Evolution API
+ */
+
+import { fetchWithTimeout, logStructured, TIMEOUT_WHAPI } from "./utils.ts";
+import { captureError } from "./sentry.ts";
+
+export interface EvolutionButton {
+  id: string;
+  title: string;
+}
+
+export interface EvolutionInstance {
+  id: string;
+  instance_name: string;
+  api_url: string;
+  api_key: string;
+  phone_number?: string;
+  status: string;
+}
+
+/**
+ * Cria sender para Evolution API
+ */
+export function createEvolutionSender(apiUrl: string, apiKey: string, instanceName: string) {
+  const baseUrl = apiUrl.replace(/\/$/, "");
+
+  // Retry helper para envios — exponential backoff (300ms, 900ms, 2.7s)
+  async function sendWithRetry(label: string, doSend: () => Promise<Response>): Promise<boolean> {
+    let lastStatus = 0;
+    let lastBody = "";
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await doSend();
+        if (res.ok) return true;
+        lastStatus = res.status;
+        lastBody = (await res.text()).substring(0, 200);
+        // 4xx (exceto 408/429) não vale retry
+        if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+          break;
+        }
+      } catch (error: any) {
+        lastBody = error?.message || String(error);
+      }
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 300 * Math.pow(3, attempt - 1)));
+      }
+    }
+    logStructured("error", `evolution_${label}_failed_final`, {
+      instance: instanceName,
+      status: lastStatus,
+      error: lastBody,
+    });
+    captureError(new Error(`Evolution ${label} failed after 3 attempts: ${lastBody}`), {
+      tags: { function: "evolution-api", instance: instanceName, kind: label },
+      extra: { status: lastStatus },
+    });
+    return false;
+  }
+
+  async function sendText(remoteJid: string, text: string): Promise<boolean> {
+    const preview = (text || "").substring(0, 60).replace(/\n/g, " ");
+    console.log(`📤 [sendText] -> ${remoteJid} | "${preview}${text.length > 60 ? "..." : ""}"`);
+    const ok = await sendWithRetry("send_text", () =>
+      fetchWithTimeout(`${baseUrl}/message/sendText/${instanceName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "apikey": apiKey },
+        body: JSON.stringify({ number: remoteJid, text }),
+        timeout: TIMEOUT_WHAPI,
+      })
+    );
+    console.log(`${ok ? "✅" : "❌"} [sendText] resultado=${ok}`);
+    return ok;
+  }
+
+  async function sendButtons(remoteJid: string, message: string, buttons: EvolutionButton[]): Promise<boolean> {
+    // Evolution API v2 (Baileys) exige `type: "reply"` em cada botão.
+    const safeButtons = buttons.slice(0, 3).map((b) => ({
+      type: "reply" as const,
+      displayText: (b.title || "").substring(0, 20),
+      id: b.id,
+    }));
+
+    console.log(`📤 [sendButtons] -> ${remoteJid} (${safeButtons.length} botões: ${safeButtons.map(b => b.id).join(",")})`);
+    const ok = await sendWithRetry("send_buttons", () =>
+      fetchWithTimeout(`${baseUrl}/message/sendButtons/${instanceName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "apikey": apiKey },
+        body: JSON.stringify({
+          number: remoteJid,
+          title: "Escolha uma opção",
+          description: message,
+          footer: "iGreen Energy",
+          buttons: safeButtons,
+        }),
+        timeout: TIMEOUT_WHAPI,
+      })
+    );
+    if (ok) {
+      console.log(`✅ [sendButtons] entregue à Evolution`);
+      return true;
+    }
+
+    // Fallback final: texto numerado garantindo que o cliente NUNCA fica sem resposta
+    console.warn(`⚠️ [sendButtons] FALHOU -> caindo para texto numerado`);
+    logStructured("warn", "evolution_buttons_fallback_to_text", { instance: instanceName });
+    const textWithOptions = `${message}\n\n${buttons.map((b, i) => `*${i + 1}.* ${b.title}`).join("\n")}\n\n_Digite o número da opção desejada._`;
+    const okText = await sendText(remoteJid, textWithOptions);
+    console.log(`${okText ? "✅" : "❌"} [sendButtons fallback texto] resultado=${okText}`);
+    return okText;
+  }
+
+  async function downloadMedia(key: any, message: any): Promise<string | null> {
+    try {
+      const res = await fetchWithTimeout(`${baseUrl}/chat/getBase64FromMediaMessage/${instanceName}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": apiKey,
+        },
+        body: JSON.stringify({
+          message: {
+            key,
+            message,
+          },
+        }),
+        timeout: 30_000,
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        logStructured("error", "evolution_download_media_failed", {
+          instance: instanceName,
+          status: res.status,
+          error: errorText.substring(0, 200),
+        });
+        return null;
+      }
+
+      const data = await res.json();
+      return data.base64 || null;
+    } catch (error: any) {
+      logStructured("error", "evolution_download_media_exception", {
+        instance: instanceName,
+        error: error?.message,
+      });
+      return null;
+    }
+  }
+
+  async function sendMedia(remoteJid: string, mediaUrl: string, caption: string, mediatype: "video" | "image" | "document" = "video"): Promise<boolean> {
+    // Evolution API espera apenas o número, sem sufixo JID
+    const number = remoteJid.replace("@s.whatsapp.net", "").replace("@c.us", "");
+    try {
+      const res = await fetchWithTimeout(`${baseUrl}/message/sendMedia/${instanceName}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": apiKey,
+        },
+        body: JSON.stringify({
+          number,
+          mediatype,
+          mimetype: mediatype === "video" ? "video/mp4" : mediatype === "image" ? "image/jpeg" : "application/pdf",
+          caption,
+          media: mediaUrl,
+          fileName: mediatype === "video" ? "video.mp4" : mediatype === "image" ? "image.jpg" : "document.pdf",
+        }),
+        timeout: 120_000,
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        logStructured("error", "evolution_send_media_failed", {
+          instance: instanceName,
+          status: res.status,
+          error: errorText.substring(0, 200),
+        });
+        return false;
+      }
+
+      return true;
+    } catch (error: any) {
+      logStructured("error", "evolution_send_media_exception", {
+        instance: instanceName,
+        error: error?.message,
+      });
+      return false;
+    }
+  }
+
+  async function sendAudio(remoteJid: string, audioUrl: string): Promise<boolean> {
+    const number = remoteJid.replace("@s.whatsapp.net", "").replace("@c.us", "");
+    try {
+      const res = await fetchWithTimeout(`${baseUrl}/message/sendWhatsAppAudio/${instanceName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "apikey": apiKey },
+        body: JSON.stringify({ number, audio: audioUrl, encoding: true }),
+        timeout: 120_000,
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        logStructured("error", "evolution_send_audio_failed", { instance: instanceName, status: res.status, error: errorText.substring(0, 200) });
+        return false;
+      }
+      return true;
+    } catch (error: any) {
+      logStructured("error", "evolution_send_audio_exception", { instance: instanceName, error: error?.message });
+      return false;
+    }
+  }
+
+  return { sendText, sendButtons, downloadMedia, sendMedia, sendAudio };
+}
+
+/**
+ * Extrai dados da mensagem Evolution API
+ *
+ * @param body Payload bruto da Evolution
+ * @param instanceConnectedPhone (opcional) Telefone conectado da instância — se o remoteJid
+ *        for o próprio número conectado, ignoramos a mensagem (auto-mensagem do consultor).
+ */
+export function parseEvolutionMessage(body: any, instanceConnectedPhone?: string | null) {
+  const data = body.data || body;
+  const key = data.key || {};
+  const message = data.message || {};
+  const messageTimestamp = data.messageTimestamp || key.timestamp;
+
+  // Remote JID (número do remetente)
+  const remoteJid = key.remoteJid || "";
+  const fromMe = key.fromMe || false;
+
+  // Ignorar mensagens enviadas por nós
+  if (fromMe) {
+    return null;
+  }
+
+  // Ignorar grupos, newsletters e canais
+  if (
+    remoteJid.includes("@g.us") ||
+    remoteJid.includes("@newsletter") ||
+    remoteJid.includes("@broadcast")
+  ) {
+    return null;
+  }
+
+  // ── BLINDAGEM ANTI-SELF-MESSAGE ──
+  // Se o número remetente == número conectado da instância, é auto-mensagem
+  // (consultor mandando do próprio celular). Ignoramos para não criar lead lixo.
+  if (instanceConnectedPhone) {
+    const remotePhone = remoteJid.replace(/@s\.whatsapp\.net$/, "").replace(/@c\.us$/, "").replace(/\D/g, "");
+    const connected = String(instanceConnectedPhone).replace(/\D/g, "");
+    if (remotePhone && connected && (remotePhone === connected || remotePhone.endsWith(connected) || connected.endsWith(remotePhone))) {
+      logStructured("info", "evolution_self_message_ignored", { remoteJid, connected_phone: connected });
+      return null;
+    }
+  }
+
+  // Extrair texto
+  let messageText = "";
+  if (message.conversation) {
+    messageText = message.conversation;
+  } else if (message.extendedTextMessage?.text) {
+    messageText = message.extendedTextMessage.text;
+  }
+
+  // Extrair resposta de botão
+  let buttonId: string | null = null;
+  if (message.buttonsResponseMessage?.selectedButtonId) {
+    buttonId = message.buttonsResponseMessage.selectedButtonId;
+  } else if (message.listResponseMessage?.singleSelectReply?.selectedRowId) {
+    buttonId = message.listResponseMessage.singleSelectReply.selectedRowId;
+  }
+
+  // Extrair imagem
+  const imageMessage = message.imageMessage;
+  const hasImage = !!imageMessage;
+
+  // Extrair documento
+  const documentMessage = message.documentMessage;
+  const hasDocument = !!documentMessage;
+
+  // Extrair áudio
+  const audioMessage = message.audioMessage;
+  const hasAudio = !!audioMessage;
+
+  // Extrair vídeo
+  const videoMessage = message.videoMessage;
+  const hasVideo = !!videoMessage;
+
+  const isFile = hasImage || hasDocument;
+  const isButton = !!buttonId;
+
+  return {
+    remoteJid,
+    messageText: messageText.trim(),
+    buttonId,
+    hasImage,
+    hasDocument,
+    hasAudio,
+    hasVideo,
+    isFile,
+    isButton,
+    imageMessage,
+    documentMessage,
+    audioMessage,
+    videoMessage,
+    key,
+    message,
+    messageTimestamp,
+  };
+}
+
+/**
+ * Extrai URL de mídia da mensagem (se disponível)
+ */
+export function extractMediaUrl(message: any): string | null {
+  if (message.imageMessage?.url) {
+    return message.imageMessage.url;
+  }
+  if (message.documentMessage?.url) {
+    return message.documentMessage.url;
+  }
+  if (message.videoMessage?.url) {
+    return message.videoMessage.url;
+  }
+  if (message.audioMessage?.url) {
+    return message.audioMessage.url;
+  }
+  return null;
+}

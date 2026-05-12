@@ -1,13 +1,91 @@
 // Evolution API calls routed through Supabase Edge Function proxy
 import { supabase } from "@/integrations/supabase/client";
 
-const SUPABASE_URL = "https://zlzasfhcxcznaprrragl.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpsemFzZmhjeGN6bmFwcnJyYWdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyNzQ1NzAsImV4cCI6MjA4Njg1MDU3MH0.OJzRdi_Z_1TFZjQXmK8rJofBeHVZc27VSo2vMMw9Spo";
+const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL || "https://zlzasfhcxcznaprrragl.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY =
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpsemFzZmhjeGN6bmFwcnJyYWdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyNzQ1NzAsImV4cCI6MjA4Njg1MDU3MH0.OJzRdi_Z_1TFZjQXmK8rJofBeHVZc27VSo2vMMw9Spo";
 const PROXY_URL = `${SUPABASE_URL}/functions/v1/evolution-proxy`;
+
+/** Custom error class for auth failures — hooks can check this to avoid crashing */
+export class EvolutionAuthError extends Error {
+  public readonly code = "auth_error";
+  public readonly requiresRelogin: boolean;
+
+  constructor(
+    message = "Sessão expirada. Faça login novamente.",
+    options?: { requiresRelogin?: boolean }
+  ) {
+    super(message);
+    this.name = "EvolutionAuthError";
+    this.requiresRelogin = options?.requiresRelogin ?? false;
+  }
+}
 
 function normalizeQrBase64(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) return null;
   return value;
+}
+
+async function readJsonSafe(response: Response): Promise<Record<string, unknown> | null> {
+  try {
+    const parsed = await response.json();
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function signOutSilently() {
+  try {
+    await supabase.auth.signOut();
+  } catch {
+    // best-effort only
+  }
+}
+
+async function getAccessToken(forceRefresh = false): Promise<string> {
+  const sessionResult = forceRefresh
+    ? await supabase.auth.refreshSession()
+    : await supabase.auth.getSession();
+
+  const token = sessionResult.data.session?.access_token;
+  if (token) return token;
+
+  if (!forceRefresh) {
+    const refreshResult = await supabase.auth.refreshSession();
+    const refreshedToken = refreshResult.data.session?.access_token;
+    if (refreshedToken) return refreshedToken;
+  }
+
+  throw new EvolutionAuthError("Sessão expirada. Faça login novamente.", {
+    requiresRelogin: true,
+  });
+}
+
+async function executeProxyRequest(
+  token: string,
+  path: string,
+  method: string,
+  body?: unknown
+): Promise<Response> {
+  const proxyBody: Record<string, unknown> = { path, method };
+  if (body !== undefined) {
+    proxyBody.body = body;
+  }
+
+  return fetch(PROXY_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      apikey: SUPABASE_PUBLISHABLE_KEY,
+    },
+    body: JSON.stringify(proxyBody),
+  });
 }
 
 async function request<T>(
@@ -17,62 +95,72 @@ async function request<T>(
   options?: { gracefulTimeout?: boolean }
 ): Promise<T> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token || "";
+    let token = await getAccessToken();
+    let retriedAfterAuthFailure = false;
 
-    const proxyBody: Record<string, unknown> = { path, method };
-    if (body !== undefined) {
-      proxyBody.body = body;
-    }
+    while (true) {
+      const res = await executeProxyRequest(token, path, method, body);
 
-    const res = await fetch(PROXY_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        apikey: SUPABASE_PUBLISHABLE_KEY,
-      },
-      body: JSON.stringify(proxyBody),
-    });
+      if (res.status === 401) {
+        if (retriedAfterAuthFailure) {
+          await signOutSilently();
+          throw new EvolutionAuthError("Sessão expirada. Faça login novamente.", {
+            requiresRelogin: true,
+          });
+        }
 
-    if (res.status === 401) {
-      throw new Error("Erro de autenticação com a API do WhatsApp");
-    }
+        token = await getAccessToken(true);
+        retriedAfterAuthFailure = true;
+        continue;
+      }
 
-    if (!res.ok) {
-      let detail = res.statusText || "Erro na API";
-      try {
-        const json = await res.json();
-        console.error("[evolutionApi] proxy error response:", JSON.stringify(json, null, 2));
+      if (!res.ok) {
+        let detail = res.statusText || "Erro na API";
+        const json = await readJsonSafe(res);
         const msg =
-          json?.response?.message?.[0] ||
-          json?.response?.message ||
-          json?.error ||
-          json?.message;
-        if (msg) detail = typeof msg === "string" ? msg : JSON.stringify(msg);
-      } catch { /* not json */ }
-      throw new Error(detail);
-    }
+          json?.response && typeof json.response === "object" && !Array.isArray(json.response)
+            ? (json.response as Record<string, unknown>).message
+            : json?.error || json?.message;
 
-    const json = await res.json();
-
-    // Detect graceful timeout/error responses from proxy (200 with error payload)
-    if (json && typeof json === "object" && !Array.isArray(json)) {
-      if ((json as Record<string, unknown>).timeout === true) {
-        if (options?.gracefulTimeout) {
-          return json as T;
+        if (Array.isArray(msg)) {
+          // Handle nested arrays like [["instance requires..."]]
+          const flat = msg.flat();
+          detail = typeof flat[0] === "string" ? flat[0] : JSON.stringify(flat);
+        } else if (typeof msg === "string") {
+          detail = msg;
         }
-        throw new Error("Timeout ao processar requisição");
-      }
-      if ((json as Record<string, unknown>).unavailable === true) {
-        if (options?.gracefulTimeout) {
-          return json as T;
-        }
-        throw new Error((json as Record<string, unknown>).message as string || "Serviço temporariamente indisponível");
-      }
-    }
 
-    return json;
+        // Don't crash the whole app for "not connected" — let callers handle gracefully
+        if (/not connected/i.test(detail)) {
+          console.warn(`[EvolutionAPI] Instance not connected: ${detail}`);
+        }
+
+        throw new Error(detail);
+      }
+
+      const json = await res.json();
+
+      // Detect graceful timeout/error responses from proxy (200 with error payload)
+      if (json && typeof json === "object" && !Array.isArray(json)) {
+        if ((json as Record<string, unknown>).timeout === true) {
+          if (options?.gracefulTimeout) {
+            return json as T;
+          }
+          throw new Error("Timeout ao processar requisição");
+        }
+        if ((json as Record<string, unknown>).unavailable === true) {
+          if (options?.gracefulTimeout) {
+            return json as T;
+          }
+          throw new Error(
+            ((json as Record<string, unknown>).message as string) ||
+              "Serviço temporariamente indisponível"
+          );
+        }
+      }
+
+      return json;
+    }
   } catch (err) {
     if (err instanceof TypeError) {
       throw new Error("Erro de conexão. Verifique sua internet.");
@@ -84,6 +172,8 @@ async function request<T>(
 // ─── Instance Management ───
 
 export async function createInstance(instanceName: string) {
+  const webhookUrl = `${SUPABASE_URL}/functions/v1/evolution-webhook`;
+
   const response = await request<{
     instance?: { instanceName: string; status: string };
     qrcode?: { base64?: string | null; pairingCode?: string; count?: number };
@@ -91,6 +181,16 @@ export async function createInstance(instanceName: string) {
     instanceName,
     qrcode: true,
     integration: "WHATSAPP-BAILEYS",
+    webhook: {
+      url: webhookUrl,
+      byEvents: false,
+      base64: true,
+      enabled: true,
+      events: [
+        "MESSAGES_UPSERT",
+        "CONNECTION_UPDATE",
+      ],
+    },
   });
 
   return {
@@ -99,6 +199,24 @@ export async function createInstance(instanceName: string) {
       ? { ...response.qrcode, base64: normalizeQrBase64(response.qrcode.base64) }
       : undefined,
   };
+}
+
+/** Configure webhook on an existing instance */
+export async function setInstanceWebhook(instanceName: string) {
+  const webhookUrl = `${SUPABASE_URL}/functions/v1/evolution-webhook`;
+
+  return request(`webhook/set/${instanceName}`, "POST", {
+    webhook: {
+      url: webhookUrl,
+      byEvents: false,
+      base64: true,
+      enabled: true,
+      events: [
+        "MESSAGES_UPSERT",
+        "CONNECTION_UPDATE",
+      ],
+    },
+  });
 }
 
 export async function connectInstance(instanceName: string) {
@@ -117,11 +235,22 @@ export async function connectInstance(instanceName: string) {
 }
 
 export async function getConnectionState(instanceName: string) {
-  const response = await request<{ instance?: { state: string }; state?: string }>(
-    `instance/connectionState/${instanceName}`, "GET"
-  );
-  const state = response?.instance?.state || response?.state;
-  return { state: (state as "open" | "close" | "connecting") || "close" };
+  try {
+    const response = await request<{ instance?: { state: string }; state?: string }>(
+      `instance/connectionState/${instanceName}`,
+      "GET"
+    );
+    const state = response?.instance?.state || response?.state;
+    return { state: (state as "open" | "close" | "connecting") || "close" };
+  } catch (err) {
+    if (err instanceof EvolutionAuthError) throw err;
+    const msg = err instanceof Error ? err.message : "";
+    // "not connected" / "not found" → return close instead of crashing
+    if (/not connected|not found|does not exist|instance.*not/i.test(msg)) {
+      return { state: "close" as const };
+    }
+    throw err;
+  }
 }
 
 export async function deleteInstance(instanceName: string) {
@@ -132,10 +261,21 @@ export async function logoutInstance(instanceName: string) {
   return request<void>(`instance/logout/${instanceName}`, "DELETE");
 }
 
+export interface EvolutionInstanceSummary {
+  instance?: {
+    instanceName?: string;
+    status?: string;
+    owner?: string;
+    ownerJid?: string;
+  };
+  name?: string;
+  connectionStatus?: string;
+  owner?: string;
+  ownerJid?: string;
+}
+
 export async function fetchInstances() {
-  return request<{ instance: { instanceName: string; status: string } }[]>(
-    "instance/fetchInstances", "GET"
-  );
+  return request<EvolutionInstanceSummary[]>("instance/fetchInstances", "GET");
 }
 
 // ─── Chat / Conversations ───
@@ -239,6 +379,40 @@ export async function sendDocument(instanceName: string, phone: string, docUrl: 
   return request<{ key: { id: string } }>(`message/sendMedia/${instanceName}`, "POST", {
     number: phone, mediatype: "document", media: docUrl, fileName,
   }, { gracefulTimeout });
+}
+
+// ─── Groups ───
+
+export interface EvolutionGroup {
+  id: string;
+  subject: string;
+  subjectOwner?: string;
+  subjectTime?: number;
+  size?: number;
+  creation?: number;
+  owner?: string;
+  desc?: string;
+  participants?: EvolutionGroupParticipant[];
+}
+
+export interface EvolutionGroupParticipant {
+  id: string;
+  admin?: string | null;
+}
+
+export async function fetchAllGroups(instanceName: string): Promise<EvolutionGroup[]> {
+  try {
+    return await request<EvolutionGroup[]>(`group/fetchAllGroups/${instanceName}`, "GET");
+  } catch { return []; }
+}
+
+export async function getGroupParticipants(instanceName: string, groupJid: string): Promise<EvolutionGroupParticipant[]> {
+  try {
+    const result = await request<{ participants?: EvolutionGroupParticipant[] }>(
+      `group/participants/${instanceName}?groupJid=${encodeURIComponent(groupJid)}`, "GET"
+    );
+    return result?.participants || [];
+  } catch { return []; }
 }
 
 // ─── Presence / Read ───

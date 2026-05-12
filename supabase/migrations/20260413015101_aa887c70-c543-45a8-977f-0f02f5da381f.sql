@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS customers_phone_unique;

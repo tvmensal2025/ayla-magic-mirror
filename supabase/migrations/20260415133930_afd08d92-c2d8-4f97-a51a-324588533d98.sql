@@ -1,0 +1,1 @@
+UPDATE public.customers SET status = 'data_complete', conversation_step = 'data_complete', error_message = NULL WHERE id = '9342c48c-87e2-4fbc-a8c2-a1cffdd0d783' AND status = 'automation_failed';

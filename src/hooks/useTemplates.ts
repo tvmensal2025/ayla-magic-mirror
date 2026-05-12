@@ -42,8 +42,8 @@ export function useTemplates(consultantId: string) {
       if (mountedRef.current) {
         setTemplates((data as MessageTemplate[]) ?? []);
       }
-    } catch {
-      // silently handle – consumer can check templates length
+    } catch (err) {
+      console.warn("[useTemplates] fetch error:", err);
     } finally {
       if (mountedRef.current) {
         setIsLoading(false);
@@ -107,6 +107,7 @@ export function useTemplates(consultantId: string) {
   return {
     templates,
     isLoading,
+    refetchTemplates: fetchTemplates,
     createTemplate,
     updateTemplate,
     deleteTemplate,

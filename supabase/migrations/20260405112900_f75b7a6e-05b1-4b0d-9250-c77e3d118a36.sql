@@ -1,0 +1,2 @@
+UPDATE crm_deals SET deal_origin = 'aprovado' WHERE deal_origin IS NULL AND approved_at IS NOT NULL AND rejected_at IS NULL;
+UPDATE crm_deals SET deal_origin = 'reprovado' WHERE deal_origin IS NULL AND rejected_at IS NOT NULL;

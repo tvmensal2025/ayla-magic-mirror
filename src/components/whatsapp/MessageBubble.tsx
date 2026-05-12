@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Check, CheckCheck, Clock, FileText, Image, Mic, Video, Play, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ChatMessage } from "@/hooks/useMessages";
@@ -25,9 +25,16 @@ function StatusIcon({ status }: { status?: number }) {
   return null;
 }
 
+function isAccessibleUrl(url?: string): boolean {
+  if (!url) return false;
+  if (url.startsWith("data:")) return true;
+  if (url.startsWith("http") && !url.includes("mmg.whatsapp.net") && !url.includes("media-gru")) return true;
+  return false;
+}
+
 function AudioPlayer({ message, onLoadMedia }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null> }) {
   const [audioSrc, setAudioSrc] = useState<string | null>(
-    message.mediaUrl?.startsWith("data:") ? message.mediaUrl : null
+    isAccessibleUrl(message.mediaUrl) ? message.mediaUrl! : null
   );
   const [loading, setLoading] = useState(false);
 
@@ -38,6 +45,12 @@ function AudioPlayer({ message, onLoadMedia }: { message: ChatMessage; onLoadMed
     if (src) setAudioSrc(src);
     setLoading(false);
   }, [audioSrc, onLoadMedia, message.id]);
+
+  useEffect(() => {
+    if (!audioSrc && onLoadMedia) {
+      handleLoad();
+    }
+  }, []);
 
   if (audioSrc) {
     return (
@@ -68,13 +81,12 @@ function AudioPlayer({ message, onLoadMedia }: { message: ChatMessage; onLoadMed
 
 function ImageViewer({ message, onLoadMedia }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null> }) {
   const [imgSrc, setImgSrc] = useState<string | null>(
-    message.mediaUrl?.startsWith("data:") ? message.mediaUrl : null
+    isAccessibleUrl(message.mediaUrl) ? message.mediaUrl! : null
   );
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [loadAttempted, setLoadAttempted] = useState(false);
 
-  // Load on demand only (no auto-load)
   const handleLoad = useCallback(async () => {
     if (imgSrc || !onLoadMedia || loadAttempted) return;
     setLoadAttempted(true);
@@ -83,6 +95,12 @@ function ImageViewer({ message, onLoadMedia }: { message: ChatMessage; onLoadMed
     if (src) setImgSrc(src);
     setLoading(false);
   }, [imgSrc, onLoadMedia, message.id, loadAttempted]);
+
+  useEffect(() => {
+    if (!imgSrc && onLoadMedia) {
+      handleLoad();
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -131,7 +149,7 @@ function ImageViewer({ message, onLoadMedia }: { message: ChatMessage; onLoadMed
 
 function VideoPlayer({ message, onLoadMedia }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null> }) {
   const [videoSrc, setVideoSrc] = useState<string | null>(
-    message.mediaUrl?.startsWith("data:") ? message.mediaUrl : null
+    isAccessibleUrl(message.mediaUrl) ? message.mediaUrl! : null
   );
   const [loading, setLoading] = useState(false);
 
@@ -142,6 +160,12 @@ function VideoPlayer({ message, onLoadMedia }: { message: ChatMessage; onLoadMed
     if (src) setVideoSrc(src);
     setLoading(false);
   }, [videoSrc, onLoadMedia, message.id]);
+
+  useEffect(() => {
+    if (!videoSrc && onLoadMedia) {
+      handleLoad();
+    }
+  }, []);
 
   if (videoSrc) {
     return (
@@ -161,7 +185,7 @@ function VideoPlayer({ message, onLoadMedia }: { message: ChatMessage; onLoadMed
 
 function DocumentViewer({ message, onLoadMedia }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null> }) {
   const [docSrc, setDocSrc] = useState<string | null>(
-    message.mediaUrl?.startsWith("data:") ? message.mediaUrl : null
+    isAccessibleUrl(message.mediaUrl) ? message.mediaUrl! : null
   );
   const [loading, setLoading] = useState(false);
   const isPdf = message.mediaMimetype?.includes("pdf") || message.fileName?.endsWith(".pdf");
@@ -173,6 +197,12 @@ function DocumentViewer({ message, onLoadMedia }: { message: ChatMessage; onLoad
     if (src) setDocSrc(src);
     setLoading(false);
   }, [docSrc, onLoadMedia, message.id]);
+
+  useEffect(() => {
+    if (!docSrc && onLoadMedia) {
+      handleLoad();
+    }
+  }, []);
 
   if (docSrc && isPdf) {
     return (
@@ -209,7 +239,7 @@ function DocumentViewer({ message, onLoadMedia }: { message: ChatMessage; onLoad
 
 function StickerViewer({ message, onLoadMedia }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null> }) {
   const [src, setSrc] = useState<string | null>(
-    message.mediaUrl?.startsWith("data:") ? message.mediaUrl : null
+    isAccessibleUrl(message.mediaUrl) ? message.mediaUrl! : null
   );
   const [loading, setLoading] = useState(false);
 
@@ -221,6 +251,12 @@ function StickerViewer({ message, onLoadMedia }: { message: ChatMessage; onLoadM
     setLoading(false);
   }, [src, onLoadMedia, message.id]);
 
+  useEffect(() => {
+    if (!src && onLoadMedia) {
+      handleLoad();
+    }
+  }, []);
+
   if (src) {
     return <img src={src} alt="sticker" className="max-w-[150px] max-h-[150px]" />;
   }
@@ -229,6 +265,30 @@ function StickerViewer({ message, onLoadMedia }: { message: ChatMessage; onLoadM
     <Button variant="ghost" size="sm" className="gap-1 text-xs h-8" onClick={handleLoad} disabled={loading}>
       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "🏷️"} Sticker
     </Button>
+  );
+}
+
+function LinkifiedText({ text }: { text: string }) {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+  return (
+    <p className="text-sm whitespace-pre-wrap break-words">
+      {parts.map((part, i) =>
+        urlRegex.test(part) ? (
+          <a
+            key={i}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline hover:opacity-80 break-all"
+          >
+            {part}
+          </a>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </p>
   );
 }
 
@@ -246,17 +306,14 @@ export function MessageBubble({ message, onLoadMedia }: MessageBubbleProps) {
             : "bg-secondary text-foreground rounded-bl-none"
         }`}
       >
-        {/* Media content */}
         {mediaType === "image" && <ImageViewer message={message} onLoadMedia={onLoadMedia} />}
         {mediaType === "video" && <VideoPlayer message={message} onLoadMedia={onLoadMedia} />}
         {mediaType === "audio" && <AudioPlayer message={message} onLoadMedia={onLoadMedia} />}
         {mediaType === "document" && <DocumentViewer message={message} onLoadMedia={onLoadMedia} />}
         {mediaType === "sticker" && <StickerViewer message={message} onLoadMedia={onLoadMedia} />}
 
-        {/* Text */}
-        {showText && <p className="text-sm whitespace-pre-wrap break-words">{text}</p>}
+        {showText && <LinkifiedText text={text} />}
 
-        {/* Timestamp + status */}
         <div className="flex items-center justify-end gap-1 mt-0.5">
           <span className="text-[10px] text-muted-foreground">{formatTime(timestamp)}</span>
           {fromMe && <StatusIcon status={status} />}

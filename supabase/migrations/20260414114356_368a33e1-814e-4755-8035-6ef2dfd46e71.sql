@@ -1,0 +1,1 @@
+UPDATE customers SET conversation_step = 'confirmando_dados_doc' WHERE id = 'fe7d8747-1680-435b-978e-d5468ce95523';

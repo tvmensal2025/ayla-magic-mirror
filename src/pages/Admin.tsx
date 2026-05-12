@@ -1,241 +1,171 @@
-import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { useAnalytics, friendlyClickLabel } from "@/hooks/useAnalytics";
-import type { Consultant } from "@/types/consultant";
-import type { Database } from "@/integrations/supabase/types";
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area, PieChart, Pie, Cell, Legend,
-} from "recharts";
-import { Eye, EyeOff, Users, Copy, ExternalLink, LogOut, Save, Camera, BarChart3, LinkIcon, Settings, Monitor, MousePointerClick, Clock, Smartphone, Globe, QrCode, Download, X, MessageSquare, Zap, TrendingUp, KeyRound, RefreshCw, Loader2, Filter } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { LogOut, BarChart3, LinkIcon, Settings, Monitor, MessageSquare, LayoutGrid, Users, Copy, Download, X, History, Sparkles, FolderDown, Network, Eye, EyeOff, Megaphone } from "lucide-react";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { PrivacyModeProvider, usePrivacyMode } from "@/contexts/PrivacyModeContext";
 import { useQueryClient } from "@tanstack/react-query";
-import { WhatsAppTab } from "@/components/whatsapp/WhatsAppTab";
 import { WhatsAppErrorBoundary } from "@/components/whatsapp/WhatsAppErrorBoundary";
-import { QRCodeSVG } from "qrcode.react";
+import { useWhatsApp } from "@/hooks/useWhatsApp";
+import { useNotifications } from "@/hooks/useNotifications";
+import { useAdminAuth } from "@/hooks/useAdminAuth";
+import { useConsultantForm } from "@/hooks/useConsultantForm";
 
-const Admin = () => {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "dados" | "links" | "preview" | "whatsapp">("dashboard");
-  const [qrModal, setQrModal] = useState<{ url: string; label: string } | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    name: "", license: "", phone: "", cadastro_url: "", igreen_id: "", licenciada_cadastro_url: "", facebook_pixel_id: "", google_analytics_id: "", igreen_portal_email: "", igreen_portal_password: "",
-  });
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-  const [syncingDashboard, setSyncingDashboard] = useState(false);
-  const [selectedLicenciado, setSelectedLicenciado] = useState("all");
-  const [showCredPassword, setShowCredPassword] = useState(false);
-  const [showPortalPassword, setShowPortalPassword] = useState(false);
-  const [showCredentialsDialog, setShowCredentialsDialog] = useState(false);
-  const [credForm, setCredForm] = useState({ email: "", password: "" });
-  const navigate = useNavigate();
+// Heavy panels — lazy load on demand
+const QRCodeSVG = lazy(() => import("qrcode.react").then(m => ({ default: m.QRCodeSVG })));
+const DashboardTab = lazy(() => import("@/components/admin/DashboardTab").then(m => ({ default: m.DashboardTab })));
+const DadosTab = lazy(() => import("@/components/admin/DadosTab").then(m => ({ default: m.DadosTab })));
+const LinksTab = lazy(() => import("@/components/admin/LinksTab").then(m => ({ default: m.LinksTab })));
+const PreviewTab = lazy(() => import("@/components/admin/PreviewTab").then(m => ({ default: m.PreviewTab })));
+const NotificationCenter = lazy(() => import("@/components/admin/NotificationCenter").then(m => ({ default: m.NotificationCenter })));
+const AIChatPanel = lazy(() => import("@/components/admin/AIChatPanel").then(m => ({ default: m.AIChatPanel })));
+const WhatsAppTab = lazy(() => import("@/components/whatsapp/WhatsAppTab").then(m => ({ default: m.WhatsAppTab })));
+const KanbanBoard = lazy(() => import("@/components/whatsapp/KanbanBoard").then(m => ({ default: m.KanbanBoard })));
+const CustomerManager = lazy(() => import("@/components/whatsapp/CustomerManager").then(m => ({ default: m.CustomerManager })));
+const AutoMessageLog = lazy(() => import("@/components/whatsapp/AutoMessageLog").then(m => ({ default: m.AutoMessageLog })));
+const MaterialsTab = lazy(() => import("@/components/admin/MaterialsTab").then(m => ({ default: m.MaterialsTab })));
+const NetworkPanel = lazy(() => import("@/components/admin/NetworkPanel").then(m => ({ default: m.NetworkPanel })));
+const PanfletoModal = lazy(() => import("@/components/admin/PanfletoModal").then(m => ({ default: m.PanfletoModal })));
+const AdsTab = lazy(() => import("@/components/admin/ads/AdsTab").then(m => ({ default: m.AdsTab })));
+import { SupportChatButton } from "@/components/support/SupportChatButton";
+
+const AdminContent = () => {
+  const { privacyMode, togglePrivacy } = usePrivacyMode();
+  const { loading, approved, userId, form, photoPreview, setPhotoPreview, handleFormChange, handleLogout, setForm } = useAdminAuth();
+  const { saving, photoPreview: localPhotoPreview, handlePhotoChange, handleSave } = useConsultantForm(userId, form, setForm, setPhotoPreview);
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { data: analytics } = useAnalytics(userId);
 
-  // Derive unique licenciados list and filtered metrics
-  const licenciadoOptions = useMemo(() => {
-    if (!analytics?.allCustomers) return [];
-    const names = new Set<string>();
-    for (const c of analytics.allCustomers) {
-      if (c.registered_by_name) names.add(c.registered_by_name);
+  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "dados" | "links" | "preview" | "whatsapp" | "crm" | "clientes" | "historico" | "rede" | "anuncios">(() => {
+    if (typeof window !== "undefined") {
+      const tab = new URLSearchParams(window.location.search).get("tab");
+      if (tab === "anuncios") return "anuncios";
+      if (tab === "agente") return "whatsapp";
     }
-    return Array.from(names).sort();
-  }, [analytics?.allCustomers]);
+    return "dashboard";
+  });
+  const [pendingChatPhone, setPendingChatPhone] = useState<string | null>(null);
+  const [pendingChatMessage, setPendingChatMessage] = useState<string | undefined>(undefined);
+  const [qrModal, setQrModal] = useState<{ url: string; label: string } | null>(null);
+  const [panfletoOpen, setPanfletoOpen] = useState(false);
+  const [aiChatOpen, setAiChatOpen] = useState(false);
+  const [periodDays, setPeriodDays] = useState(30);
 
-  const filteredMetrics = useMemo(() => {
-    if (!analytics) return null;
-    const filtered = selectedLicenciado === "all"
-      ? analytics.allCustomers
-      : analytics.allCustomers.filter((c: any) => c.registered_by_name === selectedLicenciado);
+  const { instanceName } = useWhatsApp(userId || "");
+  // Hidrata a partir do sessionStorage para nunca mostrar 0 ao abrir/F5.
+  // O refetch acontece em background logo a seguir.
+  const [customers, setCustomers] = useState<Record<string, unknown>[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const cached = sessionStorage.getItem(`customers_cache_${userId || "anon"}`);
+      return cached ? (JSON.parse(cached) as Record<string, unknown>[]) : [];
+    } catch { return []; }
+  });
+  const fetchAbortRef = React.useRef<AbortController | null>(null);
+  const { notifications, unreadCount, markAllRead, markRead, clearAll } = useNotifications(userId);
 
-    const totalCustomers = filtered.length;
-    const totalKw = filtered.reduce((sum: number, c: any) => sum + (Number(c.media_consumo) || 0), 0);
-    const withConsumption = filtered.filter((c: any) => Number(c.media_consumo) > 0);
-    const avgKw = withConsumption.length > 0 ? totalKw / withConsumption.length : 0;
-
-    const statusMap = new Map<string, number>();
-    for (const c of filtered) {
-      const s = (c as any).status || "pending";
-      statusMap.set(s, (statusMap.get(s) || 0) + 1);
-    }
-    const statusLabels: Record<string, string> = {
-      approved: "Aprovados", pending: "Pendentes", rejected: "Rejeitados", lead: "Leads",
-      data_complete: "Dados Completos", registered_igreen: "Cadastrado iGreen", contract_sent: "Contrato Enviado",
-    };
-    const customersByStatus = Array.from(statusMap.entries())
-      .map(([status, count]) => ({
-        status, count,
-        label: statusLabels[status] || status.charAt(0).toUpperCase() + status.slice(1),
-      }))
-      .sort((a, b) => b.count - a.count);
-
-    // Weekly new customers
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const weekMap = new Map<string, number>();
-    for (let i = 3; i >= 0; i--) {
-      const start = new Date(); start.setDate(start.getDate() - (i + 1) * 7);
-      const end = new Date(); end.setDate(end.getDate() - i * 7);
-      const label = `${start.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} - ${end.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}`;
-      weekMap.set(label, 0);
-    }
-    for (const c of filtered) {
-      const created = new Date((c as any).created_at);
-      if (created >= thirtyDaysAgo) {
-        const daysAgo = Math.floor((Date.now() - created.getTime()) / (1000 * 60 * 60 * 24));
-        const weekIdx = Math.min(3, Math.floor(daysAgo / 7));
-        const keys = Array.from(weekMap.keys());
-        const key = keys[3 - weekIdx];
-        if (key) weekMap.set(key, (weekMap.get(key) || 0) + 1);
-      }
-    }
-    const weeklyNewCustomers = Array.from(weekMap.entries()).map(([week, count]) => ({ week, count }));
-
-    return { totalCustomers, totalKw, avgKw, customersByStatus, weeklyNewCustomers };
-  }, [analytics, selectedLicenciado]);
-
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      if (!session) navigate("/auth");
-      else { setUserId(session.user.id); loadConsultant(session.user.id); }
-    });
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) navigate("/auth");
-      else { setUserId(session.user.id); loadConsultant(session.user.id); }
-    });
-    return () => subscription.unsubscribe();
-  }, [navigate]);
-
-  const loadConsultant = async (uid: string) => {
-    const { data } = await supabase.from("consultants").select("*").eq("id", uid).maybeSingle();
-    if (data) {
-      const c = data as Consultant;
-      const id = c.igreen_id || "";
-      setForm({
-        name: c.name,
-        license: c.license,
-        phone: c.phone,
-        igreen_id: id,
-        cadastro_url: id ? `https://digital.igreenenergy.com.br/?id=${id}&sendcontract=true` : c.cadastro_url,
-        licenciada_cadastro_url: id ? `https://expansao.igreenenergy.com.br/?id=${id}&checkout=true` : c.licenciada_cadastro_url || "",
-        facebook_pixel_id: c.facebook_pixel_id || "",
-        google_analytics_id: c.google_analytics_id || "",
-        igreen_portal_email: (c as any).igreen_portal_email || "",
-        igreen_portal_password: (c as any).igreen_portal_password || "",
-      });
-      if (c.photo_url) setPhotoPreview(c.photo_url);
-    }
-    setLoading(false);
-  };
-
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) { setPhotoFile(file); setPhotoPreview(URL.createObjectURL(file)); }
-  };
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const fetchCustomers = React.useCallback(async () => {
     if (!userId) return;
-    setSaving(true);
+    // Cancela qualquer fetch em voo (evita race entre trocas de aba).
+    fetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
+
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const MAX_ATTEMPTS = 3;
+
     try {
-      let photo_url: string | undefined;
-      if (photoFile) {
-        const ext = photoFile.name.split(".").pop();
-        const path = `${userId}/photo.${ext}`;
-        const { error: uploadError } = await supabase.storage.from("consultant-photos").upload(path, photoFile, { upsert: true });
-        if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from("consultant-photos").getPublicUrl(path);
-        photo_url = urlData.publicUrl;
+      const selectFields = "id, name, phone_whatsapp, electricity_bill_value, email, cpf, address_city, address_state, address_street, address_neighborhood, address_complement, address_number, cep, numero_instalacao, data_nascimento, status, created_at, distribuidora, registered_by_name, registered_by_igreen_id, media_consumo, desconto_cliente, andamento_igreen, devolutiva, observacao, igreen_code, data_cadastro, data_ativo, data_validado, status_financeiro, cashback, nivel_licenciado, assinatura_cliente, assinatura_igreen, link_assinatura, customer_referred_by_name, customer_referred_by_phone, tipo_produto";
+      const allRows: Record<string, unknown>[] = [];
+      const pageSize = 1000;
+      let page = 0;
+      while (true) {
+        if (controller.signal.aborted) return;
+        // Retry com backoff por página (rede pode falhar transientemente).
+        let attempt = 0;
+        let pageData: Record<string, unknown>[] | null = null;
+        let lastError: unknown = null;
+        while (attempt < MAX_ATTEMPTS) {
+          const { data, error } = await supabase
+            .from("customers")
+            .select(selectFields)
+            .eq("consultant_id", userId)
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+          if (controller.signal.aborted) return;
+          if (!error) { pageData = (data as Record<string, unknown>[]) || []; break; }
+          lastError = error;
+          attempt++;
+          if (attempt < MAX_ATTEMPTS) await sleep(1000 * 2 ** (attempt - 1));
+        }
+        if (pageData === null) throw lastError ?? new Error("fetchCustomers failed");
+        allRows.push(...pageData);
+        if (pageData.length < pageSize) break;
+        page++;
       }
-      const payload: Database["public"]["Tables"]["consultants"]["Insert"] = {
-        id: userId, name: form.name, license: form.license.toLowerCase().replace(/\s+/g, "-"),
-        phone: form.phone.replace(/\D/g, ""), cadastro_url: form.cadastro_url, igreen_id: form.igreen_id || null,
-        licenciada_cadastro_url: form.licenciada_cadastro_url || null,
-        facebook_pixel_id: form.facebook_pixel_id || null,
-        google_analytics_id: form.google_analytics_id || null,
-        igreen_portal_email: form.igreen_portal_email || null,
-        igreen_portal_password: form.igreen_portal_password || null,
-      };
-      if (photo_url) payload.photo_url = photo_url;
-      const { error } = await supabase.from("consultants").upsert(payload, { onConflict: "id" });
-      if (error) throw error;
-      toast({ title: "✅ Dados salvos com sucesso!" });
-    } catch (error: unknown) {
-      toast({ title: "Erro ao salvar", description: error instanceof Error ? error.message : "Erro desconhecido", variant: "destructive" });
-    } finally { setSaving(false); }
-  };
 
-  const handleLogout = async () => { await supabase.auth.signOut(); navigate("/auth"); };
-
-  const runSync = async (email: string, password: string) => {
-    setSyncingDashboard(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("sync-igreen-customers", {
-        body: { portal_email: email, portal_password: password, consultant_id: userId },
-      });
-      if (error) throw error;
-      if (data?.success) {
-        toast({ title: "✅ Sincronização concluída!", description: `${data.processed} clientes processados, ${data.updated} atualizados.` });
-        queryClient.invalidateQueries({ queryKey: ["analytics"] });
-      } else {
-        toast({ title: "Erro na sincronização", description: data?.error || "Erro desconhecido", variant: "destructive" });
-      }
-    } catch (err: unknown) {
-      toast({ title: "Erro na sincronização", description: err instanceof Error ? err.message : "Erro desconhecido", variant: "destructive" });
-    } finally {
-      setSyncingDashboard(false);
+      // Sucesso real: só agora substituímos a lista exibida.
+      const mapped = allRows.map((c) => ({
+        id: c.id, name: (c.name as string) || "Sem nome", phone_whatsapp: c.phone_whatsapp,
+        electricity_bill_value: c.electricity_bill_value ?? undefined,
+        email: c.email, cpf: c.cpf, address_city: c.address_city, address_state: c.address_state,
+        address_street: c.address_street, address_neighborhood: c.address_neighborhood,
+        address_complement: c.address_complement, address_number: c.address_number,
+        cep: c.cep, numero_instalacao: c.numero_instalacao, data_nascimento: c.data_nascimento,
+        status: c.status, created_at: c.created_at, distribuidora: c.distribuidora,
+        registered_by_name: c.registered_by_name, registered_by_igreen_id: c.registered_by_igreen_id,
+        media_consumo: c.media_consumo, desconto_cliente: c.desconto_cliente,
+        andamento_igreen: c.andamento_igreen, devolutiva: c.devolutiva, observacao: c.observacao,
+        igreen_code: c.igreen_code, data_cadastro: c.data_cadastro, data_ativo: c.data_ativo,
+        data_validado: c.data_validado, status_financeiro: c.status_financeiro,
+        cashback: c.cashback, nivel_licenciado: c.nivel_licenciado,
+        assinatura_cliente: c.assinatura_cliente, assinatura_igreen: c.assinatura_igreen,
+        link_assinatura: c.link_assinatura,
+      }));
+      setCustomers(mapped);
+      try { sessionStorage.setItem(`customers_cache_${userId}`, JSON.stringify(mapped)); } catch { /* quota */ }
+    } catch (err) {
+      // NÃO zeramos a lista em erro — mantemos a última carga visível.
+      console.error("[fetchCustomers] falhou após retries — mantendo cache atual", err);
     }
-  };
+  }, [userId]);
 
-  const handleDashboardSync = () => {
-    if (form.igreen_portal_email && form.igreen_portal_password) {
-      runSync(form.igreen_portal_email, form.igreen_portal_password);
-    } else {
-      setCredForm({ email: "", password: "" });
-      setShowCredentialsDialog(true);
-    }
-  };
+  React.useEffect(() => { fetchCustomers(); }, [fetchCustomers]);
 
-  const handleSaveCredentialsAndSync = async () => {
-    if (!credForm.email || !credForm.password || !userId) return;
-    try {
-      const { error } = await supabase.from("consultants").update({
-        igreen_portal_email: credForm.email,
-        igreen_portal_password: credForm.password,
-      }).eq("id", userId);
-      if (error) throw error;
-      setForm(prev => ({ ...prev, igreen_portal_email: credForm.email, igreen_portal_password: credForm.password }));
-      setShowCredentialsDialog(false);
-      toast({ title: "✅ Credenciais salvas!" });
-      runSync(credForm.email, credForm.password);
-    } catch (err: unknown) {
-      toast({ title: "Erro ao salvar credenciais", description: err instanceof Error ? err.message : "Erro", variant: "destructive" });
+  // Re-fetch ao trocar para clientes/dashboard. AbortController dentro
+  // de fetchCustomers já cancela qualquer chamada anterior em voo.
+  React.useEffect(() => {
+    if (activeTab === "clientes" || activeTab === "dashboard") {
+      fetchCustomers();
     }
-  };
+  }, [activeTab, fetchCustomers]);
+
+  // Cleanup: cancela fetch pendente ao desmontar.
+  React.useEffect(() => () => { fetchAbortRef.current?.abort(); }, []);
+
+  const handleOpenChatFromCustomer = React.useCallback((phone: string, suggestedMessage?: string) => {
+    setPendingChatPhone(phone);
+    setPendingChatMessage(suggestedMessage);
+    setActiveTab("whatsapp");
+  }, []);
+
+  const copyLink = (url: string) => { navigator.clipboard.writeText(url); toast({ title: "✅ Link copiado!" }); };
 
   const baseUrl = "igreen.institutodossonhos.com.br";
   const slug = form.license || "sua-licenca";
 
-  const copyLink = (url: string) => {
-    navigator.clipboard.writeText(url);
-    toast({ title: "✅ Link copiado!" });
-  };
-
   const tabs = [
     { id: "dashboard" as const, label: "Dashboard", icon: BarChart3 },
     { id: "preview" as const, label: "Preview", icon: Monitor },
+    { id: "crm" as const, label: "CRM", icon: LayoutGrid },
+    { id: "clientes" as const, label: "Clientes", icon: Users },
+    { id: "rede" as const, label: "Rede", icon: Network },
     { id: "whatsapp" as const, label: "WhatsApp", icon: MessageSquare },
+    { id: "anuncios" as const, label: "Anúncios", icon: Megaphone },
+    { id: "historico" as const, label: "Histórico", icon: History },
     { id: "links" as const, label: "Links", icon: LinkIcon },
     { id: "dados" as const, label: "Dados", icon: Settings },
+    { id: "materiais" as const, label: "Materiais", icon: FolderDown },
   ];
 
   if (loading) {
@@ -247,49 +177,97 @@ const Admin = () => {
     );
   }
 
-  const chartData = analytics?.daily.map((d) => ({
-    ...d,
-    label: new Date(d.date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
-  })) || [];
+  if (!approved) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background px-4">
+        <img src="/images/logo-colorida-igreen.png" alt="iGreen" className="w-32" />
+        <div className="text-center space-y-2">
+          <h1 className="text-xl font-bold font-heading text-foreground">Aguardando Aprovação</h1>
+          <p className="text-muted-foreground text-sm max-w-md">Sua conta está sendo analisada pelo administrador. Você receberá acesso assim que for aprovado.</p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground gap-2">
+          <LogOut className="w-4 h-4" /> Sair
+        </Button>
+      </div>
+    );
+  }
+
+  const effectivePhotoPreview = localPhotoPreview || photoPreview;
 
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border bg-card/80 backdrop-blur-xl">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src="/images/logo-colorida-igreen.png" alt="iGreen" className="w-20 sm:w-24" />
             <div className="hidden sm:block">
               <h1 className="text-base font-bold font-heading text-foreground leading-tight">Painel do Consultor</h1>
-              <p className="text-xs text-muted-foreground">{form.name || "Bem-vindo"}</p>
+              <p className="text-xs text-muted-foreground sensitive-name">{form.name || "Bem-vindo"}</p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-foreground gap-2">
-            <LogOut className="w-4 h-4" />
-            <span className="hidden sm:inline">Sair</span>
-          </Button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={togglePrivacy}
+              className={`relative p-2 rounded-xl transition-all duration-200 ${privacyMode ? 'text-primary bg-primary/15' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}`}
+              aria-label={privacyMode ? "Mostrar dados sensíveis" : "Ocultar dados sensíveis"}
+              title={privacyMode ? "Modo privacidade ATIVO — clique para desativar" : "Ocultar dados sensíveis para gravação"}
+            >
+              {privacyMode ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+            </button>
+            <ThemeToggle />
+            <button
+              onClick={() => setAiChatOpen(true)}
+              className="relative p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-all duration-200"
+              aria-label="Assistente iGreen IA"
+              title="Assistente iGreen IA"
+            >
+              <Sparkles className="h-5 w-5" />
+            </button>
+            <Suspense fallback={<div className="w-9 h-9" />}>
+              <NotificationCenter
+                notifications={notifications}
+                unreadCount={unreadCount}
+                onMarkAllRead={markAllRead}
+                onMarkRead={markRead}
+                onClearAll={clearAll}
+                onAction={(n) => {
+                  if (n.type === "new_lead" || n.type === "deal_moved") setActiveTab("crm");
+                  else if (n.type === "devolutiva" || n.type === "status_change" || n.type === "new_customer") setActiveTab("clientes");
+                }}
+              />
+            </Suspense>
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-foreground gap-2 rounded-xl">
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Sair</span>
+            </Button>
+          </div>
         </div>
       </header>
 
-      {/* Tab Navigation - Scrollable on mobile */}
-      <nav className="border-b border-border bg-card/50">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="flex overflow-x-auto no-scrollbar">
+      {/* Tab Navigation */}
+      <nav className="border-b border-border bg-card/50 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto px-2 sm:px-6">
+          <div className="flex overflow-x-auto no-scrollbar -mx-2 sm:mx-0" style={{ WebkitOverflowScrolling: 'touch' }}>
             {tabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-all ${
-                    isActive
-                      ? "border-primary text-primary"
+                <button key={tab.id} onClick={() => {
+                  if (tab.id === "materiais") {
+                    window.open("https://drive.google.com/drive/folders/1KupNLRpZaJwHfgRUgbWV-cGYQenreSfu", "_blank", "noopener,noreferrer");
+                    return;
+                  }
+                  setActiveTab(tab.id);
+                }}
+                  className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-3 text-xs sm:text-sm font-medium whitespace-nowrap border-b-2 transition-all duration-200 shrink-0 ${
+                    isActive 
+                      ? "border-primary text-primary" 
                       : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  {tab.label}
+                  }`}>
+                  <Icon className={`w-4 h-4 ${isActive ? "text-primary" : ""}`} />
+                  <span className="hidden sm:inline">{tab.label}</span>
+                  <span className="sm:hidden">{tab.label.length > 8 ? tab.label.slice(0, 6) + '…' : tab.label}</span>
                 </button>
               );
             })}
@@ -298,822 +276,74 @@ const Admin = () => {
       </nav>
 
       {/* Content */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Dashboard Tab */}
-        {activeTab === "dashboard" && (
-          <div className="space-y-6">
-            {/* Stats Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <StatCard
-                icon={<Eye className="w-5 h-5" />}
-                label="Total de Visualizações"
-                value={analytics?.total ?? 0}
-                color="primary"
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        <Suspense fallback={<div className="flex justify-center py-12"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>}>
+          {activeTab === "dashboard" && userId && (
+            <DashboardTab userId={userId} form={form} onFormUpdate={handleFormChange} periodDays={periodDays} onPeriodChange={setPeriodDays} />
+          )}
+
+          {activeTab === "dados" && (
+            <DadosTab form={form} photoPreview={effectivePhotoPreview} saving={saving} onFormChange={handleFormChange} onPhotoChange={handlePhotoChange} onSave={handleSave} userId={userId || ""} />
+          )}
+
+          {activeTab === "links" && (
+            <LinksTab
+              slug={slug}
+              baseUrl={baseUrl}
+              onCopy={copyLink}
+              onQrOpen={(url, label) => setQrModal({ url, label })}
+              onPanfletoOpen={() => setPanfletoOpen(true)}
+            />
+          )}
+
+          {activeTab === "materiais" && (
+            <MaterialsTab />
+          )}
+
+          {userId && activeTab === "crm" && (
+            <KanbanBoard consultantId={userId} instanceName={instanceName} />
+          )}
+
+          {userId && activeTab === "clientes" && (
+            <CustomerManager
+              customers={customers as never[]}
+              consultantId={userId}
+              onCustomersChange={fetchCustomers}
+              instanceName={instanceName}
+              onOpenChat={handleOpenChatFromCustomer}
+            />
+          )}
+
+          {userId && activeTab === "rede" && (
+            <NetworkPanel consultantId={userId} />
+          )}
+
+          {userId && activeTab === "whatsapp" && (
+            <WhatsAppErrorBoundary>
+              <WhatsAppTab
+                key="whatsapp-tab"
+                userId={userId}
+                customers={customers as never[]}
+                pendingChatPhone={pendingChatPhone}
+                pendingChatMessage={pendingChatMessage}
+                onPendingChatConsumed={() => { setPendingChatPhone(null); setPendingChatMessage(undefined); }}
               />
-              <StatCard
-                icon={<Users className="w-5 h-5" />}
-                label="Página Cliente"
-                value={analytics?.totalClient ?? 0}
-                color="accent"
-              />
-              <StatCard
-                icon={<Users className="w-5 h-5" />}
-                label="Página Licenciado"
-                value={analytics?.totalLicenciada ?? 0}
-                color="primary"
-              />
-              <StatCard
-                icon={<MousePointerClick className="w-5 h-5" />}
-                label="Cliques nos Botões"
-                value={analytics?.totalClicks ?? 0}
-                color="accent"
-              />
-            </div>
+            </WhatsAppErrorBoundary>
+          )}
 
-            {/* Customer KPI Cards */}
-            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-              <h3 className="font-heading font-bold text-foreground text-sm flex items-center gap-2">
-                <Users className="w-4 h-4 text-primary" /> Clientes iGreen
-              </h3>
-              <div className="flex items-center gap-2">
-                <Select value={selectedLicenciado} onValueChange={setSelectedLicenciado}>
-                  <SelectTrigger className="h-8 w-[200px] text-xs">
-                    <Filter className="w-3.5 h-3.5 mr-1.5" />
-                    <SelectValue placeholder="Filtrar licenciado" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos os Licenciados</SelectItem>
-                    {licenciadoOptions.map((name) => (
-                      <SelectItem key={name} value={name}>{name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDashboardSync}
-                  disabled={syncingDashboard}
-                  className="h-8 text-xs gap-1.5"
-                >
-                  {syncingDashboard ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                  {syncingDashboard ? "Sincronizando..." : "Sincronizar iGreen"}
-                </Button>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              <StatCard
-                icon={<Users className="w-5 h-5" />}
-                label="Total de Clientes"
-                value={filteredMetrics?.totalCustomers ?? 0}
-                color="primary"
-              />
-              <StatCard
-                icon={<Zap className="w-5 h-5" />}
-                label="Total kW (Consumo)"
-                value={`${(filteredMetrics?.totalKw ?? 0).toLocaleString("pt-BR")} kW`}
-                color="accent"
-                subtitle={`Média: ${(filteredMetrics?.avgKw ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} kW`}
-              />
-              <StatCard
-                icon={<TrendingUp className="w-5 h-5" />}
-                label="Taxa de Conversão"
-                value={`${(analytics?.conversionRate ?? 0).toFixed(1)}%`}
-                color="primary"
-                subtitle="Cliques / Visualizações"
-              />
-            </div>
+          {userId && activeTab === "historico" && (
+            <AutoMessageLog consultantId={userId} />
+          )}
 
+          {userId && activeTab === "anuncios" && (
+            <AdsTab consultantId={userId} />
+          )}
 
-            {/* Customer Consumption + Status Donut */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Top Licenciados by Deals */}
-              <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
-                <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-primary" /> 🏆 Licenciados — Cadastros
-                </h3>
-                <p className="text-xs text-muted-foreground mb-4">Top licenciados por contas cadastradas</p>
-                {analytics?.topLicenciados && analytics.topLicenciados.length > 0 ? (
-                  <div style={{ height: Math.max(200, analytics.topLicenciados.length * 36) }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={analytics.topLicenciados} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(120, 8%, 18%)" horizontal={false} />
-                        <XAxis
-                          type="number"
-                          tick={{ fill: "hsl(120, 5%, 65%)", fontSize: 11 }}
-                          tickLine={false}
-                          axisLine={false}
-                          allowDecimals={false}
-                        />
-                        <YAxis
-                          type="category"
-                          dataKey="name"
-                          tick={{ fill: "hsl(120, 5%, 65%)", fontSize: 11 }}
-                          tickLine={false}
-                          axisLine={false}
-                          width={100}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            background: "hsl(120, 8%, 8%)",
-                            border: "1px solid hsl(120, 8%, 18%)",
-                            borderRadius: "12px",
-                            fontSize: "13px",
-                            color: "hsl(0, 0%, 95%)",
-                          }}
-                          formatter={(value: number) => [`${value} cadastros`, "Contas"]}
-                        />
-                        <defs>
-                          <linearGradient id="barGradientLic" x1="0" y1="0" x2="1" y2="0">
-                            <stop offset="0%" stopColor="hsl(130, 100%, 30%)" />
-                            <stop offset="100%" stopColor="hsl(130, 100%, 45%)" />
-                          </linearGradient>
-                        </defs>
-                        <Bar dataKey="deals" name="Cadastros" fill="url(#barGradientLic)" radius={[0, 6, 6, 0]} barSize={20} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-8">Nenhum licenciado vinculado ainda</p>
-                )}
-              </div>
+          {activeTab === "preview" && (
+            <PreviewTab slug={slug} baseUrl={baseUrl} />
+          )}
 
-              {/* Customer Status Donut */}
-              <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
-                <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
-                  <Users className="w-4 h-4 text-primary" /> Status dos Clientes
-                </h3>
-                <p className="text-xs text-muted-foreground mb-4">Distribuição por status</p>
-                {filteredMetrics?.customersByStatus && filteredMetrics.customersByStatus.length > 0 ? (
-                  <>
-                    <div className="h-52">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={filteredMetrics.customersByStatus.map((s) => ({ name: s.label, value: s.count }))}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={50}
-                            outerRadius={80}
-                            paddingAngle={4}
-                            dataKey="value"
-                            stroke="none"
-                          >
-                            {filteredMetrics.customersByStatus.map((s, i) => {
-                              const statusColors: Record<string, string> = {
-                                approved: "hsl(130, 100%, 36%)",
-                                pending: "hsl(45, 100%, 50%)",
-                                rejected: "hsl(0, 80%, 55%)",
-                                lead: "hsl(200, 100%, 50%)",
-                                data_complete: "hsl(180, 70%, 45%)",
-                                registered_igreen: "hsl(260, 60%, 55%)",
-                                contract_sent: "hsl(30, 100%, 50%)",
-                              };
-                              return <Cell key={i} fill={statusColors[s.status] || "hsl(260, 60%, 55%)"} />;
-                            })}
-                          </Pie>
-                          <Tooltip
-                            contentStyle={{
-                              background: "hsl(120, 8%, 8%)",
-                              border: "1px solid hsl(120, 8%, 18%)",
-                              borderRadius: "12px",
-                              fontSize: "13px",
-                              color: "hsl(0, 0%, 95%)",
-                            }}
-                          />
-                          <Legend
-                            iconType="circle"
-                            iconSize={8}
-                            formatter={(value: string) => <span className="text-xs text-muted-foreground">{value}</span>}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    {/* Status badges */}
-                    <div className="flex flex-wrap gap-2 mt-3 justify-center">
-                      {filteredMetrics.customersByStatus.map((s) => {
-                        const badgeColors: Record<string, string> = {
-                          approved: "bg-green-500/20 text-green-400",
-                          pending: "bg-yellow-500/20 text-yellow-400",
-                          rejected: "bg-red-500/20 text-red-400",
-                          lead: "bg-blue-500/20 text-blue-400",
-                          data_complete: "bg-teal-500/20 text-teal-400",
-                          registered_igreen: "bg-purple-500/20 text-purple-400",
-                          contract_sent: "bg-orange-500/20 text-orange-400",
-                        };
-                        return (
-                          <span key={s.status} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${badgeColors[s.status] || "bg-purple-500/20 text-purple-400"}`}>
-                            {s.label}: {s.count}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-8">Sem clientes cadastrados</p>
-                )}
-              </div>
-            </div>
-
-            {/* Weekly New Customers */}
-            {filteredMetrics?.weeklyNewCustomers && filteredMetrics.weeklyNewCustomers.some((w) => w.count > 0) && (
-              <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
-                <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-primary" /> Novos Clientes por Semana
-                </h3>
-                <p className="text-xs text-muted-foreground mb-4">Últimos 30 dias</p>
-                <div className="h-52">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={filteredMetrics.weeklyNewCustomers} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="colorNewCust" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="hsl(200, 100%, 50%)" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="hsl(200, 100%, 50%)" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(120, 8%, 18%)" />
-                      <XAxis
-                        dataKey="week"
-                        tick={{ fill: "hsl(120, 5%, 65%)", fontSize: 10 }}
-                        tickLine={false}
-                        axisLine={false}
-                      />
-                      <YAxis
-                        tick={{ fill: "hsl(120, 5%, 65%)", fontSize: 11 }}
-                        tickLine={false}
-                        axisLine={false}
-                        allowDecimals={false}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          background: "hsl(120, 8%, 8%)",
-                          border: "1px solid hsl(120, 8%, 18%)",
-                          borderRadius: "12px",
-                          fontSize: "13px",
-                          color: "hsl(0, 0%, 95%)",
-                        }}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="count"
-                        name="Novos Clientes"
-                        stroke="hsl(200, 100%, 50%)"
-                        strokeWidth={2}
-                        fill="url(#colorNewCust)"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            )}
-
-            {/* Area Chart */}
-            <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
-              <h3 className="font-heading font-bold text-foreground mb-1">Visualizações — Últimos 30 dias</h3>
-              <p className="text-xs text-muted-foreground mb-4">Acompanhe o tráfego das suas landing pages</p>
-              <div className="h-64 sm:h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorClient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(130, 100%, 36%)" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="hsl(130, 100%, 36%)" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="colorLic" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(30, 100%, 50%)" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="hsl(30, 100%, 50%)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(120, 8%, 18%)" />
-                    <XAxis
-                      dataKey="label"
-                      tick={{ fill: "hsl(120, 5%, 65%)", fontSize: 11 }}
-                      tickLine={false}
-                      axisLine={false}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      tick={{ fill: "hsl(120, 5%, 65%)", fontSize: 11 }}
-                      tickLine={false}
-                      axisLine={false}
-                      allowDecimals={false}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        background: "hsl(120, 8%, 8%)",
-                        border: "1px solid hsl(120, 8%, 18%)",
-                        borderRadius: "12px",
-                        fontSize: "13px",
-                        color: "hsl(0, 0%, 95%)",
-                      }}
-                      labelStyle={{ color: "hsl(0, 0%, 95%)", fontWeight: 600 }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="client"
-                      name="Cliente"
-                      stroke="hsl(130, 100%, 36%)"
-                      strokeWidth={2}
-                      fill="url(#colorClient)"
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="licenciada"
-                      name="Licenciado"
-                      stroke="hsl(30, 100%, 50%)"
-                      strokeWidth={2}
-                      fill="url(#colorLic)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex items-center justify-center gap-6 mt-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full" style={{ background: "hsl(130, 100%, 36%)" }} />
-                  <span className="text-xs text-muted-foreground">Cliente</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full" style={{ background: "hsl(30, 100%, 50%)" }} />
-                  <span className="text-xs text-muted-foreground">Licenciado</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Hourly + Device + UTM row */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Hourly Distribution */}
-              <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
-                <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-primary" /> Horários de Pico
-                </h3>
-                <p className="text-xs text-muted-foreground mb-4">Visitas por hora do dia</p>
-                <div className="h-48">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analytics?.hourly || []} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(120, 8%, 18%)" />
-                      <XAxis
-                        dataKey="hour"
-                        tick={{ fill: "hsl(120, 5%, 65%)", fontSize: 10 }}
-                        tickLine={false}
-                        axisLine={false}
-                        tickFormatter={(h) => `${h}h`}
-                      />
-                      <YAxis
-                        tick={{ fill: "hsl(120, 5%, 65%)", fontSize: 10 }}
-                        tickLine={false}
-                        axisLine={false}
-                        allowDecimals={false}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          background: "hsl(120, 8%, 8%)",
-                          border: "1px solid hsl(120, 8%, 18%)",
-                          borderRadius: "12px",
-                          fontSize: "13px",
-                          color: "hsl(0, 0%, 95%)",
-                        }}
-                        labelFormatter={(h) => `${h}:00`}
-                      />
-                      <Bar dataKey="views" name="Visitas" fill="hsl(130, 100%, 36%)" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Device Distribution */}
-              <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
-                <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
-                  <Smartphone className="w-4 h-4 text-primary" /> Dispositivos
-                </h3>
-                <p className="text-xs text-muted-foreground mb-4">De onde seus visitantes acessam</p>
-                <div className="space-y-3">
-                  {(analytics?.devices || []).map((d) => {
-                    const total = analytics?.total || 1;
-                    const pct = Math.round((d.count / total) * 100);
-                    const labels: Record<string, string> = { mobile: "📱 Mobile", tablet: "📱 Tablet", desktop: "💻 Desktop", desconhecido: "❓ Outro" };
-                    return (
-                      <div key={d.device}>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-foreground">{labels[d.device] || d.device}</span>
-                          <span className="text-muted-foreground">{d.count} ({pct}%)</span>
-                        </div>
-                        <div className="w-full bg-secondary rounded-full h-2">
-                          <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {(!analytics?.devices || analytics.devices.length === 0) && (
-                    <p className="text-sm text-muted-foreground text-center py-4">Sem dados ainda</p>
-                  )}
-                </div>
-              </div>
-
-              {/* UTM Sources - Pie Chart */}
-              <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
-                <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
-                  <Globe className="w-4 h-4 text-primary" /> Origem do Tráfego
-                </h3>
-                <p className="text-xs text-muted-foreground mb-4">De onde vêm seus visitantes</p>
-                {analytics?.utmSources && analytics.utmSources.length > 0 ? (
-                  <div className="h-48">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={analytics.utmSources.map((u) => ({ name: u.source, value: u.count }))}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={40}
-                          outerRadius={70}
-                          paddingAngle={3}
-                          dataKey="value"
-                          stroke="none"
-                        >
-                          {analytics.utmSources.map((_, i) => (
-                            <Cell key={i} fill={["hsl(130,100%,36%)", "hsl(30,100%,50%)", "hsl(200,100%,50%)", "hsl(280,80%,60%)", "hsl(0,80%,55%)"][i % 5]} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          contentStyle={{
-                            background: "hsl(120, 8%, 8%)",
-                            border: "1px solid hsl(120, 8%, 18%)",
-                            borderRadius: "12px",
-                            fontSize: "13px",
-                            color: "hsl(0, 0%, 95%)",
-                          }}
-                          formatter={(value: number, name: string) => {
-                            const total = analytics?.total || 1;
-                            return [`${value} (${Math.round((value / total) * 100)}%)`, name];
-                          }}
-                        />
-                        <Legend
-                          iconType="circle"
-                          iconSize={8}
-                          formatter={(value: string) => <span className="text-xs text-muted-foreground capitalize">{value}</span>}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">Sem dados ainda</p>
-                )}
-              </div>
-            </div>
-
-            {/* Bar Chart */}
-            <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
-              <h3 className="font-heading font-bold text-foreground mb-1">Comparativo diário</h3>
-              <p className="text-xs text-muted-foreground mb-4">Visitas por tipo de página</p>
-              <div className="h-52 sm:h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData.slice(-14)} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(120, 8%, 18%)" />
-                    <XAxis
-                      dataKey="label"
-                      tick={{ fill: "hsl(120, 5%, 65%)", fontSize: 11 }}
-                      tickLine={false}
-                      axisLine={false}
-                    />
-                    <YAxis
-                      tick={{ fill: "hsl(120, 5%, 65%)", fontSize: 11 }}
-                      tickLine={false}
-                      axisLine={false}
-                      allowDecimals={false}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        background: "hsl(120, 8%, 8%)",
-                        border: "1px solid hsl(120, 8%, 18%)",
-                        borderRadius: "12px",
-                        fontSize: "13px",
-                        color: "hsl(0, 0%, 95%)",
-                      }}
-                    />
-                    <Bar dataKey="client" name="Cliente" fill="hsl(130, 100%, 36%)" radius={[6, 6, 0, 0]} />
-                    <Bar dataKey="licenciada" name="Licenciado" fill="hsl(30, 100%, 50%)" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Clicks by target - separated by page */}
-            {analytics?.clicksByTarget && Object.keys(analytics.clicksByTarget).length > 0 && (
-              <div className="bg-card rounded-2xl border border-border p-4 sm:p-6">
-                <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
-                  <MousePointerClick className="w-4 h-4 text-primary" /> Cliques por Botão
-                </h3>
-                <p className="text-xs text-muted-foreground mb-4">Quais botões seus visitantes mais clicam — separado por página</p>
-
-                {/* Página Cliente */}
-                {analytics.clicksByPage?.client && Object.keys(analytics.clicksByPage.client).length > 0 && (
-                  <div className="mb-4">
-                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">📄 Página Cliente</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {Object.entries(analytics.clicksByPage.client).map(([target, count]) => (
-                        <div key={target} className="bg-secondary rounded-xl p-4 text-center">
-                          <p className="text-2xl font-bold font-heading text-foreground">{count}</p>
-                          <p className="text-xs text-muted-foreground">{friendlyClickLabel(target)}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Página Licenciada */}
-                {analytics.clicksByPage?.licenciada && Object.keys(analytics.clicksByPage.licenciada).length > 0 && (
-                  <div>
-                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">💼 Página Licenciada</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {Object.entries(analytics.clicksByPage.licenciada).map(([target, count]) => (
-                        <div key={target} className="bg-secondary rounded-xl p-4 text-center">
-                          <p className="text-2xl font-bold font-heading text-foreground">{count}</p>
-                          <p className="text-xs text-muted-foreground">{friendlyClickLabel(target)}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Credentials Dialog */}
-        <Dialog open={showCredentialsDialog} onOpenChange={setShowCredentialsDialog}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <KeyRound className="w-5 h-5 text-primary" />
-                Conectar ao Portal iGreen
-              </DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              Informe suas credenciais do portal iGreen para sincronizar seus clientes automaticamente.
-            </p>
-            <div className="space-y-4 mt-2">
-              <div>
-                <Label htmlFor="cred-email">Email do Portal</Label>
-                <Input
-                  id="cred-email"
-                  type="email"
-                  placeholder="seu@email.com"
-                  value={credForm.email}
-                  onChange={(e) => setCredForm(prev => ({ ...prev, email: e.target.value }))}
-                />
-              </div>
-              <div>
-                <Label htmlFor="cred-password">Senha do Portal</Label>
-                <div className="relative">
-                  <Input
-                    id="cred-password"
-                    type={showCredPassword ? "text" : "password"}
-                    placeholder="••••••••"
-                    value={credForm.password}
-                    onChange={(e) => setCredForm(prev => ({ ...prev, password: e.target.value }))}
-                  />
-                  <button type="button" onClick={() => setShowCredPassword(!showCredPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                    {showCredPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-              <Button
-                className="w-full"
-                onClick={handleSaveCredentialsAndSync}
-                disabled={!credForm.email || !credForm.password}
-              >
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Conectar e Sincronizar
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* Dados Tab */}
-        {activeTab === "dados" && (
-          <form onSubmit={handleSave} className="space-y-6">
-            {/* Photo Section */}
-            <div className="bg-card rounded-2xl border border-border p-6">
-              <h3 className="font-heading font-bold text-foreground mb-4 flex items-center gap-2">
-                <Camera className="w-5 h-5 text-primary" /> Sua Foto
-              </h3>
-              <div className="flex flex-col sm:flex-row items-center gap-5">
-                <div className="relative group">
-                  {photoPreview ? (
-                    <img src={photoPreview} alt="Foto" className="w-28 h-28 rounded-2xl object-cover border-2 border-border group-hover:border-primary transition-colors" />
-                  ) : (
-                    <div className="w-28 h-28 rounded-2xl bg-secondary flex items-center justify-center border-2 border-dashed border-border">
-                      <Camera className="w-8 h-8 text-muted-foreground" />
-                    </div>
-                  )}
-                </div>
-                <div className="flex-1 w-full">
-                  <Input type="file" accept="image/*" onChange={handlePhotoChange} className="bg-secondary border-border" />
-                  <p className="text-xs text-muted-foreground mt-2">JPG ou PNG, recomendado 400×400px</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Form Fields */}
-            <div className="bg-card rounded-2xl border border-border p-6">
-              <h3 className="font-heading font-bold text-foreground mb-4 flex items-center gap-2">
-                <Settings className="w-5 h-5 text-primary" /> Informações
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name" className="text-sm text-muted-foreground">Nome completo</Label>
-                  <Input id="name" value={form.name} onChange={(e) => {
-                    const newName = e.target.value;
-                    const slug = newName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-                    setForm({ ...form, name: newName, license: slug });
-                  }} placeholder="Seu nome" className="bg-secondary border-border" required />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="license" className="text-sm text-muted-foreground">Licença (slug)</Label>
-                  <Input id="license" value={form.license} readOnly className="bg-secondary/50 border-border text-muted-foreground cursor-not-allowed" />
-                  <p className="text-xs text-muted-foreground">Gerado automaticamente a partir do nome</p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="phone" className="text-sm text-muted-foreground">WhatsApp (com DDD)</Label>
-                  <Input id="phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="5511999999999" className="bg-secondary border-border" required />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="igreen_id" className="text-sm text-muted-foreground">ID iGreen</Label>
-                  <Input id="igreen_id" value={form.igreen_id} onChange={(e) => {
-                    const id = e.target.value;
-                    setForm({
-                      ...form,
-                      igreen_id: id,
-                      cadastro_url: id ? `https://digital.igreenenergy.com.br/?id=${id}&sendcontract=true` : "",
-                      licenciada_cadastro_url: id ? `https://expansao.igreenenergy.com.br/?id=${id}&checkout=true` : "",
-                    });
-                  }} placeholder="ex: 126928" className="bg-secondary border-border" />
-                </div>
-              </div>
-              <div className="mt-4 space-y-2">
-                <Label htmlFor="cadastro_url" className="text-sm text-muted-foreground">Link de cadastro iGreen (Conta de Energia)</Label>
-                <Input id="cadastro_url" value={form.cadastro_url} readOnly className="bg-secondary/50 border-border text-muted-foreground cursor-not-allowed" />
-              </div>
-              <div className="mt-4 space-y-2">
-                <Label htmlFor="licenciada_cadastro_url" className="text-sm text-muted-foreground">Link de cadastro Licença</Label>
-                <Input id="licenciada_cadastro_url" value={form.licenciada_cadastro_url} readOnly className="bg-secondary/50 border-border text-muted-foreground cursor-not-allowed" />
-              </div>
-            </div>
-
-            {/* Pixel Tracking */}
-            <div className="bg-card rounded-2xl border border-border p-6">
-              <h3 className="font-heading font-bold text-foreground mb-4 flex items-center gap-2">
-                <Globe className="w-5 h-5 text-primary" /> Pixels de Rastreamento
-              </h3>
-              <p className="text-xs text-muted-foreground mb-4">Cole seus IDs para rastrear conversões nas suas páginas</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="facebook_pixel_id" className="text-sm text-muted-foreground">Facebook Pixel ID</Label>
-                  <Input id="facebook_pixel_id" value={form.facebook_pixel_id} onChange={(e) => setForm({ ...form, facebook_pixel_id: e.target.value })} placeholder="Ex: 123456789012345" className="bg-secondary border-border" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="google_analytics_id" className="text-sm text-muted-foreground">Google Analytics ID (GA4)</Label>
-                  <Input id="google_analytics_id" value={form.google_analytics_id} onChange={(e) => setForm({ ...form, google_analytics_id: e.target.value })} placeholder="Ex: G-XXXXXXXXXX" className="bg-secondary border-border" />
-            </div>
-
-            {/* Portal iGreen Credentials */}
-            <div className="bg-card rounded-2xl border border-border p-6">
-              <h3 className="font-heading font-bold text-foreground mb-4 flex items-center gap-2">
-                <KeyRound className="w-5 h-5 text-primary" /> Credenciais Portal iGreen
-              </h3>
-              <p className="text-xs text-muted-foreground mb-4">Email e senha do escritório virtual iGreen para sincronização automática de clientes</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="igreen_portal_email" className="text-sm text-muted-foreground">Email do Portal</Label>
-                  <Input id="igreen_portal_email" type="email" value={form.igreen_portal_email} onChange={(e) => setForm({ ...form, igreen_portal_email: e.target.value })} placeholder="seu@email.com" className="bg-secondary border-border" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="igreen_portal_password" className="text-sm text-muted-foreground">Senha do Portal</Label>
-                  <div className="relative">
-                    <Input id="igreen_portal_password" type={showPortalPassword ? "text" : "password"} value={form.igreen_portal_password} onChange={(e) => setForm({ ...form, igreen_portal_password: e.target.value })} placeholder="••••••••" className="bg-secondary border-border pr-10" />
-                    <button type="button" onClick={() => setShowPortalPassword(!showPortalPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                      {showPortalPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-              </div>
-            </div>
-
-            <Button type="submit" disabled={saving} className="w-full h-12 text-base font-bold rounded-xl gap-2" style={{ background: "var(--gradient-green)" }}>
-              <Save className="w-5 h-5" />
-              {saving ? "Salvando..." : "Salvar dados"}
-            </Button>
-          </form>
-        )}
-
-        {/* Links Tab */}
-        {activeTab === "links" && (
-          <div className="space-y-6">
-            {/* Main Links */}
-            <div className="space-y-4">
-              <h2 className="font-heading font-bold text-foreground text-lg flex items-center gap-2">
-                <LinkIcon className="w-5 h-5 text-primary" /> Links Principais
-              </h2>
-              <LinkCard
-                emoji="🏠"
-                title="Landing Page — Cliente"
-                description="Para captar clientes que querem desconto na conta de luz"
-                url={`https://${baseUrl}/${slug}`}
-                onCopy={copyLink}
-                previewUrl={`/${slug}`}
-              />
-              <LinkCard
-                emoji="💼"
-                title="Landing Page — Licenciado"
-                description="Para recrutar novos licenciados para sua equipe"
-                url={`https://${baseUrl}/licenciada/${slug}`}
-                onCopy={copyLink}
-                previewUrl={`/licenciada/${slug}`}
-              />
-            </div>
-
-            {/* Tracking Links */}
-            {[
-              { pageLabel: "Cliente", pagePath: slug, emoji: "🏠" },
-              { pageLabel: "Licenciado", pagePath: `licenciada/${slug}`, emoji: "💼" },
-            ].map((page) => (
-              <div key={page.pagePath} className="space-y-3">
-                <h2 className="font-heading font-bold text-foreground text-lg flex items-center gap-2">
-                  <Globe className="w-5 h-5 text-primary" /> Links de Rastreamento — {page.emoji} {page.pageLabel}
-                </h2>
-                <p className="text-xs text-muted-foreground -mt-1">Compartilhe o link certo em cada rede social para saber de onde vem seu tráfego</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[
-                    { source: "whatsapp", label: "WhatsApp", icon: "💬", color: "bg-[hsl(142,70%,45%)]" },
-                    { source: "instagram", label: "Instagram", icon: "📸", color: "bg-[hsl(330,80%,55%)]" },
-                    { source: "facebook", label: "Facebook", icon: "📘", color: "bg-[hsl(220,80%,55%)]" },
-                    { source: "youtube", label: "YouTube", icon: "🎬", color: "bg-[hsl(0,80%,50%)]" },
-                    { source: "tiktok", label: "TikTok", icon: "🎵", color: "bg-[hsl(270,80%,55%)]" },
-                    { source: "google", label: "Google", icon: "🔍", color: "bg-[hsl(45,90%,50%)]" },
-                  ].map((s) => {
-                    const fullUrl = `https://${baseUrl}/${page.pagePath}?utm_source=${s.source}`;
-                    return (
-                      <div key={s.source} className="bg-card rounded-xl border border-border p-4 flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg shrink-0 ${s.color} bg-opacity-20`}>
-                          {s.icon}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-foreground">{s.label}</p>
-                          <p className="text-xs text-muted-foreground truncate">{fullUrl.replace("https://", "")}</p>
-                        </div>
-                        <div className="flex gap-1.5 shrink-0">
-                          <Button size="sm" variant="outline" onClick={() => setQrModal({ url: fullUrl, label: `${s.label} — ${page.pageLabel}` })} className="gap-1 rounded-lg text-xs px-2">
-                            <QrCode className="w-3 h-3" />
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => copyLink(fullUrl)} className="gap-1 rounded-lg text-xs">
-                            <Copy className="w-3 h-3" /> Copiar
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* WhatsApp Tab — always mounted, hidden when inactive to preserve connection state */}
-        {userId && activeTab === "whatsapp" && (
-          <WhatsAppErrorBoundary>
-            <WhatsAppTab key="whatsapp-tab" userId={userId} />
-          </WhatsAppErrorBoundary>
-        )}
-
-        {/* Preview Tab */}
-        {activeTab === "preview" && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <a href={`https://${baseUrl}/${slug}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 bg-primary text-primary-foreground font-bold py-3 rounded-xl hover:opacity-90 transition-opacity">
-                <ExternalLink className="w-4 h-4" /> Página de Cliente
-              </a>
-              <a href={`https://${baseUrl}/licenciada/${slug}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 border-2 border-primary text-primary font-bold py-3 rounded-xl hover:bg-primary/10 transition-colors">
-                <ExternalLink className="w-4 h-4" /> Página de Licenciado
-              </a>
-            </div>
-            <div className="bg-card rounded-2xl border border-border overflow-hidden">
-              <div className="bg-secondary px-4 py-2.5 flex items-center gap-2 border-b border-border">
-                <div className="flex gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-destructive/60" />
-                  <span className="w-2.5 h-2.5 rounded-full bg-accent/60" />
-                  <span className="w-2.5 h-2.5 rounded-full bg-primary/60" />
-                </div>
-                <span className="text-xs text-muted-foreground ml-2 truncate">{baseUrl}/{slug}</span>
-              </div>
-              <iframe
-                src={`/${slug}`}
-                className="w-full border-0"
-                style={{ height: "70vh", minHeight: "400px" }}
-                title="Preview da landing page"
-              />
-            </div>
-          </div>
-        )}
+        </Suspense>
       </main>
 
       {/* QR Code Modal */}
@@ -1128,7 +358,9 @@ const Admin = () => {
             </div>
             <p className="text-sm text-muted-foreground">{qrModal.label}</p>
             <div className="flex justify-center bg-white rounded-xl p-6">
-              <QRCodeSVG id="qr-canvas" value={qrModal.url} size={200} level="H" includeMargin={false} />
+              <Suspense fallback={<div className="w-[200px] h-[200px] flex items-center justify-center"><div className="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full" /></div>}>
+                <QRCodeSVG id="qr-canvas" value={qrModal.url} size={200} level="H" includeMargin={false} />
+              </Suspense>
             </div>
             <p className="text-xs text-muted-foreground text-center break-all">{qrModal.url}</p>
             <div className="flex gap-3">
@@ -1142,15 +374,13 @@ const Admin = () => {
                 const canvas = document.createElement("canvas");
                 canvas.width = 600; canvas.height = 600;
                 const ctx = canvas.getContext("2d")!;
-                ctx.fillStyle = "#ffffff";
-                ctx.fillRect(0, 0, 600, 600);
+                ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, 600, 600);
                 const img = new Image();
                 img.onload = () => {
                   ctx.drawImage(img, 50, 50, 500, 500);
                   const a = document.createElement("a");
                   a.download = `qrcode-${qrModal.label.toLowerCase().replace(/[^a-z0-9]/g, "-")}.png`;
-                  a.href = canvas.toDataURL("image/png");
-                  a.click();
+                  a.href = canvas.toDataURL("image/png"); a.click();
                 };
                 img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
               }}>
@@ -1160,55 +390,37 @@ const Admin = () => {
           </div>
         </div>
       )}
+
+      {/* AI Chat Panel */}
+      {aiChatOpen && (
+        <Suspense fallback={null}>
+          <AIChatPanel open={aiChatOpen} onClose={() => setAiChatOpen(false)} />
+        </Suspense>
+      )}
+
+      {/* Panfleto Modal */}
+      {panfletoOpen && (
+        <Suspense fallback={null}>
+          <PanfletoModal
+            open={panfletoOpen}
+            onClose={() => setPanfletoOpen(false)}
+            licenca={slug}
+            nomeConsultor={form.name || ""}
+            telefoneConsultor={form.phone || ""}
+            igreenId={form.igreen_id || ""}
+          />
+        </Suspense>
+      )}
+
+      <SupportChatButton />
     </div>
   );
 };
 
-/* ── Sub-components ── */
-
-function StatCard({ icon, label, value, color, subtitle }: { icon: React.ReactNode; label: string; value: number | string; color: "primary" | "accent"; subtitle?: string }) {
-  return (
-    <div className="bg-card rounded-2xl border border-border p-5 flex items-center gap-4 hover:border-primary/30 transition-colors">
-      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
-        color === "primary" ? "bg-primary/15 text-primary" : "bg-accent/15 text-accent"
-      }`}>
-        {icon}
-      </div>
-      <div>
-        <p className="text-2xl font-bold font-heading text-foreground">{typeof value === "number" ? value.toLocaleString("pt-BR") : value}</p>
-        <p className="text-xs text-muted-foreground">{label}</p>
-        {subtitle && <p className="text-[10px] text-muted-foreground/70 mt-0.5">{subtitle}</p>}
-      </div>
-    </div>
-  );
-}
-
-function LinkCard({ emoji, title, description, url, onCopy, previewUrl }: {
-  emoji: string; title: string; description: string; url: string; onCopy: (url: string) => void; previewUrl: string;
-}) {
-  return (
-    <div className="bg-card rounded-2xl border border-border p-5 sm:p-6">
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <div>
-          <h3 className="font-heading font-bold text-foreground flex items-center gap-2">
-            <span>{emoji}</span> {title}
-          </h3>
-          <p className="text-xs text-muted-foreground mt-1">{description}</p>
-        </div>
-        <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary transition-colors shrink-0">
-          <ExternalLink className="w-4 h-4" />
-        </a>
-      </div>
-      <div className="flex items-center gap-2">
-        <code className="flex-1 bg-secondary px-3 py-2.5 rounded-xl text-primary text-sm break-all font-mono">
-          {url.replace("https://", "")}
-        </code>
-        <Button size="sm" variant="outline" onClick={() => onCopy(url)} className="gap-1.5 shrink-0 rounded-xl">
-          <Copy className="w-3.5 h-3.5" /> Copiar
-        </Button>
-      </div>
-    </div>
-  );
-}
+const Admin = () => (
+  <PrivacyModeProvider>
+    <AdminContent />
+  </PrivacyModeProvider>
+);
 
 export default Admin;

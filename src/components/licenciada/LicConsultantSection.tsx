@@ -7,17 +7,17 @@ interface LicConsultantSectionProps {
   igreenId?: string | null;
 }
 
-const DEFAULT_WHATSAPP = "https://api.whatsapp.com/send?phone=5515981077416&text=Ol%C3%A1,%20gostaria%20de%20mais%20informa%C3%A7%C3%B5es%20sobre%20a%20oportunidade%20de%20Licenciado%20iGreen%20Energy";
+const DEFAULT_WHATSAPP = "https://api.whatsapp.com/send?phone=5500000000000&text=Ol%C3%A1,%20gostaria%20de%20mais%20informa%C3%A7%C3%B5es%20sobre%20a%20oportunidade%20de%20Licenciado%20iGreen%20Energy";
 
 const LicConsultantSection = ({
-  name = "Ayla Viana",
+  name = "Seu Consultor",
   whatsappUrl,
   photoUrl,
-  igreenId = "126928",
+  igreenId = "",
 }: LicConsultantSectionProps) => {
   const WHATSAPP = whatsappUrl || DEFAULT_WHATSAPP;
   const photo = photoUrl || consultantDefault;
-  const displayId = igreenId || "126928";
+  const displayId = igreenId || "";
 
   return (
     <section className="relative overflow-hidden">
@@ -29,8 +29,8 @@ const LicConsultantSection = ({
       </div>
 
       <div className="section-container relative z-10">
-        <div className="badge-green mx-auto mb-6">Sua consultora</div>
-        <h2 className="section-heading mb-2">Licenciada e Líder de Expansão iGreen Energy</h2>
+        <div className="badge-green mx-auto mb-6">Seu consultor</div>
+        <h2 className="section-heading mb-2">Licenciado e Líder de Expansão iGreen Energy</h2>
         <p className="text-center font-heading font-bold text-lg mb-12" style={{ color: 'hsl(var(--primary))' }}>ID {displayId}</p>
 
         <div className="grid md:grid-cols-2 gap-12 items-center max-w-4xl mx-auto">
@@ -38,7 +38,7 @@ const LicConsultantSection = ({
             <div className="absolute -inset-4 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" style={{ background: 'radial-gradient(circle, hsl(130 100% 36% / 0.15), transparent 70%)' }} />
             <img
               src={photo}
-              alt={`${name} - Licenciada iGreen Energy`}
+              alt={`${name} - Licenciado iGreen Energy`}
               loading="lazy"
               className="rounded-2xl w-full max-w-sm mx-auto shadow-lg relative z-10 transition-transform duration-500 group-hover:scale-[1.02]"
               style={{ boxShadow: 'var(--shadow-green)' }}
@@ -70,7 +70,7 @@ const LicConsultantSection = ({
       <footer className="bg-card/50 py-10 text-center mt-16 border-t border-border">
         <img src="/images/logo-colorida-igreen.png" alt="iGreen Energy" loading="lazy" className="mx-auto mb-4 w-36" />
         <p className="text-muted-foreground font-heading text-sm tracking-wider">
-          {name.toUpperCase()} | LICENCIADA E LÍDER DE EXPANSÃO IGREEN ENERGY ID {displayId}
+          {name.toUpperCase()} | LICENCIADO E LÍDER DE EXPANSÃO IGREEN ENERGY ID {displayId}
         </p>
       </footer>
     </section>

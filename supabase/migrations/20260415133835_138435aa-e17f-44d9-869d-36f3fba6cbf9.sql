@@ -1,0 +1,1 @@
+ALTER TABLE public.customers ADD CONSTRAINT customers_consultant_id_fkey FOREIGN KEY (consultant_id) REFERENCES public.consultants(id) ON DELETE SET NULL;

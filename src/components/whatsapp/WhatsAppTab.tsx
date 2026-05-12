@@ -1,42 +1,47 @@
-import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useWhatsApp } from "@/hooks/useWhatsApp";
 import { useTemplates } from "@/hooks/useTemplates";
 import { useChats } from "@/hooks/useChats";
 import { ConnectionPanel } from "./ConnectionPanel";
-import { MessagePanel } from "./MessagePanel";
-import { BulkSendPanel } from "./BulkSendPanel";
-import { TemplateManager } from "./TemplateManager";
-import { CustomerManager } from "./CustomerManager";
 import { ChatSidebar } from "./ChatSidebar";
 import { ChatView } from "./ChatView";
-import { KanbanBoard } from "./KanbanBoard";
-import { SchedulePanel } from "./SchedulePanel";
-import { MessageSquare, LayoutGrid, Send, FileText, Clock, Users } from "lucide-react";
+import { BarChart3, MessageSquare, Send, FileText, Clock, Bot } from "lucide-react";
 
-interface Customer {
-  id: string;
-  name: string;
-  phone_whatsapp: string;
-  electricity_bill_value?: number;
-}
+// Heavy panels — load only when their sub-tab is opened
+const BulkBlockSendPanel = lazy(() => import("./BulkBlockSendPanel").then(m => ({ default: m.BulkBlockSendPanel })));
+const TemplateManager = lazy(() => import("./TemplateManager").then(m => ({ default: m.TemplateManager })));
+const SchedulePanel = lazy(() => import("./SchedulePanel").then(m => ({ default: m.SchedulePanel })));
+const WhatsAppDashboard = lazy(() => import("./WhatsAppDashboard").then(m => ({ default: m.WhatsAppDashboard })));
+const AIAgentTab = lazy(() => import("@/components/admin/AIAgentTab").then(m => ({ default: m.AIAgentTab })));
+
+const LazyFallback = () => (
+  <div className="flex items-center justify-center py-12">
+    <div className="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full" />
+  </div>
+);
 
 interface WhatsAppTabProps {
   userId: string;
+  pendingChatPhone?: string | null;
+  pendingChatMessage?: string;
+  onPendingChatConsumed?: () => void;
+  customers?: any[];
 }
 
-type SubTab = "conversas" | "crm" | "envio_massa" | "templates" | "agendamentos" | "clientes";
+type SubTab = "dashboard" | "conversas" | "agente" | "envio_massa" | "templates" | "agendamentos";
 
 const SUB_TABS: { key: SubTab; label: string; icon: React.ElementType }[] = [
+  { key: "dashboard", label: "Dashboard", icon: BarChart3 },
   { key: "conversas", label: "Conversas", icon: MessageSquare },
-  { key: "crm", label: "CRM", icon: LayoutGrid },
+  { key: "agente", label: "Atendente IA", icon: Bot },
   { key: "envio_massa", label: "Envio em Massa", icon: Send },
   { key: "templates", label: "Templates", icon: FileText },
   { key: "agendamentos", label: "Agendamentos", icon: Clock },
-  { key: "clientes", label: "Clientes", icon: Users },
 ];
 
-export function WhatsAppTab({ userId }: WhatsAppTabProps) {
+export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPendingChatConsumed, customers = [] }: WhatsAppTabProps) {
+  const isMobile = useIsMobile();
   const {
     connectionStatus,
     instanceName,
@@ -46,15 +51,20 @@ export function WhatsAppTab({ userId }: WhatsAppTabProps) {
     isLoading,
     error,
     connectionLog,
+    operationalHealth,
+    consecutiveTimeouts,
+    isWhapi,
     createAndConnect,
     disconnect,
     reconnect,
     refreshQr,
+    safeReset,
   } = useWhatsApp(userId);
 
   const {
     templates,
     isLoading: templatesLoading,
+    refetchTemplates,
     createTemplate,
     updateTemplate,
     deleteTemplate,
@@ -62,11 +72,11 @@ export function WhatsAppTab({ userId }: WhatsAppTabProps) {
   } = useTemplates(userId);
 
   const { chats, isLoading: chatsLoading } = useChats(
-    connectionStatus === "connected" ? instanceName : null
+    connectionStatus === "connected" ? instanceName : null,
+    isWhapi,
   );
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>("conversas");
+  const [activeSubTab, setActiveSubTab] = useState<SubTab>("dashboard");
   const [selectedChatJid, setSelectedChatJid] = useState<string | null>(null);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [pendingMessageKey, setPendingMessageKey] = useState(0);
@@ -135,77 +145,19 @@ export function WhatsAppTab({ userId }: WhatsAppTabProps) {
     setPendingMessageKey((k) => k + 1);
   }, [chats]);
 
-  const fetchCustomers = useCallback(async () => {
-    try {
-      const selectFields = "id, name, phone_whatsapp, electricity_bill_value, email, cpf, address_city, address_state, address_street, address_neighborhood, address_complement, address_number, cep, numero_instalacao, data_nascimento, status, created_at, distribuidora, registered_by_name, registered_by_igreen_id, media_consumo, desconto_cliente, andamento_igreen, devolutiva, observacao, igreen_code, data_cadastro, data_ativo, data_validado, status_financeiro, cashback, nivel_licenciado, assinatura_cliente, assinatura_igreen, link_assinatura";
-      const allRows: any[] = [];
-      const pageSize = 1000;
-      let page = 0;
-      while (true) {
-        const { data, error } = await supabase
-          .from("customers")
-          .select(selectFields)
-          .eq("consultant_id", userId)
-          .range(page * pageSize, (page + 1) * pageSize - 1);
-        if (error) throw error;
-        if (data) allRows.push(...data);
-        if (!data || data.length < pageSize) break;
-        page++;
-      }
-      if (allRows.length > 0) {
-        setCustomers(
-          allRows.map((c) => ({
-            id: c.id,
-            name: c.name || "Sem nome",
-            phone_whatsapp: c.phone_whatsapp,
-            electricity_bill_value: c.electricity_bill_value ?? undefined,
-            email: c.email,
-            cpf: c.cpf,
-            address_city: c.address_city,
-            address_state: c.address_state,
-            address_street: c.address_street,
-            address_neighborhood: c.address_neighborhood,
-            address_complement: c.address_complement,
-            address_number: c.address_number,
-            cep: c.cep,
-            numero_instalacao: c.numero_instalacao,
-            data_nascimento: c.data_nascimento,
-            status: c.status,
-            created_at: c.created_at,
-            distribuidora: c.distribuidora,
-            registered_by_name: c.registered_by_name,
-            registered_by_igreen_id: c.registered_by_igreen_id,
-            media_consumo: c.media_consumo,
-            desconto_cliente: c.desconto_cliente,
-            andamento_igreen: c.andamento_igreen,
-            devolutiva: c.devolutiva,
-            observacao: c.observacao,
-            igreen_code: c.igreen_code,
-            data_cadastro: c.data_cadastro,
-            data_ativo: c.data_ativo,
-            data_validado: c.data_validado,
-            status_financeiro: c.status_financeiro,
-            cashback: c.cashback,
-            nivel_licenciado: c.nivel_licenciado,
-            assinatura_cliente: c.assinatura_cliente,
-            assinatura_igreen: c.assinatura_igreen,
-            link_assinatura: c.link_assinatura,
-          }))
-        );
-      }
-    } catch {
-      // silently handle
-    }
-  }, [userId]);
-
+  // Handle incoming pending chat from Admin (Clientes tab)
   useEffect(() => {
-    fetchCustomers();
-  }, [fetchCustomers]);
+    if (pendingChatPhone) {
+      handleOpenChatFromCustomer(pendingChatPhone, pendingChatMessage);
+      onPendingChatConsumed?.();
+    }
+  }, [pendingChatPhone, pendingChatMessage]);
 
+  const totalUnread = useMemo(() => chats.reduce((sum, c) => sum + c.unreadCount, 0), [chats]);
   const isConnected = connectionStatus === "connected";
 
   return (
-    <div className="flex flex-col gap-0 h-[calc(100vh-200px)] min-h-[500px]">
+    <div className="flex flex-col gap-0 h-[calc(100vh-180px)] sm:h-[calc(100vh-200px)] min-h-[400px]">
       {/* Compact connection status */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-card border border-border rounded-t-lg">
         {isConnected ? (
@@ -250,6 +202,7 @@ export function WhatsAppTab({ userId }: WhatsAppTabProps) {
       <div className="flex border-x border-border bg-card overflow-x-auto">
         {SUB_TABS.map((tab) => {
           const Icon = tab.icon;
+          const showBadge = tab.key === "conversas" && totalUnread > 0;
           return (
             <button
               key={tab.key}
@@ -262,6 +215,11 @@ export function WhatsAppTab({ userId }: WhatsAppTabProps) {
             >
               <Icon className="h-3.5 w-3.5" />
               {tab.label}
+              {showBadge && (
+                <span className="bg-primary text-primary-foreground text-[9px] rounded-full h-4 min-w-[16px] flex items-center justify-center px-1 font-bold">
+                  {totalUnread > 99 ? "99+" : totalUnread}
+                </span>
+              )}
             </button>
           );
         })}
@@ -269,25 +227,70 @@ export function WhatsAppTab({ userId }: WhatsAppTabProps) {
 
       {/* Content area */}
       <div className="flex-1 border border-t-0 border-border rounded-b-lg overflow-hidden bg-background">
+        {activeSubTab === "dashboard" && (
+          <Suspense fallback={<LazyFallback />}>
+            <WhatsAppDashboard consultantId={userId} />
+          </Suspense>
+        )}
+
         {activeSubTab === "conversas" && (
           isConnected && instanceName ? (
             <div className="flex h-full">
-              <div className="w-[300px] shrink-0">
-                <ChatSidebar
-                  chats={chats}
-                  isLoading={chatsLoading}
-                  selectedJid={selectedChatJid}
-                  onSelectChat={handleSelectChat}
-                />
-              </div>
-              <ChatView
-                instanceName={instanceName}
-                chat={selectedChat}
-                templates={templates}
-                consultantId={userId}
-                initialMessage={pendingMessage}
-                key={`chat-${selectedChatJid}-${pendingMessageKey}`}
-              />
+              {/* Mobile: show sidebar OR chat, not both */}
+              {isMobile ? (
+                selectedChatJid ? (
+                  <div className="flex flex-col h-full w-full">
+                    <button
+                      onClick={() => setSelectedChatJid(null)}
+                      className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-primary bg-card border-b border-border shrink-0"
+                    >
+                      ← Voltar às conversas
+                    </button>
+                    <div className="flex-1 min-h-0">
+                      <ChatView
+                        instanceName={instanceName}
+                        chat={selectedChat}
+                        templates={templates}
+                        consultantId={userId}
+                        initialMessage={pendingMessage}
+                        isWhapi={isWhapi}
+                        key={`chat-${selectedChatJid}-${pendingMessageKey}`}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full h-full">
+                    <ChatSidebar
+                      chats={chats}
+                      isLoading={chatsLoading}
+                      selectedJid={selectedChatJid}
+                      onSelectChat={handleSelectChat}
+                      consultantId={userId}
+                    />
+                  </div>
+                )
+              ) : (
+                <>
+                  <div className="w-[300px] shrink-0">
+                    <ChatSidebar
+                      chats={chats}
+                      isLoading={chatsLoading}
+                      selectedJid={selectedChatJid}
+                      onSelectChat={handleSelectChat}
+                      consultantId={userId}
+                    />
+                  </div>
+                  <ChatView
+                    instanceName={instanceName}
+                    chat={selectedChat}
+                    templates={templates}
+                    consultantId={userId}
+                    initialMessage={pendingMessage}
+                    isWhapi={isWhapi}
+                    key={`chat-${selectedChatJid}-${pendingMessageKey}`}
+                  />
+                </>
+              )}
             </div>
           ) : (
             <div className="p-4 overflow-auto h-full">
@@ -300,30 +303,33 @@ export function WhatsAppTab({ userId }: WhatsAppTabProps) {
                 isLoading={isLoading}
                 error={error}
                 connectionLog={connectionLog}
+                operationalHealth={operationalHealth}
+                consecutiveTimeouts={consecutiveTimeouts}
+                isWhapi={isWhapi}
                 onConnect={createAndConnect}
                 onDisconnect={disconnect}
                 onReconnect={reconnect}
                 onRefreshQr={refreshQr}
+                onSafeReset={safeReset}
               />
             </div>
           )
         )}
 
-        {activeSubTab === "crm" && (
-          <div className="p-4 overflow-auto h-full">
-            <KanbanBoard consultantId={userId} instanceName={instanceName} />
-          </div>
-        )}
 
         {activeSubTab === "envio_massa" && (
           <div className="p-4 overflow-auto h-full">
             {isConnected && instanceName ? (
-              <BulkSendPanel
-                instanceName={instanceName}
-                customers={customers}
-                templates={templates}
-                applyTemplate={applyTemplate}
-              />
+              <Suspense fallback={<LazyFallback />}>
+                <BulkBlockSendPanel
+                  instanceName={instanceName}
+                  customers={customers}
+                  templates={templates}
+                  applyTemplate={applyTemplate}
+                  consultantId={userId}
+                  onCreateTemplate={(name, content, mediaType, mediaUrl, imageUrl) => createTemplate(name, content, mediaType, mediaUrl, imageUrl)}
+                />
+              </Suspense>
             ) : (
               <div className="flex items-center justify-center h-40 text-sm text-muted-foreground">
                 Conecte o WhatsApp para enviar mensagens em massa.
@@ -334,24 +340,29 @@ export function WhatsAppTab({ userId }: WhatsAppTabProps) {
 
         {activeSubTab === "templates" && (
           <div className="p-4 overflow-auto h-full">
-            <TemplateManager
-              templates={templates}
-              isLoading={templatesLoading}
-              consultantId={userId}
-              onCreateTemplate={(name, content, mediaType, mediaUrl, imageUrl) => createTemplate(name, content, mediaType, mediaUrl, imageUrl)}
-              onUpdateTemplate={updateTemplate}
-              onDeleteTemplate={deleteTemplate}
-            />
+            <Suspense fallback={<LazyFallback />}>
+              <TemplateManager
+                templates={templates}
+                isLoading={templatesLoading}
+                consultantId={userId}
+                onCreateTemplate={(name, content, mediaType, mediaUrl, imageUrl) => createTemplate(name, content, mediaType, mediaUrl, imageUrl)}
+                onUpdateTemplate={updateTemplate}
+                onDeleteTemplate={deleteTemplate}
+                onRefetch={refetchTemplates}
+              />
+            </Suspense>
           </div>
         )}
 
         {activeSubTab === "agendamentos" && (
           <div className="p-4 overflow-auto h-full">
             {isConnected && instanceName ? (
-              <SchedulePanel
-                consultantId={userId}
-                instanceName={instanceName}
-              />
+              <Suspense fallback={<LazyFallback />}>
+                <SchedulePanel
+                  consultantId={userId}
+                  instanceName={instanceName}
+                />
+              </Suspense>
             ) : (
               <div className="flex items-center justify-center h-40 text-sm text-muted-foreground">
                 Conecte o WhatsApp para gerenciar agendamentos.
@@ -360,17 +371,14 @@ export function WhatsAppTab({ userId }: WhatsAppTabProps) {
           </div>
         )}
 
-        {activeSubTab === "clientes" && (
+        {activeSubTab === "agente" && (
           <div className="p-4 overflow-auto h-full">
-            <CustomerManager
-              customers={customers}
-              consultantId={userId}
-              onCustomersChange={fetchCustomers}
-              instanceName={instanceName}
-              onOpenChat={handleOpenChatFromCustomer}
-            />
+            <Suspense fallback={<LazyFallback />}>
+              <AIAgentTab userId={userId} />
+            </Suspense>
           </div>
         )}
+
       </div>
     </div>
   );

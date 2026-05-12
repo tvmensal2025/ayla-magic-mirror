@@ -1,0 +1,237 @@
+/**
+ * Whapi Proxy — encaminha chamadas REST do front para gate.whapi.cloud
+ * Restrito ao super admin (consultant_id = settings.superadmin_consultant_id).
+ *
+ * Body: { action: "list_chats" | "list_messages" | "send_text" | "send_media" | "send_audio" | "get_profile_pic", payload: any }
+ */
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const WHAPI_BASE = "https://gate.whapi.cloud";
+
+function json(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+async function whapiFetch(token: string, path: string, init: RequestInit = {}) {
+  const res = await fetch(`${WHAPI_BASE}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(init.headers || {}),
+    },
+  });
+  const text = await res.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+  return { ok: res.ok, status: res.status, data };
+}
+
+// ── Mappers Whapi → formato Evolution (para reaproveitar UI) ──
+function mapChat(c: any) {
+  const lm = c.last_message || c.lastMessage || null;
+  const lmType = lm?.type;
+  const lmText =
+    lm?.text?.body ||
+    lm?.caption ||
+    lm?.image?.caption ||
+    lm?.video?.caption ||
+    lm?.document?.file_name ||
+    "";
+  return {
+    id: c.id,
+    remoteJid: c.id,
+    name: c.name || c.first_name || undefined,
+    pushName: c.name || c.pushname || undefined,
+    profilePicUrl: c.profile_pic_full || c.profile_pic || c.icon_full || c.icon || undefined,
+    unreadCount: c.unread_count ?? c.unread ?? 0,
+    lastMsgTimestamp: lm?.timestamp || c.timestamp || 0,
+    lastMessage: lm
+      ? {
+          key: { fromMe: !!lm.from_me, remoteJid: c.id, id: lm.id || "" },
+          pushName: lm.from_name || undefined,
+          messageTimestamp: lm.timestamp,
+          message: {
+            ...(lmType === "text" || !lmType ? { conversation: lmText } : {}),
+            ...(lmType === "image" ? { imageMessage: { caption: lmText } } : {}),
+            ...(lmType === "video" ? { videoMessage: { caption: lmText } } : {}),
+            ...(lmType === "audio" || lmType === "voice" ? { audioMessage: {} } : {}),
+            ...(lmType === "document" ? { documentMessage: { fileName: lm.document?.file_name } } : {}),
+          },
+        }
+      : undefined,
+  };
+}
+
+function mapMessage(m: any, chatId: string) {
+  const t = m.type;
+  const message: any = {};
+  if (t === "text" || !t) message.conversation = m.text?.body || "";
+  if (t === "image") message.imageMessage = {
+    url: m.image?.link, caption: m.image?.caption || m.caption,
+    mimetype: m.image?.mime_type || "image/jpeg",
+  };
+  if (t === "video") message.videoMessage = {
+    url: m.video?.link, caption: m.video?.caption || m.caption,
+    mimetype: m.video?.mime_type || "video/mp4",
+  };
+  if (t === "audio" || t === "voice") message.audioMessage = {
+    url: (m.audio || m.voice)?.link,
+    mimetype: (m.audio || m.voice)?.mime_type || "audio/ogg; codecs=opus",
+    ptt: t === "voice",
+  };
+  if (t === "document") message.documentMessage = {
+    url: m.document?.link, fileName: m.document?.file_name,
+    mimetype: m.document?.mime_type || "application/pdf",
+  };
+  if (t === "sticker") message.stickerMessage = {
+    url: m.sticker?.link, mimetype: m.sticker?.mime_type || "image/webp",
+  };
+  return {
+    key: {
+      id: m.id,
+      remoteJid: m.chat_id || chatId,
+      fromMe: !!m.from_me,
+    },
+    pushName: m.from_name,
+    messageTimestamp: m.timestamp || 0,
+    status: m.status === "read" ? 4 : m.status === "delivered" ? 3 : m.status === "sent" ? 2 : 1,
+    message,
+  };
+}
+
+function normalizeChatId(raw: string): string {
+  if (!raw) return raw;
+  if (raw.includes("@")) return raw;
+  const digits = raw.replace(/\D/g, "");
+  return `${digits}@s.whatsapp.net`;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return json(405, { error: "Method not allowed" });
+
+  try {
+    const authHeader = req.headers.get("Authorization") || "";
+    if (!authHeader.startsWith("Bearer ")) return json(401, { error: "Unauthorized" });
+
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } },
+    );
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claims, error: claimsErr } = await supabase.auth.getClaims(token);
+    if (claimsErr || !claims?.claims?.sub) return json(401, { error: "Unauthorized" });
+    const userId = claims.claims.sub as string;
+
+    // Service role para ler settings sem RLS
+    const admin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    const { data: settingsRows } = await admin
+      .from("settings")
+      .select("key, value")
+      .in("key", ["superadmin_consultant_id", "whapi_token"]);
+    const settings: Record<string, string> = {};
+    settingsRows?.forEach((r: any) => { settings[r.key] = r.value; });
+
+    if (settings.superadmin_consultant_id !== userId) {
+      return json(403, { error: "Acesso restrito ao super admin" });
+    }
+    const whapiToken = settings.whapi_token || Deno.env.get("WHAPI_TOKEN") || "";
+    if (!whapiToken) return json(500, { error: "WHAPI_TOKEN não configurado" });
+
+    const body = await req.json().catch(() => ({}));
+    const action = body?.action as string;
+    const payload = body?.payload || {};
+
+    switch (action) {
+      case "list_chats": {
+        const count = Math.min(Number(payload.count) || 100, 200);
+        const r = await whapiFetch(whapiToken, `/chats?count=${count}`, { method: "GET" });
+        if (!r.ok) return json(r.status, { error: r.data });
+        const list = (r.data?.chats || []).map(mapChat);
+        return json(200, list);
+      }
+
+      case "list_messages": {
+        const chatId = normalizeChatId(String(payload.chatId || ""));
+        const count = Math.min(Number(payload.count) || 50, 200);
+        if (!chatId) return json(400, { error: "chatId obrigatório" });
+        const r = await whapiFetch(
+          whapiToken,
+          `/messages/list/${encodeURIComponent(chatId)}?count=${count}`,
+          { method: "GET" },
+        );
+        if (!r.ok) return json(r.status, { error: r.data });
+        const list = (r.data?.messages || []).map((m: any) => mapMessage(m, chatId));
+        return json(200, list);
+      }
+
+      case "send_text": {
+        const to = normalizeChatId(String(payload.to || ""));
+        const text = String(payload.text || "");
+        if (!to || !text) return json(400, { error: "to e text obrigatórios" });
+        const r = await whapiFetch(whapiToken, `/messages/text`, {
+          method: "POST",
+          body: JSON.stringify({ to, body: text }),
+        });
+        if (!r.ok) return json(r.status, { error: r.data });
+        return json(200, { key: { id: r.data?.message?.id || r.data?.id || "" } });
+      }
+
+      case "send_media": {
+        const to = normalizeChatId(String(payload.to || ""));
+        const mediaUrl = String(payload.mediaUrl || "");
+        const caption = payload.caption ? String(payload.caption) : undefined;
+        const fileName = payload.fileName ? String(payload.fileName) : undefined;
+        const mediatype = String(payload.mediatype || "image"); // image | video | document | audio
+        if (!to || !mediaUrl) return json(400, { error: "to e mediaUrl obrigatórios" });
+
+        const path =
+          mediatype === "video" ? "/messages/video"
+          : mediatype === "document" ? "/messages/document"
+          : mediatype === "audio" ? "/messages/voice"
+          : "/messages/image";
+
+        const sendBody: Record<string, unknown> = { to, media: mediaUrl };
+        if (caption) sendBody.caption = caption;
+        if (fileName) sendBody.file_name = fileName;
+
+        const r = await whapiFetch(whapiToken, path, {
+          method: "POST",
+          body: JSON.stringify(sendBody),
+        });
+        if (!r.ok) return json(r.status, { error: r.data });
+        return json(200, { key: { id: r.data?.message?.id || r.data?.id || "" } });
+      }
+
+      case "get_profile_pic": {
+        const chatId = normalizeChatId(String(payload.chatId || ""));
+        if (!chatId) return json(400, { error: "chatId obrigatório" });
+        const phone = chatId.split("@")[0];
+        const r = await whapiFetch(whapiToken, `/contacts/${phone}/profile`, { method: "GET" });
+        if (!r.ok) return json(200, { url: null });
+        return json(200, { url: r.data?.profile_pic_full || r.data?.icon_full || r.data?.profile_pic || null });
+      }
+
+      default:
+        return json(400, { error: `Ação desconhecida: ${action}` });
+    }
+  } catch (err: any) {
+    console.error("[whapi-proxy] erro:", err);
+    return json(500, { error: err?.message || "Erro interno" });
+  }
+});

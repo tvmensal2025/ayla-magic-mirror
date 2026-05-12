@@ -17,7 +17,7 @@ const LicConexaoClubPJ = () => (
           Serviço prestado pela iGreen que conecta empresas interessadas em fidelizar clientes e colaboradores por meio dos benefícios exclusivos do iGreen Club
         </p>
       </div>
-      <img src="/images/club-pj.webp" alt="Conexão Club PJ" loading="lazy" className="rounded-2xl w-full max-w-2xl mx-auto mb-14 shadow-lg transition-transform duration-500 hover:scale-[1.02]" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/assinatura-empresarial.png" alt="Assinatura Empresarial - Tabela de preços" loading="lazy" className="rounded-2xl w-full max-w-2xl mx-auto mb-14 shadow-lg transition-transform duration-500 hover:scale-[1.02]" style={{ boxShadow: 'var(--shadow-card)' }} />
 
       <div className="glass-card max-w-3xl mx-auto mb-12">
         <div className="space-y-4">

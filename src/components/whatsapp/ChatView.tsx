@@ -23,13 +23,15 @@ interface ChatViewProps {
   templates: MessageTemplate[];
   consultantId: string;
   initialMessage?: string | null;
+  isWhapi?: boolean;
 }
 
-export function ChatView({ instanceName, chat, templates, consultantId, initialMessage }: ChatViewProps) {
+export function ChatView({ instanceName, chat, templates, consultantId, initialMessage, isWhapi = false }: ChatViewProps) {
   const { messages, isLoading, sendMessage, loadMedia, resolveSendTargetJid } = useMessages(
     instanceName,
     chat?.remoteJid || null,
-    chat?.sendTargetJid || null
+    chat?.sendTargetJid || null,
+    isWhapi,
   );
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
@@ -134,8 +136,8 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
           </AvatarFallback>
         </Avatar>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground truncate">{chat.name}</p>
-          <p className="text-[10px] text-muted-foreground">{phoneNumber}</p>
+          <p className="text-sm font-semibold text-foreground truncate sensitive-name">{chat.name}</p>
+          <p className="text-[10px] text-muted-foreground sensitive-phone">{phoneNumber}</p>
         </div>
         {isCustomer ? (
           <div className="flex items-center gap-1.5 text-primary">
@@ -200,7 +202,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
             // Send as base64 data URL with correct webm mimetype
             const audioDataUrl = `data:audio/webm;base64,${base64}`;
             const result = await sendWhatsAppMessage({
-              instanceName, phone, mediaCategory: "audio", mediaUrl: audioDataUrl,
+              instanceName, phone, mediaCategory: "audio", mediaUrl: audioDataUrl, isWhapi,
             });
             if (result.status === "timeout") {
               toast({ title: "Áudio enviado (aguardando confirmação)", description: "O servidor está processando", variant: "default" });
@@ -217,7 +219,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
           if (!phone) return;
           try {
             const result = await sendWhatsAppMessage({
-              instanceName, phone, mediaCategory: "audio", mediaUrl: audioUrl,
+              instanceName, phone, mediaCategory: "audio", mediaUrl: audioUrl, isWhapi,
             });
             if (result.status === "timeout") {
               toast({ title: "Áudio enviado (aguardando confirmação)", variant: "default" });
@@ -240,7 +242,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
               : undefined;
 
             const result = await sendWhatsAppMessage({
-              instanceName, phone, mediaCategory: category, mediaUrl, text: caption, fileName,
+              instanceName, phone, mediaCategory: category, mediaUrl, text: caption, fileName, isWhapi,
             });
             if (result.status === "timeout") {
               toast({ title: "Mídia enviada (aguardando confirmação)", description: "O servidor está processando", variant: "default" });

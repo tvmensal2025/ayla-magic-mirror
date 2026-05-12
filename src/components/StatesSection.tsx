@@ -14,6 +14,7 @@ const StatesSection = () => (
           src="/images/imagem-3.jpeg"
           alt="Mapa do Brasil - Estados atendidos pela iGreen Energy"
           loading="lazy"
+          decoding="async"
           className="rounded-2xl w-full shadow-lg relative z-10 transition-transform duration-500 group-hover:scale-[1.02]"
           style={{ boxShadow: 'var(--shadow-card)' }}
         />

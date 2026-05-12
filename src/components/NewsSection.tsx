@@ -1,14 +1,16 @@
 import { useRef, useState } from "react";
 import { Play } from "lucide-react";
 
-const MINIO_BASE = "https://igreen-minio.b099mi.easypanel.host/igreen";
+const SUPABASE_BASE = "https://zlzasfhcxcznaprrragl.supabase.co/storage/v1/object/public/video%20igreen";
 
 const videos = [
-  `${MINIO_BASE}/noticia1.mp4`,
-  `${MINIO_BASE}/noticia2.mp4`,
-  `${MINIO_BASE}/noticia3.mp4`,
-  `${MINIO_BASE}/noticia5.mp4`,
-  `${MINIO_BASE}/noticia6.mp4`,
+  `${SUPABASE_BASE}/noticia1.mp4`,
+  `${SUPABASE_BASE}/noticia2.mp4`,
+  `${SUPABASE_BASE}/noticia3.mp4`,
+  `${SUPABASE_BASE}/noticia4.mp4`,
+  `${SUPABASE_BASE}/noticia5.mp4`,
+  `${SUPABASE_BASE}/noticia6.mp4`,
+  `${SUPABASE_BASE}/noticaia9.mp4`,
 ];
 
 function NewsVideoCard({ src }: { src: string }) {

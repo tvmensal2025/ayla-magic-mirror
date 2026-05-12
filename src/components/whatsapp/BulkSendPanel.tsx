@@ -1,7 +1,8 @@
 import { useState, useRef, useMemo } from "react";
-import { Users, Send, CheckSquare, Loader2, Sparkles, Megaphone, Timer, Shield, Filter, Eye, Phone, Mail, MapPin, Zap, ChevronDown, X } from "lucide-react";
+import { Users, Send, CheckSquare, Loader2, Sparkles, Megaphone, Timer, Shield, Filter, Eye, Phone, Mail, MapPin, Zap, ChevronDown, X, CheckCircle2, Search, AlertTriangle, Clock, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
@@ -23,9 +24,43 @@ interface BulkSendPanelProps {
   instanceName: string; customers: Customer[]; templates: MessageTemplate[];
   applyTemplate: (t: MessageTemplate, c: { name: string; electricity_bill_value?: number }) => string;
 }
-const SEND_INTERVAL_MS = 20000;
+const SEND_INTERVAL_MIN_S = 18;
+const SEND_INTERVAL_MAX_S = 35;
+const PROGRESSIVE_EXTRA_S = 5;
 
-type StatusFilter = "all" | "approved" | "rejected" | "pending" | "approved_devolutiva";
+function getRandomInterval(messageIndex: number): number {
+  const base = SEND_INTERVAL_MIN_S + Math.random() * (SEND_INTERVAL_MAX_S - SEND_INTERVAL_MIN_S);
+  const progressive = Math.floor(messageIndex / 10) * PROGRESSIVE_EXTRA_S;
+  return Math.round(base + progressive);
+}
+
+/** Check if a phone number is valid for sending */
+function isValidPhone(phone: string): boolean {
+  if (!phone) return false;
+  if (/sem_celular/i.test(phone)) return false;
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 10;
+}
+
+/** Estimate total send time in seconds */
+function estimateSendTime(count: number): number {
+  if (count <= 1) return 0;
+  const avgInterval = (SEND_INTERVAL_MIN_S + SEND_INTERVAL_MAX_S) / 2;
+  let total = 0;
+  for (let i = 0; i < count - 1; i++) {
+    total += avgInterval + Math.floor(i / 10) * PROGRESSIVE_EXTRA_S;
+  }
+  return Math.round(total);
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return s > 0 ? `${m}min ${s}s` : `${m}min`;
+}
+
+type StatusFilter = "all" | "approved" | "rejected" | "pending";
 
 const DEVOLUTIVA_CATEGORIES = [
   { key: "fatura_ilegivel", label: "Fatura Ilegível", match: ["fatura ilegível", "fatura ilegivel"] },
@@ -50,6 +85,7 @@ function matchDevolutiva(devolutiva: string | null | undefined, categoryKey: str
 
 export function BulkSendPanel({ instanceName, customers, templates, applyTemplate }: BulkSendPanelProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sentIds, setSentIds] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<MessageTemplate | null>(null);
   const [isSending, setIsSending] = useState(false);
@@ -62,6 +98,7 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
   const [devolutivaFilter, setDevolutivaFilter] = useState<string>("all");
   const [licenciadoFilter, setLicenciadoFilter] = useState<Set<string>>(new Set());
   const [viewingCustomer, setViewingCustomer] = useState<Customer | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const { toast } = useToast();
 
   const licenciadoOptions = useMemo(() => {
@@ -75,41 +112,78 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
     if (statusFilter === "approved") list = list.filter(c => c.status === "approved");
     else if (statusFilter === "rejected") list = list.filter(c => c.status === "rejected");
     else if (statusFilter === "pending") list = list.filter(c => c.status === "pending");
-    else if (statusFilter === "approved_devolutiva") list = list.filter(c => c.status === "approved" && c.devolutiva && c.devolutiva.trim() !== "");
-
-    if (statusFilter === "approved_devolutiva" && devolutivaFilter !== "all") {
+    if (devolutivaFilter !== "all") {
       list = list.filter(c => matchDevolutiva(c.devolutiva, devolutivaFilter));
     }
-
     if (licenciadoFilter.size > 0) {
       list = list.filter(c => c.registered_by_name != null && licenciadoFilter.has(c.registered_by_name));
     }
-
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(c =>
+        (c.name && c.name.toLowerCase().includes(q)) ||
+        c.phone_whatsapp.toLowerCase().includes(q)
+      );
+    }
     return list;
-  }, [customers, statusFilter, devolutivaFilter, licenciadoFilter]);
+  }, [customers, statusFilter, devolutivaFilter, licenciadoFilter, searchQuery]);
 
-  const allSelected = filteredCustomers.length > 0 && filteredCustomers.every(c => selectedIds.has(c.id));
+  // Valid/invalid phone counts
+  const validCount = useMemo(() => filteredCustomers.filter(c => isValidPhone(c.phone_whatsapp)).length, [filteredCustomers]);
+  const invalidCount = filteredCustomers.length - validCount;
+
+  // Selected valid count
+  const selectedValidCount = useMemo(() => {
+    return customers.filter(c => selectedIds.has(c.id) && isValidPhone(c.phone_whatsapp)).length;
+  }, [customers, selectedIds]);
+  const selectedInvalidCount = selectedIds.size - selectedValidCount;
+
+  // Time estimate for selected valid
+  const timeEstimate = useMemo(() => estimateSendTime(selectedValidCount), [selectedValidCount]);
+
+  const allValidSelected = useMemo(() => {
+    const validInList = filteredCustomers.filter(c => isValidPhone(c.phone_whatsapp));
+    return validInList.length > 0 && validInList.every(c => selectedIds.has(c.id));
+  }, [filteredCustomers, selectedIds]);
+
+  // Preview message with first selected customer's data
+  const previewMessage = useMemo(() => {
+    if (!message.trim()) return null;
+    const firstSelected = customers.find(c => selectedIds.has(c.id));
+    if (!firstSelected) return null;
+    if (message.includes("{{")) {
+      return applyTemplate(
+        { id: "", consultant_id: "", name: "", content: message, media_type: "text", media_url: null, image_url: null, created_at: "" },
+        firstSelected
+      );
+    }
+    return message;
+  }, [message, selectedIds, customers, applyTemplate]);
 
   function toggleCustomer(id: string) {
     setSelectedIds((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
     setWarning("");
   }
+
   function toggleAll() {
-    if (allSelected) {
+    if (allValidSelected) {
+      // Deselect all valid from filtered
       setSelectedIds(prev => {
         const n = new Set(prev);
-        filteredCustomers.forEach(c => n.delete(c.id));
+        filteredCustomers.filter(c => isValidPhone(c.phone_whatsapp)).forEach(c => n.delete(c.id));
         return n;
       });
     } else {
+      // Select only valid phones from filtered
       setSelectedIds(prev => {
         const n = new Set(prev);
-        filteredCustomers.forEach(c => n.add(c.id));
+        filteredCustomers.filter(c => isValidPhone(c.phone_whatsapp)).forEach(c => n.add(c.id));
         return n;
       });
     }
     setWarning("");
   }
+
   function handleTemplateChange(tid: string) {
     const t = templates.find((t) => t.id === tid);
     if (t) {
@@ -172,13 +246,17 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
             if (r.status === "failed") allOk = false;
           }
         }
-        if (allOk) sent++; else failed++;
+        if (allOk) {
+          sent++;
+          setSentIds(prev => new Set(prev).add(selected[i].id));
+        } else { failed++; }
       } catch { failed++; }
 
       if (i < selected.length - 1) {
-        setCountdown(SEND_INTERVAL_MS / 1000);
+        const intervalS = getRandomInterval(i);
+        setCountdown(intervalS);
         await new Promise<void>((resolve) => {
-          let seconds = SEND_INTERVAL_MS / 1000;
+          let seconds = intervalS;
           countdownRef.current = setInterval(() => {
             seconds--;
             setCountdown(seconds);
@@ -197,8 +275,6 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
     toast({ title: "Envio concluído", description: `${sent} enviadas, ${failed} falhas`, variant: failed > 0 ? "destructive" : "default" });
   }
   const pct = progress && progress.total > 0 ? ((progress.sent + progress.failed) / progress.total) * 100 : 0;
-
-  const selectedFromFiltered = filteredCustomers.filter(c => selectedIds.has(c.id)).length;
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-card via-card to-orange-950/10">
@@ -221,10 +297,9 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
           </div>
           {[
             { key: "all", label: "Todos" },
-            { key: "approved", label: "Aprovados" },
-            { key: "rejected", label: "Reprovados" },
-            { key: "pending", label: "Pendentes" },
-            { key: "approved_devolutiva", label: "Aprovado + Devolutiva" },
+            { key: "approved", label: "Aprovado" },
+            { key: "rejected", label: "Reprovado" },
+            { key: "pending", label: "Pendente" },
           ].map(f => (
             <button
               key={f.key}
@@ -241,12 +316,13 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
           ))}
         </div>
 
-        {/* Devolutiva sub-filter */}
-        {statusFilter === "approved_devolutiva" && (
+        {/* Devolutiva filter - visible when status = rejected */}
+        {statusFilter === "rejected" && (
           <div className="mb-3">
             <Select value={devolutivaFilter} onValueChange={setDevolutivaFilter} disabled={isSending}>
-              <SelectTrigger className="rounded-xl bg-secondary/50 border-border/50 text-sm">
-                <SelectValue placeholder="Tipo de devolutiva..." />
+              <SelectTrigger className="rounded-xl bg-secondary/50 border-border/50">
+                <AlertTriangle className="w-3.5 h-3.5 text-orange-400 mr-2" />
+                <SelectValue placeholder="Filtrar por devolutiva..." />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas as devolutivas</SelectItem>
@@ -332,42 +408,94 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
           </div>
         )}
 
-        <div className="flex items-center justify-between mb-3 px-1">
+        {/* Search bar */}
+        <div className="relative mb-3">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <Input
+            placeholder="Buscar por nome ou telefone..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            disabled={isSending}
+            className="pl-9 rounded-xl bg-secondary/50 border-border/50"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Select all + counters */}
+        <div className="flex items-center justify-between mb-2 px-1">
           <label className="flex items-center gap-2.5 cursor-pointer">
-            <Checkbox checked={allSelected} onCheckedChange={toggleAll} disabled={isSending || filteredCustomers.length === 0} />
+            <Checkbox checked={allValidSelected} onCheckedChange={toggleAll} disabled={isSending || filteredCustomers.length === 0} />
             <span className="text-sm text-foreground font-medium flex items-center gap-1.5">
-              <CheckSquare className="w-3.5 h-3.5 text-muted-foreground" /> Selecionar Todos
+              <CheckSquare className="w-3.5 h-3.5 text-muted-foreground" /> Selecionar Válidos
             </span>
           </label>
           <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">
-            {selectedIds.size} selecionados • {filteredCustomers.length} filtrados
+            {selectedIds.size} selecionados
           </span>
+        </div>
+
+        {/* Valid/invalid counter */}
+        <div className="flex flex-wrap items-center gap-2 mb-3 px-1">
+          <span className="text-[11px] text-muted-foreground">{filteredCustomers.length} filtrados:</span>
+          <span className="text-[11px] text-green-400 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+            {validCount} válidos
+          </span>
+          {invalidCount > 0 && (
+            <span className="text-[11px] text-red-400 flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" />
+              {invalidCount} sem número válido
+            </span>
+          )}
+          {selectedInvalidCount > 0 && (
+            <span className="text-[11px] text-yellow-400 flex items-center gap-1">
+              ⚠ {selectedInvalidCount} inválido(s) selecionado(s)
+            </span>
+          )}
         </div>
 
         {/* Customer list */}
         <div className="max-h-52 overflow-y-auto rounded-xl border border-border/50 mb-4 divide-y divide-border/30">
           {filteredCustomers.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-6">
-              {customers.length === 0 ? "Nenhum cliente" : "Nenhum cliente com este filtro"}
+              {customers.length === 0 ? "Nenhum cliente" : searchQuery ? "Nenhum resultado para a busca" : "Nenhum cliente com este filtro"}
             </p>
-          ) : filteredCustomers.map((c) => (
-            <div key={c.id} className={`w-full flex items-center gap-3 px-4 py-2.5 transition-all hover:bg-secondary/40 ${selectedIds.has(c.id) ? "bg-orange-500/5" : ""} ${isSending ? "pointer-events-none opacity-50" : ""}`}>
-              <Checkbox checked={selectedIds.has(c.id)} onCheckedChange={() => toggleCustomer(c.id)} disabled={isSending} />
-              <div className="min-w-0 flex-1 cursor-pointer" onClick={() => setViewingCustomer(c)}>
-                <p className="text-sm text-foreground truncate hover:underline">{c.name}</p>
-                <p className="text-xs text-muted-foreground/70">{c.phone_whatsapp}</p>
+          ) : filteredCustomers.map((c) => {
+            const phoneValid = isValidPhone(c.phone_whatsapp);
+            return (
+              <div key={c.id} className={`w-full flex items-center gap-3 px-4 py-2.5 transition-all hover:bg-secondary/40 ${selectedIds.has(c.id) ? "bg-orange-500/5" : ""} ${!phoneValid ? "opacity-50" : ""} ${isSending ? "pointer-events-none opacity-50" : ""}`}>
+                <Checkbox checked={selectedIds.has(c.id)} onCheckedChange={() => toggleCustomer(c.id)} disabled={isSending} />
+                <div className="min-w-0 flex-1 cursor-pointer" onClick={() => setViewingCustomer(c)}>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm text-foreground truncate hover:underline">{c.name}</p>
+                    {sentIds.has(c.id) && <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0" />}
+                    {!phoneValid && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-medium shrink-0">
+                        Nº inválido
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground/70">{c.phone_whatsapp}</p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {c.status === "approved" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 font-medium">Aprovado</span>}
+                  {c.status === "rejected" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-medium">Reprovado</span>}
+                  {c.status === "pending" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500/15 text-yellow-400 font-medium">Pendente</span>}
+                  {c.devolutiva && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-500/15 text-orange-400 font-medium">Dev.</span>}
+                  <button onClick={() => setViewingCustomer(c)} className="p-1 rounded-lg hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors">
+                    <Eye className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5">
-                {c.status === "approved" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 font-medium">Aprovado</span>}
-                {c.status === "rejected" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-medium">Reprovado</span>}
-                {c.status === "pending" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500/15 text-yellow-400 font-medium">Pendente</span>}
-                {c.devolutiva && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-500/15 text-orange-400 font-medium">Dev.</span>}
-                <button onClick={() => setViewingCustomer(c)} className="p-1 rounded-lg hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors">
-                  <Eye className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {warning && (
@@ -389,6 +517,32 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
         )}
 
         <Textarea placeholder="Digite sua mensagem..." value={message} onChange={(e) => setMessage(e.target.value)} rows={4} disabled={isSending} className="mb-3 rounded-xl bg-secondary/30 border-border/40 resize-none" />
+
+        {/* Message preview */}
+        {previewMessage && selectedIds.size > 0 && !isSending && (
+          <div className="mb-4 rounded-xl border border-border/40 overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 bg-secondary/30 border-b border-border/30">
+              <MessageSquare className="w-3.5 h-3.5 text-green-400" />
+              <span className="text-xs font-medium text-muted-foreground">Preview da mensagem</span>
+            </div>
+            <div className="p-3 bg-[#0b141a]">
+              <div className="max-w-[85%] ml-auto rounded-lg bg-[#005c4b] px-3 py-2 shadow-sm">
+                <p className="text-sm text-white/90 whitespace-pre-wrap break-words">{previewMessage}</p>
+                <p className="text-[10px] text-white/40 text-right mt-1">agora</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Time estimate */}
+        {selectedValidCount > 1 && !isSending && (
+          <div className="flex items-center gap-2 mb-3 px-1">
+            <Clock className="w-3.5 h-3.5 text-blue-400" />
+            <span className="text-xs text-blue-300">
+              Tempo estimado: <span className="font-bold">~{formatDuration(timeEstimate)}</span> para {selectedValidCount} contatos
+            </span>
+          </div>
+        )}
 
         {isSending && progress && (
           <div className="mb-4 space-y-3 rounded-xl bg-secondary/20 border border-border/30 p-4">
@@ -424,7 +578,7 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
         )}
 
         <Button onClick={handleBulkSend} disabled={selectedIds.size === 0 || (!message.trim() && !selectedTemplate?.media_url) || isSending} className="gap-2 rounded-xl h-11 font-bold shadow-lg shadow-green-500/10 hover:shadow-green-500/20 transition-all" style={{ background: "var(--gradient-green)" }}>
-          {isSending ? <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</> : <><Send className="w-4 h-4" /> Enviar para {selectedIds.size} clientes</>}
+          {isSending ? <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</> : <><Send className="w-4 h-4" /> Enviar para {selectedValidCount} clientes</>}
         </Button>
       </div>
 
@@ -473,7 +627,7 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
               )}
 
               {viewingCustomer.registered_by_name && (
-                <div className="text-muted-foreground"><span className="font-medium text-foreground">Licenciada:</span> {viewingCustomer.registered_by_name}</div>
+                <div className="text-muted-foreground"><span className="font-medium text-foreground">Licenciado:</span> {viewingCustomer.registered_by_name}</div>
               )}
 
               <div className="flex items-center gap-2">

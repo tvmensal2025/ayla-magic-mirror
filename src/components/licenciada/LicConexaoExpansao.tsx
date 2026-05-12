@@ -9,8 +9,7 @@ const LicConexaoExpansao = () => (
         </p>
       </div>
 
-      <img src="/images/conexao-expansao.webp" alt="Conexão Expansão" loading="lazy" className="rounded-2xl w-full max-w-2xl mx-auto mb-8 shadow-lg transition-transform duration-500 hover:scale-[1.02]" style={{ boxShadow: 'var(--shadow-card)' }} />
-      <img src="/images/conexao-expansao-2.webp" alt="Estrutura de Expansão" loading="lazy" className="rounded-2xl w-full max-w-2xl mx-auto mb-14 shadow-lg" style={{ boxShadow: 'var(--shadow-card)' }} />
+      <img src="/images/conexao-expansao.webp" alt="Conexão Expansão" loading="lazy" className="rounded-2xl w-full max-w-2xl mx-auto mb-14 shadow-lg transition-transform duration-500 hover:scale-[1.02]" style={{ boxShadow: 'var(--shadow-card)' }} />
 
       <div className="max-w-3xl mx-auto space-y-8">
         <div className="glass-card">

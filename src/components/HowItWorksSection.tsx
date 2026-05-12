@@ -6,6 +6,8 @@ const steps = [
   { icon: "💡", text: "Nosso trabalho está regulamentado pela Lei Federal 14.300 de 6 de Janeiro de 2022. Os consumidores já podem escolher o tipo de energia que desejam utilizar em suas residências e empresas, se é a energia hidrelétrica ou a energia solar renovável e mais barata" },
 ];
 
+import LazyVideo from "@/components/ui/LazyVideo";
+
 const HowItWorksSection = () => (
   <section className="section-gradient relative overflow-hidden">
     <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{ background: 'radial-gradient(circle at 80% 50%, hsl(130, 100%, 36%), transparent 60%)' }} />
@@ -15,9 +17,7 @@ const HowItWorksSection = () => (
 
       <div className="max-w-4xl mx-auto rounded-2xl overflow-hidden relative mb-14" style={{ boxShadow: 'var(--shadow-green-lg)' }}>
         <div className="absolute inset-0 rounded-2xl border border-primary/20 z-10 pointer-events-none" />
-        <video controls className="w-full aspect-video relative z-0">
-          <source src="/videos/como-funciona-cliente.mp4" type="video/mp4" />
-        </video>
+        <LazyVideo src="https://zlzasfhcxcznaprrragl.supabase.co/storage/v1/object/public/video%20igreen/casasustentavel.mp4" />
       </div>
 
       <div className="grid md:grid-cols-2 gap-12 items-center">

@@ -1,0 +1,1 @@
+INSERT INTO public.settings (key, value) VALUES ('ai_knowledge_extra', '') ON CONFLICT (key) DO NOTHING;

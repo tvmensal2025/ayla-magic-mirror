@@ -1,0 +1,121 @@
+// ─── Normalização canônica de telefone (sempre 55 + DDD + número) ────────
+export function normalizePhone(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  // Já tem 55 + DDD + número (13 dígitos) ou 55 + DDD + fixo (12 dígitos)
+  if (digits.length >= 12 && digits.startsWith("55")) return digits;
+  // Apenas DDD + número (10-11 dígitos)
+  if (digits.length >= 10 && digits.length <= 11) return "55" + digits;
+  // Fallback: retorna como está (ex: números curtos ou inválidos)
+  return digits;
+}
+
+// ─── Timeouts (ms) para evitar travamentos ──────────────────────────────
+export const TIMEOUT_VIA_CEP = 6_000;    // 6s (era 10s)
+export const TIMEOUT_FETCH_IMAGE = 15_000; // 15s (era 30s)
+export const TIMEOUT_GEMINI = 30_000;      // 30s (era 50s) — Gemini 2.5 Flash responde em <10s normalmente
+export const TIMEOUT_WHAPI = 12_000;       // 12s (era 20s)
+export const TIMEOUT_EVOLUTION = 12_000;   // 12s (era 20s)
+
+// ─── Log estruturado (para troubleshooting) ──────────────────────────────
+export function logStructured(
+  level: "info" | "warn" | "error",
+  action: string,
+  data: { customer_id?: string; step?: string; error?: string; [k: string]: unknown }
+) {
+  const payload = { level, action, ts: new Date().toISOString(), ...data };
+  console.log(JSON.stringify(payload));
+}
+
+// ─── fetch com timeout ───────────────────────────────────────────────────
+export async function fetchWithTimeout(
+  url: string,
+  init: RequestInit & { timeout?: number } = {}
+): Promise<Response> {
+  const timeout = init.timeout ?? 30_000;
+  const { timeout: _t, ...rest } = init;
+  return fetch(url, { ...rest, signal: AbortSignal.timeout(timeout) });
+}
+
+// ─── fetch inseguro (aceita certificados auto-assinados) ─────────────────
+// Usado para conectar ao worker VPS via IP com certificado auto-assinado
+export async function fetchInsecure(
+  url: string,
+  init: RequestInit & { timeout?: number } = {}
+): Promise<Response> {
+  const timeout = init.timeout ?? 30_000;
+  const { timeout: _t, ...rest } = init;
+  try {
+    // Deno suporta client customizado para ignorar SSL
+    const client = (Deno as any).createHttpClient({ caCerts: [], certErrors: "ignore" });
+    return await fetch(url, { ...rest, signal: AbortSignal.timeout(timeout), client });
+  } catch {
+    // Fallback: tenta fetch normal (pode falhar com SSL)
+    return fetch(url, { ...rest, signal: AbortSignal.timeout(timeout) });
+  }
+}
+
+// ─── Retry simples (para OCR e Whapi) ────────────────────────────────────
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  options: { maxAttempts?: number; delayMs?: number; retryOn?: (e: unknown) => boolean } = {}
+): Promise<T> {
+  const { maxAttempts = 2, delayMs = 500, retryOn = () => true } = options;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastError = e;
+      if (attempt < maxAttempts && retryOn(e)) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      } else {
+        throw e;
+      }
+    }
+  }
+  throw lastError;
+}
+
+// ─── Buscar CEP por endereço via ViaCEP (reverse lookup) ─────────────────
+// Evita CEPs genéricos (terminam em 000) — são sectores da cidade, não da rua.
+export async function buscarCepPorEndereco(estado: string, cidade: string, rua: string): Promise<string> {
+  if (!estado || !cidade || !rua) return "";
+  let ruaLimpa = rua.trim()
+    .replace(/^(R\.|R |RUA |AV\.|AV |AVENIDA |AL\.|AL |ALAMEDA |TV\.|TV |TRAVESSA |PÇ\.|PÇ |PRAÇA |ROD\.|ROD |RODOVIA )/i, "")
+    .trim();
+  if (ruaLimpa.length < 3) ruaLimpa = rua.trim();
+  const uf = estado.trim().substring(0, 2).toUpperCase();
+  const cidadeLimpa = cidade.trim();
+  try {
+    const url = `https://viacep.com.br/ws/${encodeURIComponent(uf)}/${encodeURIComponent(cidadeLimpa)}/${encodeURIComponent(ruaLimpa)}/json/`;
+    console.log(`🔍 Buscando CEP: ${url}`);
+    const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_VIA_CEP) });
+    if (!res.ok) return "";
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return "";
+
+    // Preferir CEP que NÃO termina em 000 (CEP genérico de setor, não específico da rua)
+    const ruaLower = ruaLimpa.toLowerCase();
+    const comSufixo = data.filter((item: any) => item.cep && !/000$/.test(item.cep.replace("-", "")));
+    const candidatos = comSufixo.length > 0 ? comSufixo : data;
+
+    // Entre os candidatos, preferir logradouro que contenha o nome da rua
+    const melhor = candidatos.find((item: any) =>
+      item.logradouro && item.logradouro.toLowerCase().includes(ruaLower.substring(0, Math.min(ruaLower.length, 8)))
+    ) || candidatos[0];
+
+    if (melhor?.cep) {
+      const cepEncontrado = melhor.cep.replace("-", "");
+      // Se só restaram CEPs 000, não usar — pedir ao usuário
+      if (/000$/.test(cepEncontrado)) {
+        console.warn(`⚠️ ViaCEP retornou só CEPs genéricos (000). Não auto-preenchendo.`);
+        return "";
+      }
+      console.log(`✅ CEP via ViaCEP: ${cepEncontrado} (${melhor.logradouro})`);
+      return cepEncontrado;
+    }
+  } catch (e: any) {
+    console.warn(`⚠️ Erro buscando CEP por endereço: ${e.message}`);
+  }
+  return "";
+}

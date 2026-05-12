@@ -11,6 +11,7 @@ const SolarPlantsSection = () => (
             src="/images/feed-1.jpeg"
             alt="Usinas Solares iGreen"
             loading="lazy"
+            decoding="async"
             className="rounded-2xl w-full shadow-lg relative z-10 transition-transform duration-500 group-hover:scale-[1.01]"
             style={{ boxShadow: 'var(--shadow-card)' }}
           />

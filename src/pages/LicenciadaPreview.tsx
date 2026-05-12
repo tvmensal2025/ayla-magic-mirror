@@ -19,11 +19,11 @@ import LicIntermediateCTA from "@/components/licenciada/LicIntermediateCTA";
 import WhatsAppFloat from "@/components/WhatsAppFloat";
 import SEOHead from "@/components/SEOHead";
 
-const DEFAULT_WHATSAPP = "https://api.whatsapp.com/send?phone=5515981077416&text=Ol%C3%A1,%20gostaria%20de%20mais%20informa%C3%A7%C3%B5es%20sobre%20a%20oportunidade%20de%20Licenciado%20iGreen%20Energy";
+const DEFAULT_WHATSAPP = "https://api.whatsapp.com/send?phone=5500000000000&text=Ol%C3%A1,%20gostaria%20de%20mais%20informa%C3%A7%C3%B5es%20sobre%20a%20oportunidade%20de%20Licenciado%20iGreen%20Energy";
 
 const LicenciadaPreview = () => (
   <>
-    <SEOHead title="Licenciada Ayla Viana – iGreen Energy" description="Descubra como se tornar um Licenciado iGreen Energy" />
+    <SEOHead title="Licenciado iGreen Energy" description="Descubra como se tornar um Licenciado iGreen Energy" />
     <div className="min-h-screen">
       <LicHeroSection />
       <LicUrgencyBanner />

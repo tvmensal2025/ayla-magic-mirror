@@ -1,1 +1,64 @@
 project_id = "zlzasfhcxcznaprrragl"
+
+[functions.evolution-webhook]
+verify_jwt = false
+
+[functions.facebook-oauth-start]
+verify_jwt = true
+
+[functions.facebook-oauth-callback]
+verify_jwt = false
+
+[functions.wallet-stripe-webhook]
+verify_jwt = false
+
+[functions.facebook-validate-account]
+verify_jwt = true
+
+[functions.facebook-search-cities]
+verify_jwt = true
+
+[functions.facebook-create-campaign]
+verify_jwt = true
+
+[functions.facebook-list-assets]
+verify_jwt = true
+
+[functions.facebook-select-assets]
+verify_jwt = true
+
+[functions.facebook-sync-metrics]
+verify_jwt = false
+
+[functions.facebook-token-refresh]
+verify_jwt = false
+
+[functions.facebook-capi]
+verify_jwt = false
+
+[functions.ad-creative-builder]
+verify_jwt = true
+
+[functions.upload-documents-minio]
+verify_jwt = false
+
+[functions.recover-stuck-otp]
+verify_jwt = false
+
+[functions.qr-redirect]
+verify_jwt = false
+
+[functions.facebook-campaign-healthcheck]
+verify_jwt = false
+
+[functions.facebook-auto-pause]
+verify_jwt = false
+
+[functions.facebook-cbo-to-abo]
+verify_jwt = false
+
+[functions.ai-agent-router]
+verify_jwt = false
+
+[functions.ai-transcribe-media]
+verify_jwt = true

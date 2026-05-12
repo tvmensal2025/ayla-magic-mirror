@@ -5,8 +5,30 @@ import {
   connectInstance,
   getConnectionState,
   logoutInstance,
+  deleteInstance,
+  EvolutionAuthError,
 } from "@/services/evolutionApi";
 import type { ConnectionStatus } from "@/types/whatsapp";
+import {
+  type OperationalHealth,
+  REL_LOGIN_MESSAGE,
+  MAX_CONSECUTIVE_TIMEOUTS,
+  MAX_RECOVERY_CYCLES_WITHOUT_SIGNAL,
+  DEGRADED_POLL_INTERVAL,
+  HEALTHY_POLL_INTERVAL,
+  logEntry,
+  sanitize,
+  getFixedInstanceName,
+  isAuthError,
+  isRecoverableConnectionError,
+  sleep,
+  withTimeout,
+} from "./whatsapp/whatsappHelpers";
+import { useWhatsAppInstanceDb } from "./whatsapp/useWhatsAppInstanceDb";
+import { createHealthControls } from "./whatsapp/whatsappHealth";
+import { createStateChecks } from "./whatsapp/whatsappStateChecks";
+
+export type { OperationalHealth } from "./whatsapp/whatsappHelpers";
 
 interface UseWhatsAppReturn {
   connectionStatus: ConnectionStatus;
@@ -17,70 +39,28 @@ interface UseWhatsAppReturn {
   isLoading: boolean;
   error: string | null;
   connectionLog: string[];
+  operationalHealth: OperationalHealth;
+  consecutiveTimeouts: number;
+  isWhapi: boolean;
   createAndConnect: () => Promise<void>;
   disconnect: () => Promise<void>;
   reconnect: () => Promise<void>;
   refreshQr: () => Promise<void>;
+  safeReset: () => Promise<void>;
 }
-
-/* ── helpers ── */
-
-function logEntry(msg: string): string {
-  const ts = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  return `[${ts}] ${msg}`;
-}
-
-function sanitize(message: string): string {
-  return message
-    .replace(/evolution api/gi, "serviço de conexão")
-    .replace(/evolution/gi, "serviço")
-    .replace(/^\[\d{3}\]\s*/, "")
-    .trim();
-}
-
-function getFixedInstanceName(consultantId: string): string {
-  const slug = consultantId.replace(/-/g, "").slice(0, 12);
-  return `igreen-${slug}`;
-}
-
-function isNotFoundError(message: string): boolean {
-  return /404|not found|does not exist|instance.*not|inst[âa]ncia.*n[ãa]o/i.test(message);
-}
-
-function isRecoverableConnectionError(message: string): boolean {
-  return /timeout|connection closed|temporariamente|inst[áa]vel|erro de conex[ãa]o/i.test(message);
-}
-
-function isAlreadyConnectedError(message: string): boolean {
-  return /already.*(connected|open)|connection.*already|j[áa].*conectad|inst[âa]ncia.*(aberta|conectada)/i.test(message);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const id = setTimeout(() => reject(new Error("timeout")), ms);
-    promise
-      .then((v) => { clearTimeout(id); resolve(v); })
-      .catch((e) => { clearTimeout(id); reject(e); });
-  });
-}
-
-/* ── Core: single polling loop handles everything ── */
-
-type ConnectionCheckState = "open" | "close" | "connecting" | "unknown" | "missing";
 
 export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [instanceName, setInstanceName] = useState<string | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [qrGeneratedAt, setQrGeneratedAt] = useState<number | null>(null);
+  const [isWhapi, setIsWhapi] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [connectionLog, setConnectionLog] = useState<string[]>([]);
+  const [operationalHealth, setOperationalHealth] = useState<OperationalHealth>("healthy");
+  const [consecutiveTimeouts, setConsecutiveTimeouts] = useState(0);
 
   const mountedRef = useRef(true);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -88,10 +68,21 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
   const graceCountRef = useRef(0);
   const instanceSavedRef = useRef(false);
   const statusRef = useRef<ConnectionStatus>("disconnected");
+  const timeoutCountRef = useRef(0);
+  const healthRef = useRef<OperationalHealth>("healthy");
+  const recoveryCyclesRef = useRef(0);
+
+  const { saveInstance, deleteInstanceDb, fetchAndSaveConnectedPhone, ensureWebhook } =
+    useWhatsAppInstanceDb(consultantId);
 
   const setStatus = useCallback((status: ConnectionStatus) => {
     statusRef.current = status;
     setConnectionStatus(status);
+  }, []);
+
+  const setHealth = useCallback((health: OperationalHealth) => {
+    healthRef.current = health;
+    setOperationalHealth(health);
   }, []);
 
   const addLog = useCallback((msg: string) => {
@@ -102,188 +93,223 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
     if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
   }, []);
 
-  /* ── DB helpers ── */
-  const saveInstance = useCallback(async (name: string) => {
-    await supabase
-      .from("whatsapp_instances")
-      .upsert({ consultant_id: consultantId, instance_name: name }, { onConflict: "consultant_id" });
-  }, [consultantId]);
+  // ── Health controls (factory) ──
+  const health = createHealthControls({
+    healthRef, setHealth, timeoutCountRef, setConsecutiveTimeouts,
+    recoveryCyclesRef, addLog,
+  });
 
-  const deleteInstanceDb = useCallback(async () => {
-    await supabase.from("whatsapp_instances").delete().eq("consultant_id", consultantId);
-  }, [consultantId]);
+  // ── State checks (factory) ──
+  const checks = createStateChecks({
+    health, setHealth, timeoutCountRef, addLog,
+  });
+
+  const haltRecovery = useCallback((message: string) => {
+    stopPolling();
+    graceCountRef.current = 0;
+    recoveryCyclesRef.current = 0;
+    setStatus("disconnected");
+    setQrCode(null);
+    setQrGeneratedAt(null);
+    setError(null);
+
+    const nextHealth: OperationalHealth = timeoutCountRef.current >= MAX_CONSECUTIVE_TIMEOUTS
+      ? "reset_recommended"
+      : "degraded";
+
+    setHealth(nextHealth);
+    addLog(message);
+
+    if (nextHealth === "reset_recommended") {
+      addLog("🛡️ Recuperação automática pausada para evitar loop. Use Resetar Conexão.");
+    }
+  }, [addLog, setHealth, setStatus, stopPolling]);
+
+  const handleAuthFailure = useCallback((err: EvolutionAuthError) => {
+    stopPolling();
+    setQrCode(null);
+    setQrGeneratedAt(null);
+    setStatus("disconnected");
+
+    if (err.requiresRelogin) {
+      setError(REL_LOGIN_MESSAGE);
+      addLog("⚠️ Sessão expirada. Faça login novamente.");
+      return;
+    }
+
+    setError("Autenticando novamente...");
+    addLog("🔄 Atualizando autenticação...");
+  }, [addLog, setStatus, stopPolling]);
 
   const markConnected = useCallback(async (name: string, message?: string) => {
     graceCountRef.current = 0;
+    health.resetTimeoutCounter();
+    health.resetRecoveryCounter();
 
-    if (statusRef.current !== "connected" && message) {
-      addLog(message);
-    }
+    if (statusRef.current !== "connected" && message) addLog(message);
 
     setQrCode(null);
     setQrGeneratedAt(null);
     setError(null);
     setStatus("connected");
+    setHealth("healthy");
 
     if (!instanceSavedRef.current) {
       try {
         await saveInstance(name);
         instanceSavedRef.current = true;
-      } catch {
-        // Non-critical persistence failure
-      }
+        ensureWebhook(name);
+      } catch { /* non-critical */ }
     }
-  }, [addLog, saveInstance, setStatus]);
+    fetchAndSaveConnectedPhone(name).catch(() => {/* non-critical */});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addLog, ensureWebhook, fetchAndSaveConnectedPhone, saveInstance, setHealth, setStatus]);
 
-  /* ── Check state with proper error handling ── */
-  const checkState = useCallback(async (name: string): Promise<ConnectionCheckState> => {
-    try {
-      const result = await withTimeout(getConnectionState(name), 10000);
-      const state: string = result?.state || "close";
-      if (state === "open") return "open";
-      if (state === "connecting") return "connecting";
-      if (state === "close") return "close";
-      return "unknown";
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "";
-      if (isNotFoundError(msg)) return "missing";
-      return "unknown";
-    }
-  }, []);
-
-  const confirmConnectedState = useCallback(async (
-    name: string,
-    attempts = 3,
-    delayMs = 1500
-  ): Promise<boolean> => {
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      const state = await checkState(name);
-      if (state === "open") return true;
-      if (state === "missing") return false;
-      if (attempt < attempts - 1) {
-        await sleep(delayMs);
-      }
-    }
-
-    return false;
-  }, [checkState]);
-
-  /* ── Try to get QR code ── */
-  const tryGetQr = useCallback(async (
-    name: string
-  ): Promise<{ qr: string | null; alreadyConnected: boolean }> => {
-    try {
-      const resp = await withTimeout(connectInstance(name), 12000);
-      return { qr: resp?.base64 || null, alreadyConnected: false };
-    } catch (err) {
-      const msg = sanitize(err instanceof Error ? err.message : "");
-
-      if (isAlreadyConnectedError(msg)) {
-        return { qr: null, alreadyConnected: true };
-      }
-
-      const confirmedOpen = await confirmConnectedState(name, 2, 1000);
-      return { qr: null, alreadyConnected: confirmedOpen };
-    }
-  }, [confirmConnectedState]);
-
-  /* ── Single unified polling loop ── */
+  /* ── Unified polling loop with circuit breaker ── */
   const startPolling = useCallback((name: string) => {
     stopPolling();
 
     const poll = async () => {
       if (!mountedRef.current) return;
 
-      const state = await checkState(name);
-      if (!mountedRef.current) return;
-
-      if (state === "open") {
-        await markConnected(name, "✅ WhatsApp conectado!");
-        pollRef.current = setTimeout(poll, 60000);
-        return;
-      }
-
-      if (state === "missing") {
-        graceCountRef.current = 0;
-        setStatus("disconnected");
-        setQrCode(null);
-        setQrGeneratedAt(null);
-        setError(null);
-        if (statusRef.current !== "disconnected") {
-          addLog("ℹ️ Instância não encontrada. Clique em Conectar para gerar um novo QR Code");
+      if (timeoutCountRef.current >= MAX_CONSECUTIVE_TIMEOUTS) {
+        if (healthRef.current !== "reset_recommended") {
+          setHealth("reset_recommended");
+          addLog("⚠️ Servidor instável. Recomendamos resetar a conexão.");
         }
+        pollRef.current = setTimeout(poll, DEGRADED_POLL_INTERVAL);
         return;
       }
 
-      if (state === "connecting" || state === "unknown") {
-        const maxGraceChecks = statusRef.current === "connected" ? 6 : 2;
-        if (graceCountRef.current < maxGraceChecks) {
-          if (statusRef.current === "connected" && graceCountRef.current === 0) {
-            addLog("🔄 Verificando estabilidade da conexão...");
+      try {
+        const schedulePendingRecovery = (nextPollMs: number, message: string) => {
+          recoveryCyclesRef.current += 1;
+          if (recoveryCyclesRef.current >= MAX_RECOVERY_CYCLES_WITHOUT_SIGNAL) {
+            haltRecovery("⚠️ Não foi possível recuperar a conexão automaticamente. Use Reconectar ou Resetar Conexão.");
+            return false;
           }
-          graceCountRef.current++;
-          pollRef.current = setTimeout(poll, 5000);
+          addLog(message);
+          pollRef.current = setTimeout(poll, nextPollMs);
+          return true;
+        };
+
+        const state = timeoutCountRef.current >= 2
+          ? await checks.multiSignalCheck(name)
+          : await checks.checkState(name);
+
+        if (!mountedRef.current) return;
+
+        if (state === "open") {
+          await markConnected(name, "✅ WhatsApp conectado!");
+          pollRef.current = setTimeout(poll, HEALTHY_POLL_INTERVAL);
           return;
         }
 
+        if (state === "missing") {
+          graceCountRef.current = 0;
+          health.resetRecoveryCounter();
+          setStatus("disconnected");
+          setQrCode(null);
+          setQrGeneratedAt(null);
+          setError(null);
+          setHealth("needs_qr");
+          if (statusRef.current !== "disconnected") {
+            addLog("ℹ️ Instância não encontrada. Clique em Conectar para gerar um novo QR Code");
+          }
+          return;
+        }
+
+        if (state === "connecting" || state === "unknown") {
+          const maxGraceChecks = statusRef.current === "connected" ? 6 : 2;
+          if (graceCountRef.current < maxGraceChecks) {
+            if (statusRef.current === "connected" && graceCountRef.current === 0) {
+              addLog("🔄 Verificando estabilidade da conexão...");
+              setHealth("degraded");
+            }
+            graceCountRef.current++;
+            const pollInterval = timeoutCountRef.current >= 2 ? 15000 : 10000;
+            pollRef.current = setTimeout(poll, pollInterval);
+            return;
+          }
+
+          setStatus("connecting");
+          setHealth("recovering");
+          const qrAttempt = await checks.tryGetQr(name);
+          const recoveredConnection = qrAttempt.alreadyConnected || (
+            !qrAttempt.qr && await checks.confirmConnectedState(name, 2, 1000)
+          );
+          if (!mountedRef.current) return;
+
+          if (recoveredConnection) {
+            await markConnected(name, "✅ WhatsApp conectado!");
+            pollRef.current = setTimeout(poll, HEALTHY_POLL_INTERVAL);
+            return;
+          }
+
+          if (qrAttempt.qr) {
+            health.resetRecoveryCounter();
+            setQrCode(qrAttempt.qr);
+            setQrGeneratedAt(Date.now());
+            setError(null);
+            setHealth("needs_qr");
+            addLog("📱 QR Code gerado — escaneie com seu celular");
+            pollRef.current = setTimeout(poll, 10000);
+            return;
+          }
+
+          if (!schedulePendingRecovery(10000, "⏳ Ainda aguardando um sinal confiável do servidor...")) return;
+          return;
+        }
+
+        if (statusRef.current === "connected" && graceCountRef.current < 3) {
+          if (graceCountRef.current === 0) {
+            addLog("🔄 Tentando recuperar a sessão do WhatsApp...");
+            setHealth("recovering");
+          }
+          graceCountRef.current++;
+          pollRef.current = setTimeout(poll, 8000);
+          return;
+        }
+
+        graceCountRef.current = 0;
         setStatus("connecting");
-        const qrAttempt = await tryGetQr(name);
+        setHealth("recovering");
+        const qrAttempt = await checks.tryGetQr(name);
         const recoveredConnection = qrAttempt.alreadyConnected || (
-          !qrAttempt.qr && await confirmConnectedState(name, 2, 1000)
+          !qrAttempt.qr && await checks.confirmConnectedState(name, 2, 1000)
         );
         if (!mountedRef.current) return;
 
         if (recoveredConnection) {
           await markConnected(name, "✅ WhatsApp conectado!");
-          pollRef.current = setTimeout(poll, 60000);
+          pollRef.current = setTimeout(poll, HEALTHY_POLL_INTERVAL);
           return;
         }
 
         if (qrAttempt.qr) {
+          health.resetRecoveryCounter();
           setQrCode(qrAttempt.qr);
           setQrGeneratedAt(Date.now());
           setError(null);
+          setHealth("needs_qr");
           addLog("📱 QR Code gerado — escaneie com seu celular");
+          pollRef.current = setTimeout(poll, 8000);
+          return;
         }
-        pollRef.current = setTimeout(poll, 5000);
-        return;
-      }
 
-      // state === "close"
-      if (statusRef.current === "connected" && graceCountRef.current < 3) {
-        if (graceCountRef.current === 0) {
-          addLog("🔄 Tentando recuperar a sessão do WhatsApp...");
+        if (!schedulePendingRecovery(8000, "⏳ Conexão ainda sem resposta estável. Nova tentativa em instantes...")) return;
+      } catch (err) {
+        if (isAuthError(err)) {
+          handleAuthFailure(err);
+          return;
         }
-        graceCountRef.current++;
-        pollRef.current = setTimeout(poll, 5000);
-        return;
+        pollRef.current = setTimeout(poll, 10000);
       }
-
-      graceCountRef.current = 0;
-      setStatus("connecting");
-      const qrAttempt = await tryGetQr(name);
-      const recoveredConnection = qrAttempt.alreadyConnected || (
-        !qrAttempt.qr && await confirmConnectedState(name, 2, 1000)
-      );
-      if (!mountedRef.current) return;
-
-      if (recoveredConnection) {
-        await markConnected(name, "✅ WhatsApp conectado!");
-        pollRef.current = setTimeout(poll, 60000);
-        return;
-      }
-
-      if (qrAttempt.qr) {
-        setQrCode(qrAttempt.qr);
-        setQrGeneratedAt(Date.now());
-        setError(null);
-        addLog("📱 QR Code gerado — escaneie com seu celular");
-      }
-      pollRef.current = setTimeout(poll, 3000);
     };
 
-    poll();
-  }, [addLog, checkState, confirmConnectedState, markConnected, setStatus, stopPolling, tryGetQr]);
+    void poll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addLog, handleAuthFailure, haltRecovery, markConnected, setHealth, setStatus, stopPolling]);
 
   /* ── Create & Connect ── */
   const createAndConnect = useCallback(async () => {
@@ -296,15 +322,18 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
     setQrCode(null);
     setQrGeneratedAt(null);
     instanceSavedRef.current = false;
+    health.resetRecoveryCounter();
+    timeoutCountRef.current = 0;
+    setConsecutiveTimeouts(0);
+    setHealth("healthy");
     stopPolling();
 
     const name = getFixedInstanceName(consultantId);
     setInstanceName(name);
 
     try {
-      // Step 1: Check current state
       addLog("Verificando conexão...");
-      const state = await checkState(name);
+      const state = await checks.checkState(name);
       if (!mountedRef.current) return;
 
       if (state === "open") {
@@ -313,12 +342,12 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
         return;
       }
 
-      // Step 2: If instance exists (connecting or close), try to get QR
       if (state === "connecting" || state === "close") {
         addLog("⏳ Recuperando QR Code...");
-        const qrAttempt = await tryGetQr(name);
+        setHealth("recovering");
+        const qrAttempt = await checks.tryGetQr(name);
         const recoveredConnection = qrAttempt.alreadyConnected || (
-          !qrAttempt.qr && await confirmConnectedState(name, 2, 1000)
+          !qrAttempt.qr && await checks.confirmConnectedState(name, 2, 1000)
         );
         if (!mountedRef.current) return;
 
@@ -329,17 +358,18 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
         }
 
         if (qrAttempt.qr) {
+          health.resetRecoveryCounter();
           await saveInstance(name);
           instanceSavedRef.current = true;
           setQrCode(qrAttempt.qr);
           setQrGeneratedAt(Date.now());
           setStatus("connecting");
+          setHealth("needs_qr");
           addLog("📱 QR Code gerado — escaneie com seu celular");
           startPolling(name);
           return;
         }
 
-        // QR not available yet — start polling, it will keep trying
         await saveInstance(name);
         instanceSavedRef.current = true;
         setStatus("connecting");
@@ -349,35 +379,13 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
       }
 
       if (state === "unknown") {
-        addLog("⚠️ Conexão instável. Tentando recuperar a instância...");
-        const qrAttempt = await tryGetQr(name);
-        const recoveredConnection = qrAttempt.alreadyConnected || (
-          !qrAttempt.qr && await confirmConnectedState(name, 2, 1000)
-        );
-        if (!mountedRef.current) return;
-
-        if (recoveredConnection) {
-          await markConnected(name, "✅ WhatsApp já está conectado!");
-          startPolling(name);
-          return;
-        }
-
-        if (qrAttempt.qr) {
-          await saveInstance(name);
-          instanceSavedRef.current = true;
-          setQrCode(qrAttempt.qr);
-          setQrGeneratedAt(Date.now());
-          setStatus("connecting");
-          addLog("📱 QR Code recuperado — escaneie com seu celular");
-          startPolling(name);
-          return;
-        }
+        addLog("⚠️ Servidor instável. Tentando criar ou recuperar a conexão...");
+        setHealth("degraded");
       }
 
-      // Step 3: Instance doesn't exist or state is uncertain — create it
       addLog("Criando instância...");
       try {
-        const response = await withTimeout(createInstance(name), 35000);
+        const response = await withTimeout(createInstance(name), 15000);
         if (!mountedRef.current) return;
 
         await saveInstance(name);
@@ -385,9 +393,11 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
         const qr = response?.qrcode?.base64 || null;
 
         if (qr) {
+          health.resetRecoveryCounter();
           setQrCode(qr);
           setQrGeneratedAt(Date.now());
           setStatus("connecting");
+          setHealth("needs_qr");
           addLog("📱 QR Code gerado — escaneie com seu celular");
         } else {
           setStatus("connecting");
@@ -395,9 +405,10 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
         }
         startPolling(name);
       } catch (createErr) {
+        if (isAuthError(createErr)) { handleAuthFailure(createErr); return; }
+
         const msg = sanitize(createErr instanceof Error ? createErr.message : "Erro");
 
-        // Instance already exists (403/409/conflict) — just start polling
         if (msg.includes("already") || msg.includes("403") || msg.includes("409") || msg.includes("exists")) {
           await saveInstance(name);
           instanceSavedRef.current = true;
@@ -412,6 +423,7 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
           instanceSavedRef.current = true;
           setStatus("connecting");
           setError(null);
+          setHealth("degraded");
           addLog("⏳ Servidor instável. Tentando recuperar a instância...");
           startPolling(name);
           return;
@@ -422,11 +434,14 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
         addLog("❌ " + msg);
       }
     } catch (err) {
+      if (isAuthError(err)) { handleAuthFailure(err); return; }
+
       const msg = sanitize(err instanceof Error ? err.message : "Erro ao conectar");
 
       if (isRecoverableConnectionError(msg)) {
         setStatus("connecting");
         setError(null);
+        setHealth("degraded");
         addLog("⏳ Conexão instável. Tentando novamente...");
         startPolling(name);
       } else {
@@ -438,42 +453,46 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
       lockRef.current = false;
       setIsLoading(false);
     }
-  }, [consultantId, addLog, checkState, confirmConnectedState, markConnected, saveInstance, setStatus, startPolling, stopPolling, tryGetQr]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [consultantId, addLog, handleAuthFailure, markConnected, saveInstance, setHealth, setStatus, startPolling, stopPolling]);
 
   /* ── Refresh QR ── */
   const refreshQr = useCallback(async () => {
     const name = instanceName || getFixedInstanceName(consultantId);
-    addLog("📱 Renovando QR Code...");
-
-    // First check if already connected
-    const state = await checkState(name);
-    if (state === "open") {
-      await markConnected(name, "✅ WhatsApp já está conectado!");
-      startPolling(name);
-      return;
+    try {
+      addLog("📱 Renovando QR Code...");
+      const state = await checks.checkState(name);
+      if (state === "open") {
+        await markConnected(name, "✅ WhatsApp já está conectado!");
+        startPolling(name);
+        return;
+      }
+      const qrAttempt = await checks.tryGetQr(name);
+      const recoveredConnection = qrAttempt.alreadyConnected || (
+        !qrAttempt.qr && await checks.confirmConnectedState(name, 2, 1000)
+      );
+      if (recoveredConnection) {
+        await markConnected(name, "✅ WhatsApp já está conectado!");
+        startPolling(name);
+        return;
+      }
+      if (qrAttempt.qr) {
+        health.resetRecoveryCounter();
+        setQrCode(qrAttempt.qr);
+        setQrGeneratedAt(Date.now());
+        setStatus("connecting");
+        setHealth("needs_qr");
+        setError(null);
+        addLog("📱 Novo QR Code gerado");
+      } else {
+        addLog("⏳ QR Code ainda não disponível. Tentando novamente...");
+      }
+    } catch (err) {
+      if (isAuthError(err)) { handleAuthFailure(err); return; }
+      console.warn("[useWhatsApp] refreshQr error:", err);
     }
-
-    const qrAttempt = await tryGetQr(name);
-    const recoveredConnection = qrAttempt.alreadyConnected || (
-      !qrAttempt.qr && await confirmConnectedState(name, 2, 1000)
-    );
-
-    if (recoveredConnection) {
-      await markConnected(name, "✅ WhatsApp já está conectado!");
-      startPolling(name);
-      return;
-    }
-
-    if (qrAttempt.qr) {
-      setQrCode(qrAttempt.qr);
-      setQrGeneratedAt(Date.now());
-      setStatus("connecting");
-      setError(null);
-      addLog("📱 Novo QR Code gerado");
-    } else {
-      addLog("⏳ QR Code ainda não disponível. Tentando novamente...");
-    }
-  }, [instanceName, consultantId, addLog, checkState, confirmConnectedState, markConnected, setStatus, startPolling, tryGetQr]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instanceName, consultantId, addLog, handleAuthFailure, markConnected, setHealth, setStatus, startPolling]);
 
   /* ── Disconnect ── */
   const disconnect = useCallback(async () => {
@@ -491,7 +510,11 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
       setQrGeneratedAt(null);
       setPhoneNumber(null);
       setError(null);
+      setHealth("healthy");
+      health.resetRecoveryCounter();
       instanceSavedRef.current = false;
+      timeoutCountRef.current = 0;
+      setConsecutiveTimeouts(0);
       addLog("✅ Desconectado");
     } catch (err) {
       addLog("❌ " + sanitize(err instanceof Error ? err.message : "Erro"));
@@ -499,7 +522,94 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
       setIsLoading(false);
       lockRef.current = false;
     }
-  }, [instanceName, consultantId, stopPolling, addLog, deleteInstanceDb, setStatus]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instanceName, consultantId, stopPolling, addLog, deleteInstanceDb, setHealth, setStatus]);
+
+  /* ── Level 3: Safe Reset ── */
+  const safeReset = useCallback(async () => {
+    if (lockRef.current) return;
+    lockRef.current = true;
+
+    const name = instanceName || getFixedInstanceName(consultantId);
+    setIsLoading(true);
+    setHealth("resetting");
+    stopPolling();
+
+    addLog("🔄 Iniciando reset seguro da conexão...");
+
+    try {
+      addLog("1/4 — Encerrando sessão WhatsApp...");
+      try { await withTimeout(logoutInstance(name), 10000); } catch { /* ok */ }
+      await sleep(2000);
+
+      addLog("2/4 — Removendo instância antiga...");
+      try { await withTimeout(deleteInstance(name), 10000); } catch { /* ok */ }
+      await sleep(2000);
+
+      addLog("3/4 — Limpando registros locais...");
+      await deleteInstanceDb();
+      instanceSavedRef.current = false;
+      health.resetRecoveryCounter();
+      timeoutCountRef.current = 0;
+      setConsecutiveTimeouts(0);
+
+      addLog("4/4 — Criando nova instância...");
+      setInstanceName(name);
+
+      try {
+        const response = await withTimeout(createInstance(name), 20000);
+        await saveInstance(name);
+        instanceSavedRef.current = true;
+
+        const qr = response?.qrcode?.base64 || null;
+        if (qr) {
+          health.resetRecoveryCounter();
+          setQrCode(qr);
+          setQrGeneratedAt(Date.now());
+          setStatus("connecting");
+          setHealth("needs_qr");
+          addLog("✅ Reset concluído! Escaneie o novo QR Code.");
+        } else {
+          setStatus("connecting");
+          setHealth("recovering");
+          addLog("✅ Instância recriada. Aguardando QR Code...");
+        }
+        setError(null);
+        startPolling(name);
+      } catch (createErr) {
+        if (isAuthError(createErr)) { handleAuthFailure(createErr); return; }
+
+        const msg = sanitize(createErr instanceof Error ? createErr.message : "Erro");
+
+        if (msg.includes("already") || msg.includes("exists") || msg.includes("403") || msg.includes("409")) {
+          await saveInstance(name);
+          instanceSavedRef.current = true;
+          setStatus("connecting");
+          setHealth("recovering");
+          addLog("⏳ Instância recuperada. Aguardando QR Code...");
+          setError(null);
+          startPolling(name);
+          return;
+        }
+
+        setStatus("disconnected");
+        setHealth("reset_recommended");
+        setError("Falha ao recriar instância. Tente novamente em instantes.");
+        addLog("❌ " + msg);
+      }
+    } catch (err) {
+      if (isAuthError(err)) { handleAuthFailure(err); return; }
+      const msg = sanitize(err instanceof Error ? err.message : "Erro no reset");
+      setStatus("disconnected");
+      setHealth("reset_recommended");
+      setError(msg);
+      addLog("❌ " + msg);
+    } finally {
+      lockRef.current = false;
+      setIsLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instanceName, consultantId, addLog, deleteInstanceDb, handleAuthFailure, saveInstance, setHealth, setStatus, startPolling, stopPolling]);
 
   const reconnect = useCallback(() => createAndConnect(), [createAndConnect]);
 
@@ -512,17 +622,48 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
       const name = getFixedInstanceName(consultantId);
       setInstanceName(name);
 
+      // ── WHAPI CHECK: Se este consultor é o super admin (usa Whapi), pular Evolution ──
       try {
-        const state = await checkState(name);
+        const { data: settingsRows } = await supabase
+          .from("settings")
+          .select("key, value")
+          .in("key", ["superadmin_consultant_id", "whapi_connected_phone"]);
+        const settings: Record<string, string> = {};
+        settingsRows?.forEach((s: any) => { settings[s.key] = s.value; });
+
+        if (settings.superadmin_consultant_id === consultantId) {
+          // Super admin usa Whapi — não precisa de Evolution/QR Code
+          setIsWhapi(true);
+          setStatus("connected");
+          setPhoneNumber(settings.whapi_connected_phone || "+55 11 99009-2401");
+          setError(null);
+          setIsLoading(false);
+          addLog("✅ Conectado via Whapi Cloud (Super Admin)");
+          setHealth("healthy");
+          return;
+        }
+      } catch (_) { /* segue para Evolution normalmente */ }
+
+      try {
+        const { data: instanceRecord } = await supabase
+          .from("whatsapp_instances")
+          .select("id")
+          .eq("consultant_id", consultantId)
+          .maybeSingle();
+
         if (cancelled) return;
 
-        const confirmedOpen = state !== "missing"
-          ? await confirmConnectedState(name, state === "close" ? 2 : 3, 1200)
-          : false;
+        if (!instanceRecord) {
+          setStatus("disconnected");
+          setError(null);
+          setIsLoading(false);
+          return;
+        }
 
+        const state = await withTimeout(checks.checkState(name), 15000);
         if (cancelled) return;
 
-        if (state === "open" || confirmedOpen) {
+        if (state === "open") {
           await markConnected(name, "✅ WhatsApp conectado!");
           startPolling(name);
           setIsLoading(false);
@@ -531,22 +672,32 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
 
         if (state === "connecting") {
           setStatus("connecting");
+          setHealth("recovering");
           addLog("⏳ Recuperando conexão...");
           startPolling(name);
           setIsLoading(false);
           return;
         }
 
-        // "close" or "unknown" — check DB for saved instance
-        if (state === "close" || state === "missing") {
-          // Instance exists on server but disconnected — show connect button
-          setStatus("disconnected");
-          setError(null);
+        if (state === "unknown") {
+          addLog("⚠️ Servidor lento. Tentando recuperar...");
+          setHealth("degraded");
+          setStatus("connecting");
+          startPolling(name);
           setIsLoading(false);
           return;
         }
-      } catch {
-        // ignore init errors
+
+        setStatus("disconnected");
+        setError(null);
+        setIsLoading(false);
+        return;
+      } catch (err) {
+        if (!cancelled && isAuthError(err)) {
+          handleAuthFailure(err);
+          setIsLoading(false);
+          return;
+        }
       }
 
       if (cancelled) return;
@@ -555,7 +706,7 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
       setIsLoading(false);
     }
 
-    init();
+    void init();
 
     return () => {
       cancelled = true;
@@ -574,9 +725,13 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
     isLoading,
     error,
     connectionLog,
+    operationalHealth,
+    consecutiveTimeouts,
+    isWhapi,
     createAndConnect,
     disconnect,
     reconnect,
     refreshQr,
+    safeReset,
   };
 }

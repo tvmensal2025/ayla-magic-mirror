@@ -15,6 +15,10 @@ vi.mock("@/integrations/supabase/client", () => ({
       getSession: vi.fn().mockResolvedValue({
         data: { session: { access_token: "test-access-token" } },
       }),
+      refreshSession: vi.fn().mockResolvedValue({
+        data: { session: { access_token: "test-access-token-refreshed" } },
+      }),
+      signOut: vi.fn().mockResolvedValue({}),
     },
   },
 }));
@@ -80,6 +84,13 @@ describe("evolutionApi (proxy-based)", () => {
           instanceName: "test-inst",
           qrcode: true,
           integration: "WHATSAPP-BAILEYS",
+          webhook: {
+            url: "https://zlzasfhcxcznaprrragl.supabase.co/functions/v1/evolution-webhook",
+            byEvents: false,
+            base64: true,
+            enabled: true,
+            events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE"],
+          },
         },
       });
       expect(result).toEqual(responseData);
@@ -101,7 +112,7 @@ describe("evolutionApi (proxy-based)", () => {
         path: "instance/connect/my-instance",
         method: "GET",
       });
-      expect(result).toEqual(responseData);
+      expect(result).toEqual({ base64: "qr-code-base64", pairingCode: null });
     });
   });
 
@@ -167,10 +178,18 @@ describe("evolutionApi (proxy-based)", () => {
 
   describe("error handling", () => {
     it("throws authentication error on 401 response", async () => {
-      mockFetchError(401, "Unauthorized");
+      // 1st call: original request → 401
+      // 2nd call: retry after token refresh → 401
+      // After two 401s the code signs out and throws EvolutionAuthError
+      // But getAccessToken(true) calls refreshSession which returns a token,
+      // so we need the fetch mock to handle both proxy calls returning 401
+      const mock401 = { ok: false, status: 401, statusText: "Unauthorized", json: () => Promise.resolve({}) };
+      (fetch as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(mock401)
+        .mockResolvedValueOnce(mock401);
 
       await expect(createInstance("test")).rejects.toThrow(
-        "Erro de autenticação com a API do WhatsApp"
+        "Sessão expirada"
       );
     });
 

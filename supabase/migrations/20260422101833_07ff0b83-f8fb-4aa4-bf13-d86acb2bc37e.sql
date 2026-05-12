@@ -1,0 +1,1 @@
+UPDATE public.customers SET link_facial=NULL, link_assinatura=NULL, error_message=NULL, updated_at=now() WHERE id='8e859d0b-38b1-46ab-972e-99f8086a12c0';

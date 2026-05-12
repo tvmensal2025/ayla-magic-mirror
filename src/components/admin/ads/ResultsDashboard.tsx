@@ -1,0 +1,260 @@
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Loader2, DollarSign, Users, FileCheck2, CheckCircle2, TrendingUp, Target, BarChart3 } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+
+type Range = 7 | 30 | 90;
+
+interface Campaign {
+  id: string;
+  name: string;
+  status: string;
+  cities: any[];
+  distribuidora: string | null;
+  daily_budget_cents: number;
+  created_at: string;
+}
+
+interface DailyMetric {
+  campaign_id: string;
+  date: string;
+  spend_cents: number;
+  impressions: number;
+  clicks: number;
+  leads: number;
+  messaging_conversations_started: number;
+  complete_registrations: number;
+  customers_acquired: number;
+}
+
+const TICKET_MEDIO_MENSAL = 30; // R$ estimado de comissão por cliente ativo/mês (ajustável)
+
+export function ResultsDashboard({ consultantId }: { consultantId: string }) {
+  const [range, setRange] = useState<Range>(30);
+  const [distribFilter, setDistribFilter] = useState<string>("all");
+  const [loading, setLoading] = useState(true);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [metrics, setMetrics] = useState<DailyMetric[]>([]);
+  const [acquired, setAcquired] = useState<number>(0);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const { data: camps } = await supabase
+        .from("facebook_campaigns")
+        .select("id,name,status,cities,distribuidora,daily_budget_cents,created_at")
+        .eq("consultant_id", consultantId)
+        .order("created_at", { ascending: false });
+      const list = (camps || []) as Campaign[];
+      setCampaigns(list);
+
+      if (list.length > 0) {
+        const since = new Date(Date.now() - range * 86400_000).toISOString().slice(0, 10);
+        const { data: ms } = await supabase
+          .from("facebook_metrics_daily")
+          .select("campaign_id,date,spend_cents,impressions,clicks,leads,messaging_conversations_started,complete_registrations,customers_acquired")
+          .in("campaign_id", list.map(c => c.id))
+          .gte("date", since)
+          .order("date", { ascending: true });
+        setMetrics((ms || []) as DailyMetric[]);
+
+        // clientes ativos atribuíveis a anúncios via lead_source
+        const { count } = await supabase
+          .from("customers")
+          .select("id", { count: "exact", head: true })
+          .eq("consultant_id", consultantId)
+          .eq("status", "active")
+          .not("lead_source", "is", null)
+          .gte("created_at", since);
+        setAcquired(count || 0);
+      } else {
+        setMetrics([]);
+        setAcquired(0);
+      }
+      setLoading(false);
+    })();
+  }, [consultantId, range]);
+
+  const distribuidoras = useMemo(() => {
+    const set = new Set<string>();
+    campaigns.forEach(c => { if (c.distribuidora) set.add(c.distribuidora); });
+    return Array.from(set).sort();
+  }, [campaigns]);
+
+  const filteredCampaignIds = useMemo(() => {
+    if (distribFilter === "all") return new Set(campaigns.map(c => c.id));
+    return new Set(campaigns.filter(c => c.distribuidora === distribFilter).map(c => c.id));
+  }, [campaigns, distribFilter]);
+
+  const filteredMetrics = useMemo(
+    () => metrics.filter(m => filteredCampaignIds.has(m.campaign_id)),
+    [metrics, filteredCampaignIds],
+  );
+
+  const totals = useMemo(() => {
+    const t = { spend: 0, impressions: 0, clicks: 0, leads: 0, conversations: 0, registrations: 0 };
+    filteredMetrics.forEach(m => {
+      t.spend += m.spend_cents;
+      t.impressions += m.impressions;
+      t.clicks += m.clicks;
+      t.leads += m.leads;
+      t.conversations += m.messaging_conversations_started;
+      t.registrations += m.complete_registrations;
+    });
+    return t;
+  }, [filteredMetrics]);
+
+  const cpl = totals.leads > 0 ? totals.spend / totals.leads / 100 : 0;
+  const cpa = totals.registrations > 0 ? totals.spend / totals.registrations / 100 : 0;
+  const convRate = totals.leads > 0 ? (totals.registrations / totals.leads) * 100 : 0;
+  const roiMensal = (acquired * TICKET_MEDIO_MENSAL) - (totals.spend / 100);
+
+  const chartData = useMemo(() => {
+    const map = new Map<string, { date: string; gasto: number; leads: number; cadastros: number }>();
+    filteredMetrics.forEach(m => {
+      const cur = map.get(m.date) || { date: m.date, gasto: 0, leads: 0, cadastros: 0 };
+      cur.gasto += m.spend_cents / 100;
+      cur.leads += m.leads;
+      cur.cadastros += m.complete_registrations;
+      map.set(m.date, cur);
+    });
+    return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date)).map(d => ({
+      ...d,
+      gasto: Math.round(d.gasto * 100) / 100,
+      label: d.date.slice(5),
+    }));
+  }, [filteredMetrics]);
+
+  const perCampaign = useMemo(() => {
+    return campaigns
+      .filter(c => filteredCampaignIds.has(c.id))
+      .map(c => {
+        const ms = metrics.filter(m => m.campaign_id === c.id);
+        const spend = ms.reduce((s, m) => s + m.spend_cents, 0);
+        const leads = ms.reduce((s, m) => s + m.leads, 0);
+        const regs = ms.reduce((s, m) => s + m.complete_registrations, 0);
+        return {
+          ...c,
+          spend_cents: spend,
+          leads,
+          registrations: regs,
+          cpl_cents: leads > 0 ? Math.round(spend / leads) : 0,
+          cpa_cents: regs > 0 ? Math.round(spend / regs) : 0,
+        };
+      })
+      .sort((a, b) => b.spend_cents - a.spend_cents);
+  }, [campaigns, metrics, filteredCampaignIds]);
+
+  if (loading) return <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
+
+  return (
+    <div className="space-y-5">
+      {/* Filtros */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1 rounded-lg bg-secondary p-1">
+          {[7, 30, 90].map(r => (
+            <Button key={r} size="sm" variant={range === r ? "default" : "ghost"} onClick={() => setRange(r as Range)} className="h-7 text-xs">
+              {r === 90 ? "90 dias" : `${r} dias`}
+            </Button>
+          ))}
+        </div>
+        {distribuidoras.length > 0 && (
+          <select
+            value={distribFilter}
+            onChange={e => setDistribFilter(e.target.value)}
+            className="h-8 text-xs rounded-lg bg-secondary border border-border px-2 text-foreground"
+          >
+            <option value="all">Todas distribuidoras</option>
+            {distribuidoras.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+        )}
+      </div>
+
+      {/* Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <StatCard icon={<DollarSign className="w-4 h-4" />} label="Gasto total" value={`R$ ${(totals.spend / 100).toFixed(2)}`} accent />
+        <StatCard icon={<Users className="w-4 h-4" />} label="Leads" value={totals.leads.toString()} />
+        <StatCard icon={<FileCheck2 className="w-4 h-4" />} label="Cadastros" value={totals.registrations.toString()} sub={`${convRate.toFixed(1)}% conv.`} />
+        <StatCard icon={<CheckCircle2 className="w-4 h-4" />} label="Clientes ativos" value={acquired.toString()} sub="atribuídos" />
+        <StatCard icon={<Target className="w-4 h-4" />} label="CPL / CPA" value={`R$ ${cpl.toFixed(2)}`} sub={`CPA R$ ${cpa.toFixed(2)}`} />
+        <StatCard icon={<TrendingUp className="w-4 h-4" />} label="ROI estimado/mês" value={`R$ ${roiMensal.toFixed(0)}`} accent={roiMensal >= 0} />
+      </div>
+
+      {/* Gráfico */}
+      <Card className="p-4">
+        <h4 className="font-bold text-sm mb-3 flex items-center gap-2"><BarChart3 className="w-4 h-4 text-primary" /> Performance diária</h4>
+        {chartData.length === 0 ? (
+          <div className="text-xs text-muted-foreground text-center py-8">Sem dados nesse período. Crie uma campanha pra começar.</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line type="monotone" dataKey="gasto" name="Gasto (R$)" stroke="hsl(var(--destructive))" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="leads" name="Leads" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="cadastros" name="Cadastros" stroke="hsl(var(--accent-foreground))" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </Card>
+
+      {/* Tabela por campanha */}
+      <Card className="p-4 overflow-x-auto">
+        <h4 className="font-bold text-sm mb-3">Por campanha</h4>
+        {perCampaign.length === 0 ? (
+          <div className="text-xs text-muted-foreground text-center py-6">Nenhuma campanha no filtro atual.</div>
+        ) : (
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-muted-foreground border-b border-border">
+                <th className="py-2">Campanha</th>
+                <th>Distribuidora</th>
+                <th className="text-right">Gasto</th>
+                <th className="text-right">Leads</th>
+                <th className="text-right">Cadastros</th>
+                <th className="text-right">CPL</th>
+                <th className="text-right">CPA</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {perCampaign.map(c => (
+                <tr key={c.id} className="border-b border-border/50 hover:bg-secondary/30">
+                  <td className="py-2 max-w-[200px] truncate font-medium text-foreground">{c.name}</td>
+                  <td className="text-muted-foreground">{c.distribuidora || "—"}</td>
+                  <td className="text-right font-mono">R$ {(c.spend_cents / 100).toFixed(2)}</td>
+                  <td className="text-right font-mono">{c.leads}</td>
+                  <td className="text-right font-mono">{c.registrations}</td>
+                  <td className="text-right font-mono">{c.cpl_cents > 0 ? `R$ ${(c.cpl_cents / 100).toFixed(2)}` : "—"}</td>
+                  <td className="text-right font-mono">{c.cpa_cents > 0 ? `R$ ${(c.cpa_cents / 100).toFixed(2)}` : "—"}</td>
+                  <td><Badge variant="outline" className="text-[10px]">{c.status}</Badge></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
+      <p className="text-[10px] text-muted-foreground text-center">
+        ROI estimado considera ticket médio mensal de R$ {TICKET_MEDIO_MENSAL} por cliente ativo.
+        Cadastros e clientes ativos exigem o Pixel conectado e o evento `Lead`/`CompleteRegistration` configurado.
+      </p>
+    </div>
+  );
+}
+
+function StatCard({ icon, label, value, sub, accent }: { icon: React.ReactNode; label: string; value: string; sub?: string; accent?: boolean }) {
+  return (
+    <Card className={`p-3 ${accent ? "bg-primary/10 border-primary/30" : ""}`}>
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">{icon}{label}</div>
+      <div className={`text-lg font-bold mt-1 ${accent ? "text-primary" : "text-foreground"}`}>{value}</div>
+      {sub && <div className="text-[10px] text-muted-foreground">{sub}</div>}
+    </Card>
+  );
+}

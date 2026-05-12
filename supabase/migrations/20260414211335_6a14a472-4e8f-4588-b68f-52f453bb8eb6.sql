@@ -1,0 +1,1 @@
+UPDATE customers SET conversation_step = 'welcome', status = 'pending', error_message = NULL WHERE status = 'automation_failed' AND conversation_step = 'portal_submitting';

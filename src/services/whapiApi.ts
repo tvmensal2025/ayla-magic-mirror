@@ -1,0 +1,82 @@
+/**
+ * Adapter Whapi → mesma forma das respostas Evolution.
+ * Permite reuso dos mappers em useChats / useMessages.
+ */
+import { supabase } from "@/integrations/supabase/client";
+import type { EvolutionChat, EvolutionMessage } from "@/services/evolutionApi";
+
+const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL || "https://zlzasfhcxcznaprrragl.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY =
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpsemFzZmhjeGN6bmFwcnJyYWdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyNzQ1NzAsImV4cCI6MjA4Njg1MDU3MH0.OJzRdi_Z_1TFZjQXmK8rJofBeHVZc27VSo2vMMw9Spo";
+const PROXY_URL = `${SUPABASE_URL}/functions/v1/whapi-proxy`;
+
+async function call<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData.session?.access_token;
+  if (!token) throw new Error("Sessão expirada. Faça login novamente.");
+
+  const res = await fetch(PROXY_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      apikey: SUPABASE_PUBLISHABLE_KEY,
+    },
+    body: JSON.stringify({ action, payload }),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const j = await res.json();
+      detail = (j?.error && (j.error.message || JSON.stringify(j.error))) || j?.message || detail;
+    } catch { /* ignore */ }
+    throw new Error(detail || "Erro Whapi");
+  }
+  return (await res.json()) as T;
+}
+
+function normalizeJid(jid: string): string {
+  if (!jid) return jid;
+  if (jid.includes("@")) return jid;
+  const digits = jid.replace(/\D/g, "");
+  return `${digits}@s.whatsapp.net`;
+}
+
+export function whapiListChats(): Promise<EvolutionChat[]> {
+  return call<EvolutionChat[]>("list_chats", { count: 100 });
+}
+
+export function whapiListMessages(chatId: string, count = 50): Promise<EvolutionMessage[]> {
+  return call<EvolutionMessage[]>("list_messages", { chatId: normalizeJid(chatId), count });
+}
+
+export async function whapiGetProfilePicture(chatId: string): Promise<string | null> {
+  try {
+    const r = await call<{ url: string | null }>("get_profile_pic", { chatId: normalizeJid(chatId) });
+    return r?.url || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function whapiSendText(to: string, text: string): Promise<{ key: { id: string } }> {
+  return call<{ key: { id: string } }>("send_text", { to: normalizeJid(to), text });
+}
+
+export async function whapiSendMedia(
+  to: string,
+  mediaUrl: string,
+  mediatype: "image" | "video" | "document" | "audio",
+  caption?: string,
+  fileName?: string,
+): Promise<{ key: { id: string } }> {
+  return call<{ key: { id: string } }>("send_media", {
+    to: normalizeJid(to),
+    mediaUrl,
+    mediatype,
+    caption,
+    fileName,
+  });
+}
