@@ -65,3 +65,6 @@ verify_jwt = true
 
 [functions.ai-sales-agent]
 verify_jwt = false
+
+[functions.ai-followup-cron]
+verify_jwt = false
