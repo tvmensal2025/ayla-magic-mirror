@@ -325,6 +325,7 @@ Deno.serve(async (req) => {
         key: objectKey,
         type: file.type,
         size: file.size,
+        storage: storageBackend,
         visibility: userIsAdmin ? "public" : "private",
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
