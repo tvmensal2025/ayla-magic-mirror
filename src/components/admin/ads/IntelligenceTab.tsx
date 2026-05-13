@@ -55,7 +55,7 @@ export function IntelligenceTab({ consultantId, onUseCreativeInAd }: Props) {
   return (
     <div className="space-y-4">
       {/* Botão estrela: gerador de criativo */}
-      <CreativeImageGenerator consultantId={consultantId} />
+      <CreativeImageGenerator ref={generatorRef} consultantId={consultantId} onUseInAd={onUseCreativeInAd} />
 
       <div className="grid lg:grid-cols-2 gap-4">
         <InsightsPanel consultantId={consultantId} />
@@ -88,7 +88,7 @@ export function IntelligenceTab({ consultantId, onUseCreativeInAd }: Props) {
         </Card>
       </div>
 
-      <CompetitorsPanel />
+      <CompetitorsPanel onInspire={(adId, hint) => generatorRef.current?.generateInspired(adId, hint)} />
     </div>
   );
 }
