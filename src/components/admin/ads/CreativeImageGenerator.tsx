@@ -238,7 +238,17 @@ export const CreativeImageGenerator = forwardRef<CreativeImageGeneratorHandle, P
               const isMine = h.consultant_id === consultantId;
               return (
                 <div key={h.id} className="group relative rounded-lg overflow-hidden border border-border/40 bg-secondary/30 aspect-square">
-                  <img src={h.image_url} alt="Criativo gerado" loading="lazy" className="w-full h-full object-cover" />
+                  {h.headline_used ? (
+                    <CreativeOverlay
+                      imageUrl={h.image_url}
+                      format={h.format}
+                      headline={h.headline_used}
+                      badge={h.badge_text || undefined}
+                      className="w-full h-full"
+                    />
+                  ) : (
+                    <img src={h.image_url} alt="Criativo gerado" loading="lazy" className="w-full h-full object-cover" />
+                  )}
 
                   <div className="absolute top-1 right-1 flex gap-1">
                     <Badge variant="secondary" className="text-[9px] h-4 px-1.5">
