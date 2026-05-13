@@ -13,7 +13,7 @@ const corsHeaders = {
 function buildWhatsappUrl(phone: string, message: string) {
   const digits = phone.replace(/\D/g, "");
   const normalized = digits.startsWith("55") ? digits : `55${digits}`;
-  return `https://api.whatsapp.com/send?phone=${normalized}&text=${encodeURIComponent(message)}`;
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
 }
 
 function redirectTo(url: string) {
