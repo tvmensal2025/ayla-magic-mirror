@@ -213,7 +213,8 @@ Deno.serve(async (req) => {
 
     const accId = conn.ad_account_id; // já vem com prefixo act_
     // Idade ampliada por padrão (25-65) — mais inventário = CPM/CPL mais baixo.
-    const ageMin = body.age_min ?? 25;
+    // Advantage+ audience exige age_min <= 25 (subcode 1870188). Cap defensivo.
+    const ageMin = Math.min(body.age_min ?? 25, 25);
     const ageMax = body.age_max ?? 65;
     const today = new Date().toISOString().slice(0, 10);
     const cityNames = body.cities.map((c) => c.name).slice(0, 3).join(", ");
