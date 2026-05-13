@@ -339,33 +339,11 @@ Deno.serve(async (req) => {
     if (body.duration_days && body.duration_days > 0) {
       adsetParams.end_time = new Date(Date.now() + body.duration_days * 86400_000).toISOString();
     }
-    let adset: any;
-    try {
-      adset = await fbFetch(`/${accId}/adsets`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams(adsetParams),
-      });
-    } catch (e: any) {
-      const msg = String(e?.message || e);
-      // Meta: WhatsApp number não vinculado ao WABA da Página (subcode 1487246)
-      if (msg.includes("1487246") || msg.includes("not linked to your account")) {
-        const friendly =
-          `O número de WhatsApp ${conn.whatsapp_destination_number} não está vinculado à conta do WhatsApp Business (WABA) da Página do Facebook usada na plataforma.\n\n` +
-          `Como resolver:\n` +
-          `1) Acesse business.facebook.com → Configurações do Negócio → Contas do WhatsApp\n` +
-          `2) Adicione/verifique o número ${conn.whatsapp_destination_number} na WABA vinculada à Página\n` +
-          `3) Ou peça ao Super Admin para vincular o número ao WABA da plataforma\n\n` +
-          `Sem esse vínculo, o Meta não permite criar anúncios Click-to-WhatsApp para esse número.`;
-        await notifyConsultant(auth.id, "error", "Número WhatsApp não vinculado", friendly);
-        return new Response(JSON.stringify({
-          error: friendly,
-          code: "WHATSAPP_NOT_LINKED_TO_WABA",
-          phone: conn.whatsapp_destination_number,
-        }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      throw e;
-    }
+    const adset = await fbFetch(`/${accId}/adsets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(adsetParams),
+    });
     const adsetId = adset.id as string;
 
     // 3) Upload de imagens — preserva o formato (square / vertical / story).
