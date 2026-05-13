@@ -477,8 +477,8 @@ Deno.serve(async (req) => {
       ? (customer.name as string).trim().split(/\s+/)[0]
       : null;
 
-    // Conta já recebida? Não pedir de novo.
-    const billAlreadyReceived = !!customer.electricity_bill_photo_url;
+    // Conta só conta como "recebida" para fim de bloqueio se OCR + nome confiável.
+    const billAlreadyReceived = billAlreadyReceivedEarly;
     const ocrDone = !!customer.ocr_done;
     const billRequestedRecently = customer.bill_requested_at
       && (Date.now() - new Date(customer.bill_requested_at).getTime()) < 10 * 60 * 1000;
