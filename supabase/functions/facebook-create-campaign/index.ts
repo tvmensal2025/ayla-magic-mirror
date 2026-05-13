@@ -8,7 +8,6 @@ import {
   loadConsultantAdSettings,
   loadPlatformAccount,
 } from "../_shared/fb-graph.ts";
-import { validateAdImage } from "../_shared/image-validator.ts";
 import { notifyConsultant } from "../_shared/notify-consultant.ts";
 
 interface Body {
@@ -268,6 +267,7 @@ Deno.serve(async (req) => {
     const pixelEvent = hasPixel ? "LEAD" : null;
 
     // 1) Campaign
+    console.log("[fb-create] step=campaign_create");
     const camp = await fbFetch(`/${accId}/campaigns`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -351,6 +351,7 @@ Deno.serve(async (req) => {
     if (body.duration_days && body.duration_days > 0) {
       adsetParams.end_time = new Date(Date.now() + body.duration_days * 86400_000).toISOString();
     }
+    console.log("[fb-create] step=adset_create campaign=", campaignId);
     const adset = await fbFetch(`/${accId}/adsets`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
