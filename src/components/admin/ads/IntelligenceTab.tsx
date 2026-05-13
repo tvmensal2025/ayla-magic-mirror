@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Activity, Calendar } from "lucide-react";
@@ -6,9 +6,12 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CompetitorsPanel } from "./CompetitorsPanel";
 import { InsightsPanel } from "./InsightsPanel";
-import { CreativeImageGenerator } from "./CreativeImageGenerator";
+import { CreativeImageGenerator, type CreativeImageGeneratorHandle } from "./CreativeImageGenerator";
 
-interface Props { consultantId: string }
+interface Props {
+  consultantId: string;
+  onUseCreativeInAd?: (imageUrl: string) => void;
+}
 
 interface Event { ts: string; label: string; emoji: string }
 
