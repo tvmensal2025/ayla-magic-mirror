@@ -383,26 +383,49 @@ Deno.serve(async (req) => {
       ? `\n[CÁLCULO PRONTO PRA USAR NO PITCH]\nConta R$ ${billNum.toFixed(0)} → economia ~R$ ${(billNum * 0.12).toFixed(0)}/mês → R$ ${(billNum * 0.12 * 12).toFixed(0)}/ano.\n`
       : "";
 
-    // Sanitiza nome: só usa se parecer um primeiro nome real (letras, 2-20 chars).
-    // Rejeita: vazio, números, "iPhone do João", "Galaxy", emojis, marcas de aparelho,
-    // nomes de operadora ("Cliente", "Suporte"), palavras genéricas e tudo em CAPS curto.
+    // Nome só é confiável se a fonte for OCR ou auto-apresentação ("meu nome é X").
+    // Nunca usar pushName/JID/herdado de import.
     const isTrustworthyName = (raw?: string | null): boolean => {
       if (!raw) return false;
       const n = raw.trim();
       if (n.length < 2 || n.length > 30) return false;
-      if (/\d/.test(n)) return false; // tem número
+      if (/\d/.test(n)) return false;
       if (/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/u.test(n)) return false;
-      if (!/^[A-Za-zÀ-ÖØ-öø-ÿ' -]+$/.test(n)) return false; // só letras/espaços/hífen
+      if (!/^[A-Za-zÀ-ÖØ-öø-ÿ' -]+$/.test(n)) return false;
       const blacklist = /\b(iphone|galaxy|xiaomi|motorola|samsung|cliente|suporte|atendimento|whatsapp|user|test|teste|admin|null|undefined|desconhecido|none|n\/a)\b/i;
       if (blacklist.test(n)) return false;
       return true;
     };
-    const firstName = isTrustworthyName(customer.name)
+    const trustedSources = new Set(["ocr", "self_introduced", "manual"]);
+    const nameSourceOk = trustedSources.has(String(customer.name_source || ""));
+    const firstName = (nameSourceOk && isTrustworthyName(customer.name))
       ? (customer.name as string).trim().split(/\s+/)[0]
       : null;
+
+    // Conta já recebida? Não pedir de novo.
+    const billAlreadyReceived = !!customer.electricity_bill_photo_url;
+    const ocrDone = !!customer.ocr_done;
+    const billRequestedRecently = customer.bill_requested_at
+      && (Date.now() - new Date(customer.bill_requested_at).getTime()) < 10 * 60 * 1000;
+
+    const billStatusBlock = billAlreadyReceived
+      ? `\n[CONTA JÁ RECEBIDA E ANALISADA]\n` +
+        `- Foto/PDF da conta: já está no sistema (NÃO PEÇA DE NOVO).\n` +
+        `- OCR processado: ${ocrDone ? "sim" : "em andamento"}\n` +
+        `- Titular OCR: ${customer.name || "?"}\n` +
+        `- Distribuidora OCR: ${customer.distribuidora || "?"}\n` +
+        `- Instalação: ${customer.numero_instalacao || "?"}\n` +
+        `- Valor: ${billNum > 0 ? `R$ ${billNum}` : "?"}\n` +
+        `Use estes dados para confirmar com o cliente e seguir para o cadastro.\n`
+      : (billRequestedRecently
+          ? `\n[CONTA JÁ FOI SOLICITADA HÁ POUCOS MINUTOS — não repita o pedido, apenas reforce gentilmente]\n`
+          : "");
+
     const contextLine =
       `[Contexto do lead]\n` +
-      `Nome: ${firstName || "DESCONHECIDO — NÃO chame por nome, use saudação neutra (oii, tudo bem?)"}\n` +
+      (firstName
+        ? `Nome confiável: ${firstName}\n`
+        : `Nome: DESCONHECIDO — NÃO chame por nome. Use saudação neutra ("Olá! Tudo bem?"). Se a conversa avançar sem nome, considere ask_for_name.\n`) +
       `Distribuidora: ${customer.distribuidora || "?"}\n` +
       `Cidade: ${customer.address_city || "?"}/${customer.address_state || "?"}\n` +
       `Valor da conta: ${billNum > 0 ? `R$ ${billNum}` : "?"}\n` +
@@ -413,6 +436,7 @@ Deno.serve(async (req) => {
       (customer.customer_referred_by_name
         ? `Indicado por: ${customer.customer_referred_by_name}\n`
         : "") +
+      billStatusBlock +
       billCalcLine +
       mediaListLine +
       cadenceLine;
