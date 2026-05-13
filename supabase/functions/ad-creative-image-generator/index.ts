@@ -3,6 +3,7 @@
 // Salva no bucket público "IMAGE" e registra em ad_generated_creatives.
 
 import { adminClient, authConsultant, corsHeaders } from "../_shared/fb-graph.ts";
+import { uploadToMinioPath } from "../_shared/minio-upload.ts";
 
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 
