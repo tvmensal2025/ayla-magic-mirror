@@ -6,6 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { Input } from "@/components/ui/input";
 import {
   Loader2,
   Plus,
@@ -18,6 +19,7 @@ import {
   Globe,
   User,
   Tag,
+  Pencil,
 } from "lucide-react";
 
 type Kind = "audio" | "video" | "image" | "document" | "text";
@@ -89,6 +91,38 @@ function fmtBytes(n: number) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function EditableLabel({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="group/lbl flex items-center gap-1 text-sm text-foreground truncate w-full text-left hover:text-primary transition-colors"
+        title="Clique para renomear"
+      >
+        <span className="truncate">{value}</span>
+        <Pencil className="w-3 h-3 opacity-0 group-hover/lbl:opacity-60 shrink-0" />
+      </button>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { setEditing(false); onSave(draft); }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); }
+        if (e.key === "Escape") { setDraft(value); setEditing(false); }
+      }}
+      className="w-full text-sm bg-background border border-primary/40 rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-primary"
+    />
+  );
+}
+
 export function MediaColumn({ userId }: { userId: string }) {
   const { toast } = useToast();
   const [view, setView] = useState<"mine" | "public">("mine");
@@ -104,8 +138,8 @@ export function MediaColumn({ userId }: { userId: string }) {
     const q = supabase.from("ai_media_library").select("*");
     const { data } =
       view === "mine"
-        ? await q.eq("consultant_id", userId).order("created_at", { ascending: false })
-        : await q.eq("is_public", true).order("created_at", { ascending: false });
+        ? await q.eq("consultant_id", userId).order("priority", { ascending: false }).order("created_at", { ascending: false })
+        : await q.eq("is_public", true).order("priority", { ascending: false }).order("created_at", { ascending: false });
     setItems((data as any) || []);
     setLoading(false);
   }
@@ -155,7 +189,7 @@ export function MediaColumn({ userId }: { userId: string }) {
           step_tags: ["any"],
           intent_tags: [],
           active: true,
-          priority: 0,
+          priority: 10,
         });
         if (insErr) throw insErr;
       }
@@ -207,6 +241,25 @@ export function MediaColumn({ userId }: { userId: string }) {
       return;
     }
     setItems((prev) => prev.map((x) => (x.id === m.id ? { ...x, ...patch } : x)));
+  }
+
+  async function updateLabel(m: Media, newLabel: string) {
+    const trimmed = newLabel.trim();
+    if (!trimmed || trimmed === m.label) return;
+    const { error } = await supabase.from("ai_media_library").update({ label: trimmed }).eq("id", m.id);
+    if (error) { toast({ title: "Erro ao renomear", description: error.message, variant: "destructive" }); return; }
+    setItems((prev) => prev.map((x) => (x.id === m.id ? { ...x, label: trimmed } : x)));
+  }
+
+  async function updatePriority(m: Media, value: number) {
+    const v = Number.isFinite(value) ? Math.max(0, Math.min(999, Math.trunc(value))) : 0;
+    if (v === m.priority) return;
+    const { error } = await supabase.from("ai_media_library").update({ priority: v }).eq("id", m.id);
+    if (error) { toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
+    setItems((prev) => {
+      const next = prev.map((x) => (x.id === m.id ? { ...x, priority: v } : x));
+      return next.sort((a, b) => b.priority - a.priority);
+    });
   }
 
   function TagEditor({ m }: { m: Media }) {
@@ -375,25 +428,36 @@ export function MediaColumn({ userId }: { userId: string }) {
           <p className="text-sm text-muted-foreground text-center py-6">Nenhuma mídia ainda.</p>
         ) : (
           <ul className="space-y-1.5">
-            {items.map((m) => (
+            {items.map((m) => {
+              const isMine = m.consultant_id === userId;
+              return (
               <li
                 key={m.id}
-                className="group flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-muted/40 transition-colors"
+                className="group flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-muted/40 transition-colors"
               >
                 {iconFor(m.kind)}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-foreground truncate">{m.label}</p>
-                  <p className="text-[10px] text-muted-foreground uppercase">{m.kind}</p>
+                  {isMine ? (
+                    <EditableLabel value={m.label} onSave={(v) => updateLabel(m, v)} />
+                  ) : (
+                    <p className="text-sm text-foreground truncate">{m.label}</p>
+                  )}
+                  <p className="text-[10px] text-muted-foreground uppercase">{m.kind} · prio {m.priority}</p>
                 </div>
                 {view === "mine" ? (
                   <>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={999}
+                      defaultValue={m.priority}
+                      key={`${m.id}-${m.priority}`}
+                      onBlur={(e) => updatePriority(m, parseInt(e.target.value, 10))}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      className="h-6 w-12 text-[10px] px-1.5 text-center"
+                      title="Prioridade (maior = enviado primeiro)"
+                    />
                     <TagEditor m={m} />
-                    <Badge
-                      variant={m.active ? "default" : "outline"}
-                      className={`text-[10px] ${m.active ? "bg-primary/15 text-primary border-primary/20" : ""}`}
-                    >
-                      {m.active ? "Ativo" : "Off"}
-                    </Badge>
                     <Switch
                       checked={m.active}
                       onCheckedChange={(v) => toggleActive(m, v)}
@@ -413,7 +477,8 @@ export function MediaColumn({ userId }: { userId: string }) {
                   </Button>
                 )}
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>
