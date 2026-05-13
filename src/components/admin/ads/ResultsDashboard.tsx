@@ -161,11 +161,11 @@ export function ResultsDashboard({ consultantId, onCreateClick }: { consultantId
         </div>
         <h3 className="text-lg font-bold text-foreground">Você ainda não tem campanhas</h3>
         <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
-          Crie sua primeira campanha em 3 passos. A IA cuida do texto, das cidades e do orçamento — os leads chegam no seu WhatsApp.
+          Escolha um modelo pronto na <strong className="text-foreground">Galeria</strong> e publique em 1 clique — em seu nome, com seu WhatsApp já conectado.
         </p>
         {onCreateClick && (
           <Button size="lg" className="mt-5 gap-2" onClick={onCreateClick}>
-            <Target className="w-4 h-4" /> Criar primeira campanha
+            <Target className="w-4 h-4" /> Ver modelos prontos
           </Button>
         )}
       </Card>
