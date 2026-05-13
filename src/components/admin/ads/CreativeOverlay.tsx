@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 
 type Format = "feed_1x1" | "story_9x16" | "reels_9x16" | "carousel_4x5";
