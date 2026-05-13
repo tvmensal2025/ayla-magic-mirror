@@ -114,10 +114,77 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   // E o step está em fase conversacional (antes da coleta de docs).
   // Steps de coleta (aguardando_conta em diante) seguem determinísticos.
   // ═══════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════
+  // 🛡️  INTENT OVERRIDE DETERMINÍSTICO — roda ANTES da IA.
+  // Garante que palavras-chave críticas funcionem mesmo se o LLM falhar.
+  // ═══════════════════════════════════════════════════════════════════
+  if (messageText && !isFile && !isButton) {
+    const txt = messageText.trim();
+
+    // 1) "não sou eu" / "recomeçar" → limpa contexto poluído e reinicia.
+    if (RE_INTENT_RESET.test(txt)) {
+      console.log(`[intent-override] RESET detectado: "${txt.slice(0, 60)}"`);
+      await resetLeadIdentity(supabase, customer.id);
+      const msg =
+        "Sem problema, vamos recomeçar do zero.\n\n" +
+        `Oi! 👋 Aqui é o assistente digital de *${nomeRepresentante}*.\n\n` +
+        "Já pensou em pagar menos na sua conta de luz todo mês? 💚\n" +
+        "Posso te explicar rapidinho como funciona?";
+      await sendOptions(remoteJid, msg, [
+        { id: "entender_desconto", title: "💡 Quero saber mais" },
+        { id: "cadastrar_agora", title: "📋 Já quero participar" },
+        { id: "falar_humano", title: "🧑 Falar com humano" },
+      ]);
+      return { reply: "", updates: { conversation_step: "menu_inicial", __inline_sent: true } as any };
+    }
+
+    // 2) "cadastrar / quero participar / vamos lá" → pula direto pro pedido da conta,
+    //    mas SOMENTE se ainda não temos a foto da conta.
+    if (RE_INTENT_CADASTRAR.test(txt) && !customer.electricity_bill_photo_url) {
+      console.log(`[intent-override] CADASTRAR detectado: "${txt.slice(0, 60)}"`);
+      return {
+        reply:
+          "📋 Ótimo! Vamos iniciar seu cadastro.\n\n" +
+          "📸 *Envie uma FOTO ou PDF da sua conta de energia* para começarmos!\n\n" +
+          "Formatos aceitos: JPG, PNG ou PDF",
+        updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento" },
+      };
+    }
+
+    // 3) "humano / atendente" → handoff explícito.
+    if (RE_INTENT_HUMANO.test(txt)) {
+      console.log(`[intent-override] HUMANO detectado: "${txt.slice(0, 60)}"`);
+      return {
+        reply:
+          `🧑 Sem problema! Um consultor da equipe *${nomeRepresentante}* vai te chamar em breve.\n\n` +
+          "Se mudar de ideia e quiser começar agora, é só digitar *cadastrar*.",
+        updates: {
+          conversation_step: "aguardando_humano",
+          bot_paused: true,
+          bot_paused_reason: "lead_pediu_humano",
+          bot_paused_at: new Date().toISOString(),
+        },
+      };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 🤖 SALES AI — delegação opcional para LLM com tool-calling.
+  // Ativa quando: ai_agent_config.handoff_rules.use_sales_ai = true
+  // E o step está em fase conversacional (antes da coleta de docs).
+  // Steps de coleta (aguardando_conta em diante) seguem determinísticos.
+  // ═══════════════════════════════════════════════════════════════════
   const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "aguardando_humano"]);
+  // Bypass: se já temos a conta com OCR + nome confiável, NÃO chamar a IA —
+  // o switch determinístico vai cuidar de confirmar/avançar sem virar handoff loop.
+  const billTrusted =
+    !!customer.electricity_bill_photo_url &&
+    !!customer.ocr_done &&
+    TRUSTED_NAME_SOURCES.has(String(customer.name_source || ""));
   if (
     !isFile &&
     !customer.bot_paused &&
+    !billTrusted &&
     conversationalSteps.has(step) &&
     messageText &&
     messageText.trim().length > 0
