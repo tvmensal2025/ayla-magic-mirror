@@ -298,6 +298,7 @@ Deno.serve(async (req) => {
       badge,
       overlay_layout,
       qa_attempts: attempts,
+      qa_approved: approved,
       model_used: modelUsed,
       width: spec.w,
       height: spec.h,
