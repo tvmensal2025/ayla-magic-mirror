@@ -443,8 +443,8 @@ Deno.serve(async (req) => {
       `\n[CADÊNCIA]\n` +
       `- Mídias enviadas nas últimas 4 respostas: ${recentMediaCount}\n` +
       `- Última msg do lead foi do tipo: ${lastInboundKind}\n` +
-      (recentMediaCount >= 2
-        ? `- ⚠️ NÃO envie mídia agora — use send_text para não soar spam.\n`
+      (recentMediaCount >= 1
+        ? `- ⚠️ NÃO envie mídia agora — a última resposta JÁ foi mídia. Use send_text.\n`
         : ``) +
       (lastInboundKind === "audio"
         ? `- Lead mandou áudio: prefira responder com áudio também (espelho).\n`
