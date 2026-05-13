@@ -579,6 +579,48 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_agent_slots: {
+        Row: {
+          active: boolean
+          created_at: string
+          description: string | null
+          fallback_text: string | null
+          label: string
+          min_interval_minutes: number
+          position: number
+          slot_key: string
+          trigger_hint: string | null
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          description?: string | null
+          fallback_text?: string | null
+          label: string
+          min_interval_minutes?: number
+          position?: number
+          slot_key: string
+          trigger_hint?: string | null
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          description?: string | null
+          fallback_text?: string | null
+          label?: string
+          min_interval_minutes?: number
+          position?: number
+          slot_key?: string
+          trigger_hint?: string | null
+          updated_at?: string
+          version?: number
+        }
+        Relationships: []
+      }
       ai_decisions: {
         Row: {
           ai_output: Json | null
@@ -673,10 +715,14 @@ export type Database = {
           duration_sec: number | null
           id: string
           intent_tags: string[]
+          is_draft: boolean
           is_public: boolean
           kind: string
           label: string
           priority: number
+          reply_count: number
+          sent_count: number
+          slot_key: string | null
           step_tags: string[]
           storage_path: string | null
           text_content: string | null
@@ -691,10 +737,14 @@ export type Database = {
           duration_sec?: number | null
           id?: string
           intent_tags?: string[]
+          is_draft?: boolean
           is_public?: boolean
           kind: string
           label: string
           priority?: number
+          reply_count?: number
+          sent_count?: number
+          slot_key?: string | null
           step_tags?: string[]
           storage_path?: string | null
           text_content?: string | null
@@ -709,16 +759,61 @@ export type Database = {
           duration_sec?: number | null
           id?: string
           intent_tags?: string[]
+          is_draft?: boolean
           is_public?: boolean
           kind?: string
           label?: string
           priority?: number
+          reply_count?: number
+          sent_count?: number
+          slot_key?: string | null
           step_tags?: string[]
           storage_path?: string | null
           text_content?: string | null
           transcript?: string | null
           updated_at?: string
           url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_media_library_slot_key_fkey"
+            columns: ["slot_key"]
+            isOneToOne: false
+            referencedRelation: "ai_agent_slots"
+            referencedColumns: ["slot_key"]
+          },
+        ]
+      }
+      ai_slot_dispatch_log: {
+        Row: {
+          consultant_id: string
+          customer_id: string | null
+          id: string
+          media_id: string | null
+          reply_within_min: number | null
+          sent_at: string
+          slot_key: string
+          variant: string
+        }
+        Insert: {
+          consultant_id: string
+          customer_id?: string | null
+          id?: string
+          media_id?: string | null
+          reply_within_min?: number | null
+          sent_at?: string
+          slot_key: string
+          variant: string
+        }
+        Update: {
+          consultant_id?: string
+          customer_id?: string | null
+          id?: string
+          media_id?: string | null
+          reply_within_min?: number | null
+          sent_at?: string
+          slot_key?: string
+          variant?: string
         }
         Relationships: []
       }
