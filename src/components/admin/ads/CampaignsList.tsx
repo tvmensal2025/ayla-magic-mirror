@@ -73,13 +73,21 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { data: camps } = await supabase
-        .from("facebook_campaigns")
-        .select("id,name,status,cities,daily_budget_cents,fb_campaign_id,created_at,rejection_reason")
-        .eq("consultant_id", consultantId)
-        .order("created_at", { ascending: false });
-      const list = (camps || []) as Campaign[];
+      const [campsRes, settingsRes] = await Promise.all([
+        supabase
+          .from("facebook_campaigns")
+          .select("id,name,status,cities,daily_budget_cents,fb_campaign_id,created_at,rejection_reason")
+          .eq("consultant_id", consultantId)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("consultant_ad_settings")
+          .select("whatsapp_destination_number")
+          .eq("consultant_id", consultantId)
+          .maybeSingle(),
+      ]);
+      const list = (campsRes.data || []) as Campaign[];
       setItems(list);
+      setWaNumber((settingsRes.data as any)?.whatsapp_destination_number || null);
 
       if (list.length > 0) {
         const since = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
