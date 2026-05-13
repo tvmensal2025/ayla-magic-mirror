@@ -104,7 +104,7 @@ export function AdsTab({ consultantId }: Props) {
           {view === "gallery" && (
             <AdTemplatesGallery consultantId={consultantId} onPublished={() => { setRefreshKey(k => k + 1); setView("campaigns"); }} />
           )}
-          {view === "intel" && <IntelligenceTab consultantId={consultantId} />}
+          {view === "intel" && <IntelligenceTab consultantId={consultantId} onUseCreativeInAd={openExpressWithCreative} />}
         </>
       )}
 
@@ -117,8 +117,9 @@ export function AdsTab({ consultantId }: Props) {
 
       <CreateCampaignExpress
         open={expressOpen}
-        onClose={() => setExpressOpen(false)}
+        onClose={() => { setExpressOpen(false); setPrefillImageUrl(null); }}
         consultantId={consultantId}
+        prefillImageUrl={prefillImageUrl}
         onCreated={() => setRefreshKey(k => k + 1)}
         onSwitchAdvanced={() => setWizardOpen(true)}
       />
