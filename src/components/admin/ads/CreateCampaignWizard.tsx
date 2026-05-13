@@ -88,6 +88,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
   const { toast } = useToast();
   const { connection } = useFacebookConnection(consultantId);
   const { isSuperAdmin } = useUserRole(consultantId);
+  const { phone: consultantPhone, loading: phoneLoading } = useConsultantPhone(consultantId);
   const [step, setStep] = useState<Step>(1);
   const [submitting, setSubmitting] = useState(false);
   const [aiResizingIdx, setAiResizingIdx] = useState<number | null>(null);
