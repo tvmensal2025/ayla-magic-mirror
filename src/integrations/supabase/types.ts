@@ -2187,6 +2187,7 @@ export type Database = {
       }
     }
     Functions: {
+      admin_unpause_global_bot: { Args: never; Returns: number }
       credit_consultant_wallet:
         | {
             Args: {
