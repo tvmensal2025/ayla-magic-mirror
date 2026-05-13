@@ -338,9 +338,10 @@ Deno.serve(async (req) => {
       targeting: JSON.stringify(targeting),
       status: "PAUSED",
       start_time: new Date(Date.now() + 60_000).toISOString(),
-      // Frequency cap: max 3 impressões a cada 7 dias por usuário.
-      // Sem isso, no dia 4 o mesmo lead vê 8× e o CTR despenca.
-      frequency_control_specs: JSON.stringify([{ event: "IMPRESSIONS", interval_days: 7, max_frequency: 3 }]),
+      // frequency_control_specs só é aceito com optimization_goal=REACH (Meta).
+      ...(optimizationGoal === "REACH"
+        ? { frequency_control_specs: JSON.stringify([{ event: "IMPRESSIONS", interval_days: 7, max_frequency: 3 }]) }
+        : {}),
       ...(adlabelsParam ? { adlabels: adlabelsParam } : {}),
       access_token: conn.token,
     };
