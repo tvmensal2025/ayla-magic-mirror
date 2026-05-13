@@ -106,8 +106,8 @@ export function MediaColumn({ userId }: { userId: string }) {
     const q = supabase.from("ai_media_library").select("*");
     const { data } =
       view === "mine"
-        ? await q.eq("consultant_id", userId).order("created_at", { ascending: false })
-        : await q.eq("is_public", true).order("created_at", { ascending: false });
+        ? await q.eq("consultant_id", userId).order("priority", { ascending: false }).order("created_at", { ascending: false })
+        : await q.eq("is_public", true).order("priority", { ascending: false }).order("created_at", { ascending: false });
     setItems((data as any) || []);
     setLoading(false);
   }
