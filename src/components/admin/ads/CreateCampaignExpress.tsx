@@ -118,19 +118,30 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
     setPreviews((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  async function composeFinalFiles(): Promise<File[]> {
-    if (!applyCta) return files;
-    const out: File[] = [];
+  type FormatKey = "square" | "vertical" | "story";
+  const FORMATS: FormatKey[] = ["square", "vertical", "story"];
+
+  async function composeFinalFiles(): Promise<{ file: File; format: FormatKey }[]> {
+    if (!applyCta) {
+      // sem overlay → publica só no quadrado mesmo
+      return files.map((f) => ({ file: f, format: "square" as FormatKey }));
+    }
+    const out: { file: File; format: FormatKey }[] = [];
     for (let i = 0; i < files.length; i++) {
-      const handle = overlayRefs.current[i];
-      if (!handle) { out.push(files[i]); continue; }
-      try {
-        const composite = await handle.toFile(`anuncio-${Date.now()}-${i}.png`);
-        out.push(composite);
-      } catch {
-        out.push(files[i]);
+      const refs = overlayRefs.current[i];
+      for (const fmt of FORMATS) {
+        const handle = refs?.[fmt];
+        if (!handle) continue;
+        try {
+          const composite = await handle.toFile(`anuncio-${Date.now()}-${i}-${fmt}.png`);
+          out.push({ file: composite, format: fmt });
+        } catch {
+          // se falhar overlay, cai pro upload original como square
+          if (fmt === "square") out.push({ file: files[i], format: "square" });
+        }
       }
     }
+    if (out.length === 0) return files.map((f) => ({ file: f, format: "square" as FormatKey }));
     return out;
   }
 
@@ -165,15 +176,19 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
 
       setStepLog("Gerando texto do anúncio com IA...");
       const copy = await generateCopy([`clientes de ${preset.nome}`, ...cities.map((c) => c.name).slice(0, 3)]);
-      const finalHeadline = copy.headlines[0] || headline;
+      const finalHeadline = copy.headlines[0] || defaultHeadline;
       const primary = copy.primary_texts[0] || `Reduza até 20% na conta de luz com energia limpa. Atendimento via WhatsApp.`;
       const description = copy.description || `Sem obra. Sem instalação. Sem fidelidade.`;
 
-      setStepLog(applyCta ? "Aplicando selo e CTA nas fotos..." : "Preparando fotos...");
-      const finalFiles = await composeFinalFiles();
+      // Atualiza overlay com headline final da IA antes de compor
+      setLiveHeadline(finalHeadline);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null))));
+
+      setStepLog(applyCta ? "Aplicando selo e CTA nas fotos (1:1, 4:5, 9:16)..." : "Preparando fotos...");
+      const composed = await composeFinalFiles();
 
       setStepLog("Enviando fotos...");
-      const photoUrls = await uploadAdPhotos(consultantId, finalFiles);
+      const photoUrls = await uploadAdPhotos(consultantId, composed.map((c) => c.file));
 
       setStepLog("Publicando campanha no Facebook...");
       await createCampaign({
@@ -181,7 +196,7 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
         cities: cities.map((c) => ({ key: c.key, name: c.name })),
         daily_budget_cents: 3000,
         duration_days: null,
-        photos: photoUrls.map((url) => ({ url, format: "square" as const })),
+        photos: photoUrls.map((url, idx) => ({ url, format: composed[idx].format })),
         headline: finalHeadline, primary_text: primary, description,
         distribuidora: preset.nome,
       });
