@@ -234,8 +234,9 @@ export function UseTemplateDialog({ open, onClose, template, consultantId, onPub
               </div>
               <div className="flex flex-wrap gap-1.5">
                 <button type="button" onClick={() => setSelectedCity("__all__")}
-                  className={`text-xs px-3 py-1.5 rounded-full border transition ${selectedCity === "__all__" ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-primary/10 border-border"}`}>
-                  Todas ({presetCities.length})
+                  title="Avançado: orçamento será diluído entre muitas cidades. CPL costuma ficar mais alto."
+                  className={`text-xs px-3 py-1.5 rounded-full border transition ${selectedCity === "__all__" ? "bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/60" : "bg-card hover:bg-amber-500/10 border-border"}`}>
+                  ⚠ Todas ({presetCities.length}) — avançado
                 </button>
                 {presetCities.map((c) => (
                   <button key={c} type="button" onClick={() => setSelectedCity(c)}
@@ -244,7 +245,9 @@ export function UseTemplateDialog({ open, onClose, template, consultantId, onPub
                   </button>
                 ))}
               </div>
-              <div className="text-[10px] text-muted-foreground">Dica: começar por uma cidade só ajuda a baixar o CPL.</div>
+              <div className="text-[10px] text-muted-foreground">
+                Recomendado: 1 cidade por campanha pra baixar o CPL. Use "Todas" só se seu orçamento for ≥ R$ 80/dia.
+              </div>
             </div>
 
             <div className="text-xs flex gap-2 rounded border border-amber-500/40 bg-amber-500/10 p-3">
