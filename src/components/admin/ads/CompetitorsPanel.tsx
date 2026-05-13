@@ -36,7 +36,7 @@ const ANGLE_LABEL: Record<string, string> = {
   urgencia_local: "📍 Urgência local",
 };
 
-export function CompetitorsPanel() {
+export function CompetitorsPanel({ onInspire }: Props = {}) {
   const { toast } = useToast();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,7 +50,7 @@ export function CompetitorsPanel() {
     setLoading(true);
     const { data } = await supabase
       .from("ad_competitor_creatives")
-      .select("id, advertiser, headline, primary_text, cta, angle, creative_format, active_days, ingested_at")
+      .select("id, ad_archive_id, advertiser, headline, primary_text, cta, angle, creative_format, active_days, thumbnail_url, image_url, ingested_at")
       .order("active_days", { ascending: false })
       .limit(100);
     setRows((data as Row[]) || []);
