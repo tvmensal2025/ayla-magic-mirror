@@ -467,6 +467,15 @@ Deno.serve(async (req) => {
       updates.bot_paused = true;
       updates.bot_paused_reason = `mark_lost: ${args.reason}`;
     }
+    // Apply qualification score delta
+    if ((tool === "send_text" || tool === "send_media") && typeof args.score_delta === "number") {
+      const current = Number(customer.qualification_score ?? 0);
+      const next = Math.max(0, Math.min(100, current + args.score_delta));
+      updates.qualification_score = next;
+    }
+    if (tool === "advance_to_closing") {
+      updates.qualification_score = Math.max(Number(customer.qualification_score ?? 0), 90);
+    }
     if (Object.keys(updates).length > 0) {
       await supabase.from("customers").update(updates).eq("id", customer_id);
     }
