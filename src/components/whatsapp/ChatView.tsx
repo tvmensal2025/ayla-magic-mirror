@@ -54,7 +54,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
     if (r.ok) {
       toast({ title: "Conversa zerada", description: "O bot vai começar do zero na próxima mensagem." });
     } else {
-      toast({ title: "Erro ao zerar", description: r.error, variant: "destructive" });
+      toast({ title: "Erro ao zerar", description: (r as { error: string }).error, variant: "destructive" });
     }
   }, [chat, consultantId, toast]);
 
