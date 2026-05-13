@@ -10,7 +10,7 @@ import { CreativeImageGenerator, type CreativeImageGeneratorHandle } from "./Cre
 
 interface Props {
   consultantId: string;
-  onUseCreativeInAd?: (imageUrl: string) => void;
+  onUseCreativeInAd?: (creative: { image_url: string; format: string; headline: string; badge: string }) => void;
 }
 
 interface Event { ts: string; label: string; emoji: string }
