@@ -1,164 +1,100 @@
+## Diagnóstico — o que falta para resultados reais
 
-# Anúncios à prova de leigo + IA que aprende sozinha
+**Já está 100% funcional (backend):**
+- ✅ Scraper de concorrentes rodando + cron semanal (38 anúncios populados de 10 marcas)
+- ✅ Learner diário gerando padrões vencedores/perdedores
+- ✅ Rotator diário pausando criativos perdedores
+- ✅ Builder com 6 ângulos obrigatórios + image briefs
+- ✅ Gemini 2.5-flash atualizado
 
-## Diagnóstico (do print que você mandou)
-
-Você pausou o anúncio com um saldo de R$ 179, 644 impressões, 1 clique e **0 leads** em 24h. Dois problemas reais:
-
-1. **Linguagem técnica demais** — "impressão", "CPL", "CPA", "conversão" não significam nada pro consultor médio. Ele olha "11 impressões · 0 cliques · 0 leads · −R$ 0,47" e não sabe se é bom, ruim ou normal.
-2. **A IA gera copy uma vez e nunca mais aprende** — `ad-creative-builder` cria 6 títulos + 3 textos no momento da campanha e acabou. Não há ciclo de aprendizado: copy ruim continua rodando, copy boa não vira referência. 644 impressões com 1 clique é CTR de 0,15% (ruim) e ninguém ajusta nada.
-3. **Sem objetivo claro de fechamento** — o painel mostra "Leads" mas o que importa pra você é **cadastro completo** (cliente assinou). Hoje não há um indicador único "quantos viraram cliente por R$ gasto".
-
----
-
-## O que vamos construir
-
-### 1. Painel em português de gente normal (Resultados + Carteira)
-
-Substituir todos os termos técnicos por linguagem do Rafael:
-
-| Hoje (técnico) | Vai virar (humano) |
-|---|---|
-| 644 impressões | **644 pessoas viram seu anúncio** |
-| 1 clique | **1 pessoa tocou** |
-| 0 leads | **0 conversas começaram no zap** |
-| 0 cadastros | **0 viraram cliente** |
-| CPL R$ 13,69 | **Custo por conversa: R$ 13,69** |
-| CPA R$ 28 | **Custo pra ganhar 1 cliente: R$ 28** |
-| CTR 0,15% | **De cada 1.000 que viram, só 1 tocou — anúncio fraco 🔴** |
-| Conversion rate | **Taxa de fechamento** |
-
-**Mini-tooltip "?"** ao lado de cada métrica com explicação de 1 linha + benchmark ("bom: > 1%", "ruim: < 0,3%").
-
-**Card de saúde** no topo do `ResultsDashboard`:
-```
-┌──────────────────────────────────────────────────────┐
-│ 🟢 Anúncio saudável                                  │
-│    Cada R$ gasto está trazendo 0,8 conversas no zap. │
-│    Continua rodando.                                 │
-└──────────────────────────────────────────────────────┘
-```
-Estados: 🟢 saudável / 🟡 atenção / 🔴 vai pausar em 1h se não melhorar.
-
-**Wallet feed** em `WalletCard.tsx` — trocar a linha "11 impressões · 0 cliques · 0 leads (4 sincronizações)" por:
-> *"11 pessoas viram. Ninguém tocou ainda."* (sem mencionar "sincronização")
-
-### 2. IA que aprende com cada anúncio (Creative Learner)
-
-Nova edge function `ad-creative-learner` rodando 1x/dia (cron):
-
-```
-Para cada consultor:
-  1. Pega os últimos 30 dias de facebook_metrics_daily
-  2. Junta com os textos/imagens reais (facebook_ads tem o creative_id)
-  3. Calcula score por variação:
-       score = (cadastros × 100) + (conversas × 10) + (cliques × 1) − (R$ gasto)
-  4. Ranqueia top-5 vencedoras e bottom-5 perdedoras
-  5. Salva em ad_creative_insights (nova tabela):
-       - winning_patterns: ["headlines com número", "tom de pergunta", "menciona CPFL"]
-       - losing_patterns: ["genérico", "sem CTA", "emoji demais"]
-       - best_image_traits: ["foto real", "boleto visível", "rosto humano"]
-  6. Quando o consultor abrir "Nova campanha", o ad-creative-builder
-     recebe esses padrões no prompt e SÓ gera variações no estilo vencedor.
-```
-
-Tabela nova:
-```sql
-ad_creative_insights (
-  consultant_id, distribuidora,
-  winning_patterns jsonb, losing_patterns jsonb,
-  best_ctr numeric, best_cpa_cents int,
-  sample_size int, updated_at timestamptz
-)
-```
-
-Mudança no `ad-creative-builder/index.ts`: antes do prompt do Gemini, busca insights do consultor e injeta:
-```
-HISTÓRICO DESTE CONSULTOR (use como guia):
-- Padrões vencedores: títulos com número específico, menciona "CPFL"
-- Evitar: genérico, sem CTA, mais de 1 emoji
-- Melhor CTR atingido: 2,3% (use isso como referência mínima)
-```
-
-### 3. Auto-rotação A/B (kill the losers)
-
-Hoje a campanha sobe 6 títulos + 3 textos = 18 combinações, mas o Facebook escolhe sozinho e não temos controle.
-
-Novo cron `facebook-creative-rotator` (a cada 12h):
-- Pra cada ad ativo com > 500 impressões nos últimos 3 dias
-- Se CTR < 0,5% **E** zero conversas → **pausa esse criativo automaticamente**
-- Se CTR > 1,5% **E** ≥ 1 conversa → marca como `is_winner=true`
-- Cria 3 novas variações INSPIRADAS no vencedor (chama ad-creative-builder com `seed_winner=<id>`)
-
-Resultado: o set de criativos evolui sozinho. Em 2 semanas, só sobram os que convertem.
-
-### 4. Foco real no fechamento (cadastro)
-
-O KPI "Cadastros" hoje depende do Pixel `CompleteRegistration` — checar via `facebook-capi` se está disparando. Se não estiver, adicionar um disparo automático **quando `customers.status` muda pra `approved`** (trigger SQL → edge `facebook-capi/track-conversion`).
-
-Adicionar ao Wallet feed coluna nova: **"Virou cliente?"** com 🎯 verde quando aquela conversa chegou em `status=approved`.
-
-Card-resumo no topo do `ResultsDashboard`:
-```
-🎯 Custo real pra ganhar 1 cliente: R$ 47
-   (R$ 186 gastos → 4 cadastros aprovados)
-   Meta: < R$ 60 ✅
-```
-
-### 5. Recomendações pró-ativas (Insight Cards)
-
-Toda vez que o `ad-creative-learner` roda, gera 1-3 cards no painel:
-
-```
-┌─────────────────────────────────────────────────────┐
-│ 💡 Recomendação                                     │
-│ Seus anúncios com a palavra "boleto" no título      │
-│ converteram 3× mais que os outros.                  │
-│ [ Aplicar em todas as próximas campanhas ]          │
-└─────────────────────────────────────────────────────┘
-```
-
-Tabela `ad_recommendations` (consultant_id, type, message, action_payload, dismissed).
+**O que falta para você acompanhar e ter resultados:**
+1. **UI ausente**: as tabelas `ad_competitor_creatives` e `ad_creative_insights` existem, mas **nenhuma tela mostra esses dados** hoje. Você não consegue ver os concorrentes nem os insights da IA pelo painel.
+2. **Geração de imagem com 1 clique**: hoje o builder gera só *briefs textuais* das imagens. Não existe botão que transforme o brief em imagem real pronta para subir no Meta.
+3. **Acompanhamento histórico**: insights e mudanças de concorrentes não têm timeline visível.
 
 ---
 
-## Arquivos a criar/editar
+## Plano
 
+### 1. Nova aba "Inteligência" dentro de Anúncios
+Adicionar 4ª aba (`Resultados | Campanhas | Modelos | **Inteligência** 🧠`) em `AdsTab.tsx`.
+
+A aba terá 3 cards verticais:
+
+```text
+┌────────────────────────────────────────────────────┐
+│ 📊 INSIGHTS DA IA (sua performance)                │
+│  • Padrões vencedores: "número específico", ...    │
+│  • Padrões perdedores: "tom genérico", ...         │
+│  • Resumo: "Headlines com cidade convertem 2x"     │
+│  Atualizado há 4h · [Atualizar agora]              │
+├────────────────────────────────────────────────────┤
+│ 🕵️ CONCORRENTES ATIVOS (10 marcas)                 │
+│  Filtro: [Todas ▾] [Ângulo ▾] [Formato ▾]          │
+│  Tabela: Marca | Headline | Ângulo | Formato | Dias│
+│  Top 5 com mais dias no ar = ★ destaque verde      │
+│  Última atualização: hoje · [Re-escanear agora]    │
+├────────────────────────────────────────────────────┤
+│ 📅 TIMELINE DE ATUALIZAÇÕES                        │
+│  • 13/05 09:14 — Learner rodou (3 ads avaliados)   │
+│  • 13/05 09:11 — Scraper +38 ads de 10 marcas      │
+│  • Cron: scraper toda 2ª 06h, learner diário 07h   │
+└────────────────────────────────────────────────────┘
 ```
-NOVOS:
-  supabase/functions/ad-creative-learner/index.ts        # cron diário
-  supabase/functions/facebook-creative-rotator/index.ts  # cron 12h
-  supabase/migrations/<ts>_creative_insights.sql         # 2 tabelas + cron
-  src/components/admin/ads/HealthSummaryCard.tsx         # card 🟢/🟡/🔴
-  src/components/admin/ads/InsightCards.tsx              # recomendações
-  src/components/admin/ads/MetricTooltip.tsx             # "?" com explicação
-  src/lib/adGlossary.ts                                  # mapa termo→linguagem leiga
 
-EDITAR:
-  src/components/admin/ads/ResultsDashboard.tsx          # labels humanas + tooltips + card de saúde
-  src/components/admin/ads/WalletCard.tsx                # feed em linguagem simples
-  supabase/functions/ad-creative-builder/index.ts        # injeta insights do consultor no prompt
-  supabase/functions/facebook-capi/index.ts              # garante disparo de CompleteRegistration
-```
+**Componentes novos:**
+- `src/components/admin/ads/CompetitorsPanel.tsx` — lê `ad_competitor_creatives`, agrupa por marca, ordena por `active_days` desc, mostra top 5 com badge "Top conversor". Botão "Re-escanear" invoca `ad-competitor-scraper`.
+- `src/components/admin/ads/InsightsPanel.tsx` — lê `ad_creative_insights` do consultor. Botão "Atualizar agora" invoca `ad-creative-learner`. Vazio-estado: "Rode 3+ campanhas para insights".
+- `src/components/admin/ads/IntelligenceTab.tsx` — agrupa os 2 acima + timeline simples lendo `created_at`/`updated_at` dessas tabelas.
 
-## Detalhes técnicos
+### 2. Botão "Gerar criativo perfeito (1 clique)"
 
-- **Cron**: `pg_cron` para `ad-creative-learner` (03:00 BRT) e `facebook-creative-rotator` (a cada 12h).
-- **RLS**: insights e recomendações são `consultant_id`-scoped, policies idênticas a `facebook_campaigns`.
-- **Custo de IA**: aprendizado roda 1x/dia/consultor com `google/gemini-3-flash-preview` (barato).
-- **Backfill**: na primeira execução, processa últimos 30 dias.
-- **Segurança**: rotator só pausa criativo, nunca pausa campanha inteira sem confirmação humana.
+Nova edge function `ad-creative-image-generator`:
+- **Entrada**: `consultant_id`, `format` (`feed_1x1` | `story_9x16` | `reels_9x16` | `carousel_4x5`), opcional `angle`
+- **Lógica**:
+  1. Lê insights do consultor + top concorrentes (`ad_competitor_creatives` ordenado por `active_days`)
+  2. Pega o `image_brief` correspondente ao ângulo vencedor (ou gera um novo via Gemini)
+  3. Chama **Lovable AI Gateway** com `google/gemini-2.5-flash-image` (Nano Banana) — prompt enriquecido com:
+     - Padrões vencedores próprios
+     - Brand voice iGreen (cores oficiais, tom)
+     - Especificação técnica do formato (ratio exato, área segura para texto, foco do anúncio)
+     - Anti-padrões dos perdedores ("evite stock photo genérico de painel solar")
+  4. Salva o resultado no bucket `IMAGE` do Supabase
+  5. Retorna URL + brief usado
 
-## Tempo
+- **UI**: dentro do `IntelligenceTab` (e também na galeria de modelos), botão grande:
+  ```
+  ✨ Gerar criativo perfeito
+  [ Feed 1:1 ] [ Story 9:16 ] [ Reels 9:16 ] [ Carrossel 4:5 ]
+  ```
+  Cada clique gera 1 imagem nas dimensões corretas. Mostra preview + botão "Usar em campanha" e "Baixar".
 
-Sessão única de build (~10 arquivos, 1 migration, 2 edge functions novas).
+**Tamanhos exatos (especificação Meta):**
+- Feed 1:1 → 1080×1080
+- Story/Reels 9:16 → 1080×1920
+- Carrossel 4:5 → 1080×1350
 
----
+O Nano Banana respeita aspect ratio quando incluído explicitamente no prompt; o pós-processamento normaliza para o tamanho final.
 
-## Antes de eu implementar — 1 decisão
+### 3. Migração de DB
+- Nova tabela `ad_generated_creatives` (consultant_id, format, image_url, brief_used, angle, created_at) — para histórico/galeria de imagens geradas com RLS owner-read/write.
 
-A IA pode tomar 3 níveis de iniciativa. Qual você quer?
+### Arquivos a criar/editar
+**Criar:**
+- `src/components/admin/ads/IntelligenceTab.tsx`
+- `src/components/admin/ads/CompetitorsPanel.tsx`
+- `src/components/admin/ads/InsightsPanel.tsx`
+- `src/components/admin/ads/CreativeImageGenerator.tsx`
+- `supabase/functions/ad-creative-image-generator/index.ts`
 
-**A) Conservador** — IA só *recomenda*, você clica pra aplicar.
-**B) Equilibrado** *(recomendado)* — IA pausa criativos perdedores sozinha, mas pra criar novos pede sua aprovação.
-**C) Agressivo** — IA pausa, cria novos e sobe sozinha. Você só revisa relatório semanal.
+**Editar:**
+- `src/components/admin/ads/AdsTab.tsx` — adicionar 4ª aba "Inteligência"
+- Migração SQL para `ad_generated_creatives`
+
+### Validação final (após implementar)
+- Disparar scraper de novo → ver concorrentes na UI
+- Disparar learner → ver insights na UI
+- Clicar "Gerar Feed 1:1" → imagem aparece em <30s, dimensões corretas
+
+### Observação importante
+Insights da IA só aparecem para consultores com **histórico real de campanhas** (mínimo ~3 anúncios com gasto). Hoje o learner avaliou apenas 3 anúncios. Para validar a feature antes de ter volume real, posso adicionar **modo "demo"** que mostra os padrões agregados de TODOS os concorrentes como insight inicial — confirma se quer.
