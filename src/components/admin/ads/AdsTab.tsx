@@ -6,9 +6,10 @@ import { ResultsDashboard } from "./ResultsDashboard";
 import { WalletCard } from "./WalletCard";
 import { ConsultantAdSettingsCard } from "./ConsultantAdSettingsCard";
 import { AdTemplatesGallery } from "./AdTemplatesGallery";
+import { IntelligenceTab } from "./IntelligenceTab";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Megaphone, Sparkles, Plus, BarChart3, ListChecks, LayoutGrid } from "lucide-react";
+import { Megaphone, Sparkles, Plus, BarChart3, ListChecks, LayoutGrid, Brain } from "lucide-react";
 
 interface Props { consultantId: string }
 
