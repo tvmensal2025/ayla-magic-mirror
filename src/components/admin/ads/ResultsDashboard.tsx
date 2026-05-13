@@ -3,8 +3,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, DollarSign, Users, FileCheck2, CheckCircle2, TrendingUp, Target, BarChart3 } from "lucide-react";
+import { Loader2, DollarSign, Users, FileCheck2, CheckCircle2, TrendingUp, Target, BarChart3, Eye, Hand } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { MetricTooltip } from "./MetricTooltip";
+import { HealthSummaryCard } from "./HealthSummaryCard";
+import { InsightCards } from "./InsightCards";
 
 type Range = 7 | 30 | 90;
 
@@ -173,15 +176,42 @@ export function ResultsDashboard({ consultantId }: { consultantId: string }) {
         )}
       </div>
 
-      {/* Cards */}
+      {/* Saúde geral + insights da IA */}
+      <HealthSummaryCard
+        spend_cents={totals.spend}
+        leads={totals.leads}
+        impressions={totals.impressions}
+        registrations={totals.registrations}
+      />
+      <InsightCards consultantId={consultantId} />
+
+      {/* Cards em linguagem do dia a dia */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatCard icon={<DollarSign className="w-4 h-4" />} label="Gasto total" value={`R$ ${(totals.spend / 100).toFixed(2)}`} accent />
-        <StatCard icon={<Users className="w-4 h-4" />} label="Leads" value={totals.leads.toString()} />
-        <StatCard icon={<FileCheck2 className="w-4 h-4" />} label="Cadastros" value={totals.registrations.toString()} sub={`${convRate.toFixed(1)}% conv.`} />
-        <StatCard icon={<CheckCircle2 className="w-4 h-4" />} label="Clientes ativos" value={acquired.toString()} sub="atribuídos" />
-        <StatCard icon={<Target className="w-4 h-4" />} label="CPL / CPA" value={`R$ ${cpl.toFixed(2)}`} sub={`CPA R$ ${cpa.toFixed(2)}`} />
-        <StatCard icon={<TrendingUp className="w-4 h-4" />} label="ROI estimado/mês" value={`R$ ${roiMensal.toFixed(0)}`} accent={roiMensal >= 0} />
+        <StatCard icon={<DollarSign className="w-4 h-4" />} label="Quanto gastou" metric="spend" value={`R$ ${(totals.spend / 100).toFixed(2)}`} accent />
+        <StatCard icon={<Eye className="w-4 h-4" />} label="Pessoas que viram" metric="impressions" value={totals.impressions.toLocaleString("pt-BR")} />
+        <StatCard icon={<Hand className="w-4 h-4" />} label="Tocaram no anúncio" metric="clicks" value={totals.clicks.toString()} />
+        <StatCard icon={<Users className="w-4 h-4" />} label="Conversas no zap" metric="leads" value={totals.leads.toString()} sub={`R$ ${cpl.toFixed(2)} cada`} />
+        <StatCard icon={<FileCheck2 className="w-4 h-4" />} label="Viraram cliente" metric="registrations" value={totals.registrations.toString()} sub={`${convRate.toFixed(1)}% das conversas`} />
+        <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Lucro estimado/mês" value={`R$ ${roiMensal.toFixed(0)}`} accent={roiMensal >= 0} />
       </div>
+
+      {/* Card-resumo de fechamento real */}
+      <Card className="p-4 bg-gradient-to-br from-primary/10 to-primary/5 border-primary/30">
+        <div className="flex items-center gap-3">
+          <Target className="w-5 h-5 text-primary" />
+          <div className="flex-1">
+            <div className="text-xs text-muted-foreground">Custo real pra ganhar 1 cliente novo</div>
+            <div className="text-2xl font-bold text-foreground">
+              {acquired > 0 ? `R$ ${((totals.spend / 100) / acquired).toFixed(2)}` : "—"}
+            </div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              R$ {(totals.spend / 100).toFixed(2)} gastos → {acquired} cliente{acquired === 1 ? "" : "s"} aprovado{acquired === 1 ? "" : "s"}
+              {acquired > 0 && (totals.spend / 100) / acquired <= 60 && <span className="ml-2 text-primary">✅ dentro da meta (R$ 60)</span>}
+              {acquired > 0 && (totals.spend / 100) / acquired > 60 && <span className="ml-2 text-warning">⚠ acima da meta de R$ 60</span>}
+            </div>
+          </div>
+        </div>
+      </Card>
 
       {/* Gráfico */}
       <Card className="p-4">
@@ -249,10 +279,14 @@ export function ResultsDashboard({ consultantId }: { consultantId: string }) {
   );
 }
 
-function StatCard({ icon, label, value, sub, accent }: { icon: React.ReactNode; label: string; value: string; sub?: string; accent?: boolean }) {
+function StatCard({ icon, label, value, sub, accent, metric }: { icon: React.ReactNode; label: string; value: string; sub?: string; accent?: boolean; metric?: import("@/lib/adGlossary").AdMetricKey }) {
   return (
     <Card className={`p-3 ${accent ? "bg-primary/10 border-primary/30" : ""}`}>
-      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">{icon}{label}</div>
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        {icon}
+        <span>{label}</span>
+        {metric && <MetricTooltip metric={metric} />}
+      </div>
       <div className={`text-lg font-bold mt-1 ${accent ? "text-primary" : "text-foreground"}`}>{value}</div>
       {sub && <div className="text-[10px] text-muted-foreground">{sub}</div>}
     </Card>
