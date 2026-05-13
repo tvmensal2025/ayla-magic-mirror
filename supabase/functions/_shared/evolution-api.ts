@@ -47,13 +47,49 @@ export function createEvolutionSender(apiUrl: string, apiKey: string, instanceNa
         await new Promise((r) => setTimeout(r, 300 * Math.pow(3, attempt - 1)));
       }
     }
+    // Detecta sessão WhatsApp derrubada do lado do servidor Evolution.
+    // Sintoma típico: HTTP 500 + body contendo "Connection Closed".
+    const isConnectionClosed =
+      lastStatus === 500 && /connection closed/i.test(lastBody);
+
     logStructured("error", `evolution_${label}_failed_final`, {
       instance: instanceName,
       status: lastStatus,
       error: lastBody,
+      connection_closed: isConnectionClosed,
     });
+
+    if (isConnectionClosed) {
+      // Marca instância como needs_reconnect — super-admin recebe alerta visual.
+      // (Best-effort: não falha o envio se o update der erro.)
+      try {
+        const sbUrl = Deno.env.get("SUPABASE_URL");
+        const sbKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+        if (sbUrl && sbKey) {
+          await fetch(`${sbUrl}/rest/v1/whatsapp_instances?instance_name=eq.${instanceName}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: sbKey,
+              Authorization: `Bearer ${sbKey}`,
+              Prefer: "return=minimal",
+            },
+            body: JSON.stringify({
+              status: "needs_reconnect",
+              updated_at: new Date().toISOString(),
+            }),
+          });
+        }
+      } catch (_) { /* swallow */ }
+    }
+
     captureError(new Error(`Evolution ${label} failed after 3 attempts: ${lastBody}`), {
-      tags: { function: "evolution-api", instance: instanceName, kind: label },
+      tags: {
+        function: "evolution-api",
+        instance: instanceName,
+        kind: label,
+        connection_closed: String(isConnectionClosed),
+      },
       extra: { status: lastStatus },
     });
     return false;
