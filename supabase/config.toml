@@ -68,3 +68,7 @@ verify_jwt = false
 
 [functions.ai-followup-cron]
 verify_jwt = false
+
+[functions.ad-creative-qa]
+verify_jwt = false
+
