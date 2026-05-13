@@ -2,13 +2,30 @@ import { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Loader2, Sparkles, Upload, X, Wand2, ImageIcon, Settings2 } from "lucide-react";
+import { Loader2, Sparkles, Upload, X, Wand2, ImageIcon, Settings2, RefreshCw, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   CityHit, createCampaign, generateCopy, preflightCampaign, searchCitiesBulk,
   uploadAdPhotos, validateAccount,
 } from "@/services/facebookAds";
 import { DISTRIBUIDORAS_PRESETS, type DistribuidoraPreset } from "@/data/distribuidoraPresets";
+import { supabase } from "@/integrations/supabase/client";
+import { CreativeOverlay, type CreativeOverlayHandle } from "./CreativeOverlay";
+
+type AiFormat = "feed_1x1" | "story_9x16" | "reels_9x16" | "carousel_4x5";
+const AI_ANGLES = [
+  { id: "economia_concreta", label: "💰 Economia" },
+  { id: "quebra_objecao",    label: "🛡️ Sem obra" },
+  { id: "prova_social",      label: "👥 Prova social" },
+  { id: "dor_pas",           label: "😣 Dor" },
+  { id: "urgencia_local",    label: "📍 Local" },
+];
+const AI_FORMATS: { id: AiFormat; label: string }[] = [
+  { id: "feed_1x1",     label: "Feed 1:1" },
+  { id: "story_9x16",   label: "Story 9:16" },
+  { id: "reels_9x16",   label: "Reels 9:16" },
+  { id: "carousel_4x5", label: "Carrossel 4:5" },
+];
 
 interface Props {
   open: boolean;
