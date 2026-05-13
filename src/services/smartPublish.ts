@@ -1,0 +1,156 @@
+// Orquestrador do fluxo "Publicar inteligente" (1 clique).
+// Detecta região do consultor pelo DDD do WhatsApp conectado, escolhe a
+// distribuidora compatível e a melhor cidade do preset, valida no Meta
+// e publica a campanha usando o template fornecido.
+
+import { supabase } from "@/integrations/supabase/client";
+import {
+  CityHit, createCampaign, preflightCampaign, searchCitiesBulk,
+} from "@/services/facebookAds";
+import { DISTRIBUIDORAS_PRESETS, type DistribuidoraPreset } from "@/data/distribuidoraPresets";
+import { AdTemplate } from "@/services/adTemplates";
+import { ufFromPhone } from "@/lib/dddToUf";
+
+const PRESET_CACHE_VERSION = "v1";
+const cacheKey = (id: string) => `ads-preset-cities-${PRESET_CACHE_VERSION}-${id}`;
+
+function readCache(id: string): CityHit[] | null {
+  try {
+    const raw = localStorage.getItem(cacheKey(id));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.cities) && parsed.cities.length > 0) return parsed.cities as CityHit[];
+  } catch {}
+  return null;
+}
+function writeCache(id: string, cities: CityHit[]) {
+  try { localStorage.setItem(cacheKey(id), JSON.stringify({ ts: Date.now(), cities })); } catch {}
+}
+
+export interface SmartPublishProgress {
+  step: "region" | "city" | "validate" | "publish" | "done";
+  label: string;
+}
+export type ProgressFn = (p: SmartPublishProgress) => void;
+
+export interface SmartPublishResult {
+  ok: true;
+  preset: DistribuidoraPreset;
+  cities: CityHit[];
+  reach?: { lower: number; upper: number };
+}
+
+async function getConnectedPhone(consultantId: string): Promise<string | null> {
+  // Tenta facebook_connections (whatsapp_destination_number) primeiro,
+  // depois cai pro telefone do consultor.
+  const { data: fb } = await supabase
+    .from("facebook_connections")
+    .select("whatsapp_destination_number, whatsapp_display_number")
+    .eq("consultant_id", consultantId)
+    .maybeSingle();
+  const fromFb = fb?.whatsapp_destination_number || fb?.whatsapp_display_number;
+  if (fromFb) return fromFb;
+  const { data: c } = await supabase
+    .from("consultants").select("phone").eq("id", consultantId).maybeSingle();
+  return c?.phone || null;
+}
+
+function pickPresetByUf(allowed: DistribuidoraPreset[], uf: string | null): DistribuidoraPreset | null {
+  if (!allowed.length) return null;
+  if (uf) {
+    const match = allowed.find((p) => p.uf.split("/").includes(uf));
+    if (match) return match;
+  }
+  // fallback: maior tier
+  const tierOrder = { alto: 0, medio: 1, sem_bonus: 2 } as const;
+  return [...allowed].sort((a, b) => tierOrder[a.tier] - tierOrder[b.tier])[0];
+}
+
+export async function smartPublish(opts: {
+  template: AdTemplate;
+  consultantId: string;
+  onProgress?: ProgressFn;
+}): Promise<SmartPublishResult> {
+  const { template, consultantId, onProgress } = opts;
+  const log = (step: SmartPublishProgress["step"], label: string) =>
+    onProgress?.({ step, label });
+
+  // 1) Região
+  log("region", "Detectando sua região...");
+  const phone = await getConnectedPhone(consultantId);
+  const uf = ufFromPhone(phone);
+
+  const targetIds = template.target_distribuidora_ids ?? [];
+  const allowed = targetIds.length
+    ? DISTRIBUIDORAS_PRESETS.filter((p) => targetIds.includes(p.id))
+    : DISTRIBUIDORAS_PRESETS;
+  const preset = pickPresetByUf(allowed, uf);
+  if (!preset) throw new Error("Nenhuma distribuidora compatível com este modelo");
+
+  // 2) Cidade ideal
+  log("city", `Escolhendo cidade em ${preset.nome}...`);
+  let hits = readCache(preset.id);
+  if (!hits) {
+    const ufPrimary = preset.uf.split("/")[0];
+    const targetCities = template.target_cidades ?? [];
+    const cityNames = targetCities.length
+      ? preset.cidades.filter((c) => targetCities.includes(c))
+      : preset.cidades;
+    const r = await searchCitiesBulk(cityNames.map((name) => ({ name, uf: ufPrimary })));
+    hits = (r.cities || []).filter((h) => h?.key);
+    if (hits.length) writeCache(preset.id, hits);
+  }
+  if (!hits?.length) throw new Error("Não consegui carregar cidades dessa distribuidora");
+
+  // Heurística simples: começa pela 1ª cidade do preset (já ordenadas por porte).
+  // Se audiência <80k, expande pra 2 cidades; se >2M, mantém só capital.
+  let chosen: CityHit[] = [hits[0]];
+
+  // 3) Pré-validação
+  log("validate", "Validando alcance no Facebook...");
+  let reach: { lower: number; upper: number } | undefined;
+  try {
+    const pf = await preflightCampaign({
+      cities: chosen.map((c) => ({ key: c.key, name: c.name })),
+      daily_budget_cents: template.suggested_daily_budget_cents,
+    });
+    reach = pf.reach || undefined;
+    if (reach && reach.lower < 80_000 && hits.length > 1) {
+      chosen = hits.slice(0, Math.min(3, hits.length));
+      const pf2 = await preflightCampaign({
+        cities: chosen.map((c) => ({ key: c.key, name: c.name })),
+        daily_budget_cents: template.suggested_daily_budget_cents,
+      });
+      reach = pf2.reach || reach;
+    } else if (reach && reach.upper > 2_000_000) {
+      chosen = [hits[0]];
+    }
+    if (reach && reach.lower < 50_000) {
+      throw new Error(`Audiência muito pequena (${reach.lower.toLocaleString("pt-BR")} pessoas).`);
+    }
+  } catch (e) {
+    // Não bloquear publicação por falha de preflight; seguir com a escolha atual.
+    if ((e as Error)?.message?.startsWith("Audiência muito pequena")) throw e;
+  }
+
+  // 4) Publicar
+  log("publish", "Publicando campanha...");
+  const cityLabel = chosen.length === 1 ? chosen[0].name : `${chosen.length} cidades`;
+  await createCampaign({
+    template_id: template.id,
+    name: `${template.title} — ${preset.nome} (${cityLabel})`,
+    cities: chosen.map((c) => ({ key: c.key, name: c.name })),
+    daily_budget_cents: template.suggested_daily_budget_cents,
+    duration_days: null,
+    photos: template.photos,
+    headline: template.headline,
+    primary_text: template.primary_text,
+    description: template.description_text || undefined,
+    age_min: template.age_min,
+    age_max: template.age_max,
+    distribuidora: preset.nome,
+  });
+
+  log("done", "Pronto!");
+  return { ok: true, preset, cities: chosen, reach };
+}
