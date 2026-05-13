@@ -86,7 +86,17 @@ interface CopyPack {
   legacy?: { headlines: string[]; primary_texts: string[] };
 }
 
-async function generate(cities: string[], insights?: any): Promise<CopyPack> {
+// Ângulos obrigatórios — IA precisa entregar 1 de cada (evita 6 títulos do mesmo tipo).
+const REQUIRED_ANGLES = [
+  "economia_concreta", // R$/% específicos
+  "quebra_objecao",    // sem obra, sem fidelidade, sem instalar
+  "prova_social",      // milhares de famílias, depoimento
+  "curiosidade",       // gancho, lei 14.300, segredo
+  "urgencia_local",    // cidade/distribuidora + prazo
+  "dor_pas",           // PAS — começa pela dor
+];
+
+async function generate(cities: string[], insights?: any, competitors: any[] = []): Promise<CopyPack> {
   if (!GEMINI_KEY) return packWithLegacy(FALLBACK);
   const ctx = cities.join(", ") || "Brasil";
   const isDistribuidora = ctx.toLowerCase().includes("clientes da");
@@ -96,32 +106,44 @@ async function generate(cities: string[], insights?: any): Promise<CopyPack> {
 APRENDIZADO DESTE CONSULTOR (use como guia obrigatório):
 - Padrões VENCEDORES (use): ${(insights.winning_patterns || []).join(", ") || "(ainda coletando)"}
 - Padrões PERDEDORES (evite): ${(insights.losing_patterns || []).join(", ") || "(ainda coletando)"}
-- Melhor taxa de toque atingida: ${(insights.best_ctr_bps / 100).toFixed(2)}% — supere isso
+- Melhor taxa de toque atingida: ${((insights.best_ctr_bps || 0) / 100).toFixed(2)}% — supere isso
 ${insights.summary ? `- Lição mais recente: ${insights.summary}` : ""}
+${insights.competitor_summary ? `- Padrão dos concorrentes vencedores: ${insights.competitor_summary}` : ""}
+` : "";
+
+  const competitorBlock = competitors.length ? `
+
+ANÚNCIOS DE CONCORRENTES NO AR HÁ MAIS TEMPO (sinal claro de que convertem — inspire-se, NÃO copie):
+${competitors.map((c, i) => `${i + 1}. [${c.advertiser} • ${c.active_days}d • ${c.creative_format || "?"} • ${c.angle || "?"}] "${(c.headline || "").slice(0, 60)}" — ${(c.primary_text || "").slice(0, 100)}`).join("\n")}
 ` : "";
 
   const prompt = `Você é o melhor copywriter de Facebook Ads do Brasil. Gere copy em pt-BR para iGreen Energy (energia por assinatura — desconto na conta de luz).
 
 Contexto-alvo: ${ctx}.
-${isDistribuidora ? "IMPORTANTE: o 1º item é a distribuidora do cliente — use o NOME dela em pelo menos 3 dos 6 títulos.\n" : ""}${learnedBlock}
+${isDistribuidora ? "IMPORTANTE: o 1º item é a distribuidora do cliente — use o NOME dela em pelo menos 3 dos 6 títulos.\n" : ""}${learnedBlock}${competitorBlock}
 
-Retorne JSON ESTRITO com 6 títulos (cada um em UM framework diferente) + 3 textos primários:
+Retorne JSON ESTRITO. Cada headline DEVE ter um ângulo distinto da lista [${REQUIRED_ANGLES.join(", ")}] — exatamente 1 de cada:
 
 {
   "headlines": [
-    { "text": "...", "framework": "PAS" },           // Dor-Agita-Solução: começa com pergunta sobre dor
-    { "text": "...", "framework": "pergunta_direta" }, // pergunta que qualifica o público
-    { "text": "...", "framework": "prova_social" },    // "+X mil famílias", "milhares já..."
-    { "text": "...", "framework": "urgência_local" },  // menciona cidade/distribuidora + prazo
-    { "text": "...", "framework": "curiosidade" },     // gancho que dá vontade de clicar
-    { "text": "...", "framework": "específico" }       // número concreto: "R$48/mês", "20%"
+    { "text": "...", "framework": "específico",        "angle": "economia_concreta" },
+    { "text": "...", "framework": "objeção",           "angle": "quebra_objecao" },
+    { "text": "...", "framework": "prova_social",      "angle": "prova_social" },
+    { "text": "...", "framework": "curiosidade",       "angle": "curiosidade" },
+    { "text": "...", "framework": "urgência_local",    "angle": "urgencia_local" },
+    { "text": "...", "framework": "PAS",               "angle": "dor_pas" }
   ],
   "primary_texts": [
-    { "text": "...", "framework": "AIDA" },
-    { "text": "...", "framework": "PAS" },
-    { "text": "...", "framework": "benefício_direto" }
+    { "text": "...", "framework": "AIDA",              "angle": "economia_concreta" },
+    { "text": "...", "framework": "PAS",               "angle": "dor_pas" },
+    { "text": "...", "framework": "benefício_direto",  "angle": "quebra_objecao" }
   ],
-  "description": "1 descrição curta"
+  "description": "1 descrição curta",
+  "image_briefs": [
+    { "format": "estatico",  "brief": "descreva 1 imagem que NÃO seja painel solar genérico — mostre conta antes/depois, pessoa real, ou objeto cotidiano." },
+    { "format": "video_9x16","brief": "descreva 1 vídeo vertical 15-25s: hook nos 3 primeiros segundos, prova visual no meio, CTA WhatsApp no fim." },
+    { "format": "carrossel", "brief": "slide 1 de alto contraste com texto de curiosidade; slides seguintes mostram a economia." }
+  ]
 }
 
 REGRAS DE OURO (cumpra TODAS, senão a Meta rejeita):
@@ -129,8 +151,8 @@ REGRAS DE OURO (cumpra TODAS, senão a Meta rejeita):
 - PROIBIDO usar: "garantido", "100%", "milagre", "ganhe dinheiro", "grátis", "melhor do Brasil/mundo", "!!" ou "??", VOCÊ/SEU/SUA em CAIXA ALTA.
 - Tom direto, brasileiro, sem enrolação. Foque em ECONOMIA, nunca em ganho.
 - Cada texto primário precisa ter um CTA no final (ex: "Fala no zap 👇", "Toca aqui", "Garante a sua").
-- Use no máximo 1 emoji por texto.
-- Pelo menos 3 itens devem conter um número específico (R$, %, mil, etc.).
+- Use no máximo 1 emoji por texto. Pelo menos 3 itens devem conter um número específico.
+- Image briefs: NUNCA proponha painel solar bonito em telhado azul — esse é o erro #1 do mercado.
 
 Exemplo do nível de qualidade esperado:
 - headline: "Conta CPFL 20% mais barata"
@@ -159,25 +181,43 @@ Exemplo do nível de qualidade esperado:
         .map((v) => ({
           text: trim(typeof v === "string" ? v : v?.text || "", maxLen),
           framework: typeof v === "object" ? (v?.framework || "geral") : "geral",
+          angle: typeof v === "object" ? (v?.angle || "geral") : "geral",
         }))
         .filter((v) => v.text && isClean(v.text))
         .map((v) => ({ ...v, score: variationScore(v.text, kind) }))
         .sort((a, b) => b.score - a.score);
 
-    const headlines = cleanList(parsed.headlines, "headline", 30);
+    let headlines = cleanList(parsed.headlines, "headline", 30);
     const primary_texts = cleanList(parsed.primary_texts, "primary", 90);
+
+    // Garante diversidade de ângulos: 1 por categoria, no máximo
+    const seen = new Set<string>();
+    headlines = headlines.filter((h) => {
+      const key = h.angle || "geral";
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const briefs: ImageBrief[] = Array.isArray(parsed.image_briefs)
+      ? parsed.image_briefs
+          .map((b: any) => ({ format: String(b?.format || "estatico").slice(0, 24), brief: String(b?.brief || "").slice(0, 280) }))
+          .filter((b: ImageBrief) => b.brief.length > 10)
+          .slice(0, 3)
+      : FALLBACK.image_briefs;
 
     return packWithLegacy({
       headlines: headlines.length >= 3 ? headlines.slice(0, 6) : FALLBACK.headlines,
       primary_texts: primary_texts.length >= 2 ? primary_texts.slice(0, 3) : FALLBACK.primary_texts,
       description: trim(parsed.description || FALLBACK.description, 25),
+      image_briefs: briefs.length ? briefs : FALLBACK.image_briefs,
     });
   } catch {
     return packWithLegacy(FALLBACK);
   }
 }
 
-function packWithLegacy(p: { headlines: Variation[]; primary_texts: Variation[]; description: string }): CopyPack {
+function packWithLegacy(p: { headlines: Variation[]; primary_texts: Variation[]; description: string; image_briefs: ImageBrief[] }): CopyPack {
   return {
     ...p,
     legacy: {
@@ -193,13 +233,16 @@ Deno.serve(async (req) => {
     const auth = await authConsultant(req);
     if (!auth) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     const { cities, distribuidora } = await req.json().catch(() => ({ cities: [] }));
-    const insights = await loadInsights(auth.id, distribuidora);
-    const copy = await generate(cities || [], insights);
-    // Mantém shape antigo no topo (headlines/primary_texts como string[]) + novo shape em `variations`
+    const [insights, competitors] = await Promise.all([
+      loadInsights(auth.id, distribuidora),
+      loadCompetitorWinners(8),
+    ]);
+    const copy = await generate(cities || [], insights, competitors);
     const flat = {
       headlines: copy.legacy!.headlines,
       primary_texts: copy.legacy!.primary_texts,
       description: copy.description,
+      image_briefs: copy.image_briefs,
       variations: { headlines: copy.headlines, primary_texts: copy.primary_texts },
     };
     return new Response(JSON.stringify(flat), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
