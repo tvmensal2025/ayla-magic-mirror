@@ -80,6 +80,7 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
     if (!open) return;
     setPresetId(null); setFiles([]); setPreviews([]); setStepLog(""); setSubmitting(false);
     setIssues(null);
+    setPhotoTab("upload"); setAiPreview(null); setAiGenerating(false); setAiAccepting(false);
     validateAccount().then(r => setIssues(r.issues)).catch(e => setIssues([e.message]));
 
     // Pré-carregar imagem gerada (criativo IA do MinIO)
