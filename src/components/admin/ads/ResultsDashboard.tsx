@@ -153,6 +153,25 @@ export function ResultsDashboard({ consultantId, onCreateClick }: { consultantId
 
   if (loading) return <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
 
+  if (campaigns.length === 0) {
+    return (
+      <Card className="p-10 text-center bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
+        <div className="mx-auto w-14 h-14 rounded-full bg-primary/15 flex items-center justify-center mb-4">
+          <BarChart3 className="w-7 h-7 text-primary" />
+        </div>
+        <h3 className="text-lg font-bold text-foreground">Você ainda não tem campanhas</h3>
+        <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+          Crie sua primeira campanha em 3 passos. A IA cuida do texto, das cidades e do orçamento — os leads chegam no seu WhatsApp.
+        </p>
+        {onCreateClick && (
+          <Button size="lg" className="mt-5 gap-2" onClick={onCreateClick}>
+            <Target className="w-4 h-4" /> Criar primeira campanha
+          </Button>
+        )}
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-5">
       {/* Filtros */}
