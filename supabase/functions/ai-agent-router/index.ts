@@ -41,13 +41,14 @@ const DECISION_SCHEMA = {
   properties: {
     intent: { type: "string", description: "Intenção detectada do cliente em 1-3 palavras" },
     next_step: { type: "string", enum: [...FUNNEL_STEPS] },
-    reply_text: { type: "string", description: "Texto curto humanizado para enviar. Vazio se for só enviar mídia." },
+    reply_text: { type: "string", description: "Texto curto humanizado para enviar. Vazio se for só enviar mídia/áudio." },
     media_to_send_ids: { type: "array", items: { type: "string" }, description: "IDs de ai_media_library a enviar em ordem. Vazio se nenhum." },
+    audio_slot_key: { type: "string", description: "slot_key da biblioteca de áudios da Camila a disparar (ex: objecao_preco). Vazio se nenhum." },
     handoff: { type: "boolean", description: "true se deve transferir para humano agora" },
     handoff_reason: { type: "string" },
     confidence: { type: "number", minimum: 0, maximum: 1 },
   },
-  required: ["intent", "next_step", "reply_text", "media_to_send_ids", "handoff", "handoff_reason", "confidence"],
+  required: ["intent", "next_step", "reply_text", "media_to_send_ids", "audio_slot_key", "handoff", "handoff_reason", "confidence"],
 } as const;
 
 function randInt(min: number, max: number) { return Math.floor(Math.random() * (max - min + 1)) + min; }
@@ -130,6 +131,14 @@ Deno.serve(async (req) => {
       .eq("is_active", true)
       .order("position");
 
+    // 6b) Slots de áudio (Camila)
+    const { data: slotsRaw } = await supabase
+      .from("ai_agent_slots")
+      .select("slot_key, label, trigger_hint, fallback_text, min_interval_minutes")
+      .eq("active", true)
+      .order("position");
+    const slots = slotsRaw || [];
+
     // 7) Montar prompt
     const persona = config.persona_name || "Camila";
     const tone = config.tone || "humano, breve, cordial";
@@ -167,7 +176,10 @@ ${JSON.stringify({
 BIBLIOTECA DE MÍDIAS DISPONÍVEIS PARA ESTA ETAPA (use o id em media_to_send_ids):
 ${relevantMedia.map((m: any) => `- id=${m.id} kind=${m.kind} label="${m.label}" intent_tags=${JSON.stringify(m.intent_tags || [])}${m.transcript ? ` transcript="${(m.transcript || "").slice(0, 120)}"` : ""}`).join("\n") || "(nenhuma)"}
 
-RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se for enviar áudio/vídeo, geralmente reply_text fica vazio ou bem curto.`;
+ÁUDIOS DA CAMILA (slots fixos — preencha "audio_slot_key" com o slot_key apropriado quando o gatilho bater; deixe vazio se nenhum se aplica):
+${slots.map((s: any) => `- slot_key=${s.slot_key} (${s.label}): ${s.trigger_hint || ""}`).join("\n") || "(nenhum)"}
+
+RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se for enviar áudio/vídeo, geralmente reply_text fica vazio ou bem curto. Se houver um slot_key apropriado, prefira "audio_slot_key" em vez de "media_to_send_ids".`;
 
     const userMessages = historyChrono.map((m: any) => ({
       role: m.message_direction === "inbound" ? "user" : "assistant",
@@ -209,6 +221,7 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
         next_step: stepBefore,
         reply_text: "Tive uma instabilidade aqui, pode repetir, por favor?",
         media_to_send_ids: [],
+        audio_slot_key: "",
         handoff: false,
         handoff_reason: "",
         confidence: 0,
@@ -232,6 +245,92 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
     // Simulação de digitação
     const typingMin = config.typing_min_ms ?? 1200;
     const typingMax = config.typing_max_ms ?? 3500;
+
+    // 10a) Resolver e enviar áudio do slot (Camila) — prioridade: personal → public → fallback_text
+    let dispatchedSlot: { slot_key: string; variant: string; media_id: string | null } | null = null;
+    const slotKey = (decision.audio_slot_key || "").trim();
+    if (slotKey) {
+      const slot = slots.find((s: any) => s.slot_key === slotKey);
+      if (slot) {
+        // Cooldown
+        const cutoff = new Date(Date.now() - (slot.min_interval_minutes || 0) * 60_000).toISOString();
+        const { data: recent } = await supabase
+          .from("ai_slot_dispatch_log")
+          .select("id")
+          .eq("customer_id", customer_id)
+          .eq("slot_key", slotKey)
+          .gte("sent_at", cutoff)
+          .limit(1);
+        const onCooldown = (recent || []).length > 0;
+        if (!onCooldown) {
+          // Buscar áudio personal ativo
+          const { data: personal } = await supabase
+            .from("ai_media_library")
+            .select("id, url")
+            .eq("consultant_id", consultantId)
+            .eq("slot_key", slotKey)
+            .eq("active", true)
+            .eq("is_draft", false)
+            .maybeSingle();
+          let chosen: { id: string | null; url: string | null; variant: string } | null = null;
+          if (personal?.url) {
+            chosen = { id: personal.id, url: personal.url, variant: "personal" };
+          } else {
+            const { data: pub } = await supabase
+              .from("ai_media_library")
+              .select("id, url")
+              .eq("is_public", true)
+              .eq("slot_key", slotKey)
+              .eq("active", true)
+              .maybeSingle();
+            if (pub?.url) chosen = { id: pub.id, url: pub.url, variant: "default" };
+          }
+
+          try {
+            await sleep(randInt(typingMin, typingMax));
+            if (chosen?.url) {
+              await sender.sendAudio(remote_jid, chosen.url);
+              dispatchedSlot = { slot_key: slotKey, variant: chosen.variant, media_id: chosen.id };
+              await supabase.from("conversations").insert({
+                customer_id, message_direction: "outbound",
+                message_text: `[audio:${slotKey}]`, message_type: "audio",
+                conversation_step: updates.conversation_step || stepBefore,
+              });
+              if (chosen.id) {
+                const { data: cur } = await supabase
+                  .from("ai_media_library").select("sent_count").eq("id", chosen.id).single();
+                if (cur) {
+                  await supabase.from("ai_media_library")
+                    .update({ sent_count: (cur.sent_count || 0) + 1 })
+                    .eq("id", chosen.id);
+                }
+              }
+            } else if (slot.fallback_text) {
+              await sender.sendText(remote_jid, slot.fallback_text);
+              dispatchedSlot = { slot_key: slotKey, variant: "fallback_text", media_id: null };
+              await supabase.from("conversations").insert({
+                customer_id, message_direction: "outbound",
+                message_text: slot.fallback_text, message_type: "text",
+                conversation_step: updates.conversation_step || stepBefore,
+              });
+            }
+            if (dispatchedSlot) {
+              await supabase.from("ai_slot_dispatch_log").insert({
+                consultant_id: consultantId,
+                customer_id,
+                slot_key: slotKey,
+                media_id: dispatchedSlot.media_id,
+                variant: dispatchedSlot.variant,
+              });
+            }
+          } catch (e) {
+            console.error("slot send error:", e);
+          }
+        } else {
+          console.log(`slot ${slotKey} on cooldown, skipping`);
+        }
+      }
+    }
 
     // Enviar mídias primeiro (mais humano: áudio chega antes do texto)
     const sentMediaIds: string[] = [];
