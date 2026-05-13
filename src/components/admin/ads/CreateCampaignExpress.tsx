@@ -67,6 +67,15 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
   const [stepLog, setStepLog] = useState<string>("");
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  // ===== Tab "Gerar com IA" =====
+  const [photoTab, setPhotoTab] = useState<"upload" | "ai">("upload");
+  const [aiAngle, setAiAngle] = useState<string>("economia_concreta");
+  const [aiFormat, setAiFormat] = useState<AiFormat>("feed_1x1");
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiPreview, setAiPreview] = useState<{ image_url: string; headline: string; badge: string } | null>(null);
+  const [aiAccepting, setAiAccepting] = useState(false);
+  const overlayRef = useRef<CreativeOverlayHandle | null>(null);
+
   useEffect(() => {
     if (!open) return;
     setPresetId(null); setFiles([]); setPreviews([]); setStepLog(""); setSubmitting(false);
