@@ -194,19 +194,57 @@ NÃO INVENTE preços, prazos contratuais, percentuais ou condições. Quando nã
 ${custom ? `\n═══════════════════════════════════════════\nINSTRUÇÕES ADICIONAIS DO CONSULTOR\n═══════════════════════════════════════════\n${custom}` : ""}`;
 }
 
-function sanitizeHumanMessage(message: string, phase: string, userInput: string): string {
-  const original = (message || "").trim();
-  const forbidden = /(assistente\s+(virtual|digital)?|bot\b|rob[oô]|sistema|como posso ajudar|fico (à|a) disposição)/i;
-  const normalizedInput = (userInput || "").toLowerCase().trim();
-  const isGreeting = /^(oi|ol[aá]|opa|bom dia|boa tarde|boa noite|tudo bem|eai|e aí)[!?.\s]*$/i.test(normalizedInput);
-  if (!original || forbidden.test(original) || original.length > 280) {
-    if (isGreeting || phase === "abertura") return "oii 😊 vc é de qual cidade?";
-    if (phase === "descoberta") return "me conta uma coisa: quanto vem mais ou menos sua conta de luz?";
-    if (phase === "pitch") return "posso fazer uma continha rápida pra ver sua economia?";
-    if (phase === "objecao") return "super entendo. o que ficou pegando pra vc?";
-    return "me manda uma foto da sua conta que eu vejo isso rapidinho pra vc 👌";
+function stripEmojis(s: string): string {
+  return (s || "")
+    .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}]/gu, "")
+    .replace(/[\u{2600}-\u{27BF}]/gu, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function stripUntrustedVocative(message: string, trustedFirstName: string | null): string {
+  if (!message) return message;
+  // Remove "Olá NOME," / "Oi NOME!" / "NOME, ..." se NOME não for o confiável.
+  const re = /^(ol[aá]|oi|opa|bom dia|boa tarde|boa noite)[,!\s]+([A-ZÀ-Ý][a-zà-ÿ]{1,20})([,!.\s])/i;
+  const m = message.match(re);
+  if (m) {
+    const used = m[2];
+    if (!trustedFirstName || used.toLowerCase() !== trustedFirstName.toLowerCase()) {
+      return message.replace(re, "$1$3");
+    }
   }
-  return original.replace(/🤖/g, "").trim();
+  return message;
+}
+
+function sanitizeHumanMessage(
+  message: string,
+  phase: string,
+  userInput: string,
+  trustedFirstName: string | null,
+): string {
+  let out = (message || "").trim();
+  if (!out) {
+    if (phase === "abertura") return "Olá! Tudo bem? Você é de qual cidade?";
+    if (phase === "descoberta") return "Quanto vem em média a sua conta de luz?";
+    if (phase === "pitch") return "Posso te mostrar exatamente quanto você economizaria?";
+    if (phase === "objecao") return "Compreendo. O que especificamente está pesando na decisão?";
+    return "Vamos seguir com seu cadastro. Me confirma se podemos avançar?";
+  }
+  out = stripEmojis(out);
+  out = stripUntrustedVocative(out, trustedFirstName);
+  // Remove gírias infantis residuais
+  out = out
+    .replace(/\b(oii+e?|oiee+|oie)\b/gi, "Olá")
+    .replace(/\bvc\b/gi, "você")
+    .replace(/\bblz\b/gi, "tudo bem")
+    .replace(/\brapidinho\b/gi, "rapidamente")
+    .replace(/\b(rs+|kk+|haha+|hehe+)\b/gi, "")
+    .replace(/\b(amor|fofo|fofa|querido|querida|lindo|linda)\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  // Comprimento máximo
+  if (out.length > 400) out = out.slice(0, 397) + "...";
+  return out;
 }
 
 async function loadContext(supabase: any, customerId: string) {
