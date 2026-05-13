@@ -44,6 +44,19 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [kanbanStages, setKanbanStages] = useState<Tables<"kanban_stages">[]>([]);
   const [sendingToCrm, setSendingToCrm] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  const handleReset = useCallback(async () => {
+    if (!chat) return;
+    setResetting(true);
+    const r = await resetLeadConversation({ consultantId, remoteJid: chat.remoteJid });
+    setResetting(false);
+    if (r.ok) {
+      toast({ title: "Conversa zerada", description: "O bot vai começar do zero na próxima mensagem." });
+    } else {
+      toast({ title: "Erro ao zerar", description: r.error, variant: "destructive" });
+    }
+  }, [chat, consultantId, toast]);
 
   // Fetch kanban stages
   useEffect(() => {
