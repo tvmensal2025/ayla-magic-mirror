@@ -118,13 +118,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     messageText.trim().length > 0
   ) {
     try {
-      const { data: cfg } = await supabase
-        .from("ai_agent_config")
-        .select("handoff_rules, enabled")
-        .or(`consultant_id.eq.${consultorId},consultant_id.is.null`)
-        .order("consultant_id", { ascending: false, nullsFirst: false })
-        .limit(1)
-        .maybeSingle();
+      const { data: cfgPrivate } = customer.consultant_id
+        ? await supabase
+          .from("ai_agent_config")
+          .select("handoff_rules, enabled")
+          .eq("consultant_id", customer.consultant_id)
+          .maybeSingle()
+        : { data: null };
+      const { data: cfgGlobal } = !cfgPrivate
+        ? await supabase
+          .from("ai_agent_config")
+          .select("handoff_rules, enabled")
+          .is("consultant_id", null)
+          .maybeSingle()
+        : { data: null };
+      const cfg = cfgPrivate || cfgGlobal;
 
       const useSalesAi = cfg?.enabled !== false && cfg?.handoff_rules?.use_sales_ai === true;
       if (useSalesAi) {
