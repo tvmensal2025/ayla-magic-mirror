@@ -62,7 +62,7 @@ export const CreativeImageGenerator = forwardRef<CreativeImageGeneratorHandle, P
     async function loadHistory() {
       let q = supabase
         .from("ad_generated_creatives")
-        .select("id, format, image_url, angle, brief_used, is_public, consultant_id, inspired_by_advertisers, created_at")
+        .select("id, format, image_url, angle, brief_used, is_public, consultant_id, inspired_by_advertisers, created_at, headline_used, badge_text")
         .order("created_at", { ascending: false })
         .limit(24);
       if (galleryView === "mine") q = q.eq("consultant_id", consultantId);
