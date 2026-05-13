@@ -85,12 +85,11 @@ Deno.serve(async (req) => {
     const admin = adminClient();
     const all: CompetitorAd[] = [];
     const debugByAdv: Record<string, any> = {};
-    for (const advertiser of COMPETITORS) {
-      const { ads, debug } = await research(advertiser);
-      debugByAdv[advertiser] = debug;
-      console.log(`[scraper] ${advertiser}:`, JSON.stringify(debug));
+    const results = await Promise.all(COMPETITORS.map((adv) => research(adv).then((r) => ({ adv, ...r }))));
+    for (const { adv, ads, debug } of results) {
+      debugByAdv[adv] = debug;
+      console.log(`[scraper] ${adv}:`, JSON.stringify(debug));
       all.push(...ads);
-      await new Promise((r) => setTimeout(r, 800));
     }
 
     let inserted = 0;
