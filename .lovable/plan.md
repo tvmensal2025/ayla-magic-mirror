@@ -1,162 +1,105 @@
-# Plano: Slots de Áudio da Camila
+## Diagnóstico
 
-## Objetivo
+### 1) Os Áudios da Camila ficaram inteligentes? Risco real
+**Hoje (já implementado):** o roteador da IA recebe a lista de slots disponíveis e responde com `audio_slot_key` via JSON schema. Isso reduz alucinação, mas **não elimina**. Riscos que ainda existem:
 
-Resolver o problema de consultores não gravarem áudios. Cada momento-chave da conversa tem um **slot fixo** com áudio padrão pronto. O consultor pode usar o padrão ou gravar o dele em 1 toque. A IA decide qual slot disparar via tool calling (sem alucinação).
+- A IA pode escolher `objecao_preco` quando o lead só perguntou "como funciona". Hoje só temos `description` + `trigger_hint` como dica — a IA pode interpretar errado.
+- Não há **classificador prévio** (intent detection) antes da decisão. A IA decide texto + áudio na mesma chamada, então um prompt mal calibrado causa disparo errado.
+- Não há **limite global por conversa** (só cooldown por slot). Em teoria a IA pode disparar 4 áudios diferentes em 4 mensagens seguidas.
+- Não há **fallback de segurança**: se a IA chamar um `slot_key` inexistente, o código ignora silenciosamente em vez de logar e alertar.
+- Sem dashboard de "quais áudios estão sendo disparados pra quem" — você não consegue auditar sem abrir o banco.
 
----
+### 2) Por que o anúncio "deu errado com muitas cidades"
+Olhei o `UseTemplateDialog` (o fluxo que sobrou depois de apagar o Express). Ele já tem a opção "Todas (N cidades)" como **default selecionado** (`selectedCity = "__all__"`). Resultado: o consultor clica 2 vezes e publica para **80 cidades** de uma distribuidora inteira, com R$ 30/dia. O Facebook dilui o orçamento → CPL alto, leads ruins, audiência fria.
 
-## 1. Banco de dados (1 migração)
+A regra real do mercado para CTWA (Click-to-WhatsApp) com R$ 20–50/dia é:
+- **1 a 3 cidades por campanha**, priorizando capital + cidades com >100k habitantes da distribuidora certa.
+- Audiência mínima ~80k pessoas, máxima ~2M (acima disso o Meta não otimiza bem com budget pequeno).
 
-### Nova tabela `ai_agent_slots`
-
-| coluna | tipo | nota |
-|---|---|---|
-| `slot_key` | text PK | identificador estável (`objecao_preco`) |
-| `label` | text | nome amigável |
-| `description` | text | mostrado no card |
-| `trigger_hint` | text | injetado no prompt da IA |
-| `fallback_text` | text | enviado se não houver áudio (#2 melhoria) |
-| `min_interval_minutes` | int default 60 | cooldown por conversa (#3) |
-| `position` | int | ordem |
-| `active` | bool default true | |
-| `version` | int default 1 | para revert do Super Admin (#11) |
-
-RLS: `SELECT` para `authenticated`; `ALL` apenas para `super_admin`.
-
-### Alterações em `ai_media_library`
-
-- Adicionar `slot_key text` (nullable, indexada).
-- Adicionar `is_draft bool default false` — gravação salva mas não ativa (#10).
-- Adicionar `sent_count int default 0` e `reply_count int default 0` (#6).
-- Constraint parcial: `unique (consultant_id, slot_key) where slot_key is not null and is_public = false`.
-- Constraint parcial: `unique (slot_key) where is_public = true and slot_key is not null`.
-
-### Seed inicial — 8 slots (adicionei `confirma_recebimento` #1)
-
-`boas_vindas`, `confirma_recebimento`, `como_funciona`, `fazenda_solar`, `objecao_preco`, `objecao_distribuidora`, `prova_social`, `chamada_cadastro`.
-
-### Nova tabela `ai_slot_dispatch_log`
-
-Registra cada envio de áudio por conversa. Usada para cooldown (#3) e métrica (#6).
-Colunas: `consultant_id`, `customer_id`, `slot_key`, `media_id`, `variant` (`default`/`personal`), `sent_at`, `reply_within_min` (preenchido por trigger ou cron).
+### 3) O que você pediu: 1 botão que seleciona tudo e publica
+Hoje são 2 telas (escolher distribuidora → escolher cidade → publicar). Você quer **1 clique** que já decide o melhor.
 
 ---
 
-## 2. Storage
+## Plano
 
-Bucket `ai-agent-media` (já existe). Padronizar formato `.opus` ou `.m4a` em vez de `.webm` — Evolution recodifica `.webm` com perda (#9).
+### A) Botão "Publicar inteligente" (1 clique)
+Novo botão no card de cada template (`AdTemplatesGallery`), ao lado de "Usar template":
 
-- Personal: `{consultant_id}/slots/{slot_key}.opus`
-- Padrão público: `public/slots/{slot_key}.opus`
-
-Upload faz upsert (sobrescreve anterior, economiza quota).
-
----
-
-## 3. Frontend — Aba "Áudios da Camila"
-
-### Reestruturar `AIAgentTab/index.tsx`
-
-3 sub-abas internas:
-1. **Áudios** (default) — novo `SlotsPanel`
-2. **Mídias livres** — `MediaColumn` atual (PDFs/imagens avulsas)
-3. **Roteiro** — `RoteiroColumn` atual (mantém split desktop só aqui)
-
-### Componentes novos
-
-**`SlotsPanel.tsx`** — lista vertical de cards. Topo:
-- Resumo: "5 de 8 slots no padrão · 3 personalizados"
-- Se `super_admin`: botão "Editar slots padrão" abre modal de gerenciamento.
-
-**`SlotCard.tsx`** — 1 por slot:
 ```
-🎙️ Objeção: "tá caro"             [Em uso: Meu áudio]
-Quando o lead reclama do preço...
-
-[ Padrão (Camila) ] [ Meu áudio ]   ← toggle
-
-▶️ ━━━━━━━━━━━━ 0:32
-
-📊 Padrão: 38% resposta · Seu: 52% resposta   (#6)
-
-⚪ Gravar  📎 Enviar arquivo  💾 Salvar rascunho  🗑️ Remover
+[ ⚡ Publicar inteligente ]   [ Personalizar ]
 ```
 
-Comportamento:
-- Toggle desabilitado em "Meu áudio" se não houver gravação ativa (tooltip).
-- Após gravar: preview → "Ativar agora" ou "Salvar rascunho" (#10). Rascunho fica como `is_draft=true`, não substitui o padrão.
-- Validação no upload: 3s ≤ duração ≤ 90s, normalização de pico (#5).
-- Após salvar, edge function de transcrição roda em background (#4) e preenche `transcript`.
+Ao clicar, sem abrir modal nenhum, o sistema:
 
-**`AudioRecorderInline.tsx`** — captura via `useAudioRecorder` (hook já existe). Encode para `.opus` via `MediaRecorder` com `audio/webm;codecs=opus` e converte container no edge function se necessário.
+1. **Detecta a região do consultor** com esta cascata:
+   - a) DDD do telefone WhatsApp conectado → estado (mapa DDD→UF, 67 entradas, hardcoded).
+   - b) Se o template tem `target_distribuidora_ids`, intercepta com a distribuidora compatível com o estado.
+   - c) Se nada bater, usa a distribuidora de **maior tier** (`alto`) elegível no template.
+2. **Escolhe 1 cidade ideal** dessa distribuidora:
+   - Lê `ad_campaigns_stats` (criar view) com CPL médio por cidade dos últimos 30 dias.
+   - Se houver histórico → escolhe a cidade com **menor CPL** e audiência >80k.
+   - Se não houver histórico → escolhe a **primeira cidade da lista do preset** (já são ordenadas por porte na `DISTRIBUIDORAS_PRESETS`).
+3. **Pré-valida no Meta** (`preflightCampaign`):
+   - Se audiência <80k, expande pra 2 cidades mais próximas.
+   - Se >2M, mantém só a capital.
+4. **Publica** com `createCampaign` usando copy do template, R$ do template, foto do template.
+5. **Toast de progresso** em 4 etapas: `Detectando região → Escolhendo cidade → Validando → Publicando ✅`. Sem modal.
 
-**`SuperAdminSlotsModal.tsx`** — só visível para `super_admin`:
-- Editar `label`, `description`, `trigger_hint`, `fallback_text`, `min_interval_minutes`.
-- Subir áudio padrão.
-- Ao salvar: incrementa `version`, mantém histórico para revert (#11).
-- Reordenar (drag), desativar, criar.
+Se qualquer etapa falhar, abre o `UseTemplateDialog` atual no estado certo (com distribuidora pré-selecionada) — fallback humano.
 
----
+### B) Default seguro no fluxo manual existente
+- No `UseTemplateDialog` step 2, **trocar default** de `selectedCity = "__all__"` para a primeira cidade individual.
+- Renomear o botão "Todas (N cidades)" para `Todas — avançado (CPL alto)` com ícone de aviso.
+- Adicionar badge vermelho "⚠ 80 cidades dilui o orçamento" quando "Todas" selecionado e budget <R$50/dia.
 
-## 4. Backend — `ai-agent-router`
+### C) Tornar os Áudios da Camila à prova de erro
+1. **Limite global por conversa:** máx. 1 áudio a cada 3 mensagens da IA, máx. 3 áudios em 24h por lead. Coluna `ai_slot_dispatch_log` já existe — só adicionar checagem agregada antes do dispatch.
+2. **Validação do `slot_key`:** se a IA retornar slot inexistente, logar em `ai_slot_dispatch_log` com `variant='invalid'` e enviar só texto. Já temos a infra; falta o log de erro.
+3. **Slot `_default_seguro`:** se a IA estiver em dúvida (confidence baixa OU contexto ambíguo), forçar fallback de texto sem áudio. Adicionar campo `confidence` no schema da decisão.
+4. **Aba "Auditoria" no painel de slots** (Super Admin): tabela com últimos 50 disparos: lead, slot, variant (personal/public/text), se houve resposta em 30min. Permite ver na prática se a IA está acertando.
+5. **Modo "treinamento" por slot:** toggle "🧪 Em teste" → quando ativo, IA não dispara o áudio, apenas registra no log que disparou. Permite calibrar antes de mandar pra todos os leads.
 
-### Tool calling em vez de campo livre (#8)
+### D) Análise de mercado (para decisão da cidade)
+Criar Edge Function `ad-market-analysis` que retorna, para uma distribuidora:
+- CPL médio por cidade (últimos 30d) baseado em `ad_campaigns` da plataforma toda.
+- Audiência estimada via Meta API.
+- Score: `1 / (CPL * sqrt(audiência))` — favorece cidades baratas e com volume razoável.
+- Cache em tabela `ad_market_intel` por 24h.
 
-No início, carregar slots ativos. Expor cada slot como **tool** OpenAI/Gemini:
-
-```json
-{
-  "name": "send_audio_objecao_preco",
-  "description": "Use quando o lead reclama de preço ou diz 'depois eu vejo'. Trigger: <trigger_hint>"
-}
-```
-
-A IA chama a tool em vez de devolver string livre — elimina alucinação de slot.
-
-### Resolução do áudio (ordem)
-
-1. Verificar cooldown via `ai_slot_dispatch_log` (último envio do mesmo slot para esse `customer_id` < `min_interval_minutes`?). Se sim, pular áudio e seguir só com texto.
-2. Buscar áudio personal: `ai_media_library` onde `consultant_id=X`, `slot_key=Y`, `active=true`, `is_draft=false`.
-3. Se não houver, buscar público: `slot_key=Y`, `is_public=true`, `active=true`.
-4. Se não houver áudio, enviar `fallback_text` do slot (#2).
-5. A/B leve (#7): se consultor tem áudio próprio há < 14 dias, alternar 50/50 com padrão.
-6. Registrar em `ai_slot_dispatch_log` e incrementar `sent_count`.
-
-### Métrica de resposta
-
-Cron (ou trigger em `conversations` inbound) marca `reply_within_min` no log e incrementa `reply_count` na mídia. Alimenta o card (#6).
+O botão "Publicar inteligente" usa esse score para decidir.
 
 ---
 
-## 5. Edge functions auxiliares
+## Detalhes técnicos
 
-- **`transcribe-slot-audio`** — após upload, gera `transcript` via Whisper/Gemini.
-- **`validate-slot-audio`** — duração + normalização (rejeita áudio cortado).
-- **Cron diário** — atualiza estatísticas `reply_rate` por slot/consultor.
+**Arquivos novos:**
+- `src/lib/dddToUf.ts` — mapa DDD → UF.
+- `src/services/smartPublish.ts` — orquestrador do fluxo de 1 clique.
+- `supabase/functions/ad-market-analysis/index.ts` — edge function de scoring.
+- `src/components/admin/ads/SmartPublishButton.tsx` — botão + toasts de progresso.
+
+**Arquivos editados:**
+- `src/components/admin/ads/AdTemplatesGallery.tsx` — adicionar `SmartPublishButton`.
+- `src/components/admin/ads/UseTemplateDialog.tsx` — default = 1ª cidade, badge de aviso.
+- `supabase/functions/ai-agent-router/index.ts` — limite global, validação de slot_key, campo `confidence`.
+- `src/components/admin/AIAgentTab/SlotsPanel.tsx` — toggle "🧪 Em teste" + aba auditoria.
+
+**Migrations:**
+- `ad_market_intel` (distribuidora_id, city_key, cpl_avg_cents, audience_est, score, computed_at).
+- `ai_agent_slots`: coluna `is_testing boolean default false`.
+- `ai_slot_dispatch_log`: coluna `dispatch_status text` (`sent` | `blocked_global_limit` | `blocked_invalid_slot` | `testing_only`).
+
+**Fora de escopo agora:** ML real para escolha de cidade (vamos com heurística simples), A/B testing automático, transcrição Whisper.
 
 ---
 
-## 6. Tema
+## Ordem de execução sugerida
 
-Tokens semânticos: `bg-card`, `text-foreground`, `text-primary`. Botão de gravação: `text-destructive` quando ativo. Glassmorphism dark coerente com a identidade.
+1. Default seguro no `UseTemplateDialog` (5min, resolve o problema imediato).
+2. Mapa DDD→UF + `SmartPublishButton` com lógica básica (sem market analysis ainda — usa primeira cidade do preset).
+3. Limites globais + validação `slot_key` nos áudios.
+4. `ad_market_intel` + edge function de score.
+5. Aba auditoria + toggle "Em teste" nos slots.
 
----
-
-## Fora de escopo (próximo passo se pedir)
-
-- Tela do WhatsApp / cards do CRM
-- Mídias livres (PDF/imagem) — fica como está
-- Mudanças de RLS em outras tabelas
-
----
-
-## Ordem de execução
-
-1. Migração (tabelas + colunas + seed dos 8 slots + RLS)
-2. `SlotsPanel` + `SlotCard` + `AudioRecorderInline` (consultor)
-3. `SuperAdminSlotsModal`
-4. Refator do `ai-agent-router` para tool calling + resolução com cooldown/fallback/A·B
-5. Edge functions de transcrição e validação
-6. Cron de métricas
-7. QA: gravar, ativar, conversar com bot, validar log
+Posso começar pelo passo 1+2 (resolve hoje o anúncio errado e entrega o botão de 1 clique) e os outros num próximo turno?
