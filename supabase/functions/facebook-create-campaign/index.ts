@@ -646,15 +646,9 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    console.error("[fb-create]", err);
-    if (consultantIdForAlert) {
-      await notifyConsultant(
-        consultantIdForAlert,
-        "error",
-        "Falha ao publicar campanha",
-        `Não consegui publicar sua campanha no Facebook.\n\nMotivo: ${(err as Error).message}\n\nTente novamente ou fale com o suporte.`,
-      ).catch(() => {});
-    }
+    console.error("[fb-create] step=fatal", err);
+    // notifyConsultant removido daqui — chamada externa em catch pode estourar CPU
+    // e a UI já mostra o erro retornado pela função.
     return campaignErrorResponse(err);
   }
 });
