@@ -70,9 +70,17 @@ export interface MinioUploadResult {
   bucket: string;
 }
 
-/**
- * Sobe bytes brutos diretamente ao MinIO via AWS SigV4.
- * Lança erro se as credenciais não estiverem configuradas ou a request falhar.
+/** Slug do consultor: "{igreen_id_ou_uuid}_{nome_normalizado}" */
+export function buildConsultantSlug(idOrIgreen: string, name?: string | null): string {
+  const a = normalizeName(idOrIgreen || "sem_consultor");
+  const b = normalizeName(name || "");
+  return b ? `${a}_${b}` : a;
+}
+
+/** Sanitiza um JID/telefone como pasta: só dígitos. */
+export function sanitizeJid(jid: string): string {
+  return (jid || "sem_cliente").replace(/[^0-9]/g, "") || "sem_cliente";
+}
  */
 export async function uploadBytesToMinio(input: MinioUploadInput): Promise<MinioUploadResult> {
   const serverUrl = Deno.env.get("MINIO_SERVER_URL") || "";
