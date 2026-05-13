@@ -550,7 +550,7 @@ Deno.serve(async (req) => {
             decision: {
               tool: "send_text",
               args: {
-                message: sanitizeHumanMessage(args.caption || "", phase, mode === "rescue" ? "" : user_input),
+                message: sanitizeHumanMessage(args.caption || "", phase, mode === "rescue" ? "" : user_input, firstName),
                 next_phase: args.next_phase || phase,
                 reasoning: args.reasoning,
               },
