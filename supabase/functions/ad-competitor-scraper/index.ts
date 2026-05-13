@@ -71,7 +71,7 @@ Se não encontrar ou não tiver certeza, retorne {"ads": []}. Não invente. Não
         active_days: Number.isFinite(a?.active_days) ? Math.max(0, Math.min(365, Math.floor(a.active_days))) : undefined,
       }))
       .filter((a: CompetitorAd) => a.headline || a.primary_text);
-    return { ads, debug: { status: res.status, parsed_count: ads.length } };
+    return { ads, debug: { status: res.status, parsed_count: ads.length, text_preview: ads.length === 0 ? text.slice(0, 500) : undefined } };
   } catch (err) {
     return { ads: [], debug: { error: (err as Error).message } };
   }
