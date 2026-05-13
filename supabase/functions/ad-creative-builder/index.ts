@@ -172,8 +172,9 @@ Deno.serve(async (req) => {
   try {
     const auth = await authConsultant(req);
     if (!auth) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    const { cities } = await req.json().catch(() => ({ cities: [] }));
-    const copy = await generate(cities || []);
+    const { cities, distribuidora } = await req.json().catch(() => ({ cities: [] }));
+    const insights = await loadInsights(auth.id, distribuidora);
+    const copy = await generate(cities || [], insights);
     // Mantém shape antigo no topo (headlines/primary_texts como string[]) + novo shape em `variations`
     const flat = {
       headlines: copy.legacy!.headlines,
