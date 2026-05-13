@@ -131,6 +131,14 @@ Deno.serve(async (req) => {
       .eq("is_active", true)
       .order("position");
 
+    // 6b) Slots de áudio (Camila)
+    const { data: slotsRaw } = await supabase
+      .from("ai_agent_slots")
+      .select("slot_key, label, trigger_hint, fallback_text, min_interval_minutes")
+      .eq("active", true)
+      .order("position");
+    const slots = slotsRaw || [];
+
     // 7) Montar prompt
     const persona = config.persona_name || "Camila";
     const tone = config.tone || "humano, breve, cordial";
