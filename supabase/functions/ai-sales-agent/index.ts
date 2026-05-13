@@ -253,22 +253,47 @@ function stripUntrustedVocative(message: string, trustedFirstName: string | null
   return message;
 }
 
+function stripRepeatedGreeting(message: string, hasPriorOutbound: boolean): string {
+  if (!message || !hasPriorOutbound) return message;
+  // Após a primeira mensagem, remover saudações redundantes no início.
+  return message
+    .replace(/^\s*(ol[aá]|oi|opa|bom dia|boa tarde|boa noite)[,!.\s]+/i, "")
+    .replace(/^\s*(tudo bem\??|tudo bom\??|como vai\??)[,!.\s]+/i, "")
+    .trim();
+}
+
+function stripDuplicateOpener(message: string, lastAssistantMsg: string | null): string {
+  if (!message || !lastAssistantMsg) return message;
+  // Se as duas começam com a mesma palavra de abertura comum, remove a abertura.
+  const openerRe = /^\s*(entendo|compreendo|perfeito|ótimo|otimo|claro|certo|legal|beleza|faz sentido|saquei|justo)[,!.\s]+/i;
+  const a = message.match(openerRe);
+  const b = lastAssistantMsg.match(openerRe);
+  if (a && b && a[1].toLowerCase() === b[1].toLowerCase()) {
+    return message.replace(openerRe, "").trim();
+  }
+  return message;
+}
+
 function sanitizeHumanMessage(
   message: string,
   phase: string,
   userInput: string,
   trustedFirstName: string | null,
+  hasPriorOutbound: boolean = false,
+  lastAssistantMsg: string | null = null,
 ): string {
   let out = (message || "").trim();
   if (!out) {
     if (phase === "abertura") return "Olá! Tudo bem? Você é de qual cidade?";
     if (phase === "descoberta") return "Quanto vem em média a sua conta de luz?";
     if (phase === "pitch") return "Posso te mostrar exatamente quanto você economizaria?";
-    if (phase === "objecao") return "Compreendo. O que especificamente está pesando na decisão?";
+    if (phase === "objecao") return "Faz sentido. O que especificamente está pesando na decisão?";
     return "Vamos seguir com seu cadastro. Me confirma se podemos avançar?";
   }
   out = stripEmojis(out);
   out = stripUntrustedVocative(out, trustedFirstName);
+  out = stripRepeatedGreeting(out, hasPriorOutbound);
+  out = stripDuplicateOpener(out, lastAssistantMsg);
   // Remove gírias infantis residuais
   out = out
     .replace(/\b(oii+e?|oiee+|oie)\b/gi, "Olá")
@@ -279,6 +304,8 @@ function sanitizeHumanMessage(
     .replace(/\b(amor|fofo|fofa|querido|querida|lindo|linda)\b/gi, "")
     .replace(/\s{2,}/g, " ")
     .trim();
+  // Capitaliza primeira letra se ficou minúscula após cortes
+  if (out && /^[a-zà-ÿ]/.test(out)) out = out[0].toUpperCase() + out.slice(1);
   // Comprimento máximo
   if (out.length > 400) out = out.slice(0, 397) + "...";
   return out;
