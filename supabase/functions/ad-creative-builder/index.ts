@@ -66,14 +66,24 @@ interface CopyPack {
   legacy?: { headlines: string[]; primary_texts: string[] };
 }
 
-async function generate(cities: string[]): Promise<CopyPack> {
+async function generate(cities: string[], insights?: any): Promise<CopyPack> {
   if (!GEMINI_KEY) return packWithLegacy(FALLBACK);
   const ctx = cities.join(", ") || "Brasil";
   const isDistribuidora = ctx.toLowerCase().includes("clientes da");
+
+  const learnedBlock = insights ? `
+
+APRENDIZADO DESTE CONSULTOR (use como guia obrigatório):
+- Padrões VENCEDORES (use): ${(insights.winning_patterns || []).join(", ") || "(ainda coletando)"}
+- Padrões PERDEDORES (evite): ${(insights.losing_patterns || []).join(", ") || "(ainda coletando)"}
+- Melhor taxa de toque atingida: ${(insights.best_ctr_bps / 100).toFixed(2)}% — supere isso
+${insights.summary ? `- Lição mais recente: ${insights.summary}` : ""}
+` : "";
+
   const prompt = `Você é o melhor copywriter de Facebook Ads do Brasil. Gere copy em pt-BR para iGreen Energy (energia por assinatura — desconto na conta de luz).
 
 Contexto-alvo: ${ctx}.
-${isDistribuidora ? "IMPORTANTE: o 1º item é a distribuidora do cliente — use o NOME dela em pelo menos 3 dos 6 títulos.\n" : ""}
+${isDistribuidora ? "IMPORTANTE: o 1º item é a distribuidora do cliente — use o NOME dela em pelo menos 3 dos 6 títulos.\n" : ""}${learnedBlock}
 
 Retorne JSON ESTRITO com 6 títulos (cada um em UM framework diferente) + 3 textos primários:
 
