@@ -247,7 +247,29 @@ export function createEvolutionSender(apiUrl: string, apiKey: string, instanceNa
     }
   }
 
-  return { sendText, sendButtons, downloadMedia, sendMedia, sendAudio };
+  /**
+   * Envia presença (composing/recording/paused) ao contato — simula "digitando…".
+   * Não falha o fluxo se der erro: presença é cosmética.
+   */
+  async function sendPresence(
+    remoteJid: string,
+    presence: "composing" | "recording" | "paused" | "available" = "composing",
+    delayMs = 1200,
+  ): Promise<boolean> {
+    try {
+      const res = await fetchWithTimeout(`${baseUrl}/chat/sendPresence/${instanceName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "apikey": apiKey },
+        body: JSON.stringify({ number: remoteJid, presence, delay: delayMs }),
+        timeout: 8000,
+      });
+      return res.ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  return { sendText, sendButtons, downloadMedia, sendMedia, sendAudio, sendPresence };
 }
 
 /**
