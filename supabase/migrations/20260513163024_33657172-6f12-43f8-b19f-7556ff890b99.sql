@@ -1,0 +1,5 @@
+
+ALTER TABLE public.customers
+  ADD COLUMN IF NOT EXISTS name_source TEXT DEFAULT 'unknown',
+  ADD COLUMN IF NOT EXISTS ocr_done BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS bill_requested_at TIMESTAMPTZ;
