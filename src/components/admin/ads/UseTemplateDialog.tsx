@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Loader2, Rocket, ChevronLeft, AlertTriangle } from "lucide-react";
+import { Loader2, Rocket, ChevronLeft, AlertTriangle, UserCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   CityHit, createCampaign, preflightCampaign, searchCitiesBulk,
@@ -10,6 +10,7 @@ import {
 import { DISTRIBUIDORAS_PRESETS } from "@/data/distribuidoraPresets";
 import { AdTemplate } from "@/services/adTemplates";
 import { supabase } from "@/integrations/supabase/client";
+import { useInstancePhone } from "@/hooks/useInstancePhone";
 
 interface Props {
   open: boolean;
