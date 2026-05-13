@@ -1,7 +1,19 @@
 // Gera copy de elite (6 frameworks), filtra termos proibidos pela Meta e atribui score por variação.
-import { authConsultant, corsHeaders } from "../_shared/fb-graph.ts";
+// Injeta padrões aprendidos pelo ad-creative-learner pra cada novo anúncio sair melhor que o anterior.
+import { adminClient, authConsultant, corsHeaders } from "../_shared/fb-graph.ts";
 
 const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY");
+
+async function loadInsights(consultantId: string, distribuidora?: string) {
+  try {
+    const admin = adminClient();
+    const q = admin.from("ad_creative_insights").select("*").eq("consultant_id", consultantId);
+    const { data } = distribuidora
+      ? await q.eq("distribuidora", distribuidora).maybeSingle()
+      : await q.order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    return data;
+  } catch { return null; }
+}
 
 // Termos que a Meta rejeita ou penaliza fortemente — copy regenera/filtra automaticamente.
 const FORBIDDEN = [
