@@ -14,6 +14,111 @@ export type Database = {
   }
   public: {
     Tables: {
+      ad_creative_insights: {
+        Row: {
+          best_cpa_cents: number | null
+          best_ctr_bps: number
+          best_image_traits: Json
+          consultant_id: string
+          created_at: string
+          distribuidora: string | null
+          id: string
+          losing_patterns: Json
+          sample_size: number
+          summary: string | null
+          updated_at: string
+          winning_patterns: Json
+        }
+        Insert: {
+          best_cpa_cents?: number | null
+          best_ctr_bps?: number
+          best_image_traits?: Json
+          consultant_id: string
+          created_at?: string
+          distribuidora?: string | null
+          id?: string
+          losing_patterns?: Json
+          sample_size?: number
+          summary?: string | null
+          updated_at?: string
+          winning_patterns?: Json
+        }
+        Update: {
+          best_cpa_cents?: number | null
+          best_ctr_bps?: number
+          best_image_traits?: Json
+          consultant_id?: string
+          created_at?: string
+          distribuidora?: string | null
+          id?: string
+          losing_patterns?: Json
+          sample_size?: number
+          summary?: string | null
+          updated_at?: string
+          winning_patterns?: Json
+        }
+        Relationships: []
+      }
+      ad_creative_performance: {
+        Row: {
+          campaign_id: string
+          clicks: number
+          consultant_id: string
+          evaluated_at: string
+          fb_ad_id: string
+          framework: string | null
+          headline: string | null
+          id: string
+          impressions: number
+          is_loser: boolean
+          is_winner: boolean
+          leads: number
+          paused_by_ai_at: string | null
+          primary_text: string | null
+          registrations: number
+          score: number
+          spend_cents: number
+        }
+        Insert: {
+          campaign_id: string
+          clicks?: number
+          consultant_id: string
+          evaluated_at?: string
+          fb_ad_id: string
+          framework?: string | null
+          headline?: string | null
+          id?: string
+          impressions?: number
+          is_loser?: boolean
+          is_winner?: boolean
+          leads?: number
+          paused_by_ai_at?: string | null
+          primary_text?: string | null
+          registrations?: number
+          score?: number
+          spend_cents?: number
+        }
+        Update: {
+          campaign_id?: string
+          clicks?: number
+          consultant_id?: string
+          evaluated_at?: string
+          fb_ad_id?: string
+          framework?: string | null
+          headline?: string | null
+          id?: string
+          impressions?: number
+          is_loser?: boolean
+          is_winner?: boolean
+          leads?: number
+          paused_by_ai_at?: string | null
+          primary_text?: string | null
+          registrations?: number
+          score?: number
+          spend_cents?: number
+        }
+        Relationships: []
+      }
       ad_image_validations: {
         Row: {
           created_at: string
@@ -35,6 +140,48 @@ export type Database = {
           id?: string
           image_url?: string
           validation?: Json
+        }
+        Relationships: []
+      }
+      ad_recommendations: {
+        Row: {
+          action_label: string | null
+          action_payload: Json | null
+          applied_at: string | null
+          consultant_id: string
+          created_at: string
+          dismissed_at: string | null
+          id: string
+          message: string
+          severity: string
+          title: string
+          type: string
+        }
+        Insert: {
+          action_label?: string | null
+          action_payload?: Json | null
+          applied_at?: string | null
+          consultant_id: string
+          created_at?: string
+          dismissed_at?: string | null
+          id?: string
+          message: string
+          severity?: string
+          title: string
+          type: string
+        }
+        Update: {
+          action_label?: string | null
+          action_payload?: Json | null
+          applied_at?: string | null
+          consultant_id?: string
+          created_at?: string
+          dismissed_at?: string | null
+          id?: string
+          message?: string
+          severity?: string
+          title?: string
+          type?: string
         }
         Relationships: []
       }
