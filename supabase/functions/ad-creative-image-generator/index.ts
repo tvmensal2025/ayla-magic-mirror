@@ -173,27 +173,24 @@ Deno.serve(async (req) => {
       || (Array.isArray(insights?.winning_patterns) && (insights!.winning_patterns[0] as any)?.angle)
       || "economia_concreta";
 
-    const prompt = buildPrompt(angle, format, distribuidora);
     const spec = FORMAT_SPEC[format];
 
-    // Loop de QA: até 3 tentativas. Guarda o melhor candidato como fallback.
+    // Loop QA: 4 tentativas. Só usa fallback se a imagem rejeitada NÃO tem texto.
     let imageDataUrl: string | null = null;
-    let fallbackDataUrl: string | null = null;
+    let cleanFallbackUrl: string | null = null;     // melhor candidato sem texto
+    let cleanFallbackReport: any = null;
     let lastReport: any = null;
     let attempts = 0;
     let modelUsed = PRIMARY_MODEL;
     let approved = false;
 
-    for (attempts = 1; attempts <= 3; attempts++) {
-      const useModel = attempts === 1 ? PRIMARY_MODEL : (attempts === 2 ? PRIMARY_MODEL : FALLBACK_MODEL);
+    for (attempts = 1; attempts <= 4; attempts++) {
+      const useModel = attempts <= 2 ? PRIMARY_MODEL : FALLBACK_MODEL;
       modelUsed = useModel;
+      const prompt = buildPrompt(angle, format, distribuidora, attempts);
       const candidate = await generateImage(prompt, useModel);
       if (!candidate) { lastReport = { error: `model_${useModel}_returned_null` }; continue; }
 
-      // Guarda como fallback (último candidato gerado)
-      fallbackDataUrl = candidate;
-
-      // Sobe pra MinIO temporário só pra QA conseguir baixar
       const { bytes, mime } = dataUrlToBytes(candidate);
       const ext = mime.includes("png") ? "png" : "jpg";
       const tmpKey = `creativos/${auth.id}/_tmp/${Date.now()}_a${attempts}.${ext}`;
@@ -216,22 +213,29 @@ Deno.serve(async (req) => {
         approved = true;
         break;
       }
+
+      // Guarda só candidatos SEM TEXTO como fallback (texto baked = lixo, nunca cair pra ele)
+      const hasText = qa.report?.has_text === true;
+      if (!hasText && !cleanFallbackUrl) {
+        cleanFallbackUrl = candidate;
+        cleanFallbackReport = qa.report;
+      }
     }
 
-    // Fail-open: se nenhuma aprovou mas temos uma imagem, usa a última.
-    // Overlay determinístico vai cobrir top com headline/selo, então texto
-    // residual em props (papel/calendário) raramente atrapalha.
-    if (!imageDataUrl && fallbackDataUrl) {
-      imageDataUrl = fallbackDataUrl;
-      console.warn("[gen] usando fallback sem aprovação QA. last_report=", lastReport);
+    // Fallback: usa candidato limpo (sem texto baked) se nenhum aprovou.
+    if (!imageDataUrl && cleanFallbackUrl) {
+      imageDataUrl = cleanFallbackUrl;
+      lastReport = cleanFallbackReport;
+      console.warn("[gen] usando fallback limpo sem texto. report=", cleanFallbackReport);
     }
 
     if (!imageDataUrl) {
+      // Todas as tentativas vieram com texto — não engana o usuário.
       return new Response(JSON.stringify({
-        error: "Falha ao gerar imagem (modelo não retornou). Tente novamente.",
-        fallback: true,
+        error: "A IA insistiu em colocar texto na imagem em todas as 4 tentativas. Tente um ângulo diferente (ex: 'Prova social' ou 'Curiosidade') ou gere novamente.",
         last_qa: lastReport,
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        attempts,
+      }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Upload final
