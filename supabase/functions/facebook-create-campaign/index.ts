@@ -364,45 +364,31 @@ Deno.serve(async (req) => {
       typeof p === "string" ? { url: p, format: "square" as const } : p,
     );
 
-    // 3.0) Valida cada imagem com Gemini Vision antes do upload pro Meta.
-    // Bloqueia rosto cortado, excesso de texto, conteúdo proibido, etc.
-    const geminiKey = Deno.env.get("GEMINI_API_KEY") || "";
-    const validated: Tagged[] = [];
+    // 3.0) SEM validação Gemini síncrona aqui — estourava CPU da Edge Function (546).
+    // A análise de imagem virou job assíncrono via ad-image-validator (preflight separado).
+    const validated: Tagged[] = tagged;
     const rejectedImages: { url: string; issues: string[]; suggestion?: string }[] = [];
-    for (const item of tagged) {
-      const v = await validateAdImage(item.url, geminiKey);
-      if (!v.ok) {
-        rejectedImages.push({ url: item.url, issues: v.issues, suggestion: v.suggestion });
-        console.warn("[fb-create] imagem rejeitada:", item.url, v.issues);
-        continue;
+
+    // base64 em chunks (não loop byte-a-byte) — reduz CPU em ~10x
+    function bytesToBase64(buf: Uint8Array): string {
+      const CHUNK = 0x8000;
+      let bin = "";
+      for (let i = 0; i < buf.length; i += CHUNK) {
+        bin += String.fromCharCode.apply(null, Array.from(buf.subarray(i, i + CHUNK)) as any);
       }
-      // Se Gemini detectou outro formato, corrige (Reels/Stories precisam 9:16)
-      const finalFormat = v.format_hint ?? item.format;
-      validated.push({ url: item.url, format: finalFormat });
-    }
-    if (!validated.length) {
-      const reasons = rejectedImages.flatMap((r) => r.issues).slice(0, 5).join(" | ");
-      const msg = `Suas fotos foram bloqueadas pela política da Meta (não é regra nossa).\n\nMotivo: ${reasons || "conteúdo não permitido"}\n\nA Meta proíbe: nudez, violência, drogas/álcool em excesso, antes-e-depois enganoso, promessas irreais ("ganhe dinheiro fácil") e textos sensacionalistas. Troque a arte e tente de novo.`;
-      await notifyConsultant(auth.id, "error", "Campanha não publicada", msg);
-      return new Response(JSON.stringify({
-        error: msg,
-        code: "IMAGES_REJECTED",
-        rejected: rejectedImages,
-      }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return btoa(bin);
     }
 
+    console.log("[fb-create] step=images_start count=", validated.length);
     const uploaded: { hash: string; format: "square" | "vertical" | "story" }[] = [];
-    for (const item of validated) {
+    // Limita a 5 imagens por publicação pra ficar dentro do CPU budget.
+    for (const item of validated.slice(0, 5)) {
       const url = item.url;
       try {
-        // Baixa a imagem e envia como bytes (base64) — upload por URL exige
-        // capability "ads_management_standard_access" que apps em dev não têm.
         const imgResp = await fetch(url);
         if (!imgResp.ok) throw new Error(`download ${imgResp.status}`);
         const buf = new Uint8Array(await imgResp.arrayBuffer());
-        let bin = "";
-        for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
-        const b64 = btoa(bin);
+        const b64 = bytesToBase64(buf);
         const filename = url.split("/").pop()?.split("?")[0] || `img_${Date.now()}.jpg`;
         const r = await fbFetch(`/${accId}/adimages`, {
           method: "POST",
