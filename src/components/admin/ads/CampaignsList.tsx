@@ -65,6 +65,7 @@ function explainRejection(raw: string | null | undefined): { title: string; sugg
 export function CampaignsList({ consultantId, refreshKey }: { consultantId: string; refreshKey: number }) {
   const [items, setItems] = useState<Campaign[]>([]);
   const [metrics, setMetrics] = useState<Record<string, Metric>>({});
+  const [waNumber, setWaNumber] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reactivating, setReactivating] = useState<string | null>(null);
   const { toast } = useToast();
