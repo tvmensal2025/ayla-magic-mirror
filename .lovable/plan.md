@@ -1,100 +1,92 @@
-## Diagnóstico — o que falta para resultados reais
+## Objetivo
 
-**Já está 100% funcional (backend):**
-- ✅ Scraper de concorrentes rodando + cron semanal (38 anúncios populados de 10 marcas)
-- ✅ Learner diário gerando padrões vencedores/perdedores
-- ✅ Rotator diário pausando criativos perdedores
-- ✅ Builder com 6 ângulos obrigatórios + image briefs
-- ✅ Gemini 2.5-flash atualizado
-
-**O que falta para você acompanhar e ter resultados:**
-1. **UI ausente**: as tabelas `ad_competitor_creatives` e `ad_creative_insights` existem, mas **nenhuma tela mostra esses dados** hoje. Você não consegue ver os concorrentes nem os insights da IA pelo painel.
-2. **Geração de imagem com 1 clique**: hoje o builder gera só *briefs textuais* das imagens. Não existe botão que transforme o brief em imagem real pronta para subir no Meta.
-3. **Acompanhamento histórico**: insights e mudanças de concorrentes não têm timeline visível.
+Tornar a aba **Inteligência** um ciclo completo: ver o anúncio "perfeito" do concorrente → gerar criativo otimizado → publicá-lo como anúncio em 1 clique. Toda mídia (imagem/vídeo/áudio) passa a ser armazenada no **MinIO** (bucket `igreen`), e cada criativo gerado pode ser marcado como **público** (visível para todos os consultores) ou **privado** (apenas dono).
 
 ---
 
-## Plano
+## 1. Padronizar storage em MinIO
 
-### 1. Nova aba "Inteligência" dentro de Anúncios
-Adicionar 4ª aba (`Resultados | Campanhas | Modelos | **Inteligência** 🧠`) em `AdsTab.tsx`.
+Hoje o `ad-creative-image-generator` salva no bucket Supabase `IMAGE`. Vou trocar para MinIO usando o helper já existente (`_shared/minio-upload.ts`), criando uma variante `uploadCreativeToMinio()` com pasta `creativos/{consultor_slug}/{yyyymmdd}_{angle}_{format}.png`.
 
-A aba terá 3 cards verticais:
+Outros pontos de upload de mídia gerada por IA (futuro: vídeo/áudio) também usarão esse helper. Mídias dinâmicas do WhatsApp continuam no Supabase Storage (regra de memória já existente).
 
-```text
-┌────────────────────────────────────────────────────┐
-│ 📊 INSIGHTS DA IA (sua performance)                │
-│  • Padrões vencedores: "número específico", ...    │
-│  • Padrões perdedores: "tom genérico", ...         │
-│  • Resumo: "Headlines com cidade convertem 2x"     │
-│  Atualizado há 4h · [Atualizar agora]              │
-├────────────────────────────────────────────────────┤
-│ 🕵️ CONCORRENTES ATIVOS (10 marcas)                 │
-│  Filtro: [Todas ▾] [Ângulo ▾] [Formato ▾]          │
-│  Tabela: Marca | Headline | Ângulo | Formato | Dias│
-│  Top 5 com mais dias no ar = ★ destaque verde      │
-│  Última atualização: hoje · [Re-escanear agora]    │
-├────────────────────────────────────────────────────┤
-│ 📅 TIMELINE DE ATUALIZAÇÕES                        │
-│  • 13/05 09:14 — Learner rodou (3 ads avaliados)   │
-│  • 13/05 09:11 — Scraper +38 ads de 10 marcas      │
-│  • Cron: scraper toda 2ª 06h, learner diário 07h   │
-└────────────────────────────────────────────────────┘
-```
+---
 
-**Componentes novos:**
-- `src/components/admin/ads/CompetitorsPanel.tsx` — lê `ad_competitor_creatives`, agrupa por marca, ordena por `active_days` desc, mostra top 5 com badge "Top conversor". Botão "Re-escanear" invoca `ad-competitor-scraper`.
-- `src/components/admin/ads/InsightsPanel.tsx` — lê `ad_creative_insights` do consultor. Botão "Atualizar agora" invoca `ad-creative-learner`. Vazio-estado: "Rode 3+ campanhas para insights".
-- `src/components/admin/ads/IntelligenceTab.tsx` — agrupa os 2 acima + timeline simples lendo `created_at`/`updated_at` dessas tabelas.
+## 2. Toggle público/privado nos criativos gerados
 
-### 2. Botão "Gerar criativo perfeito (1 clique)"
+**Migração:**
+- Adicionar coluna `is_public boolean default false` em `ad_generated_creatives`.
+- Política RLS adicional: `SELECT` permitido a todos `authenticated` quando `is_public = true`.
 
-Nova edge function `ad-creative-image-generator`:
-- **Entrada**: `consultant_id`, `format` (`feed_1x1` | `story_9x16` | `reels_9x16` | `carousel_4x5`), opcional `angle`
-- **Lógica**:
-  1. Lê insights do consultor + top concorrentes (`ad_competitor_creatives` ordenado por `active_days`)
-  2. Pega o `image_brief` correspondente ao ângulo vencedor (ou gera um novo via Gemini)
-  3. Chama **Lovable AI Gateway** com `google/gemini-2.5-flash-image` (Nano Banana) — prompt enriquecido com:
-     - Padrões vencedores próprios
-     - Brand voice iGreen (cores oficiais, tom)
-     - Especificação técnica do formato (ratio exato, área segura para texto, foco do anúncio)
-     - Anti-padrões dos perdedores ("evite stock photo genérico de painel solar")
-  4. Salva o resultado no bucket `IMAGE` do Supabase
-  5. Retorna URL + brief usado
+**UI (`CreativeImageGenerator.tsx`):**
+- Cada card de criativo gerado recebe um switch "Público / Privado" (com ícone de cadeado/globo).
+- Ao alternar, faz `update` na linha do criativo.
+- Filtro na galeria: "Meus criativos" / "Galeria pública".
 
-- **UI**: dentro do `IntelligenceTab` (e também na galeria de modelos), botão grande:
-  ```
-  ✨ Gerar criativo perfeito
-  [ Feed 1:1 ] [ Story 9:16 ] [ Reels 9:16 ] [ Carrossel 4:5 ]
-  ```
-  Cada clique gera 1 imagem nas dimensões corretas. Mostra preview + botão "Usar em campanha" e "Baixar".
+---
 
-**Tamanhos exatos (especificação Meta):**
-- Feed 1:1 → 1080×1080
-- Story/Reels 9:16 → 1080×1920
-- Carrossel 4:5 → 1080×1350
+## 3. "Anúncio perfeito do concorrente" em destaque
 
-O Nano Banana respeita aspect ratio quando incluído explicitamente no prompt; o pós-processamento normaliza para o tamanho final.
+No `CompetitorsPanel.tsx`:
+- Card de destaque **"Anúncio Campeão da Semana"** no topo, escolhido por score: `active_days DESC` + presença em múltiplos formatos + recência.
+- Mostra thumbnail grande, headline, primary_text, CTA, dias ativo, marca, formato e link para o original na Meta Ad Library.
+- Botão **"Inspirar criativo nele"** → abre o gerador já pré-preenchido com o ângulo, copy e visual desse anúncio (passa `inspired_by` para a edge function, que injeta no prompt do Gemini).
+- Lista secundária: top 5 anúncios por marca (Solfácil, Reverde, Matrix...) com mesmo botão.
 
-### 3. Migração de DB
-- Nova tabela `ad_generated_creatives` (consultant_id, format, image_url, brief_used, angle, created_at) — para histórico/galeria de imagens geradas com RLS owner-read/write.
+---
 
-### Arquivos a criar/editar
-**Criar:**
-- `src/components/admin/ads/IntelligenceTab.tsx`
-- `src/components/admin/ads/CompetitorsPanel.tsx`
-- `src/components/admin/ads/InsightsPanel.tsx`
-- `src/components/admin/ads/CreativeImageGenerator.tsx`
-- `supabase/functions/ad-creative-image-generator/index.ts`
+## 4. Fluxo "Gerar → Anunciar" em 1 clique
 
-**Editar:**
-- `src/components/admin/ads/AdsTab.tsx` — adicionar 4ª aba "Inteligência"
-- Migração SQL para `ad_generated_creatives`
+Após gerar a imagem, cada card de criativo ganha botão **"Usar neste anúncio"**:
+- Abre `CreateCampaignExpress` já pré-preenchido com a imagem gerada (URL MinIO), headline e primary_text sugeridos pelo brief, e ângulo.
+- Salva `used_in_campaign_id` em `ad_generated_creatives` para rastrear ROI por criativo gerado.
 
-### Validação final (após implementar)
-- Disparar scraper de novo → ver concorrentes na UI
-- Disparar learner → ver insights na UI
-- Clicar "Gerar Feed 1:1" → imagem aparece em <30s, dimensões corretas
+---
 
-### Observação importante
-Insights da IA só aparecem para consultores com **histórico real de campanhas** (mínimo ~3 anúncios com gasto). Hoje o learner avaliou apenas 3 anúncios. Para validar a feature antes de ter volume real, posso adicionar **modo "demo"** que mostra os padrões agregados de TODOS os concorrentes como insight inicial — confirma se quer.
+## 5. Análise: o que ainda falta para "100% funcional"
+
+| Item | Status | Ação |
+|---|---|---|
+| Scraper de concorrentes (semanal) | OK via pg_cron | manter |
+| Learner de padrões | OK | manter |
+| Rotator de losers | OK | manter |
+| Gerador de imagem 1-clique | Existe, salvando no Supabase | **migrar para MinIO** |
+| Validação técnica da imagem (safe area, aspect, legibilidade) | parcial (`ad_image_validations`) | rodar automaticamente após geração e exibir score |
+| Público/privado | não existe | **adicionar** |
+| Anúncio campeão em destaque | não existe | **adicionar** |
+| Atalho gerar→campanha | não existe | **adicionar** |
+| Re-scrape sob demanda | botão existe | manter |
+| Vídeo/áudio gerados por IA | não existe | (fora de escopo deste plano, anotar como próxima fase) |
+
+---
+
+## 6. "Melhor forma de anúncio" (resumo do que o sistema vai aplicar)
+
+Padrões extraídos dos concorrentes ativos há 30+ dias (sinal de que converte):
+- **Formato dominante:** Reels 9:16 + Feed 1:1 (carrossel em 2º lugar).
+- **Ângulos vencedores:** "economia comprovada na conta" (prova social com print da fatura), "sem obra/sem placa", "cashback mensal", "urgência regional" (cidade do lead).
+- **Visual:** rosto humano sorrindo + número grande de % de desconto + logo da distribuidora local + CTA verde.
+- **Copy:** primeira linha começa com pergunta ou número ("Pagou R$ 480 de luz?"), CTA "Falar no WhatsApp".
+- **Safe area:** título nos 60% centrais (Story/Reels), CTA acima do fold no 1:1.
+
+O gerador já injeta tudo isso no prompt do Gemini; vou reforçar com os dados do **anúncio campeão** quando o usuário clicar em "Inspirar".
+
+---
+
+## Arquivos a alterar/criar
+
+- `supabase/migrations/...` — `is_public` em `ad_generated_creatives` + policy.
+- `supabase/functions/_shared/minio-upload.ts` — adicionar `uploadCreativeBytesToMinio()`.
+- `supabase/functions/ad-creative-image-generator/index.ts` — usar MinIO; aceitar `inspired_by_ad_id`.
+- `src/components/admin/ads/CreativeImageGenerator.tsx` — switch público/privado, botão "Usar neste anúncio", filtro galeria.
+- `src/components/admin/ads/CompetitorsPanel.tsx` — card "Campeão da semana" + botão "Inspirar".
+- `src/components/admin/ads/CreateCampaignExpress.tsx` — aceitar criativo pré-selecionado via prop/URL state.
+
+---
+
+## Validação
+
+1. Gerar uma imagem nos 4 formatos → confirmar URL `https://minio.../igreen/creativos/...`.
+2. Tornar pública e abrir em outra conta → deve aparecer na galeria pública.
+3. Clicar em "Inspirar" no campeão concorrente → prompt enriquecido, imagem coerente.
+4. Clicar em "Usar neste anúncio" → wizard abre com imagem e copy carregadas.
