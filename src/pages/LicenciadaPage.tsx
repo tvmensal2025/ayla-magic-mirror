@@ -46,7 +46,7 @@ const LicenciadaPage = () => {
     );
   }
 
-  const whatsappUrl = `https://api.whatsapp.com/send?phone=${consultant.phone}&text=${encodeURIComponent("Olá, gostaria de mais informações sobre a oportunidade de Licenciado iGreen Energy")}`;
+  const whatsappUrl = `https://wa.me/${consultant.phone}?text=${encodeURIComponent("Olá, gostaria de mais informações sobre a oportunidade de Licenciado iGreen Energy")}`;
 
   return (
     <>

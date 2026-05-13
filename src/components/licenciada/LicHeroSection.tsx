@@ -8,7 +8,7 @@ interface LicHeroSectionProps {
 }
 
 const DEFAULT_CADASTRO = "https://digital.igreenenergy.com.br/?sendcontract=true";
-const DEFAULT_WHATSAPP = "https://api.whatsapp.com/send?phone=5500000000000&text=Ol%C3%A1,%20gostaria%20de%20mais%20informa%C3%A7%C3%B5es%20sobre%20a%20oportunidade%20de%20Licenciado%20iGreen%20Energy";
+const DEFAULT_WHATSAPP = "https://wa.me/5500000000000?text=Ol%C3%A1,%20gostaria%20de%20mais%20informa%C3%A7%C3%B5es%20sobre%20a%20oportunidade%20de%20Licenciado%20iGreen%20Energy";
 
 const AnimatedCounter = ({ target, suffix = "" }: { target: number; suffix?: string }) => {
   const [count, setCount] = useState(0);

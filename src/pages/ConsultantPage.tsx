@@ -46,7 +46,7 @@ const ConsultantPage = () => {
   
   // Botão de atendimento: priorizar instância
   const contactPhone = instancePhone || normalizedPhone;
-  const whatsappUrl = `https://api.whatsapp.com/send?phone=${contactPhone}&text=${encodeURIComponent("Olá, gostaria de mais informações sobre o desconto na conta de luz oferecido pela iGreen Energy")}`;
+  const whatsappUrl = `https://wa.me/${contactPhone}?text=${encodeURIComponent("Olá, gostaria de mais informações sobre o desconto na conta de luz oferecido pela iGreen Energy")}`;
 
   return (
     <>

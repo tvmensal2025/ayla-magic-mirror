@@ -71,7 +71,7 @@ const CadastroPage = () => {
     "Oi! 👋 Vi sobre a iGreen Energy e quero saber como economizar na minha conta de luz."
   );
 
-  const whatsappBotUrl = `https://api.whatsapp.com/send?phone=${phoneNumber}&text=${botMessage}`;
+  const whatsappBotUrl = `https://wa.me/${phoneNumber}?text=${botMessage}`;
 
   // URL de redirect eterno para o QR impresso — sempre aponta para o WhatsApp atual
   // da instância do consultor. Se trocar de número, basta atualizar no admin: os panfletos continuam valendo.
