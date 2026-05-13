@@ -143,6 +143,7 @@ ESTILO HUMANO OBRIGATÓRIO:
 - Não despeje explicação no começo. Primeiro conecte, depois qualifique.
 - Prefira português casual de WhatsApp: "vc", "tá", "rapidinho", "blz", sem exagerar.
 - Não repita a mesma abertura que já apareceu no histórico.
+- NUNCA chame o lead por um nome que não esteja explicitamente no [Contexto do lead] como "Nome: <algo>". Se vier "DESCONHECIDO", use saudação neutra ("oii", "tudo bem?") sem inventar nome. Não deduza nome do número, do JID, do histórico, nem do "pushName".
 
 FUNIL (5 fases):
 
@@ -324,9 +325,26 @@ Deno.serve(async (req) => {
       ? `\n[CÁLCULO PRONTO PRA USAR NO PITCH]\nConta R$ ${billNum.toFixed(0)} → economia ~R$ ${(billNum * 0.12).toFixed(0)}/mês → R$ ${(billNum * 0.12 * 12).toFixed(0)}/ano.\n`
       : "";
 
+    // Sanitiza nome: só usa se parecer um primeiro nome real (letras, 2-20 chars).
+    // Rejeita: vazio, números, "iPhone do João", "Galaxy", emojis, marcas de aparelho,
+    // nomes de operadora ("Cliente", "Suporte"), palavras genéricas e tudo em CAPS curto.
+    const isTrustworthyName = (raw?: string | null): boolean => {
+      if (!raw) return false;
+      const n = raw.trim();
+      if (n.length < 2 || n.length > 30) return false;
+      if (/\d/.test(n)) return false; // tem número
+      if (/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/u.test(n)) return false;
+      if (!/^[A-Za-zÀ-ÖØ-öø-ÿ' -]+$/.test(n)) return false; // só letras/espaços/hífen
+      const blacklist = /\b(iphone|galaxy|xiaomi|motorola|samsung|cliente|suporte|atendimento|whatsapp|user|test|teste|admin|null|undefined|desconhecido|none|n\/a)\b/i;
+      if (blacklist.test(n)) return false;
+      return true;
+    };
+    const firstName = isTrustworthyName(customer.name)
+      ? (customer.name as string).trim().split(/\s+/)[0]
+      : null;
     const contextLine =
       `[Contexto do lead]\n` +
-      `Nome: ${customer.name || "desconhecido"}\n` +
+      `Nome: ${firstName || "DESCONHECIDO — NÃO chame por nome, use saudação neutra (oii, tudo bem?)"}\n` +
       `Distribuidora: ${customer.distribuidora || "?"}\n` +
       `Cidade: ${customer.address_city || "?"}/${customer.address_state || "?"}\n` +
       `Valor da conta: ${billNum > 0 ? `R$ ${billNum}` : "?"}\n` +
