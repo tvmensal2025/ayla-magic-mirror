@@ -369,7 +369,10 @@ Deno.serve(async (req) => {
       return intents.some((t: string) => profileTags.includes(t));
     });
 
-    const mediaListLine = eligibleMedia.length
+    const billAlreadyReceivedEarly = !!customer.electricity_bill_photo_url;
+    const mediaListLine = billAlreadyReceivedEarly
+      ? `\n[MÍDIAS DISPONÍVEIS]\nNENHUMA — a conta já foi recebida. Confirme os dados em send_text e em seguida use request_handoff. PROIBIDO send_media nesta etapa.`
+      : eligibleMedia.length
       ? `\n[MÍDIAS DISPONÍVEIS para fase ${phase}]\n` +
         eligibleMedia
           .map(
