@@ -1,171 +1,123 @@
 
-# Fluxo 100% — do clique no anúncio até cliente ativo
+# Dois Kanbans + Melhorias no Bot/IA
 
-Bot já está respondendo de verdade no Whapi (`+55 11 99009-2401`) — o screenshot confirma: SIM/NÃO/EDITAR + RG Novo/Antigo/CNH funcionando com botões nativos. Carteira do Rafael: **R$ 180,00**. Pronto pra escalar. Abaixo está o mapa do funil inteiro, ponto a ponto, com o que precisa estar certo em cada etapa pra **maximizar conversão**.
+## Diagnóstico atual
 
----
+**Hoje só existe 1 Kanban** (`crm_deals` + `kanban_stages`), confundindo dois ciclos diferentes:
 
-## 1. Topo do funil — Anúncio Meta
-
-**Configuração obrigatória antes de despausar:**
-
-| Item | Valor correto |
-|---|---|
-| Objetivo da campanha | **Engajamento → Mensagens** (não Tráfego, não Conversões) |
-| Destino | WhatsApp `+55 11 99009-2401` |
-| Pixel | `708759256921383` vinculado à conta de anúncio |
-| Evento otimizado | `Lead` (CAPI já dispara via `fb_trigger_lead`) |
-| Orçamento inicial | R$ 30–50/dia × 3 dias (aprendizado) |
-| Público | Idade 28–60, BR, interesse em "conta de luz / economia / energia solar" |
-| Posicionamento | Advantage+ (FB feed + Reels + Stories) |
-| Criativo | 3 variações de imagem + 1 vídeo curto (15s) |
-
-**Copy testada que converte (use como ponto de partida):**
-- Headline: "Pague até **20% menos** na conta de luz, sem obra e sem instalação"
-- Texto principal: "Mais de 50 mil brasileiros já economizam com a iGreen Energy. Sem investimento, sem mudar de companhia. Clique em *Enviar mensagem* e descubra em 1 minuto quanto você vai economizar."
-- CTA: **Enviar mensagem**
-
-**Métrica-alvo nos primeiros 3 dias:**
-- CPM < R$ 25
-- CPL (custo por conversa iniciada) < R$ 8
-- Taxa de resposta no WhatsApp > 70%
-
----
-
-## 2. Primeiro contato — chegada no WhatsApp
-
-Quando o lead clica no anúncio, o Meta abre o WhatsApp com mensagem pré-preenchida → manda pro Whapi → webhook → `runBotFlow` → bot responde em < 2s.
-
-**Eventos automáticos disparados (já implementado):**
-1. `crm_deals` cria deal em `novo_lead` (via `fb_trigger_lead` trigger)
-2. `facebook_capi_events` envia `InitiateCheckout` + `Lead` pro Pixel (otimização da campanha)
-3. Bot envia mensagem de boas-vindas + pede o **nome completo**
-
-**Risco:** Se o lead manda mensagem genérica como "oi", "quero saber", o bot precisa responder com calor humano, não robô. **Validar:** rodar 3 mensagens-teste reais ("Oi", "Quanto eu economizo?", "Como funciona?") e checar se a resposta engaja.
-
----
-
-## 3. Qualificação (etapas do bot)
-
-Sequência atual já implementada em `whapi-webhook/handlers/bot-flow.ts`:
-
-```
-welcome → nome → cpf → conta_luz_foto → confirmação_dados
-       → documento (RG/CNH) → endereço → portal iGreen → ATIVO
-```
-
-**Pontos críticos de drop-off (onde leads desistem):**
-
-| Etapa | Drop-off típico | Mitigação |
+| Tipo de lead | Onde vive hoje | Problema |
 |---|---|---|
-| Pedir CPF | 25–30% | Explicar *por que* precisa: "É só pra cadastrar no programa oficial" |
-| Foto da conta de luz | 35–40% | Mostrar exemplo + aceitar PDF + reenvio até 3x (já tem `ocr_conta_attempts`) |
-| Documento (RG/CNH) | 20% | Botões nativos (já feito ✅) reduzem fricção |
-| Portal iGreen (link facial) | 15% | Mensagem de urgência: "Falta só 1 passo para começar a economizar este mês" |
+| Lead novo do anúncio (ainda em conversa com o bot) | Cai em `novo_lead` mas fica misturado com clientes em pós-venda | Sem visibilidade da **fase de venda** (abertura/descoberta/pitch/objeção/fechamento) |
+| Cliente já cadastrado (status=approved/active) | Stages 30/60/90/120 dias | OK, funcionando |
 
-**Resgate automático já ativo:** `bot-stuck-recovery` cron roda a cada 5 min e reenvia mensagem pra leads parados há > 5 min (logs confirmam).
+**Boa notícia:** a coluna `customers.sales_phase` **já existe** e o `ai-sales-agent` já atualiza ela com as 5 fases do funil. Só falta o **board visual**.
 
 ---
 
-## 4. CRM — gestão dos leads
+## O que vamos fazer
 
-Cada lead vira um card no Kanban do Rafael em `/whatsapp` → CRM. Stages padrão:
+### 1. Separar em 2 Kanbans (abas no `/whatsapp`)
 
 ```
-novo_lead → em_atendimento → aguardando_documentos
-         → aguardando_aprovacao → aprovado → ativo
-                                  ↓
-                              devolutiva → recuperação
+┌───────────────────────────────────────────────────────┐
+│  [ 🔥 Funil de Vendas ]  [ 👥 Pós-Venda / Clientes ]  │
+└───────────────────────────────────────────────────────┘
 ```
 
-**Mensagens automáticas por stage** (tabela `kanban_stages.auto_message_text`) — garantir que cada stage tenha texto + áudio + imagem configurados pra Rafael, especialmente:
-- `aguardando_documentos`: lembrete em 1h e 24h
-- `devolutiva`: explicação clara do que falta + áudio humanizado
-
----
-
-## 5. Conversão final — portal iGreen
-
-Quando o bot chega na etapa "portal", manda link único `link_facial`. Cliente faz selfie → portal aprova → `customers.status = 'active'`.
-
-**Trigger automático no momento do active:**
-- `fb_trigger_purchase` dispara evento `Purchase` no Pixel CAPI (vai realimentar o algoritmo do Meta → CPL cai com o tempo)
-- Lead sai do CRM como **conversão**
-- Comissão de Rafael é registrada
-
----
-
-## 6. Recuperação de leads frios (LTV extra)
-
-Já implementado via `pg_cron`:
-- 30 dias sem ativar → mensagem motivacional 1
-- 60 dias → desconto / urgência
-- 120 dias → última tentativa
-
-**Recomendação:** Revisar os textos dessas 3 mensagens automáticas antes de subir o anúncio — quanto melhor a copy, mais % de leads dormentes acordam.
-
----
-
-## 7. Monitoramento em tempo real (primeiras 48h)
-
-Painel super-admin já mostra:
-- Saldo carteira Rafael (R$ 180,00 ✅)
-- Status Whapi (online ✅)
-- Leads novos por hora
-- CPL ao vivo via `facebook_metrics_daily`
-
-**Alertas que precisam estar ligados:**
-1. Saldo < R$ 50 → pausa automática (`auto_pause_at_cents = 500` ✅ já configurado)
-2. Whapi desconectado > 2 min → notificação
-3. CPL > R$ 15 → revisar criativo/público
-4. Bot sem resposta > 5 min → cron já cobre ✅
-
----
-
-## 8. Checklist de lançamento (ordem exata)
+**Aba A — 🔥 Funil de Vendas (NOVO Kanban)**
+- Fonte: `customers` onde `status = 'pending'` e bot ainda ativo
+- Colunas baseadas em `sales_phase`:
 
 ```
-[ ] 1. Mandar "Oi" de número PESSOAL pro 99009-2401 (não usar o do Rafael)
-[ ] 2. Confirmar que bot responde + chega até "qual seu nome"
-[ ] 3. Confirmar Pixel 708759256921383 vinculado no Gerenciador de Anúncios
-[ ] 4. Conferir copy + criativos do anúncio
-[ ] 5. Trocar destino do anúncio: 97125-4913 → 5511990092401
-[ ] 6. Setar orçamento R$ 30/dia, duração 3 dias
-[ ] 7. Despausar campanha
-[ ] 8. Acompanhar primeiros 5 leads MANUALMENTE no CRM
-[ ] 9. Após 24h: analisar CPL e taxa de qualificação
-[ ] 10. Após 72h: escalar orçamento se CPL < R$ 8
+┌─────────┐ ┌────────────┐ ┌────────┐ ┌──────────┐ ┌────────────┐ ┌──────────┐
+│ABERTURA │→│ DESCOBERTA │→│ PITCH  │→│ OBJEÇÃO  │→│FECHAMENTO  │→│ GANHOU   │
+│(novo)   │ │(qualif.)   │ │(oferta)│ │(dúvidas) │ │(pediu foto)│ │(virou    │
+│         │ │            │ │        │ │          │ │            │ │ cliente) │
+└─────────┘ └────────────┘ └────────┘ └──────────┘ └────────────┘ └──────────┘
+                                                          ↓
+                                                   ┌─────────────┐
+                                                   │   PERDIDO   │
+                                                   │ (handoff/   │
+                                                   │  desistiu)  │
+                                                   └─────────────┘
+```
+
+Cada card mostra: nome, telefone, valor da conta, distribuidora, **score de qualificação**, último contato, badge de origem (FB/Insta/orgânico via `lead_source`).
+
+**Aba B — 👥 Pós-Venda (Kanban ATUAL, intacto)**
+- Fonte: `crm_deals` (já existe)
+- Colunas: novo_lead → aprovado → reprovado → 30/60/90/120 dias
+- Não muda nada, continua com mensagens automáticas por stage.
+
+### 2. Transição automática entre os 2 boards
+
+Quando o bot chega em `sales_phase = 'fechamento'` **e** o cliente envia a foto da conta → automaticamente:
+- Move pro "GANHOU" no Kanban A
+- Cria o card em `novo_lead` no Kanban B (Pós-Venda)
+
+Trigger SQL novo: `customers.status = 'pending' → 'approved'` cria deal em `crm_deals`.
+
+### 3. Melhorias no prompt da IA (`ai-sales-agent`)
+
+Análise do prompt atual (linha 125 de `ai-sales-agent/index.ts`):
+
+✅ **Bom:** estrutura de 5 fases, persona Camila, regras de tool-calling.
+
+⚠️ **A melhorar:**
+1. **Sem cálculo concreto na fase PITCH** — falar "12% de R$ 350 = R$ 42/mês = R$ 504/ano" converte muito mais que "você economiza ~12%".
+2. **Sem prova social específica** — citar nomes de cidades/quantidade de clientes da região (`get_coverage_summary` já existe).
+3. **Tratamento fraco de objeção "é golpe?"** — falta script pronto mencionando ANEEL + 8 anos no mercado.
+4. **Sem urgência ética no fechamento** — "ainda dá pra pegar a fatura deste mês se mandar a foto agora".
+5. **Sem regra de áudio** — humanizar respondendo com áudio quando o lead manda áudio.
+6. **Sem `qualification_score`** sendo atualizado a cada turno (já existe a coluna).
+
+### 4. Score de qualificação (lead heat)
+
+Cada card no Kanban A mostra emoji 🔥🟡🔵 baseado em `qualification_score`:
+- 🔥 80–100: respondeu rápido + valor conta > R$ 200 + sem objeção forte
+- 🟡 40–79: engajado mas com hesitação
+- 🔵 0–39: respondeu pouco / só "oi"
+
+Ajuda o Rafael a saber **onde investir tempo manual** quando entra muito lead do anúncio.
+
+---
+
+## Arquivos a criar/editar
+
+```
+NOVOS:
+  src/components/whatsapp/SalesFunnelBoard.tsx     # Kanban A (funil)
+  src/components/whatsapp/SalesFunnelCard.tsx      # card com score
+  src/hooks/useSalesFunnel.ts                      # busca customers por sales_phase
+  supabase/migrations/<ts>_funnel_to_crm_trigger.sql  # auto-cria deal quando vira approved
+
+EDITAR:
+  src/components/whatsapp/WhatsAppDashboard.tsx    # adicionar Tabs (Funil / Pós-venda)
+  src/components/whatsapp/KanbanBoard.tsx          # rename interno: "Pós-Venda"
+  supabase/functions/ai-sales-agent/index.ts       # prompt v2 + score update
 ```
 
 ---
 
-## 9. Projeção realista (com R$ 180 em saldo)
+## Detalhes técnicos
 
-| Métrica | Cenário conservador | Cenário otimista |
-|---|---|---|
-| Investimento | R$ 180 | R$ 180 |
-| CPL | R$ 10 | R$ 5 |
-| Leads (conversas iniciadas) | 18 | 36 |
-| Taxa de qualificação (chegou no portal) | 30% | 50% |
-| Taxa de ativação (virou cliente) | 50% | 70% |
-| **Clientes ativos** | **~3** | **~12** |
-| Comissão média/cliente | R$ 80–150 | R$ 80–150 |
-| **Retorno** | **R$ 240–450** | **R$ 960–1.800** |
+**Drag-and-drop no Funil de Vendas:** ao arrastar manualmente (override do bot), atualiza `customers.sales_phase` e dispara webhook pra registrar em `bot_step_transitions` (auditoria já existe).
 
-ROI projetado: **1,3× a 10×** sobre o investimento inicial — com a vantagem de que cada `Purchase` enviado pro Pixel vai **baratear o CPL nos próximos lotes**.
+**Performance:** query única com índice em `(consultant_id, status, sales_phase)` — adicionar índice na migration.
+
+**RLS:** já coberto pelas policies existentes de `customers`.
+
+**Tempo estimado:** 1 sessão de build (~6 arquivos novos/editados + 1 migration).
 
 ---
 
-## 10. Próxima ação imediata
+## Próximo passo
 
-Não há código a alterar — o sistema está pronto. A próxima ação é **operacional** (sua):
-1. Teste real do bot com número externo
-2. Configurar a campanha no Meta com os parâmetros acima
-3. Despausar
+Aprove o plano e eu implemento na ordem:
+1. Migration (índice + trigger funnel→crm)
+2. Hook `useSalesFunnel` + componentes do board
+3. Tabs no WhatsAppDashboard
+4. Prompt v2 da IA com cálculos + prova social + urgência
 
-Se quiser, posso em seguida:
-- (a) Revisar / melhorar as **mensagens automáticas** de cada stage do Kanban
-- (b) Criar **dashboard ao vivo** de CPL + leads/hora pro super-admin
-- (c) Ajustar **copy do bot** em algum ponto específico do funil
-- (d) Adicionar **alerta Telegram/email** quando saldo < R$ 50 ou Whapi cai
+Quer que eu inclua algo a mais antes de implementar (ex: filtro por origem do anúncio, alertas sonoros pra lead novo)?
 
