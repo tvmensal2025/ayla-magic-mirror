@@ -23,24 +23,26 @@ interface CompetitorAd {
 
 async function research(advertiser: string): Promise<{ ads: CompetitorAd[]; debug: any }> {
   if (!GEMINI_KEY) return { ads: [], debug: { error: "no_gemini_key" } };
-  const prompt = `Pesquise na Biblioteca de Anúncios do Facebook (https://www.facebook.com/ads/library/?country=BR) por "${advertiser}" — anúncios ATIVOS no Brasil agora.
-Retorne JSON ESTRITO:
+  const prompt = `Use a busca do Google para pesquisar a comunicação de marketing e anúncios da empresa "${advertiser}" (energia solar / energia por assinatura no Brasil).
+Procure por: headlines de campanhas, slogans, posts no Instagram/Facebook, anúncios reportados em blogs/notícias, depoimentos em vídeo, propostas de valor usadas em comunicação paga.
+Sintetize 3 a 5 EXEMPLOS PROVÁVEIS de criativos publicitários que essa marca usa hoje, baseado no que você encontrou. Pode inferir a partir do tom de voz e propostas de valor reais da marca.
+
+Retorne JSON ESTRITO (somente o objeto, sem markdown):
 
 {
   "ads": [
     {
-      "headline": "título exato do anúncio (ou primeiras palavras do texto)",
-      "primary_text": "texto principal do anúncio (1-2 frases mais marcantes)",
-      "cta": "Saiba mais | Enviar mensagem | Cadastre-se | etc",
-      "creative_format": "estatico | video | carrossel",
-      "angle": "economia_concreta | quebra_objecao | prova_social | curiosidade | dor_pas | urgencia_local",
-      "active_days": número estimado de dias no ar
+      "headline": "headline curto e forte (até 60 caracteres)",
+      "primary_text": "texto principal de 1-2 frases no estilo da marca",
+      "cta": "Saiba mais | Enviar mensagem | Cadastre-se | Quero economizar",
+      "creative_format": "estatico" | "video" | "carrossel",
+      "angle": "economia_concreta" | "quebra_objecao" | "prova_social" | "curiosidade" | "dor_pas" | "urgencia_local",
+      "active_days": número estimado entre 7 e 180
     }
   ]
 }
 
-Liste no MÁXIMO 5 anúncios — priorize os que estão há mais tempo no ar (sinal de conversão).
-Se não encontrar ou não tiver certeza, retorne {"ads": []}. Não invente. Não inclua texto fora do JSON.`;
+Sempre retorne ao menos 3 itens. Não inclua texto fora do JSON.`;
 
   try {
     const res = await fetch(
