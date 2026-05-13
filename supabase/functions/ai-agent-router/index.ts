@@ -221,6 +221,7 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
         next_step: stepBefore,
         reply_text: "Tive uma instabilidade aqui, pode repetir, por favor?",
         media_to_send_ids: [],
+        audio_slot_key: "",
         handoff: false,
         handoff_reason: "",
         confidence: 0,
