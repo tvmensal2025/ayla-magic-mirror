@@ -297,17 +297,17 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
                 <Switch checked={applyCta} onCheckedChange={setApplyCta} disabled={submitting} />
               </div>
 
-              {/* Previews com ou sem overlay */}
+              {/* Preview visível: 1:1. Os 4:5 e 9:16 ficam montados off-screen para gerar o composite. */}
               {previews.length > 0 && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {previews.map((url, i) => (
                     <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-border bg-muted">
                       {applyCta ? (
                         <CreativeOverlay
-                          ref={(h) => { overlayRefs.current[i] = h; }}
+                          ref={(h) => { getOverlayRef(i).square = h; }}
                           imageUrl={url}
                           format="feed_1x1"
-                          headline={headline}
+                          headline={liveHeadline}
                           badge={badge}
                           className="w-full h-full"
                         />
@@ -318,6 +318,34 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
                         className="absolute top-1 right-1 z-10 bg-background/80 rounded-full p-0.5 hover:bg-destructive hover:text-destructive-foreground">
                         <X className="w-3 h-3" />
                       </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Overlays ocultos: gerados em alta resolução para 4:5 e 9:16 */}
+              {applyCta && previews.length > 0 && (
+                <div aria-hidden style={{ position: "fixed", left: -99999, top: 0, width: 600, pointerEvents: "none", opacity: 0 }}>
+                  {previews.map((url, i) => (
+                    <div key={`hidden-${i}`}>
+                      <div style={{ width: 600 }}>
+                        <CreativeOverlay
+                          ref={(h) => { getOverlayRef(i).vertical = h; }}
+                          imageUrl={url}
+                          format="carousel_4x5"
+                          headline={liveHeadline}
+                          badge={badge}
+                        />
+                      </div>
+                      <div style={{ width: 600 }}>
+                        <CreativeOverlay
+                          ref={(h) => { getOverlayRef(i).story = h; }}
+                          imageUrl={url}
+                          format="story_9x16"
+                          headline={liveHeadline}
+                          badge={badge}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
