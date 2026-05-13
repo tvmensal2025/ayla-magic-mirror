@@ -127,6 +127,56 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
     setPreviews((prev) => prev.filter((_, idx) => idx !== i));
   }
 
+  async function generateAiCreative() {
+    if (!presetId) {
+      toast({ title: "Escolha a distribuidora primeiro", description: "A IA precisa do contexto da distribuidora.", variant: "destructive" });
+      return;
+    }
+    setAiGenerating(true);
+    setAiPreview(null);
+    try {
+      const preset = DISTRIBUIDORAS_PRESETS.find(p => p.id === presetId);
+      const { data, error } = await supabase.functions.invoke("ad-creative-image-generator", {
+        body: {
+          format: aiFormat,
+          angle: aiAngle,
+          is_public: false,
+          brief_extra: preset ? `Cliente típico de ${preset.nome} (${preset.uf}).` : undefined,
+        },
+      });
+      if (error) throw error;
+      if (!data?.image_url) throw new Error("IA não retornou imagem");
+      setAiPreview({
+        image_url: data.image_url,
+        headline: data.headline || "Conta de luz até 20% mais barata",
+        badge: data.badge || "ATÉ 20% OFF",
+      });
+      toast({ title: "Criativo gerado!", description: "Revise o preview e aprove ou regenere." });
+    } catch (e: any) {
+      toast({ title: "Erro ao gerar criativo", description: e?.message || String(e), variant: "destructive" });
+    } finally {
+      setAiGenerating(false);
+    }
+  }
+
+  async function acceptAiCreative() {
+    if (!aiPreview || !overlayRef.current) return;
+    setAiAccepting(true);
+    try {
+      const composite = await overlayRef.current.toFile(`criativo-ia-${Date.now()}.png`);
+      const localUrl = URL.createObjectURL(composite);
+      setFiles((prev) => [composite, ...prev].slice(0, 4));
+      setPreviews((prev) => [localUrl, ...prev].slice(0, 4));
+      setAiPreview(null);
+      setPhotoTab("upload");
+      toast({ title: "Criativo IA adicionado!", description: "Pronto para publicar." });
+    } catch (e: any) {
+      toast({ title: "Não consegui exportar a imagem", description: e?.message || String(e), variant: "destructive" });
+    } finally {
+      setAiAccepting(false);
+    }
+  }
+
   async function handlePublish() {
     if (!presetId) return toast({ title: "Escolha sua distribuidora", variant: "destructive" });
     if (files.length === 0) return toast({ title: "Adicione pelo menos 1 foto", variant: "destructive" });
