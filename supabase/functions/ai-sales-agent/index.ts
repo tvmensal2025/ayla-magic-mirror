@@ -137,6 +137,13 @@ PRODUTO: economia de ~12% na conta de luz, sem obra, sem trocar fiação, mesma 
 
 OBJETIVO: levar o lead até enviar a foto da conta de luz (fechamento). Seja humana, breve e cordial. NUNCA soe robótica. Use no MÁXIMO 2 frases por turno. Emojis com parcimônia (no máx 1 por mensagem).
 
+ESTILO HUMANO OBRIGATÓRIO:
+- Nunca diga "assistente", "assistente virtual", "bot", "sistema", "atendimento digital", "como posso ajudar" ou "fico à disposição".
+- Para lead que manda só "oi", "olá", "bom dia" ou algo curto: responda como pessoa e faça UMA pergunta simples. Ex: "oii 😊 vc é de qual cidade?" ou "oii, tudo bem? sua conta costuma vir alta?"
+- Não despeje explicação no começo. Primeiro conecte, depois qualifique.
+- Prefira português casual de WhatsApp: "vc", "tá", "rapidinho", "blz", sem exagerar.
+- Não repita a mesma abertura que já apareceu no histórico.
+
 FUNIL (5 fases):
 
 1. ABERTURA — cumprimente pelo nome se tiver, conecte com a origem do lead ("Vi que você se interessou pelo nosso anúncio…"), e descubra a distribuidora dele. UMA pergunta por vez.
@@ -178,6 +185,21 @@ REGRAS DE OURO:
 NÃO INVENTE: preços específicos, prazos contratuais, condições especiais, descontos diferentes de 12%.
 
 ${custom ? `\nINSTRUÇÕES ADICIONAIS DO CONSULTOR:\n${custom}` : ""}`;
+}
+
+function sanitizeHumanMessage(message: string, phase: string, userInput: string): string {
+  const original = (message || "").trim();
+  const forbidden = /(assistente\s+(virtual|digital)?|bot\b|rob[oô]|sistema|como posso ajudar|fico (à|a) disposição)/i;
+  const normalizedInput = (userInput || "").toLowerCase().trim();
+  const isGreeting = /^(oi|ol[aá]|opa|bom dia|boa tarde|boa noite|tudo bem|eai|e aí)[!?.\s]*$/i.test(normalizedInput);
+  if (!original || forbidden.test(original) || original.length > 280) {
+    if (isGreeting || phase === "abertura") return "oii 😊 vc é de qual cidade?";
+    if (phase === "descoberta") return "me conta uma coisa: quanto vem mais ou menos sua conta de luz?";
+    if (phase === "pitch") return "posso fazer uma continha rápida pra ver sua economia?";
+    if (phase === "objecao") return "super entendo. o que ficou pegando pra vc?";
+    return "me manda uma foto da sua conta que eu vejo isso rapidinho pra vc 👌";
+  }
+  return original.replace(/🤖/g, "").trim();
 }
 
 async function loadContext(supabase: any, customerId: string) {
@@ -407,6 +429,13 @@ Deno.serve(async (req) => {
       args = {};
     }
 
+    if (tool === "send_text" || tool === "advance_to_closing") {
+      args.message = sanitizeHumanMessage(args.message || "", phase, mode === "rescue" ? "" : user_input);
+    }
+    if (tool === "send_media" && args.caption) {
+      args.caption = sanitizeHumanMessage(args.caption, phase, mode === "rescue" ? "" : user_input);
+    }
+
     const latencyMs = Date.now() - t0;
 
     // Validate media_id and resolve URL/kind for downstream sender
@@ -421,7 +450,7 @@ Deno.serve(async (req) => {
             decision: {
               tool: "send_text",
               args: {
-                message: args.caption || "Posso te explicar melhor?",
+                message: sanitizeHumanMessage(args.caption || "", phase, mode === "rescue" ? "" : user_input),
                 next_phase: args.next_phase || phase,
                 reasoning: args.reasoning,
               },

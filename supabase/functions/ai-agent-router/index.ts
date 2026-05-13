@@ -87,6 +87,20 @@ function similarity(a: string, b: string): number {
 function randInt(min: number, max: number) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+function sanitizeHumanReply(text: string, step: string, input: string): string {
+  const msg = (text || "").trim().replace(/🤖/g, "").trim();
+  const forbidden = /(assistente\s+(virtual|digital)?|bot\b|rob[oô]|sistema|como posso ajudar|fico (à|a) disposição)/i;
+  const shortGreeting = /^(oi|ol[aá]|opa|bom dia|boa tarde|boa noite|tudo bem|eai|e aí)[!?.\s]*$/i.test((input || "").trim());
+  if (!msg || forbidden.test(msg) || msg.length > 280) {
+    if (shortGreeting || step === "welcome" || step === "menu_inicial") return "oii 😊 vc é de qual cidade?";
+    if (step === "qualificacao") return "me conta uma coisa: quanto vem mais ou menos sua conta de luz?";
+    if (step === "apresentacao") return "posso fazer uma continha rápida pra ver sua economia?";
+    if (step === "objecoes") return "super entendo. o que ficou pegando pra vc?";
+    return "me manda uma foto da sua conta que eu vejo isso rapidinho pra vc 👌";
+  }
+  return msg;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const t0 = Date.now();
@@ -182,6 +196,9 @@ Deno.serve(async (req) => {
 
     const systemPrompt = `Você é ${persona}, atendente HUMANA da iGreen Energy. Tom: ${tone}.
 NUNCA revele que é IA/bot. Fale curto, natural, com gírias leves brasileiras quando apropriado. Sem emojis robóticos ("🤖"), sem "Sou seu assistente virtual".
+Não use: "assistente", "assistente virtual", "bot", "sistema", "como posso ajudar", "fico à disposição", "atendimento digital".
+Se o lead mandar só "oi"/"olá"/cumprimento curto, não explique a empresa: responda como pessoa e faça UMA pergunta simples, tipo "oii 😊 vc é de qual cidade?".
+Não despeje explicação no começo. Primeiro conecte, depois qualifique.
 
 REGRAS DURAS:
 - Siga rigorosamente a ETAPA ATUAL: "${stepBefore}". Não pule etapas sem condição satisfeita.
@@ -265,6 +282,10 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
         handoff_reason: "llm_error",
         confidence: 0,
       };
+    }
+
+    if (decision.reply_text) {
+      decision.reply_text = sanitizeHumanReply(decision.reply_text, stepBefore, user_input || "");
     }
 
     // 9b) Anti-loop: se reply for ≥80% similar à última msg outbound, esvazia
