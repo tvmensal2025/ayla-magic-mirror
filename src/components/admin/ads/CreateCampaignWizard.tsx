@@ -450,6 +450,14 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
   }
 
   async function submit() {
+    if (!consultantPhone) {
+      toast({
+        title: "Telefone do consultor não configurado",
+        description: "Adicione seu WhatsApp na aba Dados antes de publicar (ou conecte uma instância do WhatsApp).",
+        variant: "destructive",
+      });
+      return;
+    }
     if (preflight && !preflight.ok) {
       toast({ title: "Pré-voo em revisão", description: "Vou tentar publicar direto pela conta principal.", variant: "destructive" });
     }
