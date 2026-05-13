@@ -60,7 +60,7 @@ export function TemplateCreateForm({ onCreateTemplate }: Props) {
         setUploadProgress(0);
         setUploadedFileName(file.name);
         try {
-          const result = await uploadMedia(file, (pct) => setUploadProgress(pct));
+          const result = await uploadMedia(file, (pct) => setUploadProgress(pct), { scope: "template", kind: file.type.startsWith("image/") ? "image" : file.type.startsWith("audio/") ? "audio" : file.type.startsWith("video/") ? "video" : "document", slug: name || file.name });
           setMediaUrl(result.url);
           toast.success(`Áudio gravado e enviado: ${formatFileSize(result.size)}`);
         } catch (err: unknown) {
@@ -106,7 +106,7 @@ export function TemplateCreateForm({ onCreateTemplate }: Props) {
     setUploadProgress(0);
     setUploadedFileName(file.name);
     try {
-      const result = await uploadMedia(file, (pct) => setUploadProgress(pct));
+      const result = await uploadMedia(file, (pct) => setUploadProgress(pct), { scope: "template", kind: file.type.startsWith("image/") ? "image" : file.type.startsWith("audio/") ? "audio" : file.type.startsWith("video/") ? "video" : "document", slug: name || file.name });
       setMediaUrl(result.url);
       toast.success(`Arquivo enviado: ${formatFileSize(result.size)}`);
     } catch (err: unknown) {
@@ -126,7 +126,7 @@ export function TemplateCreateForm({ onCreateTemplate }: Props) {
     setImageUploadProgress(0);
     setUploadedImageName(file.name);
     try {
-      const result = await uploadMedia(file, (pct) => setImageUploadProgress(pct));
+      const result = await uploadMedia(file, (pct) => setImageUploadProgress(pct), { scope: "template", kind: "image", slug: name || file.name });
       setImageUrl(result.url);
       toast.success(`Imagem enviada: ${formatFileSize(result.size)}`);
     } catch (err: unknown) {

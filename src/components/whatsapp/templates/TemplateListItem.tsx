@@ -77,7 +77,7 @@ export function TemplateListItem({ template: t, consultantId, onUpdateTemplate, 
     setIsEditUploading(true);
     setEditUploadProgress(0);
     try {
-      const result = await uploadMedia(file, (pct) => setEditUploadProgress(pct));
+      const result = await uploadMedia(file, (pct) => setEditUploadProgress(pct), { scope: "template", kind: file.type.startsWith("image/") ? "image" : file.type.startsWith("audio/") ? "audio" : file.type.startsWith("video/") ? "video" : "document" });
       if (target === "media") setEditMediaUrl(result.url);
       else setEditImageUrl(result.url);
       toast.success(`Arquivo enviado: ${formatFileSize(result.size)}`);

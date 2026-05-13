@@ -18,7 +18,7 @@ export function AddImageToTemplate({ templateId, onUpdateTemplate }: Props) {
     if (!file) return;
     setUploading(true);
     try {
-      const result = await uploadMedia(file);
+      const result = await uploadMedia(file, undefined, { scope: "template", kind: file.type.startsWith("image/") ? "image" : "audio" });
       await onUpdateTemplate(templateId, { image_url: result.url });
       toast.success("Imagem adicionada ao template!");
     } catch {
