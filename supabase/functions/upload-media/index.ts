@@ -224,35 +224,99 @@ Deno.serve(async (req) => {
     }
 
     const ext = getExtension(file.type);
-    const fileId = `${crypto.randomUUID()}-${Date.now()}.${ext}`;
     const fileBytes = new Uint8Array(await file.arrayBuffer());
 
-    // ── Determine storage path ──────────────────────────────────────────
-    // Admin → public/media/{file}  (publicly accessible)
-    // Client → private/{consultant_id}/{file}  (personal, private)
-    let objectKey: string;
-    if (userIsAdmin) {
-      objectKey = `public/media/${fileId}`;
-    } else if (userId) {
-      objectKey = `private/${userId}/${fileId}`;
-    } else {
-      objectKey = `public/uploads/${fileId}`;
+    // ── Determine media kind from MIME ────────────────────────────────
+    const inferKind = (mime: string): "image" | "audio" | "video" | "document" => {
+      if (mime.startsWith("image/")) return "image";
+      if (mime.startsWith("audio/")) return "audio";
+      if (mime.startsWith("video/")) return "video";
+      return "document";
+    };
+
+    // ── Optional context fields ───────────────────────────────────────
+    // scope: "chat" | "template" | "avatar" | "doc" | "generic"
+    const scope = String(formData.get("scope") || "").trim() || (userIsAdmin ? "admin" : "generic");
+    const consultantIdField = String(formData.get("consultant_id") || userId || "").trim();
+    const customerJid = String(formData.get("customer_jid") || "").trim();
+    const customerNameField = String(formData.get("customer_name") || "").trim();
+    const slugHint = String(formData.get("slug") || "").trim();
+    const kindField = String(formData.get("kind") || inferKind(file.type)).trim();
+
+    // ── Resolve consultor slug ────────────────────────────────────────
+    let consultantSlug = "sem_consultor";
+    if (consultantIdField) {
+      const { data: c } = await supabase
+        .from("consultants")
+        .select("igreen_id, name")
+        .eq("id", consultantIdField)
+        .maybeSingle();
+      consultantSlug = buildConsultantSlug(c?.igreen_id || consultantIdField, c?.name || null);
     }
 
-    console.log(`Uploading to MinIO: ${objectKey} (${file.type}, ${file.size} bytes, admin=${userIsAdmin})`);
+    const ts = Date.now();
+    const safeFileBase = slugHint
+      ? `${normalizeName(slugHint)}_${ts}`
+      : `${ts}_${crypto.randomUUID().slice(0, 8)}`;
 
-    await uploadToMinIO({
-      serverUrl: minioUrl,
-      accessKey: minioUser,
-      secretKey: minioPass,
-      bucket: minioBucket,
-      objectKey,
-      fileBytes,
-      contentType: file.type,
-    });
+    // ── Build object key based on scope ───────────────────────────────
+    let objectKey: string;
+    switch (scope) {
+      case "chat": {
+        const jid = sanitizeJid(customerJid);
+        objectKey = `whatsapp/${consultantSlug}/${jid}/${kindField}/${safeFileBase}.${ext}`;
+        break;
+      }
+      case "template": {
+        objectKey = `templates/${consultantSlug}/${kindField}/${safeFileBase}.${ext}`;
+        break;
+      }
+      case "avatar": {
+        objectKey = `consultores/${consultantSlug}/avatar_${ts}.${ext}`;
+        break;
+      }
+      case "admin":
+        objectKey = `public/media/${safeFileBase}.${ext}`;
+        break;
+      default:
+        objectKey = userId
+          ? `private/${userId}/${safeFileBase}.${ext}`
+          : `public/uploads/${safeFileBase}.${ext}`;
+    }
 
-    // Build the public URL
-    const publicUrl = `${minioUrl}/${minioBucket}/${objectKey}`;
+    console.log(`📦 [upload-media] scope=${scope} key=${objectKey} (${file.type}, ${file.size}B)`);
+
+    let storageBackend: "minio" | "supabase" = "minio";
+    let publicUrl: string;
+    try {
+      await uploadToMinIO({
+        serverUrl: minioUrl,
+        accessKey: minioUser,
+        secretKey: minioPass,
+        bucket: minioBucket,
+        objectKey,
+        fileBytes,
+        contentType: file.type,
+      });
+      publicUrl = `${minioUrl}/${minioBucket}/${objectKey}`;
+    } catch (minioErr: any) {
+      console.warn(`📦⚠️ MinIO falhou, fallback Supabase: ${minioErr?.message}`);
+      storageBackend = "supabase";
+      const fallbackKey = userId
+        ? `private/${userId}/${safeFileBase}.${ext}`
+        : `public/${safeFileBase}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("whatsapp-media")
+        .upload(fallbackKey, fileBytes, {
+          contentType: file.type,
+          upsert: false,
+          cacheControl: "31536000",
+        });
+      if (upErr) throw new Error(`Both MinIO and Supabase failed: ${upErr.message}`);
+      const { data: pub } = supabase.storage.from("whatsapp-media").getPublicUrl(fallbackKey);
+      publicUrl = pub.publicUrl;
+      objectKey = fallbackKey;
+    }
 
     return new Response(
       JSON.stringify({
