@@ -129,6 +129,23 @@ export async function loadConsultantAdSettings(consultantId: string): Promise<{
       .maybeSingle();
     phone = (inst as any)?.connected_phone ?? null;
   }
+  if (!phone) {
+    const { data: c } = await admin
+      .from("consultants")
+      .select("phone")
+      .eq("id", consultantId)
+      .maybeSingle();
+    phone = (c as any)?.phone ?? null;
+  }
+  // Normaliza apenas dígitos
+  if (phone) phone = String(phone).replace(/\D/g, "") || null;
+  // Auto-provision: persiste o resolvido em consultant_ad_settings pra próximas execuções
+  if (phone && !data?.whatsapp_destination_number) {
+    await admin.from("consultant_ad_settings").upsert(
+      { consultant_id: consultantId, whatsapp_destination_number: phone },
+      { onConflict: "consultant_id" }
+    );
+  }
   return {
     whatsapp_destination_number: phone,
     cities: (data?.cities as any) || [],
