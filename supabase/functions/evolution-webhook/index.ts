@@ -279,12 +279,17 @@ Deno.serve(async (req) => {
           const upRes = await uploadToMinioPath(bytes, mimeType, objectKey);
           inboundMediaMinioUrl = upRes.url;
           console.log(`📦✅ inbound media → MinIO: ${upRes.url.substring(0, 100)}`);
-          // Anexa a URL na conversa registrada acima (best effort)
+          // Anexa a URL na última conversa inbound deste customer (best effort)
           try {
-            await supabase.from("conversations").update({
-              message_text: `[${kind}] ${upRes.url}`,
-              message_type: kind,
-            }).eq("customer_id", customer.id).eq("message_direction", "inbound").order("created_at", { ascending: false }).limit(1);
+            const { data: lastConv } = await supabase.from("conversations")
+              .select("id").eq("customer_id", customer.id).eq("message_direction", "inbound")
+              .order("created_at", { ascending: false }).limit(1).maybeSingle();
+            if (lastConv?.id) {
+              await supabase.from("conversations").update({
+                message_text: `[${kind}] ${upRes.url}`,
+                message_type: kind,
+              }).eq("id", lastConv.id);
+            }
           } catch (e) { /* ignore */ }
         } catch (e: any) {
           console.warn(`📦⚠️ inbound media MinIO falhou: ${e?.message}`);
