@@ -403,19 +403,41 @@ Deno.serve(async (req) => {
       return intents.some((t: string) => profileTags.includes(t));
     });
 
-    const billAlreadyReceivedEarly = !!customer.electricity_bill_photo_url;
+    // Conta só conta como "recebida" se OCR concluído E nome veio de fonte confiável.
+    // Sem isso, o LLM ficava preso confirmando dados de um lead anterior reaproveitado.
+    const nameSourceTrusted = ["ocr", "self_introduced", "manual"].includes(
+      String(customer.name_source || ""),
+    );
+    const billAlreadyReceivedEarly =
+      !!customer.electricity_bill_photo_url && !!customer.ocr_done && nameSourceTrusted;
+
+    // Cooldown de mídia: pega últimas 5 mídias enviadas para esse lead e marca como "já enviadas".
+    const { data: recentMediaSent } = await supabase
+      .from("ai_decisions")
+      .select("media_sent_id")
+      .eq("customer_id", customer_id)
+      .not("media_sent_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    const sentMediaIds = new Set((recentMediaSent || []).map((r: any) => r.media_sent_id));
+    const freshMedia = eligibleMedia.filter((m: any) => !sentMediaIds.has(m.id));
+
     const mediaListLine = billAlreadyReceivedEarly
       ? `\n[MÍDIAS DISPONÍVEIS]\nNENHUMA — a conta já foi recebida. Confirme os dados em send_text e em seguida use request_handoff. PROIBIDO send_media nesta etapa.`
-      : eligibleMedia.length
+      : freshMedia.length
       ? `\n[MÍDIAS DISPONÍVEIS para fase ${phase}]\n` +
-        eligibleMedia
+        freshMedia
           .map(
             (m: any, i: number) =>
               `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""}`,
           )
           .join("\n") +
-        `\nUse send_media APENAS com um desses media_id.`
-      : `\n[MÍDIAS DISPONÍVEIS]\nNenhuma para esta fase. Use send_text.`;
+        `\nUse send_media APENAS com um desses media_id. ${
+          sentMediaIds.size
+            ? `(${sentMediaIds.size} mídia(s) já enviada(s) recentemente foram ocultadas — NÃO repita.)`
+            : ""
+        }`
+      : `\n[MÍDIAS DISPONÍVEIS]\nNenhuma nova para esta fase (todas já enviadas). Use send_text.`;
 
     const cadenceLine =
       `\n[CADÊNCIA]\n` +
