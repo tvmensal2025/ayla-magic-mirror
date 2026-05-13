@@ -20,12 +20,12 @@ const FORMAT_SPEC: Record<Format, { ratio: string; w: number; h: number; safeZon
 };
 
 const ANGLE_DESC: Record<string, string> = {
-  economia_concreta: "pessoa real brasileira em casa simples sorrindo aliviada segurando uma conta de energia, iluminação natural quente, expressão de alívio financeiro",
-  quebra_objecao:    "close em mãos brasileiras segurando smartphone com app de energia aberto (interface borrada/genérica, SEM texto legível), em ambiente residencial brasileiro",
-  prova_social:      "família brasileira de classe média (pai, mãe, filho) sorrindo na sala de casa simples, autêntica, não-posada, iluminação natural",
-  curiosidade:       "pessoa brasileira em cozinha simples olhando para conta de luz com expressão de surpresa e dúvida, fundo desfocado",
-  dor_pas:           "pessoa brasileira preocupada na sala de casa olhando uma conta de luz alta, luz fria desbotada (clima de problema), fundo simples",
-  urgencia_local:    "vista de bairro residencial brasileiro de classe média ao entardecer, casas simples, postes, atmosfera regional",
+  economia_concreta: "Brazilian woman, 30-40 years old, wearing a casual green or white t-shirt, BIG genuine surprised-happy smile, holding a COMPLETELY BLANK white paper sheet (no text, no logo, no numbers, no marks) in front of her chest like an electricity bill, pointing at it with the other hand, bright modern simple Brazilian living room background softly out of focus",
+  quebra_objecao:    "Brazilian woman 30s, casual clothes, confident relaxed smile, one hand holding a smartphone with COMPLETELY BLACK turned-off screen, the other hand holding a BLANK white paper sheet, bright clean residential background out of focus",
+  prova_social:      "Brazilian woman 30s smiling warmly at camera, holding a BLANK white paper sheet in both hands at chest height, bright clean modern living room background softly out of focus",
+  curiosidade:       "Brazilian woman 30s with curious raised-eyebrow expression, holding a COMPLETELY BLANK white paper sheet up close looking at it, bright simple kitchen/living room background softly out of focus",
+  dor_pas:           "Brazilian woman 30s with worried concerned expression, holding a BLANK white paper sheet, hand on forehead, bright clean residential background softly out of focus",
+  urgencia_local:    "Brazilian woman 30s with hopeful excited expression, holding a BLANK white paper sheet, bright clean residential background softly out of focus",
 };
 
 const ANGLE_HEADLINE: Record<string, { headline: string; badge: string }> = {
