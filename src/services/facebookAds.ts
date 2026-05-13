@@ -3,6 +3,15 @@ import { supabase } from "@/integrations/supabase/client";
 async function throwFunctionError(error: any): Promise<never> {
   const response = error?.context as Response | undefined;
   if (response && typeof response.clone === "function") {
+    // 546 = CPU Time exceeded no Supabase Edge Runtime
+    if (response.status === 546) {
+      throw new Error(
+        "A publicação demorou demais no servidor (limite de processamento). Tente novamente em alguns segundos — o sistema já está otimizado para responder rápido."
+      );
+    }
+    if (response.status === 504) {
+      throw new Error("Timeout do servidor ao publicar. Tente novamente em alguns segundos.");
+    }
     try {
       const payload = await response.clone().json();
       if (payload?.error) throw new Error(payload.error);
