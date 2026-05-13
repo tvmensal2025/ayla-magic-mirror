@@ -10,6 +10,7 @@ import { Eye, RefreshCw, Search, Trophy, Wand2, ExternalLink } from "lucide-reac
 
 interface Row {
   id: string;
+  ad_archive_id: string | null;
   advertiser: string;
   headline: string | null;
   primary_text: string | null;
@@ -17,7 +18,13 @@ interface Row {
   angle: string | null;
   creative_format: string | null;
   active_days: number | null;
+  thumbnail_url: string | null;
+  image_url: string | null;
   ingested_at: string;
+}
+
+interface Props {
+  onInspire?: (adId: string, hint: string) => void;
 }
 
 const ANGLE_LABEL: Record<string, string> = {
