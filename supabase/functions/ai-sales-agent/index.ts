@@ -637,16 +637,32 @@ Deno.serve(async (req) => {
       );
     }
     if (tool === "send_media") {
+      // Server-side anti-spam: se a última saída já foi mídia OU se essa media_id já foi
+      // enviada nas últimas 5 vezes, degrada para send_text (caption como mensagem).
+      const justSentMedia = recentMediaCount >= 1;
+      const alreadySentSameId = sentMediaIds.has(args.media_id);
       const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
-      if (!picked || !picked.url) {
-        // Hallucinated id — degrade to send_text with the caption
-        args.reasoning = (args.reasoning || "") + " [media_id inválido — fallback texto]";
+      const invalidId = !picked || !picked.url;
+
+      if (invalidId || justSentMedia || alreadySentSameId) {
+        const tag = invalidId
+          ? "[media_id inválido]"
+          : alreadySentSameId
+          ? "[mídia repetida — bloqueada]"
+          : "[mídia consecutiva — bloqueada]";
+        args.reasoning = (args.reasoning || "") + ` ${tag} fallback texto`;
+        const fallbackMsg =
+          args.caption && args.caption.trim().length > 0
+            ? args.caption
+            : (picked?.label
+              ? `Sobre ${picked.label.toLowerCase()}: posso te explicar em poucas linhas se preferir.`
+              : "Posso te explicar em poucas linhas se preferir.");
         return new Response(
           JSON.stringify({
             decision: {
               tool: "send_text",
               args: {
-                message: sanitizeHumanMessage(args.caption || "", phase, mode === "rescue" ? "" : user_input, firstName),
+                message: sanitizeHumanMessage(fallbackMsg, phase, mode === "rescue" ? "" : user_input, firstName),
                 next_phase: args.next_phase || phase,
                 reasoning: args.reasoning,
               },
