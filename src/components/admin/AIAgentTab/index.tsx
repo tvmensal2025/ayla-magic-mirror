@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bot, MessagesSquare, Library, Loader2, Brain } from "lucide-react";
+import { Bot, MessagesSquare, Library, Loader2, Brain, Mic, FileText, BookOpen } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
@@ -7,8 +7,10 @@ import { LiveConversationsPanel } from "./LiveConversationsPanel";
 import { MediaColumn } from "./MediaColumn";
 import { RoteiroColumn } from "./RoteiroColumn";
 import { AIDecisionsPanel } from "./AIDecisionsPanel";
+import { SlotsPanel } from "./SlotsPanel";
 
 type SubTab = "atendimentos" | "agente" | "decisoes";
+type AgenteSub = "audios" | "midias" | "roteiro";
 
 export function AIAgentTab({ userId }: { userId: string }) {
   const { toast } = useToast();
