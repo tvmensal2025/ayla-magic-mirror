@@ -304,14 +304,55 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── 7.1) AI AGENT MODE — delegar ao novo orquestrador ─────────────
-    const { data: aiCfg } = await supabase
+    // ─── 7.0) Garante consultant_id no customer (lead órfão de tráfego) ─
+    if (!customer.consultant_id && instanceData.consultant_id) {
+      try {
+        await supabase.from("customers")
+          .update({ consultant_id: instanceData.consultant_id })
+          .eq("id", customer.id);
+        (customer as any).consultant_id = instanceData.consultant_id;
+        console.log(`👤 [orphan-fix] customer ${customer.id} -> consultant ${instanceData.consultant_id}`);
+      } catch (e) { console.warn("orphan-fix update failed:", e); }
+    }
+
+    // ─── 7.1) AI AGENT MODE — Camila assume conversa livre ─────────────
+    // Steps onde a IA conduz (resto fica no bot hardcoded com BOTÕES intactos).
+    const CONVERSATIONAL_STEPS = new Set([
+      "welcome",
+      "menu_inicial",
+      "pos_video",
+      "aguardando_humano",
+      "aguardando_conta",
+      "qualificacao",
+      "apresentacao",
+      "objecoes",
+    ]);
+    const currentStep = customer.conversation_step || "welcome";
+
+    // Cascata: config do consultor -> config global (consultant_id IS NULL)
+    const { data: aiCfgPriv } = await supabase
       .from("ai_agent_config")
       .select("enabled")
       .eq("consultant_id", instanceData.consultant_id)
       .maybeSingle();
+    let aiCfg = aiCfgPriv;
+    if (!aiCfg) {
+      const { data: aiCfgGlobal } = await supabase
+        .from("ai_agent_config")
+        .select("enabled")
+        .is("consultant_id", null)
+        .maybeSingle();
+      aiCfg = aiCfgGlobal;
+    }
 
-    if (aiCfg?.enabled === true) {
+    // Em aguardando_conta, se o cliente mandou MÍDIA (foto da conta), NÃO chamar IA;
+    // o bot hardcoded faz OCR + envia botões SIM/NÃO/EDITAR.
+    const aiShouldHandle =
+      aiCfg?.enabled === true &&
+      CONVERSATIONAL_STEPS.has(currentStep) &&
+      !(currentStep === "aguardando_conta" && isFile);
+
+    if (aiShouldHandle) {
       let aiInput = messageText || "";
       let aiInputKind: "text" | "audio_transcript" | "image_caption" | "document" = "text";
       if (isFile && fileBase64) {
@@ -452,12 +493,32 @@ Deno.serve(async (req) => {
     delete (updates as any).__inline_sent;
     let finalReply = reply;
     if (!finalReply && !handlerSentInline) {
-      console.warn(`⚠️ [SAFETY] Bot sem resposta no step "${stepToSend}" para ${customer.id} — enviando fallback`);
-      finalReply = `🤖 Estou aqui! Vamos continuar o cadastro?\n\nDigite *cadastrar* para retomar ou aguarde, já volto com você.`;
+      // Sem resposta do bot E nada inline foi enviado.
+      // Em vez do antigo "🤖 Estou aqui!..." (robotizado), fazemos handoff silencioso:
+      // - se faz <30min desde a última resposta, manda um cumprimento curto humano só 1x
+      // - senão, pausa o bot pra um humano assumir, sem avisar o cliente
+      const lastReplyAt = (customer as any).last_bot_reply_at
+        ? new Date((customer as any).last_bot_reply_at).getTime()
+        : 0;
+      const thirtyMin = 30 * 60_000;
+      const recentlyReplied = lastReplyAt && (Date.now() - lastReplyAt) < thirtyMin;
+      console.warn(`⚠️ [empty-reply] step="${stepToSend}" customer=${customer.id} recentlyReplied=${!!recentlyReplied}`);
       captureError(new Error(`Bot empty reply at step ${stepToSend}`), {
         tags: { function: "evolution-webhook", kind: "empty_reply_safety" },
         extra: { customer_id: customer.id, step: stepToSend },
       });
+      if (!recentlyReplied) {
+        finalReply = "oii 😊";
+      } else {
+        // pausa silenciosa, sem mensagem robotizada
+        try {
+          await supabase.from("customers").update({
+            bot_paused: true,
+            bot_paused_reason: "silent_handoff_empty_reply",
+            bot_paused_at: new Date().toISOString(),
+          }).eq("id", customer.id);
+        } catch (_) { /* noop */ }
+      }
     }
     if (finalReply) {
       try {

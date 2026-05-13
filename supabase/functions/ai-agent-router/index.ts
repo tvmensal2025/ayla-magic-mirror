@@ -35,21 +35,54 @@ const FUNNEL_STEPS = [
   "complete", "handoff_humano",
 ] as const;
 
+const INTENTS = [
+  "saudacao","duvida","objecao","aceite","recusa",
+  "pediu_humano","enviou_midia","confuso","fora_escopo",
+  "frio","quente","desconfiado",
+] as const;
+
 const DECISION_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
     intent: { type: "string", description: "Intenção detectada do cliente em 1-3 palavras" },
+    detected_intent: { type: "string", enum: [...INTENTS], description: "Categoria estruturada da intenção" },
+    pain_point: { type: "string", description: "Dor/necessidade detectada em até 60 chars. Vazio se nada claro." },
+    qualification_score: { type: "integer", minimum: 0, maximum: 10, description: "Quão pronto o lead está pra fechar" },
+    objection_type: { type: "string", description: "Tipo da objeção (preco, confianca, instalacao, prazo, etc). Vazio se sem objeção." },
+    should_pause_seconds: { type: "integer", minimum: 0, maximum: 8, description: "Pausa antes de enviar (humanização)" },
     next_step: { type: "string", enum: [...FUNNEL_STEPS] },
-    reply_text: { type: "string", description: "Texto curto humanizado para enviar. Vazio se for só enviar mídia/áudio." },
-    media_to_send_ids: { type: "array", items: { type: "string" }, description: "IDs de ai_media_library a enviar em ordem. Vazio se nenhum." },
-    audio_slot_key: { type: "string", description: "slot_key da biblioteca de áudios da Camila a disparar (ex: objecao_preco). Vazio se nenhum." },
-    handoff: { type: "boolean", description: "true se deve transferir para humano agora" },
+    reply_text: { type: "string", description: "Texto curto humanizado. Vazio se for só enviar mídia/áudio." },
+    media_to_send_ids: { type: "array", items: { type: "string" } },
+    audio_slot_key: { type: "string", description: "slot_key do áudio da Camila. Vazio se nenhum." },
+    handoff: { type: "boolean" },
     handoff_reason: { type: "string" },
     confidence: { type: "number", minimum: 0, maximum: 1 },
   },
-  required: ["intent", "next_step", "reply_text", "media_to_send_ids", "audio_slot_key", "handoff", "handoff_reason", "confidence"],
+  required: [
+    "intent","detected_intent","pain_point","qualification_score","objection_type",
+    "should_pause_seconds","next_step","reply_text","media_to_send_ids",
+    "audio_slot_key","handoff","handoff_reason","confidence",
+  ],
 } as const;
+
+// Similaridade simples por trigrams para anti-loop
+function similarity(a: string, b: string): number {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-zà-ú0-9 ]/gi, "").replace(/\s+/g, " ").trim();
+  const A = norm(a), B = norm(b);
+  if (!A || !B) return 0;
+  if (A === B) return 1;
+  const trig = (s: string) => {
+    const set = new Set<string>();
+    const p = `  ${s}  `;
+    for (let i = 0; i < p.length - 2; i++) set.add(p.slice(i, i + 3));
+    return set;
+  };
+  const ta = trig(A), tb = trig(B);
+  let inter = 0;
+  ta.forEach((t) => { if (tb.has(t)) inter++; });
+  return inter / Math.max(ta.size, tb.size);
+}
 
 function randInt(min: number, max: number) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -219,19 +252,71 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
     if (!decision) {
       decision = {
         intent: "fallback",
+        detected_intent: "confuso",
+        pain_point: "",
+        qualification_score: 0,
+        objection_type: "",
+        should_pause_seconds: 0,
         next_step: stepBefore,
-        reply_text: "Tive uma instabilidade aqui, pode repetir, por favor?",
+        reply_text: "",
         media_to_send_ids: [],
         audio_slot_key: "",
         handoff: false,
-        handoff_reason: "",
+        handoff_reason: "llm_error",
         confidence: 0,
       };
+    }
+
+    // 9b) Anti-loop: se reply for ≥80% similar à última msg outbound, esvazia
+    if (decision.reply_text && decision.reply_text.trim()) {
+      const lastOut = [...historyChrono].reverse().find((m: any) => m.message_direction === "outbound");
+      if (lastOut?.message_text && similarity(decision.reply_text, lastOut.message_text) >= 0.8) {
+        console.log("🔁 anti-loop: reply muito parecido com último outbound, esvaziando");
+        decision.reply_text = "";
+        if (!decision.audio_slot_key && !(decision.media_to_send_ids || []).length) {
+          decision.handoff = true;
+          decision.handoff_reason = "anti_loop";
+        }
+      }
+    }
+
+    // 9c) 3x confuso seguidos -> handoff
+    if (decision.detected_intent === "confuso") {
+      const { data: lastLogs } = await supabase
+        .from("ai_agent_logs")
+        .select("llm_output")
+        .eq("customer_id", customer_id)
+        .order("created_at", { ascending: false })
+        .limit(2);
+      const prevConfused = (lastLogs || []).filter((l: any) =>
+        l?.llm_output?.detected_intent === "confuso").length;
+      if (prevConfused >= 2) {
+        decision.handoff = true;
+        decision.handoff_reason = "3x_confuso";
+      }
+    }
+
+    // 9d) Pediu humano -> força handoff
+    if (decision.detected_intent === "pediu_humano") {
+      decision.handoff = true;
+      decision.handoff_reason = decision.handoff_reason || "pediu_humano";
     }
 
     // 10) Executar ações
     const sender = createEvolutionSender(EVOLUTION_API_URL, EVOLUTION_API_KEY, instance_name);
     const updates: Record<string, any> = {};
+
+    // Persistir insights da IA no customer
+    if (decision.pain_point) updates.pain_point = String(decision.pain_point).slice(0, 200);
+    if (typeof decision.qualification_score === "number") {
+      updates.qualification_score = decision.qualification_score;
+    }
+    updates.intent_signals = {
+      last_intent: decision.detected_intent,
+      objection_type: decision.objection_type || null,
+      confidence: decision.confidence,
+      at: new Date().toISOString(),
+    };
 
     // Handoff
     if (decision.handoff) {
@@ -242,6 +327,10 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
     } else if (decision.next_step && decision.next_step !== stepBefore) {
       updates.conversation_step = decision.next_step;
     }
+
+    // Pausa humanizadora antes de enviar (se IA pediu)
+    const extraPauseMs = Math.max(0, Math.min(8, decision.should_pause_seconds || 0)) * 1000;
+    if (extraPauseMs > 0) await sleep(extraPauseMs);
 
     // Simulação de digitação
     const typingMin = config.typing_min_ms ?? 1200;
