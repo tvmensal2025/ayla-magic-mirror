@@ -127,6 +127,7 @@ const tools = [
         required: ["reason"],
       },
     },
+  },
   {
     type: "function",
     function: {
