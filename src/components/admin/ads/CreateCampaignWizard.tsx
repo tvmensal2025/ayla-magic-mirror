@@ -16,6 +16,7 @@ import { AdQualityPanel } from "./AdQualityPanel";
 import type { QualityResult } from "@/lib/adQualityScore";
 import { useFacebookConnection } from "@/hooks/useFacebookConnection";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useConsultantPhone, formatBrPhone } from "@/hooks/useConsultantPhone";
 import { supabase } from "@/integrations/supabase/client";
 import { upsertAdTemplate } from "@/services/adTemplates";
 
@@ -87,6 +88,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
   const { toast } = useToast();
   const { connection } = useFacebookConnection(consultantId);
   const { isSuperAdmin } = useUserRole(consultantId);
+  const { phone: consultantPhone, loading: phoneLoading } = useConsultantPhone(consultantId);
   const [step, setStep] = useState<Step>(1);
   const [submitting, setSubmitting] = useState(false);
   const [aiResizingIdx, setAiResizingIdx] = useState<number | null>(null);
@@ -448,11 +450,28 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
   }
 
   async function submit() {
+    if (!consultantPhone) {
+      toast({
+        title: "Telefone do consultor não configurado",
+        description: "Adicione seu WhatsApp na aba Dados antes de publicar (ou conecte uma instância do WhatsApp).",
+        variant: "destructive",
+      });
+      return;
+    }
     if (preflight && !preflight.ok) {
       toast({ title: "Pré-voo em revisão", description: "Vou tentar publicar direto pela conta principal.", variant: "destructive" });
     }
     setSubmitting(true);
     try {
+      // GARANTIA: persiste o telefone resolvido em consultant_ad_settings antes
+      // de chamar a edge function — assim o backend nunca falha por WHATSAPP_NOT_CONFIGURED.
+      try {
+        const { supabase } = await import("@/integrations/supabase/client");
+        await supabase.from("consultant_ad_settings").upsert(
+          { consultant_id: consultantId, whatsapp_destination_number: consultantPhone },
+          { onConflict: "consultant_id" }
+        );
+      } catch (e) { console.warn("[wizard] persist phone failed:", e); }
       // Mantém formato de cada foto pra que o backend monte asset_feed_spec
       // com customization por posicionamento (sem corte de cabeça em Reels).
       const tagged: { file: AdFile; format: AdFormat }[] = [
@@ -1041,7 +1060,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
                   headline={headline}
                   primaryText={primaryText}
                   description={description}
-                  whatsappNumber={connection?.whatsapp_destination_number || "5511971254913"}
+                  whatsappNumber={consultantPhone || ""}
                 />
                 <div className="lg:col-start-2">
                   <AdQualityPanel
@@ -1077,7 +1096,16 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
                   <div className="text-muted-foreground">📍 {cities.length} cidade(s) — {cities.slice(0, 3).map(c => c.name).join(", ")}{cities.length > 3 ? "..." : ""}</div>
                   <div className="text-muted-foreground">🖼️ {totalFiles} foto(s) — {filesByFormat.square.length} quadrada(s), {filesByFormat.vertical.length} vertical(is), {filesByFormat.story.length} story</div>
                   <div className="text-muted-foreground">💰 R$ {budget}/dia × {duration === 0 ? "contínuo" : `${duration} dias`} = <strong className="text-foreground">R$ {duration === 0 ? `${budget * 30}/mês est.` : (budget * duration)}</strong></div>
-                  <div className="text-muted-foreground">🎯 Mensagens vão para WhatsApp <strong className="text-primary">+{(connection?.whatsapp_destination_number || "5511971254913").replace(/^(\d{2})(\d{2})(\d+)(\d{4})$/, "$1 $2 $3-$4")}</strong></div>
+                  <div className={consultantPhone ? "text-muted-foreground" : "text-destructive font-semibold"}>
+                    🎯 Mensagens vão para WhatsApp{" "}
+                    {consultantPhone ? (
+                      <strong className="text-primary">{formatBrPhone(consultantPhone)}</strong>
+                    ) : phoneLoading ? (
+                      <span>carregando...</span>
+                    ) : (
+                      <span>⚠️ não configurado — adicione seu telefone na aba <strong>Dados</strong> antes de publicar</span>
+                    )}
+                  </div>
                 </Card>
 
                 <Card className="p-4 space-y-3 text-sm">
