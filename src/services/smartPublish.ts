@@ -41,18 +41,53 @@ export interface SmartPublishResult {
 }
 
 async function getConnectedPhone(consultantId: string): Promise<string | null> {
-  // Tenta facebook_connections (whatsapp_destination_number) primeiro,
-  // depois cai pro telefone do consultor.
-  const { data: fb } = await supabase
-    .from("facebook_connections")
-    .select("whatsapp_destination_number, whatsapp_display_number")
+  // Mesma cascata do backend (loadConsultantAdSettings) e do hook
+  // useConsultantPhone — garante que o anúncio use o número que está
+  // realmente conectado em Dados e na instância WhatsApp (Evolution).
+  const onlyDigits = (v: unknown) => {
+    const s = String(v ?? "").replace(/\D/g, "");
+    return s.length >= 10 ? s : null;
+  };
+
+  // 1) consultant_ad_settings (configurado em "Dados")
+  const { data: cas } = await supabase
+    .from("consultant_ad_settings")
+    .select("whatsapp_destination_number")
     .eq("consultant_id", consultantId)
     .maybeSingle();
-  const fromFb = fb?.whatsapp_destination_number || fb?.whatsapp_display_number;
-  if (fromFb) return fromFb;
-  const { data: c } = await supabase
-    .from("consultants").select("phone").eq("id", consultantId).maybeSingle();
-  return c?.phone || null;
+  let resolved = onlyDigits(cas?.whatsapp_destination_number);
+
+  // 2) whatsapp_instances.connected_phone (Evolution conectado)
+  if (!resolved) {
+    const { data: inst } = await supabase
+      .from("whatsapp_instances")
+      .select("connected_phone")
+      .eq("consultant_id", consultantId)
+      .not("connected_phone", "is", null)
+      .limit(1)
+      .maybeSingle();
+    resolved = onlyDigits((inst as any)?.connected_phone);
+  }
+
+  // 3) consultants.phone (cadastro)
+  if (!resolved) {
+    const { data: c } = await supabase
+      .from("consultants").select("phone").eq("id", consultantId).maybeSingle();
+    resolved = onlyDigits(c?.phone);
+  }
+
+  // 4) facebook_connections (último recurso)
+  if (!resolved) {
+    const { data: fb } = await supabase
+      .from("facebook_connections")
+      .select("whatsapp_destination_number, whatsapp_display_number")
+      .eq("consultant_id", consultantId)
+      .maybeSingle();
+    resolved = onlyDigits(fb?.whatsapp_destination_number)
+      || onlyDigits(fb?.whatsapp_display_number);
+  }
+
+  return resolved;
 }
 
 function pickPresetByUf(allowed: DistribuidoraPreset[], uf: string | null): DistribuidoraPreset | null {
