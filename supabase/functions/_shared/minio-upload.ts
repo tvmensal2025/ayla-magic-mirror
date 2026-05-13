@@ -32,7 +32,7 @@ function toHex(buffer: Uint8Array): string {
   return Array.from(buffer).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function normalizeName(text: string): string {
+export function normalizeName(text: string): string {
   return text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
