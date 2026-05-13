@@ -199,6 +199,17 @@ export function UseTemplateDialog({ open, onClose, template, consultantId, onPub
           </div>
         ) : (
           <div className="space-y-3">
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-2.5 flex items-start gap-2 text-xs">
+              <UserCheck className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+              <div className="leading-snug">
+                Anúncio em nome de <strong className="text-foreground">{consultantName || "você"}</strong>
+                {connectedPhone && (
+                  <> · leads chegam no WhatsApp <strong className="text-foreground">{formatPhone(connectedPhone)}</strong></>
+                )}
+                <div className="text-muted-foreground mt-0.5">Tudo automático — não precisa preencher nome nem telefone.</div>
+              </div>
+            </div>
+
             <Card className="p-3 space-y-2 bg-muted/30">
               <div className="grid grid-cols-3 gap-1">
                 {template.photos.slice(0, 3).map((p, i) => (
