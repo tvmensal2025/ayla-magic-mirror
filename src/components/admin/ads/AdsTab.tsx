@@ -22,8 +22,8 @@ export function AdsTab({ consultantId }: Props) {
   const [ready, setReady] = useState(false);
   const [prefillImageUrl, setPrefillImageUrl] = useState<string | null>(null);
 
-  function openExpressWithCreative(url: string) {
-    setPrefillImageUrl(url);
+  function openExpressWithCreative(c: { image_url: string }) {
+    setPrefillImageUrl(c.image_url);
     setExpressOpen(true);
   }
 
