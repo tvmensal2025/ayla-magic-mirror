@@ -582,11 +582,15 @@ Deno.serve(async (req) => {
       args = {};
     }
 
+    const priorOutbound = history.filter((h: any) => h.message_direction !== "inbound");
+    const hasPriorOutbound = priorOutbound.length > 0;
+    const lastAssistantMsg = priorOutbound.slice(-1)[0]?.message_text || null;
+
     if (tool === "send_text" || tool === "advance_to_closing" || tool === "ask_for_name") {
-      args.message = sanitizeHumanMessage(args.message || "", phase, mode === "rescue" ? "" : user_input, firstName);
+      args.message = sanitizeHumanMessage(args.message || "", phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
     }
     if (tool === "send_media" && args.caption) {
-      args.caption = sanitizeHumanMessage(args.caption, phase, mode === "rescue" ? "" : user_input, firstName);
+      args.caption = sanitizeHumanMessage(args.caption, phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
     }
 
     const latencyMs = Date.now() - t0;
