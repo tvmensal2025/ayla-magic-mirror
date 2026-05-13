@@ -251,19 +251,62 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
     let dispatchedSlot: { slot_key: string; variant: string; media_id: string | null } | null = null;
     const slotKey = (decision.audio_slot_key || "").trim();
     if (slotKey) {
-      const slot = slots.find((s: any) => s.slot_key === slotKey);
-      if (slot) {
-        // Cooldown
+      // Validação: slot_key inexistente -> log e ignora
+      if (!validSlotKeys.has(slotKey)) {
+        await supabase.from("ai_slot_dispatch_log").insert({
+          consultant_id: consultantId, customer_id, slot_key: slotKey,
+          media_id: null, variant: "invalid", dispatch_status: "blocked_invalid_slot",
+        });
+        console.warn(`slot_key inválido escolhido pela IA: ${slotKey}`);
+      } else {
+        const slot = slots.find((s: any) => s.slot_key === slotKey);
+        // Trava global: máx 3 áudios por cliente em 24h
+        const since24h = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+        const { data: last24 } = await supabase
+          .from("ai_slot_dispatch_log")
+          .select("id, sent_at")
+          .eq("customer_id", customer_id)
+          .eq("dispatch_status", "sent")
+          .gte("sent_at", since24h)
+          .order("sent_at", { ascending: false });
+        const sentCount24h = (last24 || []).length;
+        const lastSentAt = last24?.[0]?.sent_at ? new Date(last24[0].sent_at).getTime() : 0;
+        // Mín 5 minutos entre quaisquer dois áudios pro mesmo cliente
+        const tooSoonGlobal = lastSentAt && (Date.now() - lastSentAt) < 5 * 60_000;
+        const overGlobalLimit = sentCount24h >= 3;
+
+        // Cooldown por slot
         const cutoff = new Date(Date.now() - (slot.min_interval_minutes || 0) * 60_000).toISOString();
         const { data: recent } = await supabase
           .from("ai_slot_dispatch_log")
           .select("id")
           .eq("customer_id", customer_id)
           .eq("slot_key", slotKey)
+          .eq("dispatch_status", "sent")
           .gte("sent_at", cutoff)
           .limit(1);
         const onCooldown = (recent || []).length > 0;
-        if (!onCooldown) {
+
+        if (overGlobalLimit || tooSoonGlobal) {
+          await supabase.from("ai_slot_dispatch_log").insert({
+            consultant_id: consultantId, customer_id, slot_key: slotKey,
+            media_id: null, variant: "blocked", dispatch_status: "blocked_global_limit",
+          });
+          console.log(`slot ${slotKey} bloqueado por limite global (24h=${sentCount24h}, tooSoon=${tooSoonGlobal})`);
+        } else if (onCooldown) {
+          await supabase.from("ai_slot_dispatch_log").insert({
+            consultant_id: consultantId, customer_id, slot_key: slotKey,
+            media_id: null, variant: "blocked", dispatch_status: "blocked_cooldown",
+          });
+          console.log(`slot ${slotKey} on cooldown, skipping`);
+        } else if (slot.is_testing) {
+          // Modo teste: não envia, só registra
+          await supabase.from("ai_slot_dispatch_log").insert({
+            consultant_id: consultantId, customer_id, slot_key: slotKey,
+            media_id: null, variant: "testing", dispatch_status: "testing_only",
+          });
+          console.log(`slot ${slotKey} em modo teste — não enviado`);
+        } else {
           // Buscar áudio personal ativo
           const { data: personal } = await supabase
             .from("ai_media_library")
@@ -322,13 +365,12 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
                 slot_key: slotKey,
                 media_id: dispatchedSlot.media_id,
                 variant: dispatchedSlot.variant,
+                dispatch_status: "sent",
               });
             }
           } catch (e) {
             console.error("slot send error:", e);
           }
-        } else {
-          console.log(`slot ${slotKey} on cooldown, skipping`);
         }
       }
     }
