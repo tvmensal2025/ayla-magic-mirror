@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, Rocket, ImageIcon } from "lucide-react";
+import { Loader2, ImageIcon, Settings2 } from "lucide-react";
 import { AdTemplate, listAdTemplates } from "@/services/adTemplates";
 import { UseTemplateDialog } from "./UseTemplateDialog";
+import { SmartPublishButton } from "./SmartPublishButton";
 
 interface Props { consultantId: string; onPublished?: () => void }
 
