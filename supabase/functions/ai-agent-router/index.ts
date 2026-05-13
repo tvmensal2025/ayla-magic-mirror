@@ -176,7 +176,10 @@ ${JSON.stringify({
 BIBLIOTECA DE MÍDIAS DISPONÍVEIS PARA ESTA ETAPA (use o id em media_to_send_ids):
 ${relevantMedia.map((m: any) => `- id=${m.id} kind=${m.kind} label="${m.label}" intent_tags=${JSON.stringify(m.intent_tags || [])}${m.transcript ? ` transcript="${(m.transcript || "").slice(0, 120)}"` : ""}`).join("\n") || "(nenhuma)"}
 
-RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se for enviar áudio/vídeo, geralmente reply_text fica vazio ou bem curto.`;
+ÁUDIOS DA CAMILA (slots fixos — preencha "audio_slot_key" com o slot_key apropriado quando o gatilho bater; deixe vazio se nenhum se aplica):
+${slots.map((s: any) => `- slot_key=${s.slot_key} (${s.label}): ${s.trigger_hint || ""}`).join("\n") || "(nenhum)"}
+
+RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se for enviar áudio/vídeo, geralmente reply_text fica vazio ou bem curto. Se houver um slot_key apropriado, prefira "audio_slot_key" em vez de "media_to_send_ids".`;
 
     const userMessages = historyChrono.map((m: any) => ({
       role: m.message_direction === "inbound" ? "user" : "assistant",
