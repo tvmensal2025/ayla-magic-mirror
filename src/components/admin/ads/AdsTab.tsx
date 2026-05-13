@@ -59,7 +59,7 @@ export function AdsTab({ consultantId }: Props) {
           <Button variant="outline" onClick={() => setView("gallery")} className="gap-2">
             <LayoutGrid className="w-4 h-4" /> Galeria de modelos
           </Button>
-          <Button onClick={() => setExpressOpen(true)} className="gap-2">
+          <Button onClick={() => { setPrefillImageUrl(null); setExpressOpen(true); }} className="gap-2">
             <Plus className="w-4 h-4" /> Nova campanha
           </Button>
         </div>
