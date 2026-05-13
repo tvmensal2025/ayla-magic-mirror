@@ -277,7 +277,7 @@ Deno.serve(async (req) => {
         format,
         image_url: imageUrl,
         storage_path: storagePath,
-        prompt_used: prompt.slice(0, 4000),
+        prompt_used: buildPrompt(angle, format, distribuidora, attempts).slice(0, 4000),
         brief_used: ANGLE_DESC[angle] || null,
         angle,
         is_public: isPublic,
