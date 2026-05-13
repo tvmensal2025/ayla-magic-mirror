@@ -182,6 +182,7 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
               <Stat icon={<Users className="w-3.5 h-3.5" />} label="Leads" value={String(m.leads)} />
               <Stat icon={<DollarSign className="w-3.5 h-3.5" />} label={m.leads > 0 ? "CPL" : "Gasto"} value={m.leads > 0 ? `R$ ${(m.cost_per_lead_cents / 100).toFixed(2)}` : `R$ ${(m.spend_cents / 100).toFixed(2)}`} highlight />
             </div>
+            <CampaignHealthCheck campaignId={c.id} fbCampaignId={c.fb_campaign_id} whatsappNumber={waNumber} />
           </Card>
         );
       })}
