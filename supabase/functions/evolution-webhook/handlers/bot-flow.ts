@@ -199,6 +199,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             if (media?.url) {
               const kind = ["audio", "video", "image"].includes(media.kind) ? media.kind : "document";
               try {
+                await humanPace(args.caption || media.label || "");
                 await sendMedia(remoteJid, media.url, args.caption || "", kind);
               } catch (e) {
                 console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);
