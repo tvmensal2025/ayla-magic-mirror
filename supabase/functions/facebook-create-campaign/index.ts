@@ -382,14 +382,10 @@ Deno.serve(async (req) => {
     }
     if (!validated.length) {
       const reasons = rejectedImages.flatMap((r) => r.issues).slice(0, 5).join(" | ");
-      await notifyConsultant(
-        auth.id,
-        "error",
-        "Campanha não publicada",
-        `Suas fotos não passaram na validação:\n\n${reasons}\n\nTroque as imagens e tente de novo.`,
-      );
+      const msg = `Suas fotos foram bloqueadas pela política da Meta (não é regra nossa).\n\nMotivo: ${reasons || "conteúdo não permitido"}\n\nA Meta proíbe: nudez, violência, drogas/álcool em excesso, antes-e-depois enganoso, promessas irreais ("ganhe dinheiro fácil") e textos sensacionalistas. Troque a arte e tente de novo.`;
+      await notifyConsultant(auth.id, "error", "Campanha não publicada", msg);
       return new Response(JSON.stringify({
-        error: "Nenhuma imagem passou na validação de qualidade.",
+        error: msg,
         code: "IMAGES_REJECTED",
         rejected: rejectedImages,
       }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
