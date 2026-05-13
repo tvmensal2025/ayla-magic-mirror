@@ -15,8 +15,9 @@ interface Props {
 
 interface Event { ts: string; label: string; emoji: string }
 
-export function IntelligenceTab({ consultantId }: Props) {
+export function IntelligenceTab({ consultantId, onUseCreativeInAd }: Props) {
   const [events, setEvents] = useState<Event[]>([]);
+  const generatorRef = useRef<CreativeImageGeneratorHandle>(null);
 
   useEffect(() => {
     (async () => {
