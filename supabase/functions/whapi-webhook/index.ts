@@ -13,17 +13,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { normalizePhone } from "../_shared/utils.ts";
 import { createWhapiSender, parseWhapiMessage } from "../_shared/whapi-api.ts";
 import { checkAndMarkProcessed, logStepTransition, jsonLog } from "../_shared/audit.ts";
-// NOTE: bot-flow.ts vive em evolution-webhook/. O bundler do Supabase
-// só empacota arquivos dentro da pasta da própria função + _shared,
-// então não dá para importar diretamente daqui.
-// Stub temporário até movermos bot-flow para _shared.
-const runBotFlow = async (_ctx: any): Promise<{ reply: string; updates: Record<string, any> }> => {
-  console.warn("[whapi-webhook] runBotFlow stub — bot-flow ainda não está disponível para Whapi.");
-  return {
-    reply: "🤖 Bot temporariamente indisponível neste canal. Tente novamente em instantes.",
-    updates: {},
-  };
-};
+import { runBotFlow } from "./handlers/bot-flow.ts";
 import { captureError } from "../_shared/sentry.ts";
 
 const corsHeaders = {
