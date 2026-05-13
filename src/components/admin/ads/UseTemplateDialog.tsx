@@ -49,14 +49,21 @@ export function UseTemplateDialog({ open, onClose, template, consultantId, onPub
 
   useEffect(() => {
     if (!open) return;
-    setStep(1); setPresetId(null); setSelectedCity("__all__"); setSubmitting(false); setStepLog("");
+    setStep(1); setPresetId(null); setSelectedCity(""); setSubmitting(false); setStepLog("");
     supabase.from("consultants").select("name").eq("id", consultantId).maybeSingle()
       .then(({ data }) => setConsultantName(data?.name || ""));
   }, [open, consultantId]);
 
   const preset = useMemo(() => DISTRIBUIDORAS_PRESETS.find((p) => p.id === presetId) || null, [presetId]);
 
-  useEffect(() => { setSelectedCity("__all__"); }, [presetId]);
+  // Default seguro: 1ª cidade do preset (não "Todas"), evita CPL alto.
+  useEffect(() => {
+    if (!preset) { setSelectedCity(""); return; }
+    const firstAllowed = (template?.target_cidades?.length
+      ? preset.cidades.filter((c) => template!.target_cidades!.includes(c))
+      : preset.cidades)[0];
+    setSelectedCity(firstAllowed || "__all__");
+  }, [preset, template]);
 
   const previewCopy = useMemo(() => {
     if (!template || !preset) return null;
