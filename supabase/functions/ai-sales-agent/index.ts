@@ -515,7 +515,7 @@ Deno.serve(async (req) => {
     if (!toolCall) {
       return new Response(
         JSON.stringify({
-          decision: { tool: "send_text", args: { message: choice?.message?.content || "Pode me contar um pouco mais?", next_phase: phase, reasoning: "fallback" } },
+          decision: { tool: "send_text", args: { message: sanitizeHumanMessage(choice?.message?.content || "", phase, "", firstName), next_phase: phase, reasoning: "fallback" } },
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
@@ -529,11 +529,11 @@ Deno.serve(async (req) => {
       args = {};
     }
 
-    if (tool === "send_text" || tool === "advance_to_closing") {
-      args.message = sanitizeHumanMessage(args.message || "", phase, mode === "rescue" ? "" : user_input);
+    if (tool === "send_text" || tool === "advance_to_closing" || tool === "ask_for_name") {
+      args.message = sanitizeHumanMessage(args.message || "", phase, mode === "rescue" ? "" : user_input, firstName);
     }
     if (tool === "send_media" && args.caption) {
-      args.caption = sanitizeHumanMessage(args.caption, phase, mode === "rescue" ? "" : user_input);
+      args.caption = sanitizeHumanMessage(args.caption, phase, mode === "rescue" ? "" : user_input, firstName);
     }
 
     const latencyMs = Date.now() - t0;
