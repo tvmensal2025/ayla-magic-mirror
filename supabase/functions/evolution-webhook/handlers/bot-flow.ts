@@ -119,7 +119,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     messageText.trim().length > 0
   ) {
     try {
-      const { data: cfgPrivate } = customer.consultant_id
+      // Detecta auto-apresentação ("meu nome é X", "sou o X", "aqui é X") e salva como nome confiável
+      const selfIntroRe = /(?:meu nome (?:é|eh|e)|me chamo|aqui (?:é|eh|fala|quem fala é)|sou (?:o |a )?)\s*([A-Za-zÀ-ÖØ-öø-ÿ]{2,20})/i;
+      const introMatch = messageText.match(selfIntroRe);
+      if (introMatch && introMatch[1] && (!customer.name || customer.name_source !== 'ocr')) {
+        const newName = introMatch[1].charAt(0).toUpperCase() + introMatch[1].slice(1).toLowerCase();
+        await supabase.from("customers").update({ name: newName, name_source: 'self_introduced' }).eq("id", customer.id);
+        customer.name = newName;
+        (customer as any).name_source = 'self_introduced';
+        console.log(`👤 [bot-flow] Auto-apresentação detectada: nome="${newName}" (self_introduced)`);
+      }
+
         ? await supabase
           .from("ai_agent_config")
           .select("handoff_rules, enabled")
