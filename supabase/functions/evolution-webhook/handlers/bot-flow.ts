@@ -212,6 +212,33 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     console.log(`📧 [CAPTURA] Email "${updates.email}" salvo automaticamente (digitado no step "${step}")`);
   }
 
+  // ── DEFESA: steps conversacionais devem ir pra IA Camila quando habilitada ──
+  // O webhook já desvia, mas se chegar aqui (race / cfg lida atrasada), saímos
+  // em silêncio em vez de despejar o texto hardcoded "Oi! 👋 Aqui é o assistente...".
+  // Steps com BOTÕES (confirmando_*, ask_*, ask_finalizar, editing_*) seguem normais.
+  const CONVERSATIONAL_AI_STEPS = new Set([
+    "welcome", "menu_inicial", "pos_video", "aguardando_humano",
+    "qualificacao", "apresentacao", "objecoes",
+  ]);
+  if (CONVERSATIONAL_AI_STEPS.has(step) && !isFile && !isButton) {
+    try {
+      const { data: cfgPriv } = await supabase
+        .from("ai_agent_config").select("enabled")
+        .eq("consultant_id", customer.consultant_id).maybeSingle();
+      let cfg = cfgPriv;
+      if (!cfg) {
+        const { data: cfgGlob } = await supabase
+          .from("ai_agent_config").select("enabled")
+          .is("consultant_id", null).maybeSingle();
+        cfg = cfgGlob;
+      }
+      if (cfg?.enabled === true) {
+        console.log(`🛡️ [bot-flow] step "${step}" pertence à IA — saindo em silêncio (defesa)`);
+        return { reply: "", updates: { __inline_sent: true } as any };
+      }
+    } catch (_) { /* segue para o switch normal */ }
+  }
+
   switch (step) {
     // ─── 1. BOAS-VINDAS ────────────────────
     case "welcome": {
