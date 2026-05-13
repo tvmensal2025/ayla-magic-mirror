@@ -297,13 +297,6 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
                 conversation_step: updates.conversation_step || stepBefore,
               });
               if (chosen.id) {
-                await supabase.rpc("increment" as any, {}).then(() => {}, () => {});
-                // bump sent_count manualmente
-                await supabase
-                  .from("ai_media_library")
-                  .update({ sent_count: undefined } as any)
-                  .eq("id", chosen.id);
-                // workaround: increment via raw select+update
                 const { data: cur } = await supabase
                   .from("ai_media_library").select("sent_count").eq("id", chosen.id).single();
                 if (cur) {
