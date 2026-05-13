@@ -260,14 +260,15 @@ const AdminContent = () => {
                   }
                   setActiveTab(tab.id);
                 }}
-                  className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-3 text-xs sm:text-sm font-medium whitespace-nowrap border-b-2 transition-all duration-200 shrink-0 ${
+                  className={`flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 px-2.5 sm:px-4 py-2 sm:py-3 text-[10px] sm:text-sm font-medium whitespace-nowrap border-b-2 transition-all duration-200 shrink-0 min-w-[56px] sm:min-w-0 ${
                     isActive 
                       ? "border-primary text-primary" 
                       : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
-                  }`}>
-                  <Icon className={`w-4 h-4 ${isActive ? "text-primary" : ""}`} />
-                  <span className="hidden sm:inline">{tab.label}</span>
-                  <span className="sm:hidden">{tab.label.length > 8 ? tab.label.slice(0, 6) + '…' : tab.label}</span>
+                  }`}
+                  title={tab.label}
+                  aria-label={tab.label}>
+                  <Icon className={`w-5 h-5 sm:w-4 sm:h-4 ${isActive ? "text-primary" : ""}`} />
+                  <span className="leading-tight">{tab.label}</span>
                 </button>
               );
             })}
@@ -276,7 +277,7 @@ const AdminContent = () => {
       </nav>
 
       {/* Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6 overflow-x-hidden">
         <Suspense fallback={<div className="flex justify-center py-12"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>}>
           {activeTab === "dashboard" && userId && (
             <DashboardTab userId={userId} form={form} onFormUpdate={handleFormChange} periodDays={periodDays} onPeriodChange={setPeriodDays} />

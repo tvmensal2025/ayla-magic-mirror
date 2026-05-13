@@ -101,12 +101,12 @@ export function WalletCard({ consultantId }: { consultantId: string }) {
 
           <div>
             <p className="text-xs font-medium text-muted-foreground mb-2">Recarga rápida</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {QUICK_AMOUNTS.map((c) => (
                 <Button
                   key={c}
                   variant="outline"
-                  className="h-12"
+                  className="h-12 text-sm font-semibold"
                   disabled={topping !== null}
                   onClick={() => handleTopup(c)}
                 >
