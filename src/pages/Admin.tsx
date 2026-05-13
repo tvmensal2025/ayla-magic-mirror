@@ -301,7 +301,7 @@ const AdminContent = () => {
           )}
 
           {userId && activeTab === "crm" && (
-            <KanbanBoard consultantId={userId} instanceName={instanceName} />
+            <CrmTabs consultantId={userId} instanceName={instanceName} />
           )}
 
           {userId && activeTab === "clientes" && (
