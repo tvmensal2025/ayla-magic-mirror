@@ -252,19 +252,71 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
     if (!decision) {
       decision = {
         intent: "fallback",
+        detected_intent: "confuso",
+        pain_point: "",
+        qualification_score: 0,
+        objection_type: "",
+        should_pause_seconds: 0,
         next_step: stepBefore,
-        reply_text: "Tive uma instabilidade aqui, pode repetir, por favor?",
+        reply_text: "",
         media_to_send_ids: [],
         audio_slot_key: "",
         handoff: false,
-        handoff_reason: "",
+        handoff_reason: "llm_error",
         confidence: 0,
       };
+    }
+
+    // 9b) Anti-loop: se reply for ≥80% similar à última msg outbound, esvazia
+    if (decision.reply_text && decision.reply_text.trim()) {
+      const lastOut = [...historyChrono].reverse().find((m: any) => m.message_direction === "outbound");
+      if (lastOut?.message_text && similarity(decision.reply_text, lastOut.message_text) >= 0.8) {
+        console.log("🔁 anti-loop: reply muito parecido com último outbound, esvaziando");
+        decision.reply_text = "";
+        if (!decision.audio_slot_key && !(decision.media_to_send_ids || []).length) {
+          decision.handoff = true;
+          decision.handoff_reason = "anti_loop";
+        }
+      }
+    }
+
+    // 9c) 3x confuso seguidos -> handoff
+    if (decision.detected_intent === "confuso") {
+      const { data: lastLogs } = await supabase
+        .from("ai_agent_logs")
+        .select("llm_output")
+        .eq("customer_id", customer_id)
+        .order("created_at", { ascending: false })
+        .limit(2);
+      const prevConfused = (lastLogs || []).filter((l: any) =>
+        l?.llm_output?.detected_intent === "confuso").length;
+      if (prevConfused >= 2) {
+        decision.handoff = true;
+        decision.handoff_reason = "3x_confuso";
+      }
+    }
+
+    // 9d) Pediu humano -> força handoff
+    if (decision.detected_intent === "pediu_humano") {
+      decision.handoff = true;
+      decision.handoff_reason = decision.handoff_reason || "pediu_humano";
     }
 
     // 10) Executar ações
     const sender = createEvolutionSender(EVOLUTION_API_URL, EVOLUTION_API_KEY, instance_name);
     const updates: Record<string, any> = {};
+
+    // Persistir insights da IA no customer
+    if (decision.pain_point) updates.pain_point = String(decision.pain_point).slice(0, 200);
+    if (typeof decision.qualification_score === "number") {
+      updates.qualification_score = decision.qualification_score;
+    }
+    updates.intent_signals = {
+      last_intent: decision.detected_intent,
+      objection_type: decision.objection_type || null,
+      confidence: decision.confidence,
+      at: new Date().toISOString(),
+    };
 
     // Handoff
     if (decision.handoff) {
@@ -275,6 +327,10 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
     } else if (decision.next_step && decision.next_step !== stepBefore) {
       updates.conversation_step = decision.next_step;
     }
+
+    // Pausa humanizadora antes de enviar (se IA pediu)
+    const extraPauseMs = Math.max(0, Math.min(8, decision.should_pause_seconds || 0)) * 1000;
+    if (extraPauseMs > 0) await sleep(extraPauseMs);
 
     // Simulação de digitação
     const typingMin = config.typing_min_ms ?? 1200;
