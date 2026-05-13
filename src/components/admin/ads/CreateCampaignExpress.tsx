@@ -1,31 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Loader2, Sparkles, Upload, X, Wand2, ImageIcon, Settings2, RefreshCw, Check } from "lucide-react";
+import { Loader2, Sparkles, Upload, X, Wand2, ImageIcon, Settings2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Switch } from "@/components/ui/switch";
 import {
   CityHit, createCampaign, generateCopy, preflightCampaign, searchCitiesBulk,
   uploadAdPhotos, validateAccount,
 } from "@/services/facebookAds";
 import { DISTRIBUIDORAS_PRESETS, type DistribuidoraPreset } from "@/data/distribuidoraPresets";
-import { supabase } from "@/integrations/supabase/client";
 import { CreativeOverlay, type CreativeOverlayHandle } from "./CreativeOverlay";
-
-type AiFormat = "feed_1x1" | "story_9x16" | "reels_9x16" | "carousel_4x5";
-const AI_ANGLES = [
-  { id: "economia_concreta", label: "💰 Economia" },
-  { id: "quebra_objecao",    label: "🛡️ Sem obra" },
-  { id: "prova_social",      label: "👥 Prova social" },
-  { id: "dor_pas",           label: "😣 Dor" },
-  { id: "urgencia_local",    label: "📍 Local" },
-];
-const AI_FORMATS: { id: AiFormat; label: string }[] = [
-  { id: "feed_1x1",     label: "Feed 1:1" },
-  { id: "story_9x16",   label: "Story 9:16" },
-  { id: "reels_9x16",   label: "Reels 9:16" },
-  { id: "carousel_4x5", label: "Carrossel 4:5" },
-];
 
 interface Props {
   open: boolean;
@@ -65,25 +50,25 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
   const [previews, setPreviews] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [stepLog, setStepLog] = useState<string>("");
+  const [applyCta, setApplyCta] = useState(true);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const overlayRefs = useRef<Array<CreativeOverlayHandle | null>>([]);
 
-  // ===== Tab "Gerar com IA" =====
-  const [photoTab, setPhotoTab] = useState<"upload" | "ai">("upload");
-  const [aiAngle, setAiAngle] = useState<string>("economia_concreta");
-  const [aiFormat, setAiFormat] = useState<AiFormat>("feed_1x1");
-  const [aiGenerating, setAiGenerating] = useState(false);
-  const [aiPreview, setAiPreview] = useState<{ image_url: string; headline: string; badge: string } | null>(null);
-  const [aiAccepting, setAiAccepting] = useState(false);
-  const overlayRef = useRef<CreativeOverlayHandle | null>(null);
+  const preset = useMemo(
+    () => DISTRIBUIDORAS_PRESETS.find((p) => p.id === presetId) || null,
+    [presetId],
+  );
+  const headline = preset
+    ? `Conta de luz até 20% mais barata em ${preset.nome}`
+    : "Conta de luz até 20% mais barata";
+  const badge = "ATÉ 20% OFF";
 
   useEffect(() => {
     if (!open) return;
     setPresetId(null); setFiles([]); setPreviews([]); setStepLog(""); setSubmitting(false);
-    setIssues(null);
-    setPhotoTab("upload"); setAiPreview(null); setAiGenerating(false); setAiAccepting(false);
+    setIssues(null); setApplyCta(true);
     validateAccount().then(r => setIssues(r.issues)).catch(e => setIssues([e.message]));
 
-    // Pré-carregar imagem gerada (criativo IA do MinIO)
     if (prefillImageUrl) {
       (async () => {
         try {
@@ -91,18 +76,16 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const blob = await res.blob();
           const ext = (blob.type.split("/")[1] || "png").replace("jpeg", "jpg");
-          const file = new File([blob], `criativo-ia-${Date.now()}.${ext}`, { type: blob.type || "image/png" });
+          const file = new File([blob], `criativo-${Date.now()}.${ext}`, { type: blob.type || "image/png" });
           setFiles([file]);
           setPreviews([URL.createObjectURL(file)]);
-          toast({ title: "Criativo IA carregado", description: "Imagem pronta para virar anúncio." });
         } catch (e: any) {
-          toast({ title: "Não foi possível carregar o criativo", description: e?.message || String(e), variant: "destructive" });
+          toast({ title: "Não foi possível carregar a imagem", description: e?.message || String(e), variant: "destructive" });
         }
       })();
     }
   }, [open, prefillImageUrl]);
 
-  // limpa object URLs
   useEffect(() => () => { previews.forEach(u => URL.revokeObjectURL(u)); }, [previews]);
 
   function pickFiles(list: FileList | null) {
@@ -127,65 +110,28 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
     setPreviews((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  async function generateAiCreative() {
-    if (!presetId) {
-      toast({ title: "Escolha a distribuidora primeiro", description: "A IA precisa do contexto da distribuidora.", variant: "destructive" });
-      return;
+  async function composeFinalFiles(): Promise<File[]> {
+    if (!applyCta) return files;
+    const out: File[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const handle = overlayRefs.current[i];
+      if (!handle) { out.push(files[i]); continue; }
+      try {
+        const composite = await handle.toFile(`anuncio-${Date.now()}-${i}.png`);
+        out.push(composite);
+      } catch {
+        out.push(files[i]);
+      }
     }
-    setAiGenerating(true);
-    setAiPreview(null);
-    try {
-      const preset = DISTRIBUIDORAS_PRESETS.find(p => p.id === presetId);
-      const { data, error } = await supabase.functions.invoke("ad-creative-image-generator", {
-        body: {
-          format: aiFormat,
-          angle: aiAngle,
-          is_public: false,
-          brief_extra: preset ? `Cliente típico de ${preset.nome} (${preset.uf}).` : undefined,
-        },
-      });
-      if (error) throw error;
-      if (!data?.image_url) throw new Error("IA não retornou imagem");
-      setAiPreview({
-        image_url: data.image_url,
-        headline: data.headline || "Conta de luz até 20% mais barata",
-        badge: data.badge || "ATÉ 20% OFF",
-      });
-      toast({ title: "Criativo gerado!", description: "Revise o preview e aprove ou regenere." });
-    } catch (e: any) {
-      toast({ title: "Erro ao gerar criativo", description: e?.message || String(e), variant: "destructive" });
-    } finally {
-      setAiGenerating(false);
-    }
-  }
-
-  async function acceptAiCreative() {
-    if (!aiPreview || !overlayRef.current) return;
-    setAiAccepting(true);
-    try {
-      const composite = await overlayRef.current.toFile(`criativo-ia-${Date.now()}.png`);
-      const localUrl = URL.createObjectURL(composite);
-      setFiles((prev) => [composite, ...prev].slice(0, 4));
-      setPreviews((prev) => [localUrl, ...prev].slice(0, 4));
-      setAiPreview(null);
-      setPhotoTab("upload");
-      toast({ title: "Criativo IA adicionado!", description: "Pronto para publicar." });
-    } catch (e: any) {
-      toast({ title: "Não consegui exportar a imagem", description: e?.message || String(e), variant: "destructive" });
-    } finally {
-      setAiAccepting(false);
-    }
+    return out;
   }
 
   async function handlePublish() {
-    if (!presetId) return toast({ title: "Escolha sua distribuidora", variant: "destructive" });
+    if (!presetId || !preset) return toast({ title: "Escolha sua distribuidora", variant: "destructive" });
     if (files.length === 0) return toast({ title: "Adicione pelo menos 1 foto", variant: "destructive" });
-    const preset = DISTRIBUIDORAS_PRESETS.find((p) => p.id === presetId);
-    if (!preset) return;
 
     setSubmitting(true);
     try {
-      // 1) cidades (cache se houver)
       setStepLog("Carregando cidades da distribuidora...");
       let hits = readPresetCache(preset.id);
       if (!hits) {
@@ -195,11 +141,8 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
         if (hits.length > 0) writePresetCache(preset.id, hits);
       }
       if (!hits || hits.length === 0) throw new Error("Não consegui carregar as cidades dessa distribuidora");
-      // limita a 80 pra não ficar amplo demais
       const cities = hits.slice(0, 80);
 
-      // 2) PREFLIGHT — bloqueia se a Meta acusar audiência muito pequena
-      // ou conta com problema. R$ 30/dia é o orçamento Express.
       setStepLog("Validando alcance no Facebook...");
       const pf = await preflightCampaign({
         cities: cities.map((c) => ({ key: c.key, name: c.name })),
@@ -212,27 +155,26 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
         throw new Error(`Audiência muito pequena (${pf.reach.lower.toLocaleString("pt-BR")} pessoas). Use o modo avançado e adicione mais cidades.`);
       }
 
-      // 3) copy automático
       setStepLog("Gerando texto do anúncio com IA...");
       const copy = await generateCopy([`clientes de ${preset.nome}`, ...cities.map((c) => c.name).slice(0, 3)]);
-      const headline = copy.headlines[0] || `Conta de luz mais barata em ${preset.nome}`;
+      const finalHeadline = copy.headlines[0] || headline;
       const primary = copy.primary_texts[0] || `Reduza até 20% na conta de luz com energia limpa. Atendimento via WhatsApp.`;
       const description = copy.description || `Sem obra. Sem instalação. Sem fidelidade.`;
 
-      // 4) upload das fotos
-      setStepLog("Enviando fotos...");
-      const photoUrls = await uploadAdPhotos(consultantId, files);
+      setStepLog(applyCta ? "Aplicando selo e CTA nas fotos..." : "Preparando fotos...");
+      const finalFiles = await composeFinalFiles();
 
-      // 5) cria a campanha
+      setStepLog("Enviando fotos...");
+      const photoUrls = await uploadAdPhotos(consultantId, finalFiles);
+
       setStepLog("Publicando campanha no Facebook...");
       await createCampaign({
         name: `iGreen — ${preset.nome}`,
         cities: cities.map((c) => ({ key: c.key, name: c.name })),
-        daily_budget_cents: 3000, // R$ 30/dia
+        daily_budget_cents: 3000,
         duration_days: null,
-        // Express só aceita upload livre — assume square (Meta auto-corta para Reels).
         photos: photoUrls.map((url) => ({ url, format: "square" as const })),
-        headline, primary_text: primary, description,
+        headline: finalHeadline, primary_text: primary, description,
         distribuidora: preset.nome,
       });
       toast({ title: "Campanha publicada!", description: "Em revisão pelo Facebook. Os leads chegam no seu WhatsApp." });
@@ -300,113 +242,57 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
             </section>
 
             {/* 2. Fotos */}
-            <section className="space-y-2">
+            <section className="space-y-3">
               <div className="text-sm font-bold text-foreground">2. Adicione 1 a 4 fotos do seu anúncio</div>
 
-              {/* Tabs Upload | IA */}
-              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-lg bg-secondary/40">
-                <button
-                  type="button"
-                  onClick={() => setPhotoTab("upload")}
-                  className={`text-xs font-medium py-2 rounded-md transition flex items-center justify-center gap-1.5 ${photoTab === "upload" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"}`}
-                >
-                  <Upload className="w-3.5 h-3.5" /> Enviar minhas fotos
+              <div className="border-2 border-dashed rounded-xl p-5 text-center">
+                <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
+                  onChange={(e) => { pickFiles(e.target.files); if (e.currentTarget) e.currentTarget.value = ""; }} />
+                <button type="button" disabled={submitting || files.length >= 4}
+                  onClick={() => inputRef.current?.click()}
+                  className="inline-flex items-center gap-2 text-sm font-medium text-primary disabled:opacity-50">
+                  <Upload className="w-4 h-4" /> Clique para enviar fotos ({files.length}/4)
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setPhotoTab("ai")}
-                  className={`text-xs font-medium py-2 rounded-md transition flex items-center justify-center gap-1.5 ${photoTab === "ai" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"}`}
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-primary" /> Gerar com IA
-                </button>
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  JPG/PNG/WebP até 8 MB. Use foto real de família, casa, conta de luz ou painel solar.
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  Dica: gere a imagem base no ChatGPT/Canva e suba aqui — nós aplicamos o selo e o CTA do WhatsApp por cima.
+                </div>
               </div>
 
-              {photoTab === "upload" && (
-                <div className="border-2 border-dashed rounded-xl p-5 text-center">
-                  <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
-                    onChange={(e) => { pickFiles(e.target.files); if (e.currentTarget) e.currentTarget.value = ""; }} />
-                  <button type="button" disabled={submitting || files.length >= 4}
-                    onClick={() => inputRef.current?.click()}
-                    className="inline-flex items-center gap-2 text-sm font-medium text-primary disabled:opacity-50">
-                    <Upload className="w-4 h-4" /> Clique para enviar fotos ({files.length}/4)
-                  </button>
-                  <div className="text-[11px] text-muted-foreground mt-1">JPG/PNG/WebP até 8 MB. Quadrada (1:1) funciona melhor.</div>
+              {/* Toggle CTA */}
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                    <Wand2 className="w-3.5 h-3.5 text-primary" /> Aplicar selo + CTA do WhatsApp
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Adiciona headline, comparativo de economia e botão "Quero economizar →" por cima das suas fotos. Recomendado.
+                  </p>
                 </div>
-              )}
+                <Switch checked={applyCta} onCheckedChange={setApplyCta} disabled={submitting} />
+              </div>
 
-              {photoTab === "ai" && (
-                <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-3">
-                  {!aiPreview && (
-                    <>
-                      <div>
-                        <label className="text-[11px] text-muted-foreground mb-1 block">Ângulo do anúncio</label>
-                        <div className="flex flex-wrap gap-1.5">
-                          {AI_ANGLES.map(a => (
-                            <button key={a.id} type="button" disabled={aiGenerating}
-                              onClick={() => setAiAngle(a.id)}
-                              className={`text-[11px] px-2 py-1 rounded-md border transition ${aiAngle === a.id ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/40"}`}>
-                              {a.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="text-[11px] text-muted-foreground mb-1 block">Formato</label>
-                        <div className="flex flex-wrap gap-1.5">
-                          {AI_FORMATS.map(f => (
-                            <button key={f.id} type="button" disabled={aiGenerating}
-                              onClick={() => setAiFormat(f.id)}
-                              className={`text-[11px] px-2 py-1 rounded-md border transition ${aiFormat === f.id ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/40"}`}>
-                              {f.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <Button type="button" onClick={generateAiCreative} disabled={aiGenerating || submitting || !presetId} className="w-full gap-2">
-                        {aiGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                        {aiGenerating ? "Gerando criativo (~30s)..." : "Gerar criativo com IA"}
-                      </Button>
-                      {!presetId && (
-                        <p className="text-[10px] text-warning text-center">Escolha a distribuidora no passo 1 antes de gerar.</p>
-                      )}
-                    </>
-                  )}
-
-                  {aiPreview && (
-                    <div className="space-y-2">
-                      <div className="rounded-lg overflow-hidden border border-border max-w-[280px] mx-auto">
-                        <CreativeOverlay
-                          ref={overlayRef}
-                          imageUrl={aiPreview.image_url}
-                          format={aiFormat}
-                          headline={aiPreview.headline}
-                          badge={aiPreview.badge}
-                        />
-                      </div>
-                      <div className="flex gap-2">
-                        <Button type="button" variant="outline" size="sm" className="flex-1 gap-1.5"
-                          onClick={generateAiCreative} disabled={aiGenerating || aiAccepting}>
-                          {aiGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                          Regenerar
-                        </Button>
-                        <Button type="button" size="sm" className="flex-1 gap-1.5"
-                          onClick={acceptAiCreative} disabled={aiAccepting || aiGenerating}>
-                          {aiAccepting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                          Usar este criativo
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
+              {/* Previews com ou sem overlay */}
               {previews.length > 0 && (
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {previews.map((url, i) => (
                     <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-border bg-muted">
-                      <img src={url} alt="" className="w-full h-full object-cover" />
+                      {applyCta ? (
+                        <CreativeOverlay
+                          ref={(h) => { overlayRefs.current[i] = h; }}
+                          imageUrl={url}
+                          format="feed_1x1"
+                          headline={headline}
+                          badge={badge}
+                          className="w-full h-full"
+                        />
+                      ) : (
+                        <img src={url} alt="" className="w-full h-full object-cover" />
+                      )}
                       <button type="button" onClick={() => removePhoto(i)} disabled={submitting}
-                        className="absolute top-1 right-1 bg-background/80 rounded-full p-0.5 hover:bg-destructive hover:text-destructive-foreground">
+                        className="absolute top-1 right-1 z-10 bg-background/80 rounded-full p-0.5 hover:bg-destructive hover:text-destructive-foreground">
                         <X className="w-3 h-3" />
                       </button>
                     </div>
