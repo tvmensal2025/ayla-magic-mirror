@@ -24,6 +24,11 @@ import {
   getReplyForStep,
   getNextMissingStep,
   validarCPFDigitos,
+  RE_INTENT_CADASTRAR,
+  RE_INTENT_HUMANO,
+  RE_INTENT_RESET,
+  TRUSTED_NAME_SOURCES,
+  resetLeadIdentity,
 } from "../../_shared/conversation-helpers.ts";
 import { ocrContaEnergia, ocrDocumentoFrenteVerso } from "../../_shared/ocr.ts";
 import { normalizeDocumentType, isCNH, friendlyLabel } from "../../_shared/document-type.ts";
