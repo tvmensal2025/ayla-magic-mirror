@@ -160,12 +160,19 @@ PROIBIDO ABSOLUTAMENTE:
 - Diminutivos infantis: "rapidinho", "perguntinha", "continha", "fotinho"
 - "vou fazer uma continha", "deixa comigo", "fica tranquilo"
 - Frases de bot: "como posso ajudar?", "estou à disposição", "fico à disposição", "atendimento digital", "assistente virtual"
+- Aberturas robóticas repetidas: NÃO comece duas mensagens seguidas com a mesma palavra ("Entendo.", "Compreendo.", "Perfeito!", "Ótimo!", "Olá!"). Varie ou pule a abertura e vá direto ao ponto.
+- Listas com bullets/numeração no WhatsApp. Fale em frases corridas, como gente.
+- Repetir frase já enviada nas últimas 5 mensagens — sempre reformule.
 
 OBRIGATÓRIO:
 - "você" (nunca "vc"). Português correto, casual mas adulto.
-- 1 a 3 frases por mensagem, com CONTEÚDO de valor — nunca recheio.
-- Saudação neutra quando NÃO houver nome confiável no contexto: "Olá! Tudo bem?"
+- 1 a 2 frases por mensagem no meio da conversa. Só ultrapasse 3 frases no pitch ou em objeção pesada.
+- Saudação neutra APENAS na PRIMEIRA mensagem ("Olá! Tudo bem?"). Depois disso, NUNCA cumprimente de novo — entre direto no assunto.
 - Vocativo SOMENTE se [Contexto do lead] trouxer "Nome confiável: X". Caso contrário, NUNCA use nome — nem inventado, nem deduzido do JID, do número, do pushName, do histórico.
+- ESPELHE o lead: se ele escreve curto, responda curto; se ele desabafa, valide em uma frase antes de responder; se ele manda áudio, prefira responder em áudio.
+- ACUSE RECEBIMENTO antes de avançar: parafraseie em 3-6 palavras o que ele disse ("Entendi, conta vem alta mesmo.") e SÓ DEPOIS faça a próxima pergunta. Uma pergunta por vez, no máximo.
+- Valores em reais soam mais naturais arredondados e por extenso quando der ("uns 240 reais", "perto de 380"), em vez de "R$ 240,00".
+- Variar conectores: troque "Compreendo"/"Entendo" por "Faz sentido", "Justo", "Saquei", "Claro", ou simplesmente pule a abertura.
 
 ═══════════════════════════════════════════
 CONHECIMENTO IGREEN (use espontaneamente)
@@ -246,22 +253,47 @@ function stripUntrustedVocative(message: string, trustedFirstName: string | null
   return message;
 }
 
+function stripRepeatedGreeting(message: string, hasPriorOutbound: boolean): string {
+  if (!message || !hasPriorOutbound) return message;
+  // Após a primeira mensagem, remover saudações redundantes no início.
+  return message
+    .replace(/^\s*(ol[aá]|oi|opa|bom dia|boa tarde|boa noite)[,!.\s]+/i, "")
+    .replace(/^\s*(tudo bem\??|tudo bom\??|como vai\??)[,!.\s]+/i, "")
+    .trim();
+}
+
+function stripDuplicateOpener(message: string, lastAssistantMsg: string | null): string {
+  if (!message || !lastAssistantMsg) return message;
+  // Se as duas começam com a mesma palavra de abertura comum, remove a abertura.
+  const openerRe = /^\s*(entendo|compreendo|perfeito|ótimo|otimo|claro|certo|legal|beleza|faz sentido|saquei|justo)[,!.\s]+/i;
+  const a = message.match(openerRe);
+  const b = lastAssistantMsg.match(openerRe);
+  if (a && b && a[1].toLowerCase() === b[1].toLowerCase()) {
+    return message.replace(openerRe, "").trim();
+  }
+  return message;
+}
+
 function sanitizeHumanMessage(
   message: string,
   phase: string,
   userInput: string,
   trustedFirstName: string | null,
+  hasPriorOutbound: boolean = false,
+  lastAssistantMsg: string | null = null,
 ): string {
   let out = (message || "").trim();
   if (!out) {
     if (phase === "abertura") return "Olá! Tudo bem? Você é de qual cidade?";
     if (phase === "descoberta") return "Quanto vem em média a sua conta de luz?";
     if (phase === "pitch") return "Posso te mostrar exatamente quanto você economizaria?";
-    if (phase === "objecao") return "Compreendo. O que especificamente está pesando na decisão?";
+    if (phase === "objecao") return "Faz sentido. O que especificamente está pesando na decisão?";
     return "Vamos seguir com seu cadastro. Me confirma se podemos avançar?";
   }
   out = stripEmojis(out);
   out = stripUntrustedVocative(out, trustedFirstName);
+  out = stripRepeatedGreeting(out, hasPriorOutbound);
+  out = stripDuplicateOpener(out, lastAssistantMsg);
   // Remove gírias infantis residuais
   out = out
     .replace(/\b(oii+e?|oiee+|oie)\b/gi, "Olá")
@@ -272,6 +304,8 @@ function sanitizeHumanMessage(
     .replace(/\b(amor|fofo|fofa|querido|querida|lindo|linda)\b/gi, "")
     .replace(/\s{2,}/g, " ")
     .trim();
+  // Capitaliza primeira letra se ficou minúscula após cortes
+  if (out && /^[a-zà-ÿ]/.test(out)) out = out[0].toUpperCase() + out.slice(1);
   // Comprimento máximo
   if (out.length > 400) out = out.slice(0, 397) + "...";
   return out;
@@ -548,11 +582,15 @@ Deno.serve(async (req) => {
       args = {};
     }
 
+    const priorOutbound = history.filter((h: any) => h.message_direction !== "inbound");
+    const hasPriorOutbound = priorOutbound.length > 0;
+    const lastAssistantMsg = priorOutbound.slice(-1)[0]?.message_text || null;
+
     if (tool === "send_text" || tool === "advance_to_closing" || tool === "ask_for_name") {
-      args.message = sanitizeHumanMessage(args.message || "", phase, mode === "rescue" ? "" : user_input, firstName);
+      args.message = sanitizeHumanMessage(args.message || "", phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
     }
     if (tool === "send_media" && args.caption) {
-      args.caption = sanitizeHumanMessage(args.caption, phase, mode === "rescue" ? "" : user_input, firstName);
+      args.caption = sanitizeHumanMessage(args.caption, phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
     }
 
     const latencyMs = Date.now() - t0;
