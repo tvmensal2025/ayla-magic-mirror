@@ -297,9 +297,9 @@ Deno.serve(async (req) => {
         location_types: ["home", "recent"],
       },
       age_min: ageMin,
-      age_range: [ageMin, ageMax],
+      age_max: ageMax,
       // Advantage+ Audience (padrão Meta 2026) — algoritmo expande além das âncoras.
-      // Meta não aceita age_max explícito com Advantage+; use age_range como sugestão.
+      // Meta EXIGE age_min<=25 e age_max>=65 explícitos (subcodes 1870188/1870189).
       targeting_automation: { advantage_audience: 1 },
     };
     // Placements: por padrão omite tudo → Meta aplica Advantage+ Placements
