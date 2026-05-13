@@ -297,18 +297,25 @@ Deno.serve(async (req) => {
         ? `- Lead foi breve: responda breve também.\n`
         : ``);
 
+    const billNum = Number(customer.electricity_bill_value || 0);
+    const billCalcLine = billNum > 0
+      ? `\n[CÁLCULO PRONTO PRA USAR NO PITCH]\nConta R$ ${billNum.toFixed(0)} → economia ~R$ ${(billNum * 0.12).toFixed(0)}/mês → R$ ${(billNum * 0.12 * 12).toFixed(0)}/ano.\n`
+      : "";
+
     const contextLine =
       `[Contexto do lead]\n` +
       `Nome: ${customer.name || "desconhecido"}\n` +
       `Distribuidora: ${customer.distribuidora || "?"}\n` +
       `Cidade: ${customer.address_city || "?"}/${customer.address_state || "?"}\n` +
-      `Valor da conta: ${customer.electricity_bill_value ? `R$ ${customer.electricity_bill_value}` : "?"}\n` +
+      `Valor da conta: ${billNum > 0 ? `R$ ${billNum}` : "?"}\n` +
       `Dor: ${customer.pain_point || "?"}\n` +
+      `Score atual: ${customer.qualification_score ?? 0}/100\n` +
       `Fase atual: ${phase}\n` +
       `Origem: ${customer.lead_source?.utm_source || "organico"}\n` +
       (customer.customer_referred_by_name
         ? `Indicado por: ${customer.customer_referred_by_name}\n`
         : "") +
+      billCalcLine +
       mediaListLine +
       cadenceLine;
 
