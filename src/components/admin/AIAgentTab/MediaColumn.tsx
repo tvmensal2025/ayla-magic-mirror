@@ -6,6 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { Input } from "@/components/ui/input";
 import {
   Loader2,
   Plus,
@@ -18,6 +19,7 @@ import {
   Globe,
   User,
   Tag,
+  Pencil,
 } from "lucide-react";
 
 type Kind = "audio" | "video" | "image" | "document" | "text";
