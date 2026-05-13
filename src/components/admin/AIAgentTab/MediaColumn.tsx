@@ -157,7 +157,7 @@ export function MediaColumn({ userId }: { userId: string }) {
           step_tags: ["any"],
           intent_tags: [],
           active: true,
-          priority: 0,
+          priority: 10,
         });
         if (insErr) throw insErr;
       }
