@@ -13,6 +13,7 @@ export type SlotRow = {
   trigger_hint: string | null;
   fallback_text: string | null;
   position: number;
+  is_testing?: boolean;
 };
 
 export type SlotMedia = {
