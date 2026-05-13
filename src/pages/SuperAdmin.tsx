@@ -20,6 +20,7 @@ import { AuditLogPanel } from "@/components/superadmin/AuditLogPanel";
 import { BotFunnelPanel } from "@/components/superadmin/BotFunnelPanel";
 import { WorkerPhaseTimeline } from "@/components/superadmin/WorkerPhaseTimeline";
 import { StuckLeadsWidget } from "@/components/superadmin/StuckLeadsWidget";
+import { SystemHealthPanel } from "@/components/superadmin/SystemHealthPanel";
 import { PlatformFacebookCard } from "@/components/admin/super/PlatformFacebookCard";
 import { PlatformPnLCard } from "@/components/admin/super/PlatformPnLCard";
 import { NetworkHealthPanel } from "@/components/admin/super/NetworkHealthPanel";
@@ -341,6 +342,9 @@ const SuperAdmin = () => {
                 </div>
               ))}
             </div>
+
+            {/* Health Panel — saúde geral + religar bot global */}
+            <SystemHealthPanel />
 
             {/* Stuck Leads Widget — visibilidade em tempo real */}
             <StuckLeadsWidget />
