@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Loader2, Rocket, ChevronLeft, AlertTriangle } from "lucide-react";
+import { Loader2, Rocket, ChevronLeft, AlertTriangle, UserCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   CityHit, createCampaign, preflightCampaign, searchCitiesBulk,
@@ -10,6 +10,7 @@ import {
 import { DISTRIBUIDORAS_PRESETS } from "@/data/distribuidoraPresets";
 import { AdTemplate } from "@/services/adTemplates";
 import { supabase } from "@/integrations/supabase/client";
+import { useInstancePhone } from "@/hooks/useInstancePhone";
 
 interface Props {
   open: boolean;
@@ -36,6 +37,15 @@ export function UseTemplateDialog({ open, onClose, template, consultantId, onPub
   const [consultantName, setConsultantName] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [stepLog, setStepLog] = useState<string>("");
+  const { data: connectedPhone } = useInstancePhone(consultantId);
+
+  function formatPhone(p?: string | null) {
+    if (!p) return "";
+    const d = p.replace(/\D/g, "");
+    if (d.length === 13) return `+${d.slice(0, 2)} (${d.slice(2, 4)}) ${d.slice(4, 9)}-${d.slice(9)}`;
+    if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+    return p;
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -189,6 +199,17 @@ export function UseTemplateDialog({ open, onClose, template, consultantId, onPub
           </div>
         ) : (
           <div className="space-y-3">
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-2.5 flex items-start gap-2 text-xs">
+              <UserCheck className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+              <div className="leading-snug">
+                Anúncio em nome de <strong className="text-foreground">{consultantName || "você"}</strong>
+                {connectedPhone && (
+                  <> · leads chegam no WhatsApp <strong className="text-foreground">{formatPhone(connectedPhone)}</strong></>
+                )}
+                <div className="text-muted-foreground mt-0.5">Tudo automático — não precisa preencher nome nem telefone.</div>
+              </div>
+            </div>
+
             <Card className="p-3 space-y-2 bg-muted/30">
               <div className="grid grid-cols-3 gap-1">
                 {template.photos.slice(0, 3).map((p, i) => (
