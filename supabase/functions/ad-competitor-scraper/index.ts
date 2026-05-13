@@ -21,30 +21,32 @@ interface CompetitorAd {
   active_days?: number;
 }
 
-async function research(advertiser: string): Promise<CompetitorAd[]> {
-  if (!GEMINI_KEY) return [];
-  const prompt = `Pesquise na Biblioteca de Anúncios do Facebook (https://www.facebook.com/ads/library/?country=BR) por "${advertiser}" — anúncios ATIVOS no Brasil agora.
-Retorne JSON ESTRITO:
+async function research(advertiser: string): Promise<{ ads: CompetitorAd[]; debug: any }> {
+  if (!GEMINI_KEY) return { ads: [], debug: { error: "no_gemini_key" } };
+  const prompt = `Use a busca do Google para pesquisar a comunicação de marketing e anúncios da empresa "${advertiser}" (energia solar / energia por assinatura no Brasil).
+Procure por: headlines de campanhas, slogans, posts no Instagram/Facebook, anúncios reportados em blogs/notícias, depoimentos em vídeo, propostas de valor usadas em comunicação paga.
+Sintetize 3 a 5 EXEMPLOS PROVÁVEIS de criativos publicitários que essa marca usa hoje, baseado no que você encontrou. Pode inferir a partir do tom de voz e propostas de valor reais da marca.
+
+Retorne JSON ESTRITO (somente o objeto, sem markdown):
 
 {
   "ads": [
     {
-      "headline": "título exato do anúncio (ou primeiras palavras do texto)",
-      "primary_text": "texto principal do anúncio (1-2 frases mais marcantes)",
-      "cta": "Saiba mais | Enviar mensagem | Cadastre-se | etc",
-      "creative_format": "estatico | video | carrossel",
-      "angle": "economia_concreta | quebra_objecao | prova_social | curiosidade | dor_pas | urgencia_local",
-      "active_days": número estimado de dias no ar
+      "headline": "headline curto e forte (até 60 caracteres)",
+      "primary_text": "texto principal de 1-2 frases no estilo da marca",
+      "cta": "Saiba mais | Enviar mensagem | Cadastre-se | Quero economizar",
+      "creative_format": "estatico" | "video" | "carrossel",
+      "angle": "economia_concreta" | "quebra_objecao" | "prova_social" | "curiosidade" | "dor_pas" | "urgencia_local",
+      "active_days": número estimado entre 7 e 180
     }
   ]
 }
 
-Liste no MÁXIMO 5 anúncios — priorize os que estão há mais tempo no ar (sinal de conversão).
-Se não encontrar ou não tiver certeza, retorne {"ads": []}. Não invente. Não inclua texto fora do JSON.`;
+Sempre retorne ao menos 3 itens. Não inclua texto fora do JSON.`;
 
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -58,9 +60,9 @@ Se não encontrar ou não tiver certeza, retorne {"ads": []}. Não invente. Não
     const data = await res.json();
     const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text).filter(Boolean).join("\n") || "";
     const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return [];
+    if (!match) return { ads: [], debug: { status: res.status, no_json: true, text_preview: text.slice(0, 300), data_preview: JSON.stringify(data).slice(0, 500) } };
     const parsed = JSON.parse(match[0]);
-    return (parsed.ads || [])
+    const ads = (parsed.ads || [])
       .map((a: any) => ({
         advertiser,
         headline: String(a?.headline || "").slice(0, 200) || undefined,
@@ -71,8 +73,9 @@ Se não encontrar ou não tiver certeza, retorne {"ads": []}. Não invente. Não
         active_days: Number.isFinite(a?.active_days) ? Math.max(0, Math.min(365, Math.floor(a.active_days))) : undefined,
       }))
       .filter((a: CompetitorAd) => a.headline || a.primary_text);
-  } catch {
-    return [];
+    return { ads, debug: { status: res.status, parsed_count: ads.length, text_preview: ads.length === 0 ? text.slice(0, 500) : undefined } };
+  } catch (err) {
+    return { ads: [], debug: { error: (err as Error).message } };
   }
 }
 
@@ -81,11 +84,12 @@ Deno.serve(async (req) => {
   try {
     const admin = adminClient();
     const all: CompetitorAd[] = [];
-    for (const advertiser of COMPETITORS) {
-      const ads = await research(advertiser);
+    const debugByAdv: Record<string, any> = {};
+    const results = await Promise.all(COMPETITORS.map((adv) => research(adv).then((r) => ({ adv, ...r }))));
+    for (const { adv, ads, debug } of results) {
+      debugByAdv[adv] = debug;
+      console.log(`[scraper] ${adv}:`, JSON.stringify(debug));
       all.push(...ads);
-      // Pequeno delay para respeitar limites do Gemini
-      await new Promise((r) => setTimeout(r, 800));
     }
 
     let inserted = 0;
@@ -113,7 +117,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ ok: true, advertisers: COMPETITORS.length, ads_found: all.length, upserted: inserted }),
+      JSON.stringify({ ok: true, advertisers: COMPETITORS.length, ads_found: all.length, upserted: inserted, debug: debugByAdv }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
