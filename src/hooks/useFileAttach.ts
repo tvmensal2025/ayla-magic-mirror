@@ -60,7 +60,7 @@ export function useFileAttach(context?: FileAttachContext) {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, [attachedFile]);
+  }, [attachedFile, context?.consultantId, context?.customerJid, context?.customerName]);
 
   const clearAttachment = useCallback(() => { setAttachedFile(null); setPendingImageUrl(null); }, []);
 
