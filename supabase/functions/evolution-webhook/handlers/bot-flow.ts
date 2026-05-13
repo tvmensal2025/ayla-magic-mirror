@@ -155,28 +155,35 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           const tool = decision?.tool;
           const args = decision?.args || {};
 
-          if (tool === "send_text" || tool === "advance_to_closing") {
+          if (tool === "send_text" || tool === "advance_to_closing" || tool === "ask_for_name") {
             reply = args.message || "";
             if (tool === "advance_to_closing") {
-              updates.conversation_step = "aguardando_conta";
-              if (!reply) {
-                reply = "Perfeito! 📸 Para iniciar seu cadastro, me envie uma *foto ou PDF da sua conta de luz*.";
+              // Se o cliente já tem conta no banco, NÃO peça de novo — pula para confirmação.
+              if (customer.electricity_bill_photo_url) {
+                updates.conversation_step = "confirmando_dados_conta";
+                if (!reply || /foto|pdf|conta de (luz|energia)/i.test(reply)) {
+                  reply = "Sua conta já está aqui no sistema. Vou confirmar os dados rapidamente para seguirmos com o cadastro.";
+                }
+              } else {
+                updates.conversation_step = "aguardando_conta";
+                updates.bill_requested_at = new Date().toISOString();
+                if (!reply) {
+                  reply = "Perfeito. Para iniciar seu cadastro, me envie uma foto ou PDF da sua conta de luz.";
+                }
               }
             }
             return { reply, updates };
           }
           if (tool === "request_handoff") {
             updates.conversation_step = "aguardando_humano";
-            reply = `🧑 Vou chamar o ${nomeRepresentante} aqui pra te atender pessoalmente, ok?`;
+            reply = `Vou chamar ${nomeRepresentante} para falar com você pessoalmente.`;
             return { reply, updates };
           }
           if (tool === "schedule_followup") {
-            // Mensagem leve agora; cron de follow-up faz o resto
-            reply = "Beleza! Quando quiser continuar é só me chamar 👍";
+            reply = "Combinado. Quando quiser retomar, é só me chamar.";
             return { reply, updates };
           }
           if (tool === "send_media") {
-            // Send the media now via Evolution; reply carries the caption (or empty)
             if (media?.url) {
               const kind = ["audio", "video", "image"].includes(media.kind) ? media.kind : "document";
               try {
@@ -185,11 +192,11 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);
               }
             }
-            reply = ""; // caption already attached to media
+            reply = "";
             return { reply, updates };
           }
           if (tool === "mark_lost") {
-            reply = "Tranquilo! Se mudar de ideia é só me chamar 💚";
+            reply = "Compreendo. Se mudar de ideia, estarei à disposição.";
             return { reply, updates };
           }
         } else {
