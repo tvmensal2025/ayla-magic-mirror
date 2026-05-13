@@ -90,47 +90,47 @@ async function runQa(imageUrl: string): Promise<{ approved: boolean; report: any
   }
 }
 
-function buildPrompt(angle: string, format: Format, distribuidora: string): string {
+function buildPrompt(angle: string, format: Format, distribuidora: string, attempt = 1): string {
   const spec = FORMAT_SPEC[format];
   const scene = ANGLE_DESC[angle] || ANGLE_DESC.economia_concreta;
+  // A cada tentativa o prompt fica mais agressivo contra texto.
+  const noTextBlock = attempt >= 2
+    ? `═══ ZERO TEXT — CRITICAL ═══
+ABSOLUTE PROHIBITION on rendering ANY of: letters (A-Z, a-z), digits (0-9), %, $, R$, punctuation, words in ANY language, watermarks, logos with names, brand stamps, infographic numbers, signs, billboards, banners, captions, subtitles, percentage symbols, currency symbols, math symbols, OR text on any prop (paper, bill, phone screen, t-shirt, packaging, wall, license plate, calendar, sticker, mug). If a paper/bill is visible, it MUST be COMPLETELY BLANK or SO BLURRED no character is recognizable. Phone screens MUST be BLACK/OFF or BLURRED.
+THIS IS THE #1 RULE. The image is THROWN AWAY if ANY readable character appears.`
+    : `═══ ABSOLUTE RULE — NO TEXT, EVER ═══
+The image MUST NOT contain ANY letters, words, numbers, characters, punctuation, written signs, billboards, posters, captions, watermarks, subtitles, logos with text, brand names, UI labels, percentage signs, currency symbols, infographic numbers. Any paper/bill must be blurred. Any phone screen must be off or blurred. Any visible character makes the image USELESS.`;
 
-  return `PHOTOREALISTIC ADVERTISING BACKGROUND PHOTO (no text overlay yet — text will be added later).
+  return `PHOTOREALISTIC ADVERTISING BACKGROUND PHOTO (text will be added later as overlay).
 
-═══ ABSOLUTE RULE — NO TEXT, EVER ═══
-The image MUST NOT contain ANY:
-- letters, words, numbers, characters, punctuation
-- written signs, billboards, posters, captions, watermarks, subtitles
-- legible text on bills, papers, screens, phones, packaging, t-shirts, walls, license plates
-- logos with text, brand names, UI elements with labels
-- typography, infographics, charts with numbers
-If a paper or bill is visible, it MUST be blurred or angled so NO text is readable. Phone screens MUST be blurred or off. This is non-negotiable — any visible character makes the image USELESS.
+${noTextBlock}
 
 ═══ FORMAT ═══
 Aspect ratio: ${spec.ratio} (${spec.w}x${spec.h})
 Placement: ${spec.placement}
-Composition: ${spec.safeZone}. The main subject should sit on the OPPOSITE third (so the clean third can hold sobreposed text later).
+Composition: ${spec.safeZone}. The main subject sits on the OPPOSITE third (so the clean third can hold overlaid text later).
 
 ═══ SCENE ═══
 ${scene}
 
 ═══ STYLE ═══
-- Photoreal Brazilian DSLR photography, NOT illustration, NOT 3D render, NOT cartoon
-- Natural warm sunlight, golden hour or soft window light
-- Authentic Brazilian middle/lower-middle-class home (NOT American suburb, NOT Scandinavian, NOT studio)
-- Real-looking person (not model-tier beauty), Brazilian features, authentic clothes
-- Subtle green color accent in environment if natural (a plant, a green object) — NOT forced overlay
+- Photoreal Brazilian DSLR photography. NOT illustration, NOT 3D, NOT cartoon, NOT AI-art look
+- Natural warm sunlight, golden hour or soft window light, shallow depth of field
+- Authentic Brazilian middle/lower-middle-class home (NOT American suburb, NOT studio)
+- Real-looking person (not model-tier beauty), authentic Brazilian features and clothes
+- Subtle natural green accent (a plant, a green object) — NOT forced overlay
 - Region context: ${distribuidora}
 
 ═══ ABSOLUTELY FORBIDDEN ═══
-- Solar panels on roof or anywhere (iGreen does NOT install panels)
+- Solar panels (iGreen does NOT install panels)
 - American/European/Asian stock-photo aesthetic
 - Studio backdrop or fake gradient background
 - Cartoon, 3D render, illustration, AI-art look
 - Multiple disconnected scenes / collage
 - Hands or fingers with extra/missing digits
-- Floating UI elements, badges, percentage signs, currency symbols
+- Floating UI elements, badges, percentage signs, currency symbols, ANY text or numbers
 
-Output: ONE single PNG, photographic, ad-ready, NO TEXT.`;
+Output: ONE single PNG, photographic, ad-ready, ZERO TEXT.`;
 }
 
 Deno.serve(async (req) => {
@@ -173,27 +173,24 @@ Deno.serve(async (req) => {
       || (Array.isArray(insights?.winning_patterns) && (insights!.winning_patterns[0] as any)?.angle)
       || "economia_concreta";
 
-    const prompt = buildPrompt(angle, format, distribuidora);
     const spec = FORMAT_SPEC[format];
 
-    // Loop de QA: até 3 tentativas. Guarda o melhor candidato como fallback.
+    // Loop QA: 4 tentativas. Só usa fallback se a imagem rejeitada NÃO tem texto.
     let imageDataUrl: string | null = null;
-    let fallbackDataUrl: string | null = null;
+    let cleanFallbackUrl: string | null = null;     // melhor candidato sem texto
+    let cleanFallbackReport: any = null;
     let lastReport: any = null;
     let attempts = 0;
     let modelUsed = PRIMARY_MODEL;
     let approved = false;
 
-    for (attempts = 1; attempts <= 3; attempts++) {
-      const useModel = attempts === 1 ? PRIMARY_MODEL : (attempts === 2 ? PRIMARY_MODEL : FALLBACK_MODEL);
+    for (attempts = 1; attempts <= 4; attempts++) {
+      const useModel = attempts <= 2 ? PRIMARY_MODEL : FALLBACK_MODEL;
       modelUsed = useModel;
+      const prompt = buildPrompt(angle, format, distribuidora, attempts);
       const candidate = await generateImage(prompt, useModel);
       if (!candidate) { lastReport = { error: `model_${useModel}_returned_null` }; continue; }
 
-      // Guarda como fallback (último candidato gerado)
-      fallbackDataUrl = candidate;
-
-      // Sobe pra MinIO temporário só pra QA conseguir baixar
       const { bytes, mime } = dataUrlToBytes(candidate);
       const ext = mime.includes("png") ? "png" : "jpg";
       const tmpKey = `creativos/${auth.id}/_tmp/${Date.now()}_a${attempts}.${ext}`;
@@ -216,22 +213,29 @@ Deno.serve(async (req) => {
         approved = true;
         break;
       }
+
+      // Guarda só candidatos SEM TEXTO como fallback (texto baked = lixo, nunca cair pra ele)
+      const hasText = qa.report?.has_text === true;
+      if (!hasText && !cleanFallbackUrl) {
+        cleanFallbackUrl = candidate;
+        cleanFallbackReport = qa.report;
+      }
     }
 
-    // Fail-open: se nenhuma aprovou mas temos uma imagem, usa a última.
-    // Overlay determinístico vai cobrir top com headline/selo, então texto
-    // residual em props (papel/calendário) raramente atrapalha.
-    if (!imageDataUrl && fallbackDataUrl) {
-      imageDataUrl = fallbackDataUrl;
-      console.warn("[gen] usando fallback sem aprovação QA. last_report=", lastReport);
+    // Fallback: usa candidato limpo (sem texto baked) se nenhum aprovou.
+    if (!imageDataUrl && cleanFallbackUrl) {
+      imageDataUrl = cleanFallbackUrl;
+      lastReport = cleanFallbackReport;
+      console.warn("[gen] usando fallback limpo sem texto. report=", cleanFallbackReport);
     }
 
     if (!imageDataUrl) {
+      // Todas as tentativas vieram com texto — não engana o usuário.
       return new Response(JSON.stringify({
-        error: "Falha ao gerar imagem (modelo não retornou). Tente novamente.",
-        fallback: true,
+        error: "A IA insistiu em colocar texto na imagem em todas as 4 tentativas. Tente um ângulo diferente (ex: 'Prova social' ou 'Curiosidade') ou gere novamente.",
         last_qa: lastReport,
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        attempts,
+      }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Upload final
@@ -273,7 +277,7 @@ Deno.serve(async (req) => {
         format,
         image_url: imageUrl,
         storage_path: storagePath,
-        prompt_used: prompt.slice(0, 4000),
+        prompt_used: buildPrompt(angle, format, distribuidora, attempts).slice(0, 4000),
         brief_used: ANGLE_DESC[angle] || null,
         angle,
         is_public: isPublic,
