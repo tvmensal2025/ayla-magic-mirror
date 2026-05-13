@@ -41,7 +41,7 @@ export function normalizeName(text: string): string {
     .toLowerCase();
 }
 
-function extFromMime(mime: string): string {
+export function extFromMime(mime: string): string {
   const map: Record<string, string> = {
     "image/jpeg": "jpg",
     "image/jpg": "jpg",
