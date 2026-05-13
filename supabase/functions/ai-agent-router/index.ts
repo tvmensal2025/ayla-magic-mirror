@@ -35,21 +35,54 @@ const FUNNEL_STEPS = [
   "complete", "handoff_humano",
 ] as const;
 
+const INTENTS = [
+  "saudacao","duvida","objecao","aceite","recusa",
+  "pediu_humano","enviou_midia","confuso","fora_escopo",
+  "frio","quente","desconfiado",
+] as const;
+
 const DECISION_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
     intent: { type: "string", description: "Intenção detectada do cliente em 1-3 palavras" },
+    detected_intent: { type: "string", enum: [...INTENTS], description: "Categoria estruturada da intenção" },
+    pain_point: { type: "string", description: "Dor/necessidade detectada em até 60 chars. Vazio se nada claro." },
+    qualification_score: { type: "integer", minimum: 0, maximum: 10, description: "Quão pronto o lead está pra fechar" },
+    objection_type: { type: "string", description: "Tipo da objeção (preco, confianca, instalacao, prazo, etc). Vazio se sem objeção." },
+    should_pause_seconds: { type: "integer", minimum: 0, maximum: 8, description: "Pausa antes de enviar (humanização)" },
     next_step: { type: "string", enum: [...FUNNEL_STEPS] },
-    reply_text: { type: "string", description: "Texto curto humanizado para enviar. Vazio se for só enviar mídia/áudio." },
-    media_to_send_ids: { type: "array", items: { type: "string" }, description: "IDs de ai_media_library a enviar em ordem. Vazio se nenhum." },
-    audio_slot_key: { type: "string", description: "slot_key da biblioteca de áudios da Camila a disparar (ex: objecao_preco). Vazio se nenhum." },
-    handoff: { type: "boolean", description: "true se deve transferir para humano agora" },
+    reply_text: { type: "string", description: "Texto curto humanizado. Vazio se for só enviar mídia/áudio." },
+    media_to_send_ids: { type: "array", items: { type: "string" } },
+    audio_slot_key: { type: "string", description: "slot_key do áudio da Camila. Vazio se nenhum." },
+    handoff: { type: "boolean" },
     handoff_reason: { type: "string" },
     confidence: { type: "number", minimum: 0, maximum: 1 },
   },
-  required: ["intent", "next_step", "reply_text", "media_to_send_ids", "audio_slot_key", "handoff", "handoff_reason", "confidence"],
+  required: [
+    "intent","detected_intent","pain_point","qualification_score","objection_type",
+    "should_pause_seconds","next_step","reply_text","media_to_send_ids",
+    "audio_slot_key","handoff","handoff_reason","confidence",
+  ],
 } as const;
+
+// Similaridade simples por trigrams para anti-loop
+function similarity(a: string, b: string): number {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-zà-ú0-9 ]/gi, "").replace(/\s+/g, " ").trim();
+  const A = norm(a), B = norm(b);
+  if (!A || !B) return 0;
+  if (A === B) return 1;
+  const trig = (s: string) => {
+    const set = new Set<string>();
+    const p = `  ${s}  `;
+    for (let i = 0; i < p.length - 2; i++) set.add(p.slice(i, i + 3));
+    return set;
+  };
+  const ta = trig(A), tb = trig(B);
+  let inter = 0;
+  ta.forEach((t) => { if (tb.has(t)) inter++; });
+  return inter / Math.max(ta.size, tb.size);
+}
 
 function randInt(min: number, max: number) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
