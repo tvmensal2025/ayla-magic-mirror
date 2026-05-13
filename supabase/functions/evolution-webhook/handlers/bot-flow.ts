@@ -130,6 +130,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         console.log(`👤 [bot-flow] Auto-apresentação detectada: nome="${newName}" (self_introduced)`);
       }
 
+      const { data: cfgPrivate } = customer.consultant_id
         ? await supabase
           .from("ai_agent_config")
           .select("handoff_rules, enabled")
