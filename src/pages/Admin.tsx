@@ -21,7 +21,7 @@ const PreviewTab = lazy(() => import("@/components/admin/PreviewTab").then(m => 
 const NotificationCenter = lazy(() => import("@/components/admin/NotificationCenter").then(m => ({ default: m.NotificationCenter })));
 const AIChatPanel = lazy(() => import("@/components/admin/AIChatPanel").then(m => ({ default: m.AIChatPanel })));
 const WhatsAppTab = lazy(() => import("@/components/whatsapp/WhatsAppTab").then(m => ({ default: m.WhatsAppTab })));
-const KanbanBoard = lazy(() => import("@/components/whatsapp/KanbanBoard").then(m => ({ default: m.KanbanBoard })));
+const CrmTabs = lazy(() => import("@/components/whatsapp/CrmTabs").then(m => ({ default: m.CrmTabs })));
 const CustomerManager = lazy(() => import("@/components/whatsapp/CustomerManager").then(m => ({ default: m.CustomerManager })));
 const AutoMessageLog = lazy(() => import("@/components/whatsapp/AutoMessageLog").then(m => ({ default: m.AutoMessageLog })));
 const MaterialsTab = lazy(() => import("@/components/admin/MaterialsTab").then(m => ({ default: m.MaterialsTab })));
@@ -301,7 +301,7 @@ const AdminContent = () => {
           )}
 
           {userId && activeTab === "crm" && (
-            <KanbanBoard consultantId={userId} instanceName={instanceName} />
+            <CrmTabs consultantId={userId} instanceName={instanceName} />
           )}
 
           {userId && activeTab === "clientes" && (

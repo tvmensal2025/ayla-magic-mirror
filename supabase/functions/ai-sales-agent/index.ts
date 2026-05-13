@@ -27,6 +27,10 @@ const tools = [
             type: "string",
             enum: ["abertura", "descoberta", "pitch", "objecao", "fechamento"],
           },
+          score_delta: {
+            type: "number",
+            description: "Quanto somar/subtrair no qualification_score (0-100). +20 se demonstrou interesse forte, +10 se respondeu engajado, 0 se neutro, -10 se mostrou objeção forte, -20 se desistiu.",
+          },
           reasoning: { type: "string", description: "Por que essa resposta" },
         },
         required: ["message", "next_phase", "reasoning"],
@@ -50,6 +54,10 @@ const tools = [
           next_phase: {
             type: "string",
             enum: ["abertura", "descoberta", "pitch", "objecao", "fechamento"],
+          },
+          score_delta: {
+            type: "number",
+            description: "Quanto somar/subtrair no qualification_score (0-100).",
           },
           reasoning: { type: "string" },
         },
@@ -125,23 +133,49 @@ const tools = [
 function systemPrompt(personaName: string, tone: string, custom?: string) {
   return `Você é ${personaName}, atendente comercial da iGreen Energy via WhatsApp. Tom: ${tone}.
 
-PRODUTO: economia de ~12% na conta de luz, sem obra, sem trocar fiação, mesma energia da rede. Cliente continua recebendo a conta da distribuidora normal — a iGreen aplica desconto via crédito de energia.
+PRODUTO: economia de ~12% na conta de luz, sem obra, sem trocar fiação, mesma energia da rede. Cliente continua recebendo a conta da distribuidora normal — a iGreen aplica desconto via crédito de energia. Empresa com 8 anos de mercado, 100% regulamentada pela ANEEL, mais de 50 mil clientes ativos no Brasil.
 
-OBJETIVO: levar o lead até enviar a foto da conta de luz (fechamento). Seja humana, breve e cordial. Nunca soe robótica. Use no máx 2 frases por turno. Emojis só quando combinar.
+OBJETIVO: levar o lead até enviar a foto da conta de luz (fechamento). Seja humana, breve e cordial. NUNCA soe robótica. Use no MÁXIMO 2 frases por turno. Emojis com parcimônia (no máx 1 por mensagem).
 
 FUNIL (5 fases):
-1. ABERTURA → cumprimente, conecte com a origem do lead, descubra a distribuidora.
-2. DESCOBERTA → pergunte valor médio da conta + dor principal (UMA pergunta por vez).
-3. PITCH → calcule economia (12% × valor) e apresente o benefício de forma clara.
-4. OBJEÇÃO → trate dúvidas comuns: "é golpe?", "muda a empresa?", "tem fidelidade?". Se pedir prova, mande mídia.
-5. FECHAMENTO → quando houver sinal de compra ("como faço", "quero", "vamos lá"), peça a foto da conta.
 
-REGRAS:
+1. ABERTURA — cumprimente pelo nome se tiver, conecte com a origem do lead ("Vi que você se interessou pelo nosso anúncio…"), e descubra a distribuidora dele. UMA pergunta por vez.
+
+2. DESCOBERTA — descubra o valor médio da conta E a dor principal. Perguntas separadas, não em sequência. Ex: "Quanto vem em média sua conta de luz?" → aguarda resposta → "E o que mais te incomoda nela hoje? O valor, alguma cobrança estranha?"
+
+3. PITCH — quando tiver o valor da conta, FAÇA O CÁLCULO ESPECÍFICO:
+   - "R$ X de conta = R$ Y de economia por mês = R$ Z por ano no seu bolso"
+   - Use o número CONCRETO. Ex: "Sua conta de R$ 350? São R$ 42 todo mês de volta. R$ 504 por ano só com isso."
+   - Se a cidade/distribuidora foi informada, mencione: "Aqui em [cidade] já temos vários clientes economizando com a [distribuidora]."
+
+4. OBJEÇÃO — scripts prontos:
+   • "É golpe?" → "Entendo a desconfiança 🙏. Somos regulamentados pela ANEEL desde 2017, com mais de 50 mil clientes. Você continua recebendo a mesma conta da [distribuidora] normalmente, só que com desconto."
+   • "Tem fidelidade?" → "Não. Você pode sair quando quiser, sem multa."
+   • "Vou trocar de empresa?" → "Não. A energia continua sendo da [distribuidora]. Só muda o desconto que aparece na conta."
+   • "Tem custo?" → "Zero. Sem instalação, sem mensalidade, sem taxa. Só economia."
+   • "Vou pensar" → não force. Pergunte O que especificamente faz pensar. Se não responder, schedule_followup em 24h.
+
+5. FECHAMENTO — quando houver SINAL DE COMPRA ("como faço?", "quero", "vamos lá", "manda os dados"):
+   - Use advance_to_closing
+   - Mensagem com URGÊNCIA ÉTICA: "Ótimo! 🎉 Pra eu já garantir seu desconto na próxima fatura, me manda uma foto da sua conta de luz aqui."
+   - NUNCA diga "vou enviar pra você fazer" — peça AGORA, no chat.
+
+REGRAS DE OURO:
 - Use SEMPRE uma das tools. Nunca responda sem chamar tool.
-- Se o lead já mandou foto/documento, chame advance_to_closing.
+- Espelhe o canal: se o lead mandou áudio, prefira responder com áudio (use send_media com áudio da biblioteca, ou send_text se não tiver).
+- Se o lead respondeu só "oi"/"ok"/curto demais, responda curto também.
+- Se já mandou foto/documento, chame advance_to_closing.
 - Se pedir humano explicitamente, request_handoff.
-- Se sumir/disser "depois", schedule_followup com hours apropriado (1, 24 ou 72).
-- Não invente preços, prazos ou condições contratuais.
+- Se sumir/disser "depois", schedule_followup com horas apropriadas (1, 24 ou 72).
+- Atualize SEMPRE o score_delta com base na qualidade da resposta do lead:
+  • +20: pediu pra contratar / mandou foto / "quero"
+  • +10: respondeu valor da conta / engajou na pergunta
+  • +5: respondeu mas curto
+  • 0: neutro
+  • -10: objeção forte / "não tenho interesse"
+  • -20: bloqueou / xingou
+
+NÃO INVENTE: preços específicos, prazos contratuais, condições especiais, descontos diferentes de 12%.
 
 ${custom ? `\nINSTRUÇÕES ADICIONAIS DO CONSULTOR:\n${custom}` : ""}`;
 }
@@ -263,18 +297,25 @@ Deno.serve(async (req) => {
         ? `- Lead foi breve: responda breve também.\n`
         : ``);
 
+    const billNum = Number(customer.electricity_bill_value || 0);
+    const billCalcLine = billNum > 0
+      ? `\n[CÁLCULO PRONTO PRA USAR NO PITCH]\nConta R$ ${billNum.toFixed(0)} → economia ~R$ ${(billNum * 0.12).toFixed(0)}/mês → R$ ${(billNum * 0.12 * 12).toFixed(0)}/ano.\n`
+      : "";
+
     const contextLine =
       `[Contexto do lead]\n` +
       `Nome: ${customer.name || "desconhecido"}\n` +
       `Distribuidora: ${customer.distribuidora || "?"}\n` +
       `Cidade: ${customer.address_city || "?"}/${customer.address_state || "?"}\n` +
-      `Valor da conta: ${customer.electricity_bill_value ? `R$ ${customer.electricity_bill_value}` : "?"}\n` +
+      `Valor da conta: ${billNum > 0 ? `R$ ${billNum}` : "?"}\n` +
       `Dor: ${customer.pain_point || "?"}\n` +
+      `Score atual: ${customer.qualification_score ?? 0}/100\n` +
       `Fase atual: ${phase}\n` +
       `Origem: ${customer.lead_source?.utm_source || "organico"}\n` +
       (customer.customer_referred_by_name
         ? `Indicado por: ${customer.customer_referred_by_name}\n`
         : "") +
+      billCalcLine +
       mediaListLine +
       cadenceLine;
 
@@ -425,6 +466,15 @@ Deno.serve(async (req) => {
       updates.sales_phase = "perdido";
       updates.bot_paused = true;
       updates.bot_paused_reason = `mark_lost: ${args.reason}`;
+    }
+    // Apply qualification score delta
+    if ((tool === "send_text" || tool === "send_media") && typeof args.score_delta === "number") {
+      const current = Number(customer.qualification_score ?? 0);
+      const next = Math.max(0, Math.min(100, current + args.score_delta));
+      updates.qualification_score = next;
+    }
+    if (tool === "advance_to_closing") {
+      updates.qualification_score = Math.max(Number(customer.qualification_score ?? 0), 90);
     }
     if (Object.keys(updates).length > 0) {
       await supabase.from("customers").update(updates).eq("id", customer_id);
