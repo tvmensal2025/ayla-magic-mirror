@@ -211,6 +211,25 @@ export function MediaColumn({ userId }: { userId: string }) {
     setItems((prev) => prev.map((x) => (x.id === m.id ? { ...x, ...patch } : x)));
   }
 
+  async function updateLabel(m: Media, newLabel: string) {
+    const trimmed = newLabel.trim();
+    if (!trimmed || trimmed === m.label) return;
+    const { error } = await supabase.from("ai_media_library").update({ label: trimmed }).eq("id", m.id);
+    if (error) { toast({ title: "Erro ao renomear", description: error.message, variant: "destructive" }); return; }
+    setItems((prev) => prev.map((x) => (x.id === m.id ? { ...x, label: trimmed } : x)));
+  }
+
+  async function updatePriority(m: Media, value: number) {
+    const v = Number.isFinite(value) ? Math.max(0, Math.min(999, Math.trunc(value))) : 0;
+    if (v === m.priority) return;
+    const { error } = await supabase.from("ai_media_library").update({ priority: v }).eq("id", m.id);
+    if (error) { toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
+    setItems((prev) => {
+      const next = prev.map((x) => (x.id === m.id ? { ...x, priority: v } : x));
+      return next.sort((a, b) => b.priority - a.priority);
+    });
+  }
+
   function TagEditor({ m }: { m: Media }) {
     const stepTags = m.step_tags || [];
     const intentTags = m.intent_tags || [];
