@@ -304,14 +304,55 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── 7.1) AI AGENT MODE — delegar ao novo orquestrador ─────────────
-    const { data: aiCfg } = await supabase
+    // ─── 7.0) Garante consultant_id no customer (lead órfão de tráfego) ─
+    if (!customer.consultant_id && instanceData.consultant_id) {
+      try {
+        await supabase.from("customers")
+          .update({ consultant_id: instanceData.consultant_id })
+          .eq("id", customer.id);
+        (customer as any).consultant_id = instanceData.consultant_id;
+        console.log(`👤 [orphan-fix] customer ${customer.id} -> consultant ${instanceData.consultant_id}`);
+      } catch (e) { console.warn("orphan-fix update failed:", e); }
+    }
+
+    // ─── 7.1) AI AGENT MODE — Camila assume conversa livre ─────────────
+    // Steps onde a IA conduz (resto fica no bot hardcoded com BOTÕES intactos).
+    const CONVERSATIONAL_STEPS = new Set([
+      "welcome",
+      "menu_inicial",
+      "pos_video",
+      "aguardando_humano",
+      "aguardando_conta",
+      "qualificacao",
+      "apresentacao",
+      "objecoes",
+    ]);
+    const currentStep = customer.conversation_step || "welcome";
+
+    // Cascata: config do consultor -> config global (consultant_id IS NULL)
+    const { data: aiCfgPriv } = await supabase
       .from("ai_agent_config")
       .select("enabled")
       .eq("consultant_id", instanceData.consultant_id)
       .maybeSingle();
+    let aiCfg = aiCfgPriv;
+    if (!aiCfg) {
+      const { data: aiCfgGlobal } = await supabase
+        .from("ai_agent_config")
+        .select("enabled")
+        .is("consultant_id", null)
+        .maybeSingle();
+      aiCfg = aiCfgGlobal;
+    }
 
-    if (aiCfg?.enabled === true) {
+    // Em aguardando_conta, se o cliente mandou MÍDIA (foto da conta), NÃO chamar IA;
+    // o bot hardcoded faz OCR + envia botões SIM/NÃO/EDITAR.
+    const aiShouldHandle =
+      aiCfg?.enabled === true &&
+      CONVERSATIONAL_STEPS.has(currentStep) &&
+      !(currentStep === "aguardando_conta" && isFile);
+
+    if (aiShouldHandle) {
       let aiInput = messageText || "";
       let aiInputKind: "text" | "audio_transcript" | "image_caption" | "document" = "text";
       if (isFile && fileBase64) {
