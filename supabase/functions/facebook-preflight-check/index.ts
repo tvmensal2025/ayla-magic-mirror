@@ -66,26 +66,10 @@ Deno.serve(async (req) => {
       warnings.push("Não foi possível validar status da conta de anúncios");
     }
 
-    // 4. Página tem WhatsApp Business vinculado E o número de destino é um número WABA?
-    if (conn.page_id && conn.whatsapp_destination_number) {
-      try {
-        const pg = await fbFetch(`/${conn.page_id}?fields=connected_whatsapp_business_account{id,phone_numbers{display_phone_number,verified_name}}&access_token=${conn.token}`);
-        const waba = pg?.connected_whatsapp_business_account;
-        if (!waba?.id) {
-          blockers.push("Página sem WhatsApp Business vinculado — vincule no Meta Business Suite → Configurações → WhatsApp Manager. Sem isso o Facebook reprova o anúncio (subcode 2446885).");
-        } else {
-          const onlyDigits = (s: string) => (s || "").replace(/\D/g, "");
-          const dest = onlyDigits(conn.whatsapp_destination_number);
-          const numbers: string[] = (waba?.phone_numbers?.data || []).map((n: { display_phone_number: string }) => onlyDigits(n.display_phone_number));
-          const matched = numbers.some((n) => n === dest || dest.endsWith(n) || n.endsWith(dest));
-          if (numbers.length > 0 && !matched) {
-            blockers.push(`Número de destino (${conn.whatsapp_destination_number}) não está registrado como WhatsApp Business na sua Página. Números WABA disponíveis: ${numbers.join(", ")}. Use um destes ou registre o número no WhatsApp Manager.`);
-          }
-        }
-      } catch (_) {
-        warnings.push("Não foi possível confirmar se o número é WhatsApp Business — se o anúncio for reprovado, verifique no Meta Business Suite.");
-      }
-    }
+    // 4. Validação WABA removida: a campanha usa link wa.me (não Click-to-WhatsApp
+    // nativo), então não exige WhatsApp Business vinculado à Página.
+    // O campo `connected_whatsapp_business_account` retorna erro #100 e gerava
+    // logs falsos de erro. Qualquer número WhatsApp (pessoal ou Business) funciona.
 
     // 5. Pixel vivo (recebeu evento nos últimos 7 dias)?
     if (conn.pixel_id) {
