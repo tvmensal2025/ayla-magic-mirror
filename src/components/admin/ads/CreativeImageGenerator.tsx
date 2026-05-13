@@ -251,7 +251,7 @@ export const CreativeImageGenerator = forwardRef<CreativeImageGeneratorHandle, P
                     <Badge variant="secondary" className="text-[9px]">{h.format.replace("_", " ")}</Badge>
                     {h.angle && <Badge variant="outline" className="text-[9px]">{h.angle}</Badge>}
                     {onUseInAd && (
-                      <Button size="sm" className="h-7 text-[10px] gap-1 w-full" onClick={() => onUseInAd(h.image_url)}>
+                      <Button size="sm" className="h-7 text-[10px] gap-1 w-full" onClick={() => onUseInAd({ image_url: h.image_url, format: h.format, headline: h.headline_used || "", badge: h.badge_text || "" })}>
                         <Megaphone className="w-3 h-3" /> Usar neste anúncio
                       </Button>
                     )}
