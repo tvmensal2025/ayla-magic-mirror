@@ -41,13 +41,14 @@ const DECISION_SCHEMA = {
   properties: {
     intent: { type: "string", description: "Intenção detectada do cliente em 1-3 palavras" },
     next_step: { type: "string", enum: [...FUNNEL_STEPS] },
-    reply_text: { type: "string", description: "Texto curto humanizado para enviar. Vazio se for só enviar mídia." },
+    reply_text: { type: "string", description: "Texto curto humanizado para enviar. Vazio se for só enviar mídia/áudio." },
     media_to_send_ids: { type: "array", items: { type: "string" }, description: "IDs de ai_media_library a enviar em ordem. Vazio se nenhum." },
+    audio_slot_key: { type: "string", description: "slot_key da biblioteca de áudios da Camila a disparar (ex: objecao_preco). Vazio se nenhum." },
     handoff: { type: "boolean", description: "true se deve transferir para humano agora" },
     handoff_reason: { type: "string" },
     confidence: { type: "number", minimum: 0, maximum: 1 },
   },
-  required: ["intent", "next_step", "reply_text", "media_to_send_ids", "handoff", "handoff_reason", "confidence"],
+  required: ["intent", "next_step", "reply_text", "media_to_send_ids", "audio_slot_key", "handoff", "handoff_reason", "confidence"],
 } as const;
 
 function randInt(min: number, max: number) { return Math.floor(Math.random() * (max - min + 1)) + min; }
