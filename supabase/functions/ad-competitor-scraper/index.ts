@@ -8,6 +8,7 @@ const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API
 const COMPETITORS = [
   "iGreen Energy", "Solfácil", "Lemon Energia", "Órigo Energia",
   "Setta Energia", "Bright Energia", "Genyx Energia",
+  "Reverde Energia", "Alexandria Energia", "Matrix Energia",
 ];
 
 interface CompetitorAd {
