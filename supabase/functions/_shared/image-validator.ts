@@ -92,16 +92,20 @@ export async function validateAdImage(
     const issues: string[] = [];
     const warnings: string[] = [];
 
-    if (parsed.forbidden_content) issues.push(`Conteúdo proibido: ${parsed.forbidden_reason || "violação de política"}`);
-    if (parsed.face_cropped) issues.push("Rosto cortado ou mal enquadrado");
-    if (parsed.blurry) issues.push("Imagem borrada ou baixa resolução");
+    // BLOQUEIO apenas para conteúdo realmente proibido pela política Meta
+    // (nudez, violência, drogas, promessa claramente enganosa). Tudo o resto
+    // vira AVISO — a regra dos 20% de texto foi descontinuada pela Meta em 2020,
+    // e "rosto cortado" gera muito falso-positivo em arte de marketing estilizada.
+    if (parsed.forbidden_content) {
+      issues.push(`Conteúdo proibido pela política da Meta: ${parsed.forbidden_reason || "violação detectada"}`);
+    }
+    if (parsed.face_cropped) warnings.push("Rosto pode estar cortado — pode reduzir performance, mas não bloqueia.");
+    if (parsed.blurry) warnings.push("Imagem parece de baixa resolução — pode reduzir performance.");
     if (typeof parsed.text_percent === "number" && parsed.text_percent > 20) {
-      issues.push(`Excesso de texto na imagem (${parsed.text_percent}%) — Meta penaliza acima de 20%`);
-    } else if (typeof parsed.text_percent === "number" && parsed.text_percent > 10) {
-      warnings.push(`Bastante texto (${parsed.text_percent}%) — pode reduzir entrega`);
+      warnings.push(`Imagem com bastante texto (~${parsed.text_percent}%). A Meta não bloqueia mais isso, mas pode entregar menos.`);
     }
     const score = typeof parsed.score === "number" ? parsed.score : 100;
-    if (score < 60 && issues.length === 0) issues.push(`Score baixo (${score}/100)`);
+    if (score < 40) warnings.push(`Qualidade geral baixa (${score}/100) — considere trocar a foto.`);
 
     return {
       ok: issues.length === 0,
