@@ -77,7 +77,7 @@ export const CreativeOverlay = forwardRef<CreativeOverlayHandle, CreativeOverlay
         style={{ aspectRatio: spec.aspect, width: "100%", maxWidth: "100%" }}
       >
         <img
-          src={imageUrl}
+          src={localUrl}
           alt=""
           crossOrigin="anonymous"
           className="absolute inset-0 w-full h-full object-cover"
