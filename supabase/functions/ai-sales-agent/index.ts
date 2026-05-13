@@ -559,6 +559,23 @@ Deno.serve(async (req) => {
 
     // Validate media_id and resolve URL/kind for downstream sender
     let resolvedMedia: { id: string; url: string; kind: string; label: string } | null = null;
+    if (tool === "send_media" && billAlreadyReceivedEarly) {
+      // Hard guard: nunca enviar mídia depois da conta — sempre handoff.
+      return new Response(
+        JSON.stringify({
+          decision: {
+            tool: "request_handoff",
+            args: {
+              reason: "lead_pronto_cadastro: conta recebida; operador deve usar botões Cadastrar/OTP/Facial.",
+              urgency: "alta",
+            },
+          },
+          phase,
+          latency_ms: latencyMs,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
     if (tool === "send_media") {
       const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
       if (!picked || !picked.url) {
