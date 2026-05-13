@@ -16,6 +16,7 @@ interface Props {
   consultantId: string;
   onCreated?: () => void;
   onSwitchAdvanced?: () => void;
+  prefillImageUrl?: string | null;
 }
 
 const PRESET_CACHE_VERSION = "v1";
