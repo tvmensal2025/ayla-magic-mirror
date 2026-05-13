@@ -78,7 +78,7 @@ export function AdsTab({ consultantId }: Props) {
         </Button>
       </div>
 
-      {view === "results" && <ResultsDashboard consultantId={consultantId} />}
+      {view === "results" && <ResultsDashboard consultantId={consultantId} onCreateClick={() => { setPrefillImageUrl(null); setExpressOpen(true); }} />}
       {view === "campaigns" && <CampaignsList consultantId={consultantId} refreshKey={refreshKey} />}
       {view === "gallery" && (
         <AdTemplatesGallery consultantId={consultantId} onPublished={() => { setRefreshKey(k => k + 1); setView("campaigns"); }} />

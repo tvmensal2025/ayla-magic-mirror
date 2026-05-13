@@ -52,16 +52,24 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
   const [stepLog, setStepLog] = useState<string>("");
   const [applyCta, setApplyCta] = useState(true);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const overlayRefs = useRef<Array<CreativeOverlayHandle | null>>([]);
+  // Para cada foto: { square, vertical, story } refs do CreativeOverlay
+  const overlayRefs = useRef<Array<{ square: CreativeOverlayHandle | null; vertical: CreativeOverlayHandle | null; story: CreativeOverlayHandle | null }>>([]);
 
   const preset = useMemo(
     () => DISTRIBUIDORAS_PRESETS.find((p) => p.id === presetId) || null,
     [presetId],
   );
-  const headline = preset
+  const defaultHeadline = preset
     ? `Conta de luz até 20% mais barata em ${preset.nome}`
     : "Conta de luz até 20% mais barata";
+  const [liveHeadline, setLiveHeadline] = useState(defaultHeadline);
+  useEffect(() => { setLiveHeadline(defaultHeadline); }, [defaultHeadline]);
   const badge = "ATÉ 20% OFF";
+
+  function getOverlayRef(i: number) {
+    if (!overlayRefs.current[i]) overlayRefs.current[i] = { square: null, vertical: null, story: null };
+    return overlayRefs.current[i];
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -110,19 +118,30 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
     setPreviews((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  async function composeFinalFiles(): Promise<File[]> {
-    if (!applyCta) return files;
-    const out: File[] = [];
+  type FormatKey = "square" | "vertical" | "story";
+  const FORMATS: FormatKey[] = ["square", "vertical", "story"];
+
+  async function composeFinalFiles(): Promise<{ file: File; format: FormatKey }[]> {
+    if (!applyCta) {
+      // sem overlay → publica só no quadrado mesmo
+      return files.map((f) => ({ file: f, format: "square" as FormatKey }));
+    }
+    const out: { file: File; format: FormatKey }[] = [];
     for (let i = 0; i < files.length; i++) {
-      const handle = overlayRefs.current[i];
-      if (!handle) { out.push(files[i]); continue; }
-      try {
-        const composite = await handle.toFile(`anuncio-${Date.now()}-${i}.png`);
-        out.push(composite);
-      } catch {
-        out.push(files[i]);
+      const refs = overlayRefs.current[i];
+      for (const fmt of FORMATS) {
+        const handle = refs?.[fmt];
+        if (!handle) continue;
+        try {
+          const composite = await handle.toFile(`anuncio-${Date.now()}-${i}-${fmt}.png`);
+          out.push({ file: composite, format: fmt });
+        } catch {
+          // se falhar overlay, cai pro upload original como square
+          if (fmt === "square") out.push({ file: files[i], format: "square" });
+        }
       }
     }
+    if (out.length === 0) return files.map((f) => ({ file: f, format: "square" as FormatKey }));
     return out;
   }
 
@@ -157,15 +176,19 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
 
       setStepLog("Gerando texto do anúncio com IA...");
       const copy = await generateCopy([`clientes de ${preset.nome}`, ...cities.map((c) => c.name).slice(0, 3)]);
-      const finalHeadline = copy.headlines[0] || headline;
+      const finalHeadline = copy.headlines[0] || defaultHeadline;
       const primary = copy.primary_texts[0] || `Reduza até 20% na conta de luz com energia limpa. Atendimento via WhatsApp.`;
       const description = copy.description || `Sem obra. Sem instalação. Sem fidelidade.`;
 
-      setStepLog(applyCta ? "Aplicando selo e CTA nas fotos..." : "Preparando fotos...");
-      const finalFiles = await composeFinalFiles();
+      // Atualiza overlay com headline final da IA antes de compor
+      setLiveHeadline(finalHeadline);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null))));
+
+      setStepLog(applyCta ? "Aplicando selo e CTA nas fotos (1:1, 4:5, 9:16)..." : "Preparando fotos...");
+      const composed = await composeFinalFiles();
 
       setStepLog("Enviando fotos...");
-      const photoUrls = await uploadAdPhotos(consultantId, finalFiles);
+      const photoUrls = await uploadAdPhotos(consultantId, composed.map((c) => c.file));
 
       setStepLog("Publicando campanha no Facebook...");
       await createCampaign({
@@ -173,7 +196,7 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
         cities: cities.map((c) => ({ key: c.key, name: c.name })),
         daily_budget_cents: 3000,
         duration_days: null,
-        photos: photoUrls.map((url) => ({ url, format: "square" as const })),
+        photos: photoUrls.map((url, idx) => ({ url, format: composed[idx].format })),
         headline: finalHeadline, primary_text: primary, description,
         distribuidora: preset.nome,
       });
@@ -274,17 +297,17 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
                 <Switch checked={applyCta} onCheckedChange={setApplyCta} disabled={submitting} />
               </div>
 
-              {/* Previews com ou sem overlay */}
+              {/* Preview visível: 1:1. Os 4:5 e 9:16 ficam montados off-screen para gerar o composite. */}
               {previews.length > 0 && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {previews.map((url, i) => (
                     <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-border bg-muted">
                       {applyCta ? (
                         <CreativeOverlay
-                          ref={(h) => { overlayRefs.current[i] = h; }}
+                          ref={(h) => { getOverlayRef(i).square = h; }}
                           imageUrl={url}
                           format="feed_1x1"
-                          headline={headline}
+                          headline={liveHeadline}
                           badge={badge}
                           className="w-full h-full"
                         />
@@ -295,6 +318,34 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
                         className="absolute top-1 right-1 z-10 bg-background/80 rounded-full p-0.5 hover:bg-destructive hover:text-destructive-foreground">
                         <X className="w-3 h-3" />
                       </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Overlays ocultos: gerados em alta resolução para 4:5 e 9:16 */}
+              {applyCta && previews.length > 0 && (
+                <div aria-hidden style={{ position: "fixed", left: -99999, top: 0, width: 600, pointerEvents: "none", opacity: 0 }}>
+                  {previews.map((url, i) => (
+                    <div key={`hidden-${i}`}>
+                      <div style={{ width: 600 }}>
+                        <CreativeOverlay
+                          ref={(h) => { getOverlayRef(i).vertical = h; }}
+                          imageUrl={url}
+                          format="carousel_4x5"
+                          headline={liveHeadline}
+                          badge={badge}
+                        />
+                      </div>
+                      <div style={{ width: 600 }}>
+                        <CreativeOverlay
+                          ref={(h) => { getOverlayRef(i).story = h; }}
+                          imageUrl={url}
+                          format="story_9x16"
+                          headline={liveHeadline}
+                          badge={badge}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
