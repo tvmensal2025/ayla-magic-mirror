@@ -45,7 +45,7 @@ export interface CreativeImageGeneratorHandle {
 
 interface Props {
   consultantId: string;
-  onUseInAd?: (imageUrl: string) => void;
+  onUseInAd?: (creative: { image_url: string; format: Format; headline: string; badge: string }) => void;
 }
 
 export const CreativeImageGenerator = forwardRef<CreativeImageGeneratorHandle, Props>(
