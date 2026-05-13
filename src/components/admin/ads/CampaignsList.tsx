@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Pause, Play, Loader2, MapPin, TrendingUp, Users, MessageCircle, DollarSign, Heart, AlertTriangle, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { CampaignHealthCheck } from "./CampaignHealthCheck";
 
 interface Campaign {
   id: string; name: string; status: string; cities: any[];
@@ -64,6 +65,7 @@ function explainRejection(raw: string | null | undefined): { title: string; sugg
 export function CampaignsList({ consultantId, refreshKey }: { consultantId: string; refreshKey: number }) {
   const [items, setItems] = useState<Campaign[]>([]);
   const [metrics, setMetrics] = useState<Record<string, Metric>>({});
+  const [waNumber, setWaNumber] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reactivating, setReactivating] = useState<string | null>(null);
   const { toast } = useToast();
@@ -71,13 +73,21 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { data: camps } = await supabase
-        .from("facebook_campaigns")
-        .select("id,name,status,cities,daily_budget_cents,fb_campaign_id,created_at,rejection_reason")
-        .eq("consultant_id", consultantId)
-        .order("created_at", { ascending: false });
-      const list = (camps || []) as Campaign[];
+      const [campsRes, settingsRes] = await Promise.all([
+        supabase
+          .from("facebook_campaigns")
+          .select("id,name,status,cities,daily_budget_cents,fb_campaign_id,created_at,rejection_reason")
+          .eq("consultant_id", consultantId)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("consultant_ad_settings")
+          .select("whatsapp_destination_number")
+          .eq("consultant_id", consultantId)
+          .maybeSingle(),
+      ]);
+      const list = (campsRes.data || []) as Campaign[];
       setItems(list);
+      setWaNumber((settingsRes.data as any)?.whatsapp_destination_number || null);
 
       if (list.length > 0) {
         const since = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
@@ -172,6 +182,7 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
               <Stat icon={<Users className="w-3.5 h-3.5" />} label="Leads" value={String(m.leads)} />
               <Stat icon={<DollarSign className="w-3.5 h-3.5" />} label={m.leads > 0 ? "CPL" : "Gasto"} value={m.leads > 0 ? `R$ ${(m.cost_per_lead_cents / 100).toFixed(2)}` : `R$ ${(m.spend_cents / 100).toFixed(2)}`} highlight />
             </div>
+            <CampaignHealthCheck campaignId={c.id} fbCampaignId={c.fb_campaign_id} whatsappNumber={waNumber} />
           </Card>
         );
       })}
