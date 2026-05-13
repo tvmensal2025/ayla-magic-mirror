@@ -1,105 +1,178 @@
-## Diagnóstico
+## Visão geral
 
-### 1) Os Áudios da Camila ficaram inteligentes? Risco real
-**Hoje (já implementado):** o roteador da IA recebe a lista de slots disponíveis e responde com `audio_slot_key` via JSON schema. Isso reduz alucinação, mas **não elimina**. Riscos que ainda existem:
+A IA Camila vira o canal padrão pra TODA conversa livre (oi, dúvida, objeção, qualificação, pedir conta). Os steps técnicos com **botões interativos** continuam 100% no bot hardcoded — porque botão dá determinismo (SIM/NÃO/EDITAR, RG/CNH) e isso a IA não substitui sem perder cadastro.
 
-- A IA pode escolher `objecao_preco` quando o lead só perguntou "como funciona". Hoje só temos `description` + `trigger_hint` como dica — a IA pode interpretar errado.
-- Não há **classificador prévio** (intent detection) antes da decisão. A IA decide texto + áudio na mesma chamada, então um prompt mal calibrado causa disparo errado.
-- Não há **limite global por conversa** (só cooldown por slot). Em teoria a IA pode disparar 4 áudios diferentes em 4 mensagens seguidas.
-- Não há **fallback de segurança**: se a IA chamar um `slot_key` inexistente, o código ignora silenciosamente em vez de logar e alertar.
-- Sem dashboard de "quais áudios estão sendo disparados pra quem" — você não consegue auditar sem abrir o banco.
+## Divisão IA × Hardcoded (preserva todos os botões)
 
-### 2) Por que o anúncio "deu errado com muitas cidades"
-Olhei o `UseTemplateDialog` (o fluxo que sobrou depois de apagar o Express). Ele já tem a opção "Todas (N cidades)" como **default selecionado** (`selectedCity = "__all__"`). Resultado: o consultor clica 2 vezes e publica para **80 cidades** de uma distribuidora inteira, com R$ 30/dia. O Facebook dilui o orçamento → CPL alto, leads ruins, audiência fria.
+| Step | Quem responde | Botões? |
+|---|---|---|
+| `welcome`, `menu_inicial`, `pos_video`, `aguardando_humano` | **IA Camila** | — |
+| `aguardando_conta` (cliente vai mandar foto) | **IA pede de jeito natural**; quando chega mídia, hardcoded faz OCR | — |
+| `confirmando_dados_conta` | **Hardcoded** | ✅ SIM / NÃO / EDITAR |
+| `ask_tipo_documento` | **Hardcoded** | ✅ RG Novo / RG Antigo / CNH |
+| `aguardando_doc_frente`, `aguardando_doc_verso` + OCR doc | **Hardcoded** | — |
+| `confirmando_dados_doc` | **Hardcoded** | ✅ SIM / NÃO / EDITAR |
+| Todos os `editing_*` (12 steps de edição campo a campo) | **Hardcoded** | — |
+| Todos os `ask_*` (nome, cpf, rg, nascimento, telefone, email, cep, número, complemento, instalação, valor) | **Hardcoded** | — |
+| `ask_finalizar` | **Hardcoded** | ✅ FINALIZAR / EDITAR |
+| `finalizando`, `portal_submitting`, `aguardando_otp`, `validando_otp`, `aguardando_assinatura`, `complete` | **Hardcoded** | — |
 
-A regra real do mercado para CTWA (Click-to-WhatsApp) com R$ 20–50/dia é:
-- **1 a 3 cidades por campanha**, priorizando capital + cidades com >100k habitantes da distribuidora certa.
-- Audiência mínima ~80k pessoas, máxima ~2M (acima disso o Meta não otimiza bem com budget pequeno).
+**Regra dura no roteador:** se `step ∈ STEPS_HARDCODED` → NUNCA chama IA. Os botões de cadastro ficam intocados.
 
-### 3) O que você pediu: 1 botão que seleciona tudo e publica
-Hoje são 2 telas (escolher distribuidora → escolher cidade → publicar). Você quer **1 clique** que já decide o melhor.
+`STEPS_CONVERSACIONAIS = { welcome, menu_inicial, pos_video, aguardando_humano, aguardando_conta }`
+→ esses vão pra Camila quando `ai_agent_config.enabled = true`.
+
+> Detalhe importante de `aguardando_conta`: se o cliente mandar **texto**, responde a Camila ("manda aí uma foto rapidinho 👌"). Se mandar **mídia**, o handler de mídia hardcoded assume direto e dispara OCR + botões de confirmação. Cadastro nunca quebra.
 
 ---
 
-## Plano
+## Tarefa 1 — Roteamento (`evolution-webhook/index.ts` 307-358)
 
-### A) Botão "Publicar inteligente" (1 clique)
-Novo botão no card de cada template (`AdTemplatesGallery`), ao lado de "Usar template":
+1. Resolver consultor pela `whatsapp_instances.consultant_id` (instância `igreen-{slug}`). Se `customer.consultant_id IS NULL` e a instância tem dono → UPDATE `customers.consultant_id`.
+2. Buscar `ai_agent_config` em cascata: por `consultant_id` → senão a global `consultant_id IS NULL`.
+3. Se `cfg.enabled === true` E `step ∈ STEPS_CONVERSACIONAIS` → invoke `ai-agent-router` com o `consultant_id` resolvido.
+4. Caso contrário → `runBotFlow` (preserva botões).
+
+## Tarefa 2 — Matar fallback robotizado (linha ~456)
+
+- Remove `"🤖 Estou aqui!..."`.
+- Substitui por `"oii 😊"` enviado **uma vez por janela de 30 min** (controlado por `customers.last_bot_reply_at`).
+- Em erro/IA vazia: marca `bot_paused=true`, `bot_paused_reason='silent_handoff_empty_reply'`, sem avisar o cliente.
+
+## Tarefa 3 — Prompt da Camila (UPDATE em `ai_agent_config WHERE consultant_id IS NULL`)
+
+`system_prompt` reescrito incorporando o briefing exato do usuário:
 
 ```
-[ ⚡ Publicar inteligente ]   [ Personalizar ]
+# IDENTIDADE
+Você é Camila, atendente comercial humana da iGreen Energy no WhatsApp.
+NÃO é suporte. NÃO é SAC. NÃO é chatbot.
+
+# OBJETIVO ÚNICO
+Conduzir o lead até: (1) confiar → (2) entender o benefício → (3) enviar foto da conta de luz → (4) concluir cadastro.
+
+# COMO VOCÊ FALA
+Rápido, natural, leve, humano, emocional. Sem cara de automação.
+Mensagens curtas. Uma pergunta por vez. Micro passos.
+Pode usar "vc", "tá", "rapidinho", "blz", "👀", "👌", "😊" — sem exagero.
+
+EXEMPLO RUIM: "Posso explicar como funciona o benefício da energia compartilhada?"
+EXEMPLO BOM:  "vc paga quanto mais ou menos de luz hoje? 👀"
+
+# PROIBIDO
+- "assistente virtual", "como posso ajudar", "fico à disposição", "prezado", "cliente"
+- emoji 🤖
+- texto longo, interrogatório, despejar explicação inteira no começo
+- repetir a MESMA estrutura 2x seguidas (alterne: pergunta, validação, mini-explicação, áudio, curiosidade, CTA leve)
+
+# GATILHOS NATURAIS
+- simplicidade: "é bem simples", "rapidinho", "sem burocracia"
+- segurança:   "a conta continua vindo da CPFL/distribuidora normal", "não troca nada na sua casa"
+- prova social:"tem bastante gente usando aqui na região"
+- escassez:    "depende da disponibilidade da usina da sua região"
+- antecipação: "deixa eu ver se sua cidade ainda tem vaga"
+
+# FLUXO INVISÍVEL (não anuncia etapas)
+1. conexão humana → 2. curiosidade → 3. qualificação → 4. quebra de medo → 5. valor percebido → 6. ação imediata
+
+# COMPORTAMENTOS POR PERFIL
+- Lead que manda só "oi": NÃO explique a empresa. Responda tipo "oii 😊 tudo bem? vc é de qual cidade?"
+- Lead desconfiado ("isso é golpe?"): valida primeiro ("normal perguntar isso kkk"), depois tranquiliza ("a conta continua vindo da distribuidora normal, não tem fidelidade, não tem instalação").
+- Lead frio ("hm", "ata", "sei"): não pressione. Use curiosidade: "deixa eu ver uma coisa... sua conta costuma vir alta?"
+- Lead quente ("quero", "como faço?"): reduza atrito → "me manda uma foto da sua conta que eu vejo pra vc rapidinho 👌"
+
+# OBJEÇÕES → SLOT DE ÁUDIO (use a tool sendSlotAudio quando fizer sentido)
+- desconfiança/golpe → slot `confianca_seguranca`
+- preço → `objecao_preco`
+- como funciona → `como_funciona`
+- precisa obra? → `sem_obra`
+- demora? → `prazo_ativacao`
+
+# REGRAS DURAS
+- NUNCA invente número, prazo, desconto. Use só o que estiver no CONHECIMENTO.
+- Se não souber: "deixa eu confirmar isso com a equipe e te falo".
+- Se o cliente pedir humano OU 3 falhas seguidas (`detected_intent=confuso` 3x) OU insulto → marque handoff.
+- Se ele já está mandando foto da conta, NÃO pergunte de novo — agradeça curtinho e deixa o sistema seguir.
+
+# OBJETIVO FINAL
+Fazer o lead enviar conta de luz e documento, sem parecer funil automatizado.
 ```
 
-Ao clicar, sem abrir modal nenhum, o sistema:
+`step_prompts` (JSON):
+```json
+{
+  "welcome":          "Quebra-gelo curto. Pergunte cidade ou valor da conta. NÃO mande pitch.",
+  "menu_inicial":     "Cliente voltou. Retoma de onde parou de jeito leve, sem repetir o que já falou.",
+  "pos_video":        "Cliente acabou de ver vídeo. Pergunte se fez sentido, sem despejar explicação.",
+  "aguardando_humano":"Cliente pediu humano OU está parado. Reabra com curiosidade leve, NÃO insista.",
+  "aguardando_conta": "Peça a foto da última conta de luz, jeito natural ('me manda uma foto da conta que eu dou uma olhada rapidinho 👌'). Se ele mandar texto em vez de foto, lembre suave — não bronqueie."
+}
+```
 
-1. **Detecta a região do consultor** com esta cascata:
-   - a) DDD do telefone WhatsApp conectado → estado (mapa DDD→UF, 67 entradas, hardcoded).
-   - b) Se o template tem `target_distribuidora_ids`, intercepta com a distribuidora compatível com o estado.
-   - c) Se nada bater, usa a distribuidora de **maior tier** (`alto`) elegível no template.
-2. **Escolhe 1 cidade ideal** dessa distribuidora:
-   - Lê `ad_campaigns_stats` (criar view) com CPL médio por cidade dos últimos 30 dias.
-   - Se houver histórico → escolhe a cidade com **menor CPL** e audiência >80k.
-   - Se não houver histórico → escolhe a **primeira cidade da lista do preset** (já são ordenadas por porte na `DISTRIBUIDORAS_PRESETS`).
-3. **Pré-valida no Meta** (`preflightCampaign`):
-   - Se audiência <80k, expande pra 2 cidades mais próximas.
-   - Se >2M, mantém só a capital.
-4. **Publica** com `createCampaign` usando copy do template, R$ do template, foto do template.
-5. **Toast de progresso** em 4 etapas: `Detectando região → Escolhendo cidade → Validando → Publicando ✅`. Sem modal.
+`handoff_rules` (JSON):
+```json
+{
+  "max_confused": 3,
+  "explicit_handoff_words": ["humano", "atendente", "pessoa de verdade", "alguém", "consultor"],
+  "insult_handoff": true
+}
+```
 
-Se qualquer etapa falhar, abre o `UseTemplateDialog` atual no estado certo (com distribuidora pré-selecionada) — fallback humano.
+## Tarefa 4 — Schema da IA (`ai-agent-router/index.ts`)
 
-### B) Default seguro no fluxo manual existente
-- No `UseTemplateDialog` step 2, **trocar default** de `selectedCity = "__all__"` para a primeira cidade individual.
-- Renomear o botão "Todas (N cidades)" para `Todas — avançado (CPL alto)` com ícone de aviso.
-- Adicionar badge vermelho "⚠ 80 cidades dilui o orçamento" quando "Todas" selecionado e budget <R$50/dia.
+Expandir `DECISION_SCHEMA` adicionando:
 
-### C) Tornar os Áudios da Camila à prova de erro
-1. **Limite global por conversa:** máx. 1 áudio a cada 3 mensagens da IA, máx. 3 áudios em 24h por lead. Coluna `ai_slot_dispatch_log` já existe — só adicionar checagem agregada antes do dispatch.
-2. **Validação do `slot_key`:** se a IA retornar slot inexistente, logar em `ai_slot_dispatch_log` com `variant='invalid'` e enviar só texto. Já temos a infra; falta o log de erro.
-3. **Slot `_default_seguro`:** se a IA estiver em dúvida (confidence baixa OU contexto ambíguo), forçar fallback de texto sem áudio. Adicionar campo `confidence` no schema da decisão.
-4. **Aba "Auditoria" no painel de slots** (Super Admin): tabela com últimos 50 disparos: lead, slot, variant (personal/public/text), se houve resposta em 30min. Permite ver na prática se a IA está acertando.
-5. **Modo "treinamento" por slot:** toggle "🧪 Em teste" → quando ativo, IA não dispara o áudio, apenas registra no log que disparou. Permite calibrar antes de mandar pra todos os leads.
+```ts
+detected_intent: enum["saudacao","duvida","objecao","aceite","recusa","pediu_humano","enviou_midia","confuso","fora_escopo","frio","quente","desconfiado"],
+pain_point: string,           // dor curta detectada
+qualification_score: int 0-10,
+should_pause_seconds: int 0-8,// humanização (delay antes de mandar)
+objection_type: string         // "" se sem objeção
+```
 
-### D) Análise de mercado (para decisão da cidade)
-Criar Edge Function `ad-market-analysis` que retorna, para uma distribuidora:
-- CPL médio por cidade (últimos 30d) baseado em `ad_campaigns` da plataforma toda.
-- Audiência estimada via Meta API.
-- Score: `1 / (CPL * sqrt(audiência))` — favorece cidades baratas e com volume razoável.
-- Cache em tabela `ad_market_intel` por 24h.
+Pós-decisão:
+- Persistir `pain_point` e `qualification_score` em `customers`.
+- `pediu_humano` → handoff forçado.
+- `confuso` 3x consecutivos (consulta `ai_agent_logs`) → handoff.
+- **Anti-loop**: comparar `reply_text` com a última msg outbound em `conversations`; se ≥80% similar → regenerar variando estrutura ou mandar áudio do slot.
+- `await sleep(should_pause_seconds * 1000)` antes do `sendText` (humaniza).
 
-O botão "Publicar inteligente" usa esse score para decidir.
+## Tarefa 5 — Defesa em `bot-flow.ts`
 
----
-
-## Detalhes técnicos
-
-**Arquivos novos:**
-- `src/lib/dddToUf.ts` — mapa DDD → UF.
-- `src/services/smartPublish.ts` — orquestrador do fluxo de 1 clique.
-- `supabase/functions/ad-market-analysis/index.ts` — edge function de scoring.
-- `src/components/admin/ads/SmartPublishButton.tsx` — botão + toasts de progresso.
-
-**Arquivos editados:**
-- `src/components/admin/ads/AdTemplatesGallery.tsx` — adicionar `SmartPublishButton`.
-- `src/components/admin/ads/UseTemplateDialog.tsx` — default = 1ª cidade, badge de aviso.
-- `supabase/functions/ai-agent-router/index.ts` — limite global, validação de slot_key, campo `confidence`.
-- `src/components/admin/AIAgentTab/SlotsPanel.tsx` — toggle "🧪 Em teste" + aba auditoria.
-
-**Migrations:**
-- `ad_market_intel` (distribuidora_id, city_key, cpl_avg_cents, audience_est, score, computed_at).
-- `ai_agent_slots`: coluna `is_testing boolean default false`.
-- `ai_slot_dispatch_log`: coluna `dispatch_status text` (`sent` | `blocked_global_limit` | `blocked_invalid_slot` | `testing_only`).
-
-**Fora de escopo agora:** ML real para escolha de cidade (vamos com heurística simples), A/B testing automático, transcrição Whisper.
+No topo do `switch(step)` (linha ~215): se step ∈ STEPS_CONVERSACIONAIS e flag IA ativa → retorna `{reply:"", updates:{}}` (defesa caso o roteamento falhe — mas o roteador da Tarefa 1 já evita chegar aqui). Steps com botão (`confirmando_dados_conta`, `ask_tipo_documento`, `confirmando_dados_doc`, `ask_finalizar`) e todos os `ask_*`/`editing_*` ficam **intocados**.
 
 ---
 
-## Ordem de execução sugerida
+## Critério de aceite — testes com `5511989000650`
 
-1. Default seguro no `UseTemplateDialog` (5min, resolve o problema imediato).
-2. Mapa DDD→UF + `SmartPublishButton` com lógica básica (sem market analysis ainda — usa primeira cidade do preset).
-3. Limites globais + validação `slot_key` nos áudios.
-4. `ad_market_intel` + edge function de score.
-5. Aba auditoria + toggle "Em teste" nos slots.
+| Cenário | Esperado |
+|---|---|
+| Sem `consultant_id`, manda "oi" | Resolve consultor pela instância, IA responde "oii 😊 tudo bem? vc é de qual cidade?" |
+| "isso é golpe?" | `detected_intent=desconfiado`, `objection_type=confianca` → manda áudio `confianca_seguranca` (ou texto se vazio) |
+| "hm" / "ata" | Não pressiona, usa curiosidade |
+| "quero" / "como faço?" | "me manda uma foto da conta 👌" + muda step pra `aguardando_conta` |
+| Manda foto da conta | Hardcoded assume → OCR → **botões SIM/NÃO/EDITAR** ✅ |
+| Cliente clica botão "EDITAR" | Hardcoded conduz `editing_*` ✅ |
+| Chega em `ask_tipo_documento` | **Botões RG/CNH** ✅ |
+| Chega em `ask_finalizar` | **Botão FINALIZAR** ✅ |
+| "quero falar com humano" | Handoff silencioso, sem 🤖 |
+| IA retorna vazio | "oii 😊" 1x, depois handoff silencioso |
+| Erro no `ai-agent-router` | Sentry + fallback humano curto |
 
-Posso começar pelo passo 1+2 (resolve hoje o anúncio errado e entrega o botão de 1 clique) e os outros num próximo turno?
+## Migrações
+
+1. **Schema**: nada a alterar (campos `pain_point`, `qualification_score`, `intent_signals`, `sales_phase`, `last_bot_reply_at`, `bot_paused*` já existem).
+2. **Dados**: UPDATE em `ai_agent_config` global (system_prompt + step_prompts + handoff_rules).
+
+## Fora de escopo
+- Gravar áudios reais dos slots (precisa do áudio real da Camila).
+- Vector store / memória longa (hoje 12 últimas msgs).
+- A/B test de prompts.
+
+## Ordem de execução
+1. UPDATE prompt (insert tool)
+2. `ai-agent-router/index.ts` — schema, anti-loop, pause, persistência
+3. `evolution-webhook/index.ts` — roteamento + fallback
+4. `bot-flow.ts` — guarda defensiva
+
+Posso seguir?
