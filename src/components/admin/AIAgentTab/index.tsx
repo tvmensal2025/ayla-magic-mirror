@@ -103,9 +103,36 @@ export function AIAgentTab({ userId }: { userId: string }) {
       <div className="flex-1 min-h-0">
         {sub === "atendimentos" && <LiveConversationsPanel userId={userId} />}
         {sub === "agente" && (
-          <div className="grid lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-4 h-full min-h-[600px]">
-            <MediaColumn userId={userId} />
-            <RoteiroColumn userId={userId} />
+          <div className="flex flex-col h-full gap-3">
+            <div className="flex gap-1 flex-wrap">
+              {[
+                { id: "audios" as const, label: "Áudios da Camila", icon: Mic },
+                { id: "midias" as const, label: "Mídias livres", icon: FileText },
+                { id: "roteiro" as const, label: "Roteiro", icon: BookOpen },
+              ].map((t) => {
+                const Icon = t.icon;
+                const active = agenteSub === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setAgenteSub(t.id)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                      active
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {agenteSub === "audios" && <SlotsPanel userId={userId} />}
+              {agenteSub === "midias" && <MediaColumn userId={userId} />}
+              {agenteSub === "roteiro" && <RoteiroColumn userId={userId} />}
+            </div>
           </div>
         )}
         {sub === "decisoes" && <AIDecisionsPanel userId={userId} />}
