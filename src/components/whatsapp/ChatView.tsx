@@ -186,6 +186,36 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
             </SelectContent>
           </Select>
         )}
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px] gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
+              disabled={resetting}
+              title="Apaga histórico do bot e reinicia o fluxo do zero"
+            >
+              {resetting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+              Zerar
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Zerar conversa deste lead?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Vai apagar o histórico de mensagens do bot, decisões da IA, áudios disparados e
+                resetar a etapa do funil. O cliente continua cadastrado, mas o bot vai começar do zero
+                na próxima mensagem que ele mandar. Útil pra você testar o fluxo.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={handleReset} className="bg-destructive hover:bg-destructive/90">
+                Sim, zerar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       {/* Messages area */}
