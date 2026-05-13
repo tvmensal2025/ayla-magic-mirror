@@ -20,6 +20,12 @@ export function AdsTab({ consultantId }: Props) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [view, setView] = useState<"campaigns" | "results" | "gallery" | "intel">("results");
   const [ready, setReady] = useState(false);
+  const [prefillImageUrl, setPrefillImageUrl] = useState<string | null>(null);
+
+  function openExpressWithCreative(url: string) {
+    setPrefillImageUrl(url);
+    setExpressOpen(true);
+  }
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -53,7 +59,7 @@ export function AdsTab({ consultantId }: Props) {
           <Button variant="outline" onClick={() => setView("gallery")} className="gap-2">
             <LayoutGrid className="w-4 h-4" /> Galeria de modelos
           </Button>
-          <Button onClick={() => setExpressOpen(true)} className="gap-2">
+          <Button onClick={() => { setPrefillImageUrl(null); setExpressOpen(true); }} className="gap-2">
             <Plus className="w-4 h-4" /> Nova campanha
           </Button>
         </div>
@@ -98,7 +104,7 @@ export function AdsTab({ consultantId }: Props) {
           {view === "gallery" && (
             <AdTemplatesGallery consultantId={consultantId} onPublished={() => { setRefreshKey(k => k + 1); setView("campaigns"); }} />
           )}
-          {view === "intel" && <IntelligenceTab consultantId={consultantId} />}
+          {view === "intel" && <IntelligenceTab consultantId={consultantId} onUseCreativeInAd={openExpressWithCreative} />}
         </>
       )}
 
@@ -111,8 +117,9 @@ export function AdsTab({ consultantId }: Props) {
 
       <CreateCampaignExpress
         open={expressOpen}
-        onClose={() => setExpressOpen(false)}
+        onClose={() => { setExpressOpen(false); setPrefillImageUrl(null); }}
         consultantId={consultantId}
+        prefillImageUrl={prefillImageUrl}
         onCreated={() => setRefreshKey(k => k + 1)}
         onSwitchAdvanced={() => setWizardOpen(true)}
       />

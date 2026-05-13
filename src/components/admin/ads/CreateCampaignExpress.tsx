@@ -16,6 +16,7 @@ interface Props {
   consultantId: string;
   onCreated?: () => void;
   onSwitchAdvanced?: () => void;
+  prefillImageUrl?: string | null;
 }
 
 const PRESET_CACHE_VERSION = "v1";
@@ -39,7 +40,7 @@ const TIER_LABEL: Record<string, string> = {
   sem_bonus: "⚪ Sem bônus extra",
 };
 
-export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, onSwitchAdvanced }: Props) {
+export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, onSwitchAdvanced, prefillImageUrl }: Props) {
   const { toast } = useToast();
   const [issues, setIssues] = useState<string[] | null>(null);
   const [presetId, setPresetId] = useState<string | null>(null);
@@ -54,7 +55,25 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
     setPresetId(null); setFiles([]); setPreviews([]); setStepLog(""); setSubmitting(false);
     setIssues(null);
     validateAccount().then(r => setIssues(r.issues)).catch(e => setIssues([e.message]));
-  }, [open]);
+
+    // Pré-carregar imagem gerada (criativo IA do MinIO)
+    if (prefillImageUrl) {
+      (async () => {
+        try {
+          const res = await fetch(prefillImageUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+          const ext = (blob.type.split("/")[1] || "png").replace("jpeg", "jpg");
+          const file = new File([blob], `criativo-ia-${Date.now()}.${ext}`, { type: blob.type || "image/png" });
+          setFiles([file]);
+          setPreviews([URL.createObjectURL(file)]);
+          toast({ title: "Criativo IA carregado", description: "Imagem pronta para virar anúncio." });
+        } catch (e: any) {
+          toast({ title: "Não foi possível carregar o criativo", description: e?.message || String(e), variant: "destructive" });
+        }
+      })();
+    }
+  }, [open, prefillImageUrl]);
 
   // limpa object URLs
   useEffect(() => () => { previews.forEach(u => URL.revokeObjectURL(u)); }, [previews]);

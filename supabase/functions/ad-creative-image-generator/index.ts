@@ -3,6 +3,7 @@
 // Salva no bucket público "IMAGE" e registra em ad_generated_creatives.
 
 import { adminClient, authConsultant, corsHeaders } from "../_shared/fb-graph.ts";
+import { uploadToMinioPath } from "../_shared/minio-upload.ts";
 
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 
@@ -66,6 +67,8 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const format: Format = ["feed_1x1", "story_9x16", "reels_9x16", "carousel_4x5"].includes(body?.format) ? body.format : "feed_1x1";
     const requestedAngle: string | undefined = body?.angle;
+    const inspiredById: string | undefined = body?.inspired_by_ad_id;
+    const isPublic: boolean = !!body?.is_public;
 
     const admin = adminClient();
 
@@ -95,8 +98,19 @@ Deno.serve(async (req) => {
     const distribuidora = settings?.distribuidora_default || insights?.distribuidora || "sua distribuidora";
     const cidades = Array.isArray(settings?.cities) ? settings!.cities.slice(0, 3).join(", ") : "";
 
-    // 4. Escolher ângulo (parâmetro > vencedor histórico > default)
-    const angle = requestedAngle || (Array.isArray(insights?.winning_patterns) && insights!.winning_patterns[0]?.angle) || "economia_concreta";
+    // 3b. "Anúncio inspiração" (concorrente campeão escolhido pelo usuário)
+    let inspired: any = null;
+    if (inspiredById) {
+      const { data } = await admin
+        .from("ad_competitor_creatives")
+        .select("advertiser, headline, primary_text, cta, angle, creative_format, active_days, image_url, thumbnail_url")
+        .eq("id", inspiredById)
+        .maybeSingle();
+      inspired = data || null;
+    }
+
+    // 4. Escolher ângulo (inspiração > parâmetro > vencedor histórico > default)
+    const angle = inspired?.angle || requestedAngle || (Array.isArray(insights?.winning_patterns) && insights!.winning_patterns[0]?.angle) || "economia_concreta";
     const angleDesc = ANGLE_DESC[angle] || ANGLE_DESC.economia_concreta;
 
     const spec = FORMAT_SPEC[format];
@@ -111,6 +125,10 @@ Deno.serve(async (req) => {
     const compStr = (competitors || []).slice(0, 5)
       .map((c) => `• [${c.advertiser} · ${c.active_days}d no ar · ${c.angle || "?"}] "${c.headline || ""}"`)
       .join("\n") || "(sem dados de concorrentes)";
+
+    const inspiredStr = inspired
+      ? `\n═══ ANÚNCIO DE INSPIRAÇÃO DIRETA (concorrente CAMPEÃO ativo há ${inspired.active_days || "?"} dias) ═══\nMarca: ${inspired.advertiser}\nHeadline: "${inspired.headline || ""}"\nTexto: "${(inspired.primary_text || "").slice(0, 240)}"\nCTA: ${inspired.cta || "—"} · Formato: ${inspired.creative_format || "?"}\n→ Inspire-se na ESTRUTURA visual e ângulo emocional, mas adapte para iGreen (verde, sem painel, distribuidora ${distribuidora}). NÃO copie texto literal.\n`
+      : "";
 
     const prompt = `Crie um CRIATIVO DE ANÚNCIO REALISTA E IMPACTANTE para iGreen Energy (energia por assinatura, sem painel solar no telhado, desconto na conta de luz).
 
@@ -137,7 +155,7 @@ ${losingStr}
 
 ═══ CONCORRENTES TOP (referência de estilo, NÃO copie literal) ═══
 ${compStr}
-
+${inspiredStr}
 ═══ COMPOSIÇÃO ═══
 - Pessoa real brasileira (autêntica, não-modelo) sorrindo segurando uma conta de luz, OU close em mãos com calculadora e conta, OU casa simples brasileira com sobreposição numérica de economia
 - Tipografia bold e legível mesmo em mobile, headline curta tipo "ATÉ 20% MENOS" ou "ECONOMIA NA HORA"
@@ -152,14 +170,27 @@ Gere uma única imagem PNG pronta para subir no Meta Ads, alta resolução, foto
     const img = await generateImage(prompt);
     if (!img) return new Response(JSON.stringify({ error: "Imagem não gerada pelo modelo" }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-    // Upload no bucket IMAGE
+    // Upload no MinIO (storage padrão do projeto para mídia estática)
     const { bytes, mime } = dataUrlToBytes(img.dataUrl);
     const ext = mime.includes("png") ? "png" : mime.includes("jpeg") ? "jpg" : "png";
-    const path = `creatives/${auth.id}/${format}-${Date.now()}.${ext}`;
-    const { error: upErr } = await admin.storage.from("IMAGE").upload(path, bytes, { contentType: mime, upsert: false });
-    if (upErr) throw new Error(`Upload falhou: ${upErr.message}`);
-    const { data: pub } = admin.storage.from("IMAGE").getPublicUrl(path);
-    const imageUrl = pub.publicUrl;
+    const ts = Date.now();
+    const dateSlug = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const objectKey = `creativos/${auth.id}/${dateSlug}_${angle}_${format}_${ts}.${ext}`;
+    let imageUrl: string;
+    let storagePath: string;
+    try {
+      const upload = await uploadToMinioPath(bytes, mime, objectKey);
+      imageUrl = upload.url;
+      storagePath = `minio:${upload.bucket}/${upload.objectKey}`;
+    } catch (mErr) {
+      console.error("[image-generator] MinIO upload failed, fallback to Supabase IMAGE bucket", mErr);
+      const path = `creatives/${auth.id}/${format}-${ts}.${ext}`;
+      const { error: upErr } = await admin.storage.from("IMAGE").upload(path, bytes, { contentType: mime, upsert: false });
+      if (upErr) throw new Error(`Upload falhou (minio+supabase): ${(mErr as Error).message} / ${upErr.message}`);
+      const { data: pub } = admin.storage.from("IMAGE").getPublicUrl(path);
+      imageUrl = pub.publicUrl;
+      storagePath = path;
+    }
 
     // Registrar
     const { data: row, error: insErr } = await admin
@@ -168,11 +199,14 @@ Gere uma única imagem PNG pronta para subir no Meta Ads, alta resolução, foto
         consultant_id: auth.id,
         format,
         image_url: imageUrl,
-        storage_path: path,
+        storage_path: storagePath,
         prompt_used: prompt.slice(0, 4000),
         brief_used: angleDesc,
         angle,
-        inspired_by_advertisers: (competitors || []).slice(0, 5).map((c) => c.advertiser),
+        is_public: isPublic,
+        inspired_by_advertisers: inspired
+          ? [inspired.advertiser, ...(competitors || []).slice(0, 4).map((c) => c.advertiser)]
+          : (competitors || []).slice(0, 5).map((c) => c.advertiser),
       })
       .select()
       .single();

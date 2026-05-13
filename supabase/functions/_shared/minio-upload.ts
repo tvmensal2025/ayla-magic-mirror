@@ -171,3 +171,61 @@ export function base64ToBytes(b64: string): Uint8Array {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes;
 }
+
+/**
+ * Sobe um arquivo arbitrário ao MinIO num caminho livre (ex: criativos de IA, vídeos).
+ */
+export async function uploadToMinioPath(
+  bytes: Uint8Array,
+  contentType: string,
+  objectKey: string,
+): Promise<{ url: string; objectKey: string; bucket: string }> {
+  const serverUrl = Deno.env.get("MINIO_SERVER_URL") || "";
+  const accessKey = Deno.env.get("MINIO_ROOT_USER") || "";
+  const secretKey = Deno.env.get("MINIO_ROOT_PASSWORD") || "";
+  const bucket = Deno.env.get("MINIO_BUCKET") || "igreen";
+  if (!serverUrl || !accessKey || !secretKey) {
+    throw new Error("MinIO credentials not configured");
+  }
+  const url = new URL(serverUrl);
+  const host = url.host;
+  const region = "us-east-1";
+  const service = "s3";
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const dateStamp = amzDate.slice(0, 8);
+  const payloadHash = toHex(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", bytes.buffer as ArrayBuffer)),
+  );
+  const canonicalUri = `/${bucket}/${objectKey}`;
+  const canonicalHeaders =
+    `content-type:${contentType}\nhost:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = "content-type;host;x-amz-content-sha256;x-amz-date";
+  const canonicalRequest =
+    `PUT\n${canonicalUri}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+  const algorithm = "AWS4-HMAC-SHA256";
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const stringToSign = `${algorithm}\n${amzDate}\n${credentialScope}\n${
+    toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalRequest))))
+  }`;
+  const signingKey = await getSignatureKey(secretKey, dateStamp, region, service);
+  const signature = toHex(await hmacSHA256(signingKey, stringToSign));
+  const authorizationHeader =
+    `${algorithm} Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  const uploadUrl = `${serverUrl}${canonicalUri}`;
+  const res = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": contentType,
+      "x-amz-content-sha256": payloadHash,
+      "x-amz-date": amzDate,
+      Authorization: authorizationHeader,
+    },
+    body: bytes,
+  });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => "");
+    throw new Error(`MinIO upload failed (${res.status}): ${errBody.substring(0, 300)}`);
+  }
+  return { url: `${serverUrl}${canonicalUri}`, objectKey, bucket };
+}

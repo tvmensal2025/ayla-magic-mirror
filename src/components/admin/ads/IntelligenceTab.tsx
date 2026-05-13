@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Activity, Calendar } from "lucide-react";
@@ -6,14 +6,18 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CompetitorsPanel } from "./CompetitorsPanel";
 import { InsightsPanel } from "./InsightsPanel";
-import { CreativeImageGenerator } from "./CreativeImageGenerator";
+import { CreativeImageGenerator, type CreativeImageGeneratorHandle } from "./CreativeImageGenerator";
 
-interface Props { consultantId: string }
+interface Props {
+  consultantId: string;
+  onUseCreativeInAd?: (imageUrl: string) => void;
+}
 
 interface Event { ts: string; label: string; emoji: string }
 
-export function IntelligenceTab({ consultantId }: Props) {
+export function IntelligenceTab({ consultantId, onUseCreativeInAd }: Props) {
   const [events, setEvents] = useState<Event[]>([]);
+  const generatorRef = useRef<CreativeImageGeneratorHandle>(null);
 
   useEffect(() => {
     (async () => {
@@ -51,7 +55,7 @@ export function IntelligenceTab({ consultantId }: Props) {
   return (
     <div className="space-y-4">
       {/* Botão estrela: gerador de criativo */}
-      <CreativeImageGenerator consultantId={consultantId} />
+      <CreativeImageGenerator ref={generatorRef} consultantId={consultantId} onUseInAd={onUseCreativeInAd} />
 
       <div className="grid lg:grid-cols-2 gap-4">
         <InsightsPanel consultantId={consultantId} />
@@ -84,7 +88,7 @@ export function IntelligenceTab({ consultantId }: Props) {
         </Card>
       </div>
 
-      <CompetitorsPanel />
+      <CompetitorsPanel onInspire={(adId, hint) => generatorRef.current?.generateInspired(adId, hint)} />
     </div>
   );
 }
