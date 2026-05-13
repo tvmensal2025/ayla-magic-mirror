@@ -51,6 +51,9 @@ verify_jwt = false
 [functions.facebook-campaign-healthcheck]
 verify_jwt = false
 
+[functions.facebook-campaign-status]
+verify_jwt = false
+
 [functions.facebook-auto-pause]
 verify_jwt = false
 
