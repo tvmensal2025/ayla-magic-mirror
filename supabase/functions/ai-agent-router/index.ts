@@ -134,10 +134,11 @@ Deno.serve(async (req) => {
     // 6b) Slots de áudio (Camila)
     const { data: slotsRaw } = await supabase
       .from("ai_agent_slots")
-      .select("slot_key, label, trigger_hint, fallback_text, min_interval_minutes")
+      .select("slot_key, label, trigger_hint, fallback_text, min_interval_minutes, is_testing")
       .eq("active", true)
       .order("position");
     const slots = slotsRaw || [];
+    const validSlotKeys = new Set(slots.map((s: any) => s.slot_key));
 
     // 7) Montar prompt
     const persona = config.persona_name || "Camila";
