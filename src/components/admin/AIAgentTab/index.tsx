@@ -15,6 +15,7 @@ type AgenteSub = "audios" | "midias" | "roteiro";
 export function AIAgentTab({ userId }: { userId: string }) {
   const { toast } = useToast();
   const [sub, setSub] = useState<SubTab>("atendimentos");
+  const [agenteSub, setAgenteSub] = useState<AgenteSub>("audios");
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [savingEnabled, setSavingEnabled] = useState(false);
 
