@@ -20,6 +20,12 @@ export function AdsTab({ consultantId }: Props) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [view, setView] = useState<"campaigns" | "results" | "gallery" | "intel">("results");
   const [ready, setReady] = useState(false);
+  const [prefillImageUrl, setPrefillImageUrl] = useState<string | null>(null);
+
+  function openExpressWithCreative(url: string) {
+    setPrefillImageUrl(url);
+    setExpressOpen(true);
+  }
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
