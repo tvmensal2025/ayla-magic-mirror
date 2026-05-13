@@ -51,8 +51,14 @@ export function AdTemplatesGallery({ consultantId, onPublished }: Props) {
                 <span>R$ {(t.suggested_daily_budget_cents / 100).toFixed(0)}/dia</span>
                 {t.usage_count > 0 && <span>{t.usage_count} consultor(es) usando</span>}
               </div>
-              <Button size="sm" className="w-full gap-1.5" onClick={() => setPicked(t)}>
-                <Rocket className="w-3.5 h-3.5" /> Usar este anúncio
+              <SmartPublishButton
+                template={t}
+                consultantId={consultantId}
+                onPublished={onPublished}
+                onFallback={(tpl) => setPicked(tpl)}
+              />
+              <Button size="sm" variant="outline" className="w-full gap-1.5" onClick={() => setPicked(t)}>
+                <Settings2 className="w-3.5 h-3.5" /> Personalizar
               </Button>
             </div>
           </Card>
