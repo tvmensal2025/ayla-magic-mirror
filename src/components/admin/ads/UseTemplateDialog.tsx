@@ -37,6 +37,15 @@ export function UseTemplateDialog({ open, onClose, template, consultantId, onPub
   const [consultantName, setConsultantName] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [stepLog, setStepLog] = useState<string>("");
+  const { data: connectedPhone } = useInstancePhone(consultantId);
+
+  function formatPhone(p?: string | null) {
+    if (!p) return "";
+    const d = p.replace(/\D/g, "");
+    if (d.length === 13) return `+${d.slice(0, 2)} (${d.slice(2, 4)}) ${d.slice(4, 9)}-${d.slice(9)}`;
+    if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+    return p;
+  }
 
   useEffect(() => {
     if (!open) return;
