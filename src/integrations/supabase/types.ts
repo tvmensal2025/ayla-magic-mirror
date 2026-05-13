@@ -1204,6 +1204,7 @@ export type Database = {
           assinatura_igreen: string | null
           bill_base64: string | null
           bill_message_id: string | null
+          bill_requested_at: string | null
           bot_paused: boolean
           bot_paused_at: string | null
           bot_paused_reason: string | null
@@ -1247,6 +1248,7 @@ export type Database = {
           media_message_id: string | null
           media_storage: string | null
           name: string | null
+          name_source: string | null
           next_followup_at: string | null
           nivel_licenciado: string | null
           nome_mae: string | null
@@ -1256,6 +1258,7 @@ export type Database = {
           ocr_confianca: number | null
           ocr_conta_attempts: number
           ocr_doc_attempts: number
+          ocr_done: boolean
           otp_code: string | null
           otp_received_at: string | null
           pain_point: string | null
@@ -1289,6 +1292,7 @@ export type Database = {
           assinatura_igreen?: string | null
           bill_base64?: string | null
           bill_message_id?: string | null
+          bill_requested_at?: string | null
           bot_paused?: boolean
           bot_paused_at?: string | null
           bot_paused_reason?: string | null
@@ -1332,6 +1336,7 @@ export type Database = {
           media_message_id?: string | null
           media_storage?: string | null
           name?: string | null
+          name_source?: string | null
           next_followup_at?: string | null
           nivel_licenciado?: string | null
           nome_mae?: string | null
@@ -1341,6 +1346,7 @@ export type Database = {
           ocr_confianca?: number | null
           ocr_conta_attempts?: number
           ocr_doc_attempts?: number
+          ocr_done?: boolean
           otp_code?: string | null
           otp_received_at?: string | null
           pain_point?: string | null
@@ -1374,6 +1380,7 @@ export type Database = {
           assinatura_igreen?: string | null
           bill_base64?: string | null
           bill_message_id?: string | null
+          bill_requested_at?: string | null
           bot_paused?: boolean
           bot_paused_at?: string | null
           bot_paused_reason?: string | null
@@ -1417,6 +1424,7 @@ export type Database = {
           media_message_id?: string | null
           media_storage?: string | null
           name?: string | null
+          name_source?: string | null
           next_followup_at?: string | null
           nivel_licenciado?: string | null
           nome_mae?: string | null
@@ -1426,6 +1434,7 @@ export type Database = {
           ocr_confianca?: number | null
           ocr_conta_attempts?: number
           ocr_doc_attempts?: number
+          ocr_done?: boolean
           otp_code?: string | null
           otp_received_at?: string | null
           pain_point?: string | null
