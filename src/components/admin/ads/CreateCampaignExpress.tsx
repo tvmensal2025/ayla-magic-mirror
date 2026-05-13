@@ -301,17 +301,105 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
 
             {/* 2. Fotos */}
             <section className="space-y-2">
-              <div className="text-sm font-bold text-foreground">2. Adicione 1 a 4 fotos do seu trabalho</div>
-              <div className="border-2 border-dashed rounded-xl p-5 text-center">
-                <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
-                  onChange={(e) => { pickFiles(e.target.files); if (e.currentTarget) e.currentTarget.value = ""; }} />
-                <button type="button" disabled={submitting || files.length >= 4}
-                  onClick={() => inputRef.current?.click()}
-                  className="inline-flex items-center gap-2 text-sm font-medium text-primary disabled:opacity-50">
-                  <Upload className="w-4 h-4" /> Clique para enviar fotos ({files.length}/4)
+              <div className="text-sm font-bold text-foreground">2. Adicione 1 a 4 fotos do seu anúncio</div>
+
+              {/* Tabs Upload | IA */}
+              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-lg bg-secondary/40">
+                <button
+                  type="button"
+                  onClick={() => setPhotoTab("upload")}
+                  className={`text-xs font-medium py-2 rounded-md transition flex items-center justify-center gap-1.5 ${photoTab === "upload" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"}`}
+                >
+                  <Upload className="w-3.5 h-3.5" /> Enviar minhas fotos
                 </button>
-                <div className="text-[11px] text-muted-foreground mt-1">JPG/PNG/WebP até 8 MB. Quadrada (1:1) funciona melhor.</div>
+                <button
+                  type="button"
+                  onClick={() => setPhotoTab("ai")}
+                  className={`text-xs font-medium py-2 rounded-md transition flex items-center justify-center gap-1.5 ${photoTab === "ai" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"}`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-primary" /> Gerar com IA
+                </button>
               </div>
+
+              {photoTab === "upload" && (
+                <div className="border-2 border-dashed rounded-xl p-5 text-center">
+                  <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
+                    onChange={(e) => { pickFiles(e.target.files); if (e.currentTarget) e.currentTarget.value = ""; }} />
+                  <button type="button" disabled={submitting || files.length >= 4}
+                    onClick={() => inputRef.current?.click()}
+                    className="inline-flex items-center gap-2 text-sm font-medium text-primary disabled:opacity-50">
+                    <Upload className="w-4 h-4" /> Clique para enviar fotos ({files.length}/4)
+                  </button>
+                  <div className="text-[11px] text-muted-foreground mt-1">JPG/PNG/WebP até 8 MB. Quadrada (1:1) funciona melhor.</div>
+                </div>
+              )}
+
+              {photoTab === "ai" && (
+                <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-3">
+                  {!aiPreview && (
+                    <>
+                      <div>
+                        <label className="text-[11px] text-muted-foreground mb-1 block">Ângulo do anúncio</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {AI_ANGLES.map(a => (
+                            <button key={a.id} type="button" disabled={aiGenerating}
+                              onClick={() => setAiAngle(a.id)}
+                              className={`text-[11px] px-2 py-1 rounded-md border transition ${aiAngle === a.id ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/40"}`}>
+                              {a.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-muted-foreground mb-1 block">Formato</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {AI_FORMATS.map(f => (
+                            <button key={f.id} type="button" disabled={aiGenerating}
+                              onClick={() => setAiFormat(f.id)}
+                              className={`text-[11px] px-2 py-1 rounded-md border transition ${aiFormat === f.id ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/40"}`}>
+                              {f.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <Button type="button" onClick={generateAiCreative} disabled={aiGenerating || submitting || !presetId} className="w-full gap-2">
+                        {aiGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                        {aiGenerating ? "Gerando criativo (~30s)..." : "Gerar criativo com IA"}
+                      </Button>
+                      {!presetId && (
+                        <p className="text-[10px] text-warning text-center">Escolha a distribuidora no passo 1 antes de gerar.</p>
+                      )}
+                    </>
+                  )}
+
+                  {aiPreview && (
+                    <div className="space-y-2">
+                      <div className="rounded-lg overflow-hidden border border-border max-w-[280px] mx-auto">
+                        <CreativeOverlay
+                          ref={overlayRef}
+                          imageUrl={aiPreview.image_url}
+                          format={aiFormat}
+                          headline={aiPreview.headline}
+                          badge={aiPreview.badge}
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button type="button" variant="outline" size="sm" className="flex-1 gap-1.5"
+                          onClick={generateAiCreative} disabled={aiGenerating || aiAccepting}>
+                          {aiGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                          Regenerar
+                        </Button>
+                        <Button type="button" size="sm" className="flex-1 gap-1.5"
+                          onClick={acceptAiCreative} disabled={aiAccepting || aiGenerating}>
+                          {aiAccepting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                          Usar este criativo
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {previews.length > 0 && (
                 <div className="grid grid-cols-4 gap-2">
                   {previews.map((url, i) => (
