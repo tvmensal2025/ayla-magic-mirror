@@ -27,6 +27,10 @@ const tools = [
             type: "string",
             enum: ["abertura", "descoberta", "pitch", "objecao", "fechamento"],
           },
+          score_delta: {
+            type: "number",
+            description: "Quanto somar/subtrair no qualification_score (0-100). +20 se demonstrou interesse forte, +10 se respondeu engajado, 0 se neutro, -10 se mostrou objeção forte, -20 se desistiu.",
+          },
           reasoning: { type: "string", description: "Por que essa resposta" },
         },
         required: ["message", "next_phase", "reasoning"],
