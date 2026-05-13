@@ -21,8 +21,8 @@ interface CompetitorAd {
   active_days?: number;
 }
 
-async function research(advertiser: string): Promise<CompetitorAd[]> {
-  if (!GEMINI_KEY) return [];
+async function research(advertiser: string): Promise<{ ads: CompetitorAd[]; debug: any }> {
+  if (!GEMINI_KEY) return { ads: [], debug: { error: "no_gemini_key" } };
   const prompt = `Pesquise na Biblioteca de Anúncios do Facebook (https://www.facebook.com/ads/library/?country=BR) por "${advertiser}" — anúncios ATIVOS no Brasil agora.
 Retorne JSON ESTRITO:
 
