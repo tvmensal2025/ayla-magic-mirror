@@ -195,6 +195,9 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
       <MessageComposer
         onSend={sendMessage}
         initialMessage={initialMessage}
+        consultantId={consultantId}
+        customerJid={chat?.remoteJid}
+        customerName={chat?.name}
         onSendAudio={async (base64) => {
           const phone = await getResolvedPhone();
           if (!phone) return;

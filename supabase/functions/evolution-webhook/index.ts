@@ -256,6 +256,7 @@ Deno.serve(async (req) => {
     // ─── 7) Download media (if any) ────────────────────────────────────
     let fileUrl: string | null = null;
     let fileBase64: string | null = null;
+    let inboundMediaMinioUrl: string | null = null;
     if (isFile) {
       console.log("📥 Baixando mídia via Evolution API (getBase64FromMediaMessage)...");
       fileBase64 = await sender.downloadMedia(key, message);
@@ -263,6 +264,36 @@ Deno.serve(async (req) => {
         const mimeType = imageMessage?.mimetype || documentMessage?.mimetype || "application/octet-stream";
         fileUrl = `data:${mimeType};base64,${fileBase64}`;
         console.log(`✅ Mídia baixada via Evolution (${mimeType}, b64 len: ${fileBase64.length})`);
+
+        // Background: upload to MinIO em whatsapp/{consultor}/{jid}/{kind}/{ts}.{ext}
+        // Não bloqueia o fluxo do bot; apenas registra a URL pública para o histórico.
+        try {
+          const { uploadToMinioPath, base64ToBytes, buildConsultantSlug, sanitizeJid, normalizeName, extFromMime } =
+            await import("../_shared/minio-upload.ts");
+          const kind = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("audio/") ? "audio" : mimeType.startsWith("video/") ? "video" : "document";
+          const slug = buildConsultantSlug(consultorId || instanceData.consultant_id, nomeRepresentante);
+          const jid = sanitizeJid(remoteJid || phone);
+          const ext = extFromMime(mimeType);
+          const objectKey = `whatsapp/${slug}/${jid}/${kind}/${Date.now()}.${ext}`;
+          const bytes = base64ToBytes(fileBase64);
+          const upRes = await uploadToMinioPath(bytes, mimeType, objectKey);
+          inboundMediaMinioUrl = upRes.url;
+          console.log(`📦✅ inbound media → MinIO: ${upRes.url.substring(0, 100)}`);
+          // Anexa a URL na última conversa inbound deste customer (best effort)
+          try {
+            const { data: lastConv } = await supabase.from("conversations")
+              .select("id").eq("customer_id", customer.id).eq("message_direction", "inbound")
+              .order("created_at", { ascending: false }).limit(1).maybeSingle();
+            if (lastConv?.id) {
+              await supabase.from("conversations").update({
+                message_text: `[${kind}] ${upRes.url}`,
+                message_type: kind,
+              }).eq("id", lastConv.id);
+            }
+          } catch (e) { /* ignore */ }
+        } catch (e: any) {
+          console.warn(`📦⚠️ inbound media MinIO falhou: ${e?.message}`);
+        }
       } else {
         fileUrl = extractMediaUrl(message);
         if (fileUrl) {

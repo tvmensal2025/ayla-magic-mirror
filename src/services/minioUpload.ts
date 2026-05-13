@@ -8,21 +8,44 @@ export interface UploadResult {
   key: string;
   type: string;
   size: number;
+  storage?: "minio" | "supabase";
+}
+
+export interface UploadContext {
+  /** chat | template | avatar | admin | generic */
+  scope?: "chat" | "template" | "avatar" | "admin" | "generic";
+  consultant_id?: string;
+  /** WhatsApp JID/telefone do cliente (só dígitos ou já com @) */
+  customer_jid?: string;
+  customer_name?: string;
+  /** Sub-pasta dentro do scope (ex: image/audio/video/document, ou nome do template) */
+  kind?: string;
+  /** Nome amigável para o arquivo */
+  slug?: string;
 }
 
 /**
- * Upload a file to Supabase Storage via the upload-media edge function.
+ * Upload a file to MinIO (with Supabase Storage fallback) via the upload-media edge function.
  * Returns the public URL of the uploaded file.
  */
 export async function uploadMedia(
   file: File,
-  onProgress?: (pct: number) => void
+  onProgress?: (pct: number) => void,
+  context?: UploadContext,
 ): Promise<UploadResult> {
   // Signal start
   onProgress?.(5);
 
   const formData = new FormData();
   formData.append("file", file);
+  if (context) {
+    if (context.scope) formData.append("scope", context.scope);
+    if (context.consultant_id) formData.append("consultant_id", context.consultant_id);
+    if (context.customer_jid) formData.append("customer_jid", context.customer_jid);
+    if (context.customer_name) formData.append("customer_name", context.customer_name);
+    if (context.kind) formData.append("kind", context.kind);
+    if (context.slug) formData.append("slug", context.slug);
+  }
 
   onProgress?.(15);
 

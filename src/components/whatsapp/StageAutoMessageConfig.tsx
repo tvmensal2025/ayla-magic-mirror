@@ -87,7 +87,7 @@ function MessageItem({
     if (!file) return;
     setUploading(true);
     try {
-      const result = await uploadMedia(file);
+      const result = await uploadMedia(file, undefined, { scope: "template", kind: file.type.startsWith("image/") ? "image" : "audio" });
       onChange({ ...msg, media_url: result.url });
       toast({ title: "Upload concluído", description: `${file.name} (${formatFileSize(file.size)})` });
     } catch {
@@ -103,7 +103,7 @@ function MessageItem({
     if (!file) return;
     setUploadingImage(true);
     try {
-      const result = await uploadMedia(file);
+      const result = await uploadMedia(file, undefined, { scope: "template", kind: file.type.startsWith("image/") ? "image" : "audio" });
       onChange({ ...msg, image_url: result.url });
       toast({ title: "Imagem enviada" });
     } catch {

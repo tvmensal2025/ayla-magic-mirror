@@ -1,92 +1,91 @@
-## Objetivo
+## Padronização total: tudo no MinIO organizado por consultor/cliente
 
-Tornar a aba **Inteligência** um ciclo completo: ver o anúncio "perfeito" do concorrente → gerar criativo otimizado → publicá-lo como anúncio em 1 clique. Toda mídia (imagem/vídeo/áudio) passa a ser armazenada no **MinIO** (bucket `igreen`), e cada criativo gerado pode ser marcado como **público** (visível para todos os consultores) ou **privado** (apenas dono).
+### Estrutura final no bucket `igreen`
 
----
+```
+igreen/
+├── documentos/{consultor_slug}/{cliente_nome_data}/
+│     ├── conta_{ts}.{ext}
+│     ├── doc_frente_{ts}.{ext}
+│     └── doc_verso_{ts}.{ext}              ← já existe ✅
+│
+├── whatsapp/{consultor_slug}/{cliente_jid}/
+│     ├── audio/{ts}.ogg
+│     ├── image/{ts}.jpg
+│     ├── video/{ts}.mp4
+│     └── document/{ts}.pdf                  ← NOVO (chat manual + recebidos)
+│
+├── templates/{consultor_slug}/
+│     ├── image/{slug}.jpg
+│     └── audio/{slug}.ogg                   ← NOVO (move do Supabase)
+│
+├── consultores/{consultor_slug}/
+│     └── avatar.{ext}                       ← NOVO (move consultant-photos)
+│
+├── creativos/{consultor_slug}/{slug}.png    ← já existe ✅
+└── estaticos/                               ← LP/vídeos institucionais ✅
+```
 
-## 1. Padronizar storage em MinIO
+`{consultor_slug}` = `{igreen_id}_{nome_normalizado}` (mesmo padrão atual de documentos).
+`{cliente_jid}` = número limpo do WhatsApp (`5511999999999`).
 
-Hoje o `ad-creative-image-generator` salva no bucket Supabase `IMAGE`. Vou trocar para MinIO usando o helper já existente (`_shared/minio-upload.ts`), criando uma variante `uploadCreativeToMinio()` com pasta `creativos/{consultor_slug}/{yyyymmdd}_{angle}_{format}.png`.
+### Mudanças
 
-Outros pontos de upload de mídia gerada por IA (futuro: vídeo/áudio) também usarão esse helper. Mídias dinâmicas do WhatsApp continuam no Supabase Storage (regra de memória já existente).
+**1. Edge function `upload-media` (chat WhatsApp do painel) — refatorar**
+- Aceitar `consultant_id`, `customer_jid` (ou `customer_id`) e `media_kind` no FormData.
+- Buscar nome do consultor e gerar slug.
+- Subir direto ao MinIO em `whatsapp/{consultor}/{jid}/{kind}/{ts}.ext` via `uploadBytesToMinio` (estender helper para aceitar `customPath`).
+- Manter fallback Supabase Storage só se MinIO indisponível.
+- Atualizar `src/services/minioUpload.ts` para passar esses campos.
 
----
+**2. Mídias recebidas do cliente no chat (fora do bot)**
+- No `evolution-webhook` quando chega áudio/imagem/vídeo de cliente já existente, baixar bytes da Evolution e subir ao MinIO em `whatsapp/{consultor}/{jid}/{kind}/`.
+- Salvar URL pública na tabela `messages` (campo `media_url`).
+- Hoje só conta/doc do bot vão pro MinIO; estendendo para todo o fluxo.
 
-## 2. Toggle público/privado nos criativos gerados
+**3. Templates de mensagem**
+- Nova edge function `upload-template-media` (ou parâmetro extra em `upload-media`) que sobe em `templates/{consultor}/{kind}/{slug}.ext`.
+- Substituir uploads de templates atualmente em `whatsapp-media` pelo MinIO.
+- `useTemplates` passa a usar a nova URL.
 
-**Migração:**
-- Adicionar coluna `is_public boolean default false` em `ad_generated_creatives`.
-- Política RLS adicional: `SELECT` permitido a todos `authenticated` quando `is_public = true`.
+**4. Foto do consultor**
+- Refatorar upload em `useConsultantForm` para chamar `upload-media` com `kind=avatar` → `consultores/{slug}/avatar.ext`.
+- Atualizar coluna `consultants.photo_url`.
 
-**UI (`CreativeImageGenerator.tsx`):**
-- Cada card de criativo gerado recebe um switch "Público / Privado" (com ícone de cadeado/globo).
-- Ao alternar, faz `update` na linha do criativo.
-- Filtro na galeria: "Meus criativos" / "Galeria pública".
+**5. Helper compartilhado `_shared/minio-upload.ts`**
+- Adicionar `uploadBytesToMinioPath({bytes, contentType, objectKey})` para casos com path custom.
+- Manter `uploadBytesToMinio` legado para documentos (compatibilidade).
 
----
+**6. Migração histórica em background — nova edge function `migrate-supabase-to-minio`**
+- Roda manualmente (botão admin) ou via cron único.
+- Para cada bucket (`whatsapp-media`, `consultant-photos`):
+  - Lista objetos, baixa via `supabase.storage.download`.
+  - Detecta dono (consultor) pela tabela referenciadora (`messages.consultant_id`, `consultants.id`, `message_templates.consultant_id`).
+  - Sobe ao MinIO no path correto.
+  - Atualiza URL no banco (UPDATE WHERE old_url=...).
+  - Marca progresso em tabela `storage_migration_log` (id, old_url, new_url, status, error).
+- Idempotente: se URL já é MinIO, pula.
+- Após validação manual, deletar objetos do Supabase em segundo passo.
 
-## 3. "Anúncio perfeito do concorrente" em destaque
+**7. Logs e observabilidade**
+- Tabela `storage_migration_log` (item, status, old_url, new_url, error_message, migrated_at).
+- Painel admin simples para acompanhar progresso (lista + contagem).
 
-No `CompetitorsPanel.tsx`:
-- Card de destaque **"Anúncio Campeão da Semana"** no topo, escolhido por score: `active_days DESC` + presença em múltiplos formatos + recência.
-- Mostra thumbnail grande, headline, primary_text, CTA, dias ativo, marca, formato e link para o original na Meta Ad Library.
-- Botão **"Inspirar criativo nele"** → abre o gerador já pré-preenchido com o ângulo, copy e visual desse anúncio (passa `inspired_by` para a edge function, que injeta no prompt do Gemini).
-- Lista secundária: top 5 anúncios por marca (Solfácil, Reverde, Matrix...) com mesmo botão.
+### Detalhes técnicos
 
----
+- **Slugs**: reusar `normalizeName()` já existente (NFD + lowercase + `_`).
+- **Nome do consultor**: cache em memória dentro da edge function por execução para evitar N queries.
+- **Permissões MinIO**: bucket `igreen` é público (já é) — URL retornada é direta `https://igreen-minio.d9v63q.easypanel.host/igreen/...`.
+- **Ordenação por data no JID**: usar `Date.now()` no nome do arquivo garante histórico ordenado.
+- **Fallback**: se MinIO falhar (timeout 5s), grava em Supabase + agenda re-tentativa via `storage_migration_log` para subir depois.
+- **Tipos suportados**: mesmos limites atuais (100 MB, mimes em `ALLOWED_TYPES`).
+- **Não toca em**: `IMAGE` bucket (fallback do gerador, baixo volume) e `video igreen` (vídeos LP institucionais já replicados manualmente no MinIO).
 
-## 4. Fluxo "Gerar → Anunciar" em 1 clique
+### Ordem de execução
 
-Após gerar a imagem, cada card de criativo ganha botão **"Usar neste anúncio"**:
-- Abre `CreateCampaignExpress` já pré-preenchido com a imagem gerada (URL MinIO), headline e primary_text sugeridos pelo brief, e ângulo.
-- Salva `used_in_campaign_id` em `ad_generated_creatives` para rastrear ROI por criativo gerado.
-
----
-
-## 5. Análise: o que ainda falta para "100% funcional"
-
-| Item | Status | Ação |
-|---|---|---|
-| Scraper de concorrentes (semanal) | OK via pg_cron | manter |
-| Learner de padrões | OK | manter |
-| Rotator de losers | OK | manter |
-| Gerador de imagem 1-clique | Existe, salvando no Supabase | **migrar para MinIO** |
-| Validação técnica da imagem (safe area, aspect, legibilidade) | parcial (`ad_image_validations`) | rodar automaticamente após geração e exibir score |
-| Público/privado | não existe | **adicionar** |
-| Anúncio campeão em destaque | não existe | **adicionar** |
-| Atalho gerar→campanha | não existe | **adicionar** |
-| Re-scrape sob demanda | botão existe | manter |
-| Vídeo/áudio gerados por IA | não existe | (fora de escopo deste plano, anotar como próxima fase) |
-
----
-
-## 6. "Melhor forma de anúncio" (resumo do que o sistema vai aplicar)
-
-Padrões extraídos dos concorrentes ativos há 30+ dias (sinal de que converte):
-- **Formato dominante:** Reels 9:16 + Feed 1:1 (carrossel em 2º lugar).
-- **Ângulos vencedores:** "economia comprovada na conta" (prova social com print da fatura), "sem obra/sem placa", "cashback mensal", "urgência regional" (cidade do lead).
-- **Visual:** rosto humano sorrindo + número grande de % de desconto + logo da distribuidora local + CTA verde.
-- **Copy:** primeira linha começa com pergunta ou número ("Pagou R$ 480 de luz?"), CTA "Falar no WhatsApp".
-- **Safe area:** título nos 60% centrais (Story/Reels), CTA acima do fold no 1:1.
-
-O gerador já injeta tudo isso no prompt do Gemini; vou reforçar com os dados do **anúncio campeão** quando o usuário clicar em "Inspirar".
-
----
-
-## Arquivos a alterar/criar
-
-- `supabase/migrations/...` — `is_public` em `ad_generated_creatives` + policy.
-- `supabase/functions/_shared/minio-upload.ts` — adicionar `uploadCreativeBytesToMinio()`.
-- `supabase/functions/ad-creative-image-generator/index.ts` — usar MinIO; aceitar `inspired_by_ad_id`.
-- `src/components/admin/ads/CreativeImageGenerator.tsx` — switch público/privado, botão "Usar neste anúncio", filtro galeria.
-- `src/components/admin/ads/CompetitorsPanel.tsx` — card "Campeão da semana" + botão "Inspirar".
-- `src/components/admin/ads/CreateCampaignExpress.tsx` — aceitar criativo pré-selecionado via prop/URL state.
-
----
-
-## Validação
-
-1. Gerar uma imagem nos 4 formatos → confirmar URL `https://minio.../igreen/creativos/...`.
-2. Tornar pública e abrir em outra conta → deve aparecer na galeria pública.
-3. Clicar em "Inspirar" no campeão concorrente → prompt enriquecido, imagem coerente.
-4. Clicar em "Usar neste anúncio" → wizard abre com imagem e copy carregadas.
+1. Estender `_shared/minio-upload.ts` com helper genérico `uploadBytesToMinioPath`.
+2. Refatorar `upload-media` para aceitar contexto (consultor/cliente/kind) e priorizar MinIO.
+3. Atualizar frontend (`minioUpload.ts`, `useTemplates`, anexar mídia em chat, foto consultor) para passar contexto.
+4. Estender `evolution-webhook` para subir mídias recebidas no chat para MinIO.
+5. Criar tabela `storage_migration_log` + edge function `migrate-supabase-to-minio` + botão admin para disparar.
+6. Rodar migração em background, validar URLs, depois limpar buckets antigos.

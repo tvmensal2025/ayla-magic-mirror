@@ -36,12 +36,23 @@ export function useConsultantForm(
     try {
       let photo_url: string | undefined;
       if (photoFile) {
-        const ext = photoFile.name.split(".").pop();
-        const path = `${userId}/photo.${ext}`;
-        const { error: uploadError } = await supabase.storage.from("consultant-photos").upload(path, photoFile, { upsert: true });
-        if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from("consultant-photos").getPublicUrl(path);
-        photo_url = `${urlData.publicUrl}?t=${Date.now()}`;
+        try {
+          const { uploadMedia } = await import("@/services/minioUpload");
+          const result = await uploadMedia(photoFile, undefined, {
+            scope: "avatar",
+            consultant_id: userId,
+            kind: "avatar",
+          });
+          photo_url = `${result.url}?t=${Date.now()}`;
+        } catch (e) {
+          // Fallback Supabase Storage caso MinIO offline
+          const ext = photoFile.name.split(".").pop();
+          const path = `${userId}/photo.${ext}`;
+          const { error: uploadError } = await supabase.storage.from("consultant-photos").upload(path, photoFile, { upsert: true });
+          if (uploadError) throw uploadError;
+          const { data: urlData } = supabase.storage.from("consultant-photos").getPublicUrl(path);
+          photo_url = `${urlData.publicUrl}?t=${Date.now()}`;
+        }
       }
       const normalizedLicense = normalizeLicenseValue(form.license, userId);
       const [existingResult, conflictingResult] = await Promise.all([

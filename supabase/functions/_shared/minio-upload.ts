@@ -32,7 +32,7 @@ function toHex(buffer: Uint8Array): string {
   return Array.from(buffer).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function normalizeName(text: string): string {
+export function normalizeName(text: string): string {
   return text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -41,7 +41,7 @@ function normalizeName(text: string): string {
     .toLowerCase();
 }
 
-function extFromMime(mime: string): string {
+export function extFromMime(mime: string): string {
   const map: Record<string, string> = {
     "image/jpeg": "jpg",
     "image/jpg": "jpg",
@@ -70,10 +70,18 @@ export interface MinioUploadResult {
   bucket: string;
 }
 
-/**
- * Sobe bytes brutos diretamente ao MinIO via AWS SigV4.
- * Lança erro se as credenciais não estiverem configuradas ou a request falhar.
- */
+/** Slug do consultor: "{igreen_id_ou_uuid}_{nome_normalizado}" */
+export function buildConsultantSlug(idOrIgreen: string, name?: string | null): string {
+  const a = normalizeName(idOrIgreen || "sem_consultor");
+  const b = normalizeName(name || "");
+  return b ? `${a}_${b}` : a;
+}
+
+/** Sanitiza um JID/telefone como pasta: só dígitos. */
+export function sanitizeJid(jid: string): string {
+  return (jid || "sem_cliente").replace(/[^0-9]/g, "") || "sem_cliente";
+}
+/** Sobe bytes brutos diretamente ao MinIO via AWS SigV4. */
 export async function uploadBytesToMinio(input: MinioUploadInput): Promise<MinioUploadResult> {
   const serverUrl = Deno.env.get("MINIO_SERVER_URL") || "";
   const accessKey = Deno.env.get("MINIO_ROOT_USER") || "";

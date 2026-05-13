@@ -13,7 +13,13 @@ export interface AttachedFile {
   type: MediaType | "audio";
 }
 
-export function useFileAttach() {
+export interface FileAttachContext {
+  consultantId?: string;
+  customerJid?: string;
+  customerName?: string;
+}
+
+export function useFileAttach(context?: FileAttachContext) {
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -28,7 +34,15 @@ export function useFileAttach() {
     setIsUploading(true);
     setUploadProgress(0);
     try {
-      const result = await uploadMedia(file, (pct) => setUploadProgress(pct));
+      const inferKind = (mime: string) =>
+        mime.startsWith("image/") ? "image" : mime.startsWith("audio/") ? "audio" : mime.startsWith("video/") ? "video" : "document";
+      const result = await uploadMedia(file, (pct) => setUploadProgress(pct), {
+        scope: "chat",
+        consultant_id: context?.consultantId,
+        customer_jid: context?.customerJid,
+        customer_name: context?.customerName,
+        kind: inferKind(file.type),
+      });
       if (attachedFile?.type === "audio" && file.type.startsWith("image/")) {
         setPendingImageUrl(result.url);
         toast.success("Imagem anexada: será enviada depois do áudio");
@@ -46,7 +60,7 @@ export function useFileAttach() {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, [attachedFile]);
+  }, [attachedFile, context?.consultantId, context?.customerJid, context?.customerName]);
 
   const clearAttachment = useCallback(() => { setAttachedFile(null); setPendingImageUrl(null); }, []);
 
