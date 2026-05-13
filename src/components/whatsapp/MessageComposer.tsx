@@ -17,9 +17,12 @@ interface MessageComposerProps {
   templates: MessageTemplate[];
   disabled?: boolean;
   initialMessage?: string | null;
+  consultantId?: string;
+  customerJid?: string;
+  customerName?: string;
 }
 
-export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMedia, templates, disabled, initialMessage }: MessageComposerProps) {
+export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMedia, templates, disabled, initialMessage, consultantId, customerJid, customerName }: MessageComposerProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [showQuickReply, setShowQuickReply] = useState(false);
@@ -27,7 +30,7 @@ export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMed
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const audio = useAudioRecorder(onSendAudio);
-  const file = useFileAttach();
+  const file = useFileAttach({ consultantId, customerJid, customerName });
 
   useEffect(() => { if (initialMessage != null && initialMessage !== "") setText(initialMessage); }, [initialMessage]);
 
