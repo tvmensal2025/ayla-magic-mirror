@@ -1043,7 +1043,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
                   headline={headline}
                   primaryText={primaryText}
                   description={description}
-                  whatsappNumber={connection?.whatsapp_destination_number || "5511971254913"}
+                  whatsappNumber={consultantPhone || ""}
                 />
                 <div className="lg:col-start-2">
                   <AdQualityPanel
