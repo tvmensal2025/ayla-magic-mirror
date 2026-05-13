@@ -24,6 +24,11 @@ import {
   getReplyForStep,
   getNextMissingStep,
   validarCPFDigitos,
+  RE_INTENT_CADASTRAR,
+  RE_INTENT_HUMANO,
+  RE_INTENT_RESET,
+  TRUSTED_NAME_SOURCES,
+  resetLeadIdentity,
 } from "../../_shared/conversation-helpers.ts";
 import { ocrContaEnergia, ocrDocumentoFrenteVerso } from "../../_shared/ocr.ts";
 import { normalizeDocumentType, isCNH, friendlyLabel } from "../../_shared/document-type.ts";
@@ -110,10 +115,60 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   // E o step está em fase conversacional (antes da coleta de docs).
   // Steps de coleta (aguardando_conta em diante) seguem determinísticos.
   // ═══════════════════════════════════════════════════════════════════
+  // 🛡️  INTENT OVERRIDE DETERMINÍSTICO — antes da IA.
+  // ═══════════════════════════════════════════════════════════════════
+  if (messageText && !isFile && !isButton) {
+    const txt = messageText.trim();
+    if (RE_INTENT_RESET.test(txt)) {
+      console.log(`[intent-override] RESET: "${txt.slice(0, 60)}"`);
+      await resetLeadIdentity(supabase, customer.id);
+      const msg =
+        "Sem problema, vamos recomeçar do zero.\n\n" +
+        `Oi! 👋 Aqui é o assistente digital de *${nomeRepresentante}*.\n\n` +
+        "Já pensou em pagar menos na sua conta de luz todo mês? 💚\n" +
+        "Posso te explicar rapidinho como funciona?";
+      await sendOptions(remoteJid, msg, [
+        { id: "entender_desconto", title: "💡 Quero saber mais" },
+        { id: "cadastrar_agora", title: "📋 Já quero participar" },
+        { id: "falar_humano", title: "🧑 Falar com humano" },
+      ]);
+      return { reply: "", updates: { conversation_step: "menu_inicial", __inline_sent: true } as any };
+    }
+    if (RE_INTENT_CADASTRAR.test(txt) && !customer.electricity_bill_photo_url) {
+      console.log(`[intent-override] CADASTRAR: "${txt.slice(0, 60)}"`);
+      return {
+        reply:
+          "📋 Ótimo! Vamos iniciar seu cadastro.\n\n" +
+          "📸 *Envie uma FOTO ou PDF da sua conta de energia* para começarmos!\n\n" +
+          "Formatos aceitos: JPG, PNG ou PDF",
+        updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento" },
+      };
+    }
+    if (RE_INTENT_HUMANO.test(txt)) {
+      console.log(`[intent-override] HUMANO: "${txt.slice(0, 60)}"`);
+      return {
+        reply:
+          `🧑 Sem problema! Um consultor da equipe *${nomeRepresentante}* vai te chamar em breve.\n\n` +
+          "Se mudar de ideia e quiser começar agora, é só digitar *cadastrar*.",
+        updates: {
+          conversation_step: "aguardando_humano",
+          bot_paused: true,
+          bot_paused_reason: "lead_pediu_humano",
+          bot_paused_at: new Date().toISOString(),
+        },
+      };
+    }
+  }
+
   const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "aguardando_humano"]);
+  const billTrusted =
+    !!customer.electricity_bill_photo_url &&
+    !!customer.ocr_done &&
+    TRUSTED_NAME_SOURCES.has(String(customer.name_source || ""));
   if (
     !isFile &&
     !customer.bot_paused &&
+    !billTrusted &&
     conversationalSteps.has(step) &&
     messageText &&
     messageText.trim().length > 0

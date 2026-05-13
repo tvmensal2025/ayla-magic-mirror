@@ -403,26 +403,48 @@ Deno.serve(async (req) => {
       return intents.some((t: string) => profileTags.includes(t));
     });
 
-    const billAlreadyReceivedEarly = !!customer.electricity_bill_photo_url;
+    // Conta só conta como "recebida" se OCR concluído E nome veio de fonte confiável.
+    // Sem isso, o LLM ficava preso confirmando dados de um lead anterior reaproveitado.
+    const nameSourceTrusted = ["ocr", "self_introduced", "manual"].includes(
+      String(customer.name_source || ""),
+    );
+    const billAlreadyReceivedEarly =
+      !!customer.electricity_bill_photo_url && !!customer.ocr_done && nameSourceTrusted;
+
+    // Cooldown de mídia: pega últimas 5 mídias enviadas para esse lead e marca como "já enviadas".
+    const { data: recentMediaSent } = await supabase
+      .from("ai_decisions")
+      .select("media_sent_id")
+      .eq("customer_id", customer_id)
+      .not("media_sent_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    const sentMediaIds = new Set((recentMediaSent || []).map((r: any) => r.media_sent_id));
+    const freshMedia = eligibleMedia.filter((m: any) => !sentMediaIds.has(m.id));
+
     const mediaListLine = billAlreadyReceivedEarly
       ? `\n[MÍDIAS DISPONÍVEIS]\nNENHUMA — a conta já foi recebida. Confirme os dados em send_text e em seguida use request_handoff. PROIBIDO send_media nesta etapa.`
-      : eligibleMedia.length
+      : freshMedia.length
       ? `\n[MÍDIAS DISPONÍVEIS para fase ${phase}]\n` +
-        eligibleMedia
+        freshMedia
           .map(
             (m: any, i: number) =>
               `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""}`,
           )
           .join("\n") +
-        `\nUse send_media APENAS com um desses media_id.`
-      : `\n[MÍDIAS DISPONÍVEIS]\nNenhuma para esta fase. Use send_text.`;
+        `\nUse send_media APENAS com um desses media_id. ${
+          sentMediaIds.size
+            ? `(${sentMediaIds.size} mídia(s) já enviada(s) recentemente foram ocultadas — NÃO repita.)`
+            : ""
+        }`
+      : `\n[MÍDIAS DISPONÍVEIS]\nNenhuma nova para esta fase (todas já enviadas). Use send_text.`;
 
     const cadenceLine =
       `\n[CADÊNCIA]\n` +
       `- Mídias enviadas nas últimas 4 respostas: ${recentMediaCount}\n` +
       `- Última msg do lead foi do tipo: ${lastInboundKind}\n` +
-      (recentMediaCount >= 2
-        ? `- ⚠️ NÃO envie mídia agora — use send_text para não soar spam.\n`
+      (recentMediaCount >= 1
+        ? `- ⚠️ NÃO envie mídia agora — a última resposta JÁ foi mídia. Use send_text.\n`
         : ``) +
       (lastInboundKind === "audio"
         ? `- Lead mandou áudio: prefira responder com áudio também (espelho).\n`
@@ -455,8 +477,8 @@ Deno.serve(async (req) => {
       ? (customer.name as string).trim().split(/\s+/)[0]
       : null;
 
-    // Conta já recebida? Não pedir de novo.
-    const billAlreadyReceived = !!customer.electricity_bill_photo_url;
+    // Conta só conta como "recebida" para fim de bloqueio se OCR + nome confiável.
+    const billAlreadyReceived = billAlreadyReceivedEarly;
     const ocrDone = !!customer.ocr_done;
     const billRequestedRecently = customer.bill_requested_at
       && (Date.now() - new Date(customer.bill_requested_at).getTime()) < 10 * 60 * 1000;
@@ -615,16 +637,32 @@ Deno.serve(async (req) => {
       );
     }
     if (tool === "send_media") {
+      // Server-side anti-spam: se a última saída já foi mídia OU se essa media_id já foi
+      // enviada nas últimas 5 vezes, degrada para send_text (caption como mensagem).
+      const justSentMedia = recentMediaCount >= 1;
+      const alreadySentSameId = sentMediaIds.has(args.media_id);
       const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
-      if (!picked || !picked.url) {
-        // Hallucinated id — degrade to send_text with the caption
-        args.reasoning = (args.reasoning || "") + " [media_id inválido — fallback texto]";
+      const invalidId = !picked || !picked.url;
+
+      if (invalidId || justSentMedia || alreadySentSameId) {
+        const tag = invalidId
+          ? "[media_id inválido]"
+          : alreadySentSameId
+          ? "[mídia repetida — bloqueada]"
+          : "[mídia consecutiva — bloqueada]";
+        args.reasoning = (args.reasoning || "") + ` ${tag} fallback texto`;
+        const fallbackMsg =
+          args.caption && args.caption.trim().length > 0
+            ? args.caption
+            : (picked?.label
+              ? `Sobre ${picked.label.toLowerCase()}: posso te explicar em poucas linhas se preferir.`
+              : "Posso te explicar em poucas linhas se preferir.");
         return new Response(
           JSON.stringify({
             decision: {
               tool: "send_text",
               args: {
-                message: sanitizeHumanMessage(args.caption || "", phase, mode === "rescue" ? "" : user_input, firstName),
+                message: sanitizeHumanMessage(fallbackMsg, phase, mode === "rescue" ? "" : user_input, firstName),
                 next_phase: args.next_phase || phase,
                 reasoning: args.reasoning,
               },

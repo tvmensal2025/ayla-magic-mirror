@@ -122,3 +122,70 @@ export function getReplyForStep(step: string, c: any): string {
     default: return `Continuando... (${step})`;
   }
 }
+
+// ─── Strong intent regex (deterministic override before LLM) ───────────
+export const RE_INTENT_CADASTRAR =
+  /\b(cadastr|quero (me )?(cadastr|participar)|vamos l[áa]|como (eu )?(fa[çc]o|cadastr)|quero o desconto|me cadastra|simbora|bora cadastrar|inscrever)\b/i;
+
+export const RE_INTENT_HUMANO =
+  /\b(humano|atendente|pessoa real|operador|consultor de verdade|falar com algu[eé]m)\b/i;
+
+export const RE_INTENT_RESET =
+  /\b(n[ãa]o sou eu|esses dados n[ãa]o s[ãa]o meus|essa conta n[ãa]o [eé] minha|recome[çc]ar|come[çc]ar de novo|outra conta|nova conta|resetar|reiniciar|zerar)\b/i;
+
+// Names sources we trust for personalization / "bill is yours" logic.
+export const TRUSTED_NAME_SOURCES = new Set(["ocr", "self_introduced", "manual"]);
+
+/**
+ * Wipes lead-identity / OCR fields so the bot can restart cleanly.
+ * Used when the user explicitly says "não sou eu" / "recomeçar"
+ * or when the webhook detects polluted state from a reused phone.
+ */
+export async function resetLeadIdentity(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  customerId: string,
+  opts: { keepStep?: boolean } = {},
+): Promise<void> {
+  const patch: Record<string, unknown> = {
+    name: null,
+    name_source: "unknown",
+    electricity_bill_photo_url: null,
+    bill_base64: null,
+    bill_message_id: null,
+    bill_requested_at: null,
+    ocr_done: false,
+    ocr_confianca: null,
+    ocr_conta_attempts: 0,
+    ocr_doc_attempts: 0,
+    distribuidora: null,
+    numero_instalacao: null,
+    electricity_bill_value: null,
+    address_street: null,
+    address_number: null,
+    address_complement: null,
+    address_neighborhood: null,
+    address_city: null,
+    address_state: null,
+    cep: null,
+    document_front_url: null,
+    document_back_url: null,
+    document_front_base64: null,
+    document_type: null,
+    cpf: null,
+    rg: null,
+    data_nascimento: null,
+    nome_pai: null,
+    nome_mae: null,
+    pain_point: null,
+    sales_phase: "abertura",
+    qualification_score: 0,
+    bot_paused: false,
+    bot_paused_reason: null,
+    bot_paused_at: null,
+    error_message: null,
+    rescue_attempts: 0,
+  };
+  if (!opts.keepStep) patch.conversation_step = "welcome";
+  await supabase.from("customers").update(patch).eq("id", customerId);
+}
