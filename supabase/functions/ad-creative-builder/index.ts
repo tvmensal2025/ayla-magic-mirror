@@ -1,7 +1,19 @@
 // Gera copy de elite (6 frameworks), filtra termos proibidos pela Meta e atribui score por variação.
-import { authConsultant, corsHeaders } from "../_shared/fb-graph.ts";
+// Injeta padrões aprendidos pelo ad-creative-learner pra cada novo anúncio sair melhor que o anterior.
+import { adminClient, authConsultant, corsHeaders } from "../_shared/fb-graph.ts";
 
 const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY");
+
+async function loadInsights(consultantId: string, distribuidora?: string) {
+  try {
+    const admin = adminClient();
+    const q = admin.from("ad_creative_insights").select("*").eq("consultant_id", consultantId);
+    const { data } = distribuidora
+      ? await q.eq("distribuidora", distribuidora).maybeSingle()
+      : await q.order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    return data;
+  } catch { return null; }
+}
 
 // Termos que a Meta rejeita ou penaliza fortemente — copy regenera/filtra automaticamente.
 const FORBIDDEN = [
@@ -54,14 +66,24 @@ interface CopyPack {
   legacy?: { headlines: string[]; primary_texts: string[] };
 }
 
-async function generate(cities: string[]): Promise<CopyPack> {
+async function generate(cities: string[], insights?: any): Promise<CopyPack> {
   if (!GEMINI_KEY) return packWithLegacy(FALLBACK);
   const ctx = cities.join(", ") || "Brasil";
   const isDistribuidora = ctx.toLowerCase().includes("clientes da");
+
+  const learnedBlock = insights ? `
+
+APRENDIZADO DESTE CONSULTOR (use como guia obrigatório):
+- Padrões VENCEDORES (use): ${(insights.winning_patterns || []).join(", ") || "(ainda coletando)"}
+- Padrões PERDEDORES (evite): ${(insights.losing_patterns || []).join(", ") || "(ainda coletando)"}
+- Melhor taxa de toque atingida: ${(insights.best_ctr_bps / 100).toFixed(2)}% — supere isso
+${insights.summary ? `- Lição mais recente: ${insights.summary}` : ""}
+` : "";
+
   const prompt = `Você é o melhor copywriter de Facebook Ads do Brasil. Gere copy em pt-BR para iGreen Energy (energia por assinatura — desconto na conta de luz).
 
 Contexto-alvo: ${ctx}.
-${isDistribuidora ? "IMPORTANTE: o 1º item é a distribuidora do cliente — use o NOME dela em pelo menos 3 dos 6 títulos.\n" : ""}
+${isDistribuidora ? "IMPORTANTE: o 1º item é a distribuidora do cliente — use o NOME dela em pelo menos 3 dos 6 títulos.\n" : ""}${learnedBlock}
 
 Retorne JSON ESTRITO com 6 títulos (cada um em UM framework diferente) + 3 textos primários:
 
@@ -150,8 +172,9 @@ Deno.serve(async (req) => {
   try {
     const auth = await authConsultant(req);
     if (!auth) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    const { cities } = await req.json().catch(() => ({ cities: [] }));
-    const copy = await generate(cities || []);
+    const { cities, distribuidora } = await req.json().catch(() => ({ cities: [] }));
+    const insights = await loadInsights(auth.id, distribuidora);
+    const copy = await generate(cities || [], insights);
     // Mantém shape antigo no topo (headlines/primary_texts como string[]) + novo shape em `variations`
     const flat = {
       headlines: copy.legacy!.headlines,

@@ -137,9 +137,11 @@ export function WalletCard({ consultantId }: { consultantId: string }) {
                               {g.distribuidora && <span className="text-muted-foreground font-normal"> · {g.distribuidora}</span>}
                             </div>
                             <div className="text-xs text-muted-foreground mt-0.5">
-                              {g.impressions.toLocaleString("pt-BR")} impressões · {g.clicks} cliques · {g.leads} lead{g.leads === 1 ? "" : "s"}
-                              {g.leads > 0 && <> · CPL <strong className="text-foreground">{fmt(g.cpl_cents)}</strong></>}
-                              <span className="ml-2 opacity-70">({g.items.length} sincronização{g.items.length === 1 ? "" : "ões"})</span>
+                              {g.leads > 0
+                                ? <><strong className="text-foreground">{g.leads}</strong> conversa{g.leads === 1 ? "" : "s"} no zap · {g.impressions.toLocaleString("pt-BR")} pessoas viram · {g.clicks} tocaram · custo por conversa <strong className="text-foreground">{fmt(g.cpl_cents)}</strong></>
+                                : g.clicks > 0
+                                  ? <>{g.impressions.toLocaleString("pt-BR")} pessoas viram · {g.clicks} tocaram · ninguém começou conversa ainda</>
+                                  : <>{g.impressions.toLocaleString("pt-BR")} pessoas viram · ninguém tocou ainda</>}
                             </div>
                           </div>
                         </div>
