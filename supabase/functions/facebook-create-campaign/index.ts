@@ -173,11 +173,19 @@ Deno.serve(async (req) => {
     const platformCustomAudId = pfAud?.custom_audience_id || null;
     // Configurações específicas do consultor: telefone WhatsApp + cidades.
     const settings = await loadConsultantAdSettings(auth.id);
-    const waNumberSetting = settings?.whatsapp_destination_number;
-    if (!waNumberSetting) {
+    const waDigitsRaw = String(settings?.whatsapp_destination_number || "").replace(/\D/g, "");
+    if (!waDigitsRaw) {
       return new Response(JSON.stringify({
-        error: "Não encontramos seu número de WhatsApp. Conecte o WhatsApp na aba Dados antes de publicar.",
+        error: "Não encontramos seu número de WhatsApp. Adicione na aba Dados antes de publicar.",
         code: "WHATSAPP_NOT_CONFIGURED",
+      }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    // Aceita formato BR: 55 + DDD (2) + número (8 ou 9). Se vier sem 55, prefixa.
+    const waNumberSetting = waDigitsRaw.startsWith("55") ? waDigitsRaw : `55${waDigitsRaw}`;
+    if (waNumberSetting.length < 12 || waNumberSetting.length > 13) {
+      return new Response(JSON.stringify({
+        error: `Número de WhatsApp inválido (${waNumberSetting}). Use 55 + DDD + número (ex: 5511990092401). Corrija na aba Dados.`,
+        code: "WHATSAPP_INVALID_FORMAT",
       }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     // Trava de saldo: precisa cobrir budget × duração (default 7 dias se omitido).
