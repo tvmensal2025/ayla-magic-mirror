@@ -1,10 +1,11 @@
-import { useEffect, useImperativeHandle, useState, forwardRef } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Sparkles, Download, Loader2, Wand2, Globe, Lock, Megaphone, Users } from "lucide-react";
+import { Sparkles, Download, Loader2, Wand2, Globe, Lock, Megaphone, Users, RefreshCw } from "lucide-react";
+import { CreativeOverlay, type CreativeOverlayHandle } from "./CreativeOverlay";
 
 type Format = "feed_1x1" | "story_9x16" | "reels_9x16" | "carousel_4x5";
 
