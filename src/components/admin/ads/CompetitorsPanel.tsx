@@ -1,0 +1,158 @@
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { Eye, RefreshCw, Search, Trophy } from "lucide-react";
+
+interface Row {
+  id: string;
+  advertiser: string;
+  headline: string | null;
+  primary_text: string | null;
+  cta: string | null;
+  angle: string | null;
+  creative_format: string | null;
+  active_days: number | null;
+  ingested_at: string;
+}
+
+const ANGLE_LABEL: Record<string, string> = {
+  economia_concreta: "💰 Economia",
+  quebra_objecao: "🛡️ Quebra objeção",
+  prova_social: "👥 Prova social",
+  curiosidade: "❓ Curiosidade",
+  dor_pas: "😣 Dor/PAS",
+  urgencia_local: "📍 Urgência local",
+};
+
+export function CompetitorsPanel() {
+  const { toast } = useToast();
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [advertiser, setAdvertiser] = useState<string>("all");
+  const [angle, setAngle] = useState<string>("all");
+  const [format, setFormat] = useState<string>("all");
+  const [search, setSearch] = useState("");
+
+  async function load() {
+    setLoading(true);
+    const { data } = await supabase
+      .from("ad_competitor_creatives")
+      .select("id, advertiser, headline, primary_text, cta, angle, creative_format, active_days, ingested_at")
+      .order("active_days", { ascending: false })
+      .limit(100);
+    setRows((data as Row[]) || []);
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function rescan() {
+    setScanning(true);
+    try {
+      // Fire-and-forget — função pode demorar 30-60s, não esperamos
+      supabase.functions.invoke("ad-competitor-scraper", { body: {} }).catch(() => {});
+      toast({ title: "Re-escaneamento iniciado", description: "Atualizando em ~1 min. Os novos anúncios aparecerão aqui." });
+      setTimeout(() => { load(); setScanning(false); }, 60_000);
+    } catch (e) {
+      setScanning(false);
+      toast({ title: "Erro", description: String(e), variant: "destructive" });
+    }
+  }
+
+  const advertisers = Array.from(new Set(rows.map(r => r.advertiser))).sort();
+
+  const filtered = rows.filter(r => {
+    if (advertiser !== "all" && r.advertiser !== advertiser) return false;
+    if (angle !== "all" && r.angle !== angle) return false;
+    if (format !== "all" && r.creative_format !== format) return false;
+    if (search && !`${r.headline} ${r.primary_text} ${r.advertiser}`.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  const top5Ids = new Set([...rows].slice(0, 5).map(r => r.id));
+
+  return (
+    <Card className="p-5 bg-card/50 backdrop-blur border-border/60">
+      <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
+        <div>
+          <h3 className="font-bold text-foreground flex items-center gap-2">
+            <Eye className="w-5 h-5 text-primary" />
+            Concorrentes ativos no Brasil
+          </h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            {rows.length} anúncios mapeados de {advertisers.length} marcas. Top 5 mais antigos = ★ alta conversão provável.
+          </p>
+        </div>
+        <Button size="sm" variant="outline" onClick={rescan} disabled={scanning} className="gap-1.5">
+          <RefreshCw className={`w-3.5 h-3.5 ${scanning ? "animate-spin" : ""}`} />
+          {scanning ? "Escaneando..." : "Re-escanear agora"}
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+        <div className="col-span-2 md:col-span-1 relative">
+          <Search className="absolute left-2 top-2.5 w-3.5 h-3.5 text-muted-foreground" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar..." className="pl-7 h-9 text-xs" />
+        </div>
+        <Select value={advertiser} onValueChange={setAdvertiser}>
+          <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Marca" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas as marcas</SelectItem>
+            {advertisers.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={angle} onValueChange={setAngle}>
+          <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Ângulo" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os ângulos</SelectItem>
+            {Object.entries(ANGLE_LABEL).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={format} onValueChange={setFormat}>
+          <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Formato" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos formatos</SelectItem>
+            <SelectItem value="estatico">📷 Estático</SelectItem>
+            <SelectItem value="video">🎬 Vídeo</SelectItem>
+            <SelectItem value="carrossel">🎠 Carrossel</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-muted-foreground py-8 text-center">Carregando...</p>
+      ) : filtered.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-8 text-center">Nenhum anúncio com esses filtros.</p>
+      ) : (
+        <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+          {filtered.map(r => (
+            <div key={r.id} className={`p-3 rounded-lg border ${top5Ids.has(r.id) ? "bg-primary/5 border-primary/40" : "bg-secondary/30 border-border/40"}`}>
+              <div className="flex items-start justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-sm text-foreground">{r.advertiser}</span>
+                  {top5Ids.has(r.id) && <Trophy className="w-3.5 h-3.5 text-primary" />}
+                  {r.angle && <Badge variant="outline" className="text-[10px] h-5">{ANGLE_LABEL[r.angle] || r.angle}</Badge>}
+                  {r.creative_format && <Badge variant="outline" className="text-[10px] h-5">{r.creative_format}</Badge>}
+                </div>
+                {r.active_days != null && (
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {r.active_days}d no ar
+                  </span>
+                )}
+              </div>
+              {r.headline && <p className="text-sm text-foreground mt-1.5 font-medium">"{r.headline}"</p>}
+              {r.primary_text && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{r.primary_text}</p>}
+              {r.cta && <Badge variant="secondary" className="mt-2 text-[10px] h-5">CTA: {r.cta}</Badge>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
