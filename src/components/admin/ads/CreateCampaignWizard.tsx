@@ -16,6 +16,7 @@ import { AdQualityPanel } from "./AdQualityPanel";
 import type { QualityResult } from "@/lib/adQualityScore";
 import { useFacebookConnection } from "@/hooks/useFacebookConnection";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useConsultantPhone, formatBrPhone } from "@/hooks/useConsultantPhone";
 import { supabase } from "@/integrations/supabase/client";
 import { upsertAdTemplate } from "@/services/adTemplates";
 
