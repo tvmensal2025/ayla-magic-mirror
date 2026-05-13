@@ -213,6 +213,7 @@ export type Database = {
           id: string
           image_url: string
           inspired_by_advertisers: string[] | null
+          is_public: boolean
           prompt_used: string | null
           storage_path: string | null
           used_in_campaign_id: string | null
@@ -226,6 +227,7 @@ export type Database = {
           id?: string
           image_url: string
           inspired_by_advertisers?: string[] | null
+          is_public?: boolean
           prompt_used?: string | null
           storage_path?: string | null
           used_in_campaign_id?: string | null
@@ -239,6 +241,7 @@ export type Database = {
           id?: string
           image_url?: string
           inspired_by_advertisers?: string[] | null
+          is_public?: boolean
           prompt_used?: string | null
           storage_path?: string | null
           used_in_campaign_id?: string | null
