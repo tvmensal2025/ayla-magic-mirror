@@ -67,6 +67,8 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const format: Format = ["feed_1x1", "story_9x16", "reels_9x16", "carousel_4x5"].includes(body?.format) ? body.format : "feed_1x1";
     const requestedAngle: string | undefined = body?.angle;
+    const inspiredById: string | undefined = body?.inspired_by_ad_id;
+    const isPublic: boolean = !!body?.is_public;
 
     const admin = adminClient();
 
