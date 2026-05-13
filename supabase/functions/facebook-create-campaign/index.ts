@@ -176,7 +176,7 @@ Deno.serve(async (req) => {
     const waNumberSetting = settings?.whatsapp_destination_number;
     if (!waNumberSetting) {
       return new Response(JSON.stringify({
-        error: "Configure seu número de WhatsApp em 'Configurações de Anúncios' antes de publicar.",
+        error: "Não encontramos seu número de WhatsApp. Conecte o WhatsApp na aba Dados antes de publicar.",
         code: "WHATSAPP_NOT_CONFIGURED",
       }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
