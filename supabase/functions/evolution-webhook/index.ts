@@ -522,6 +522,11 @@ Deno.serve(async (req) => {
     }
     if (finalReply) {
       try {
+        // Simular humano: presença "digitando…" + delay proporcional ao tamanho da resposta.
+        // ~45ms por caractere, mín 1.5s, máx 6s. Não bloqueia se presença falhar.
+        const humanDelayMs = Math.min(6000, Math.max(1500, finalReply.length * 45));
+        try { await (sender as any).sendPresence?.(remoteJid, "composing", humanDelayMs); } catch (_) { /* noop */ }
+        await new Promise((r) => setTimeout(r, humanDelayMs));
         // Envia sempre como texto (botões não funcionam na Evolution API atual)
         await sender.sendText(remoteJid, finalReply);
       } catch (e: any) {
