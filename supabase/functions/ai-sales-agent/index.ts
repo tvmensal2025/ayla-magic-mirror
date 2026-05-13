@@ -194,10 +194,19 @@ FUNIL DE VENDAS (5 fases)
 5. FECHAMENTO — Sinal de compra ("quero", "como faço", "vamos lá") → use advance_to_closing pedindo a foto da conta de luz. Se a conta JÁ foi recebida (verifique [Contexto]), NÃO peça de novo — confirme os dados extraídos.
 
 ═══════════════════════════════════════════
+PÓS-CONTA → HANDOFF PARA OPERADOR (CRÍTICO)
+═══════════════════════════════════════════
+Quando [Contexto] indicar "CONTA JÁ RECEBIDA E ANALISADA":
+1. Em UMA mensagem curta, confirme os dados (titular + valor + distribuidora) e pergunte "Está tudo correto para eu seguir com o cadastro?".
+2. Assim que o lead confirmar (sim, pode, vamos, correto, isso, etc.), use IMEDIATAMENTE request_handoff com urgency="alta" e reason="lead_pronto_cadastro: operador deve clicar Cadastrar no Portal, depois Enviar OTP e Enviar Link Facial".
+3. PROIBIDO continuar enviando vídeos, áudios ou explicações depois que a conta foi recebida. O operador humano tem botões no painel para: (a) Cadastrar no portal iGreen, (b) Enviar código OTP, (c) Enviar link de validação facial. Sua função terminou — entregue o lead.
+4. Se o lead pedir mais um vídeo/explicação após a conta, responda send_text breve ("Vou te conectar com nossa equipe para finalizar agora") e em seguida, na próxima rodada, request_handoff.
+
+═══════════════════════════════════════════
 REGRAS CRÍTICAS
 ═══════════════════════════════════════════
 - Use SEMPRE uma das tools. Nunca responda fora de tool.
-- Se [Contexto] indicar "CONTA JÁ RECEBIDA E ANALISADA": JAMAIS peça a foto da conta. Use os dados extraídos para confirmar com o cliente e siga para o cadastro.
+- Se [Contexto] indicar "CONTA JÁ RECEBIDA E ANALISADA": JAMAIS peça a foto da conta. Use os dados extraídos para confirmar com o cliente e siga para o cadastro (handoff).
 - Se [Contexto] indicar "Bill_requested_at recente (<10 min)": NÃO repita o pedido — apenas reforce gentilmente que aguarda o envio.
 - Se o lead pedir humano explicitamente, request_handoff.
 - Se sumir/"depois eu vejo", schedule_followup (1h, 24h ou 72h conforme contexto).
@@ -360,7 +369,10 @@ Deno.serve(async (req) => {
       return intents.some((t: string) => profileTags.includes(t));
     });
 
-    const mediaListLine = eligibleMedia.length
+    const billAlreadyReceivedEarly = !!customer.electricity_bill_photo_url;
+    const mediaListLine = billAlreadyReceivedEarly
+      ? `\n[MÍDIAS DISPONÍVEIS]\nNENHUMA — a conta já foi recebida. Confirme os dados em send_text e em seguida use request_handoff. PROIBIDO send_media nesta etapa.`
+      : eligibleMedia.length
       ? `\n[MÍDIAS DISPONÍVEIS para fase ${phase}]\n` +
         eligibleMedia
           .map(
@@ -547,6 +559,23 @@ Deno.serve(async (req) => {
 
     // Validate media_id and resolve URL/kind for downstream sender
     let resolvedMedia: { id: string; url: string; kind: string; label: string } | null = null;
+    if (tool === "send_media" && billAlreadyReceivedEarly) {
+      // Hard guard: nunca enviar mídia depois da conta — sempre handoff.
+      return new Response(
+        JSON.stringify({
+          decision: {
+            tool: "request_handoff",
+            args: {
+              reason: "lead_pronto_cadastro: conta recebida; operador deve usar botões Cadastrar/OTP/Facial.",
+              urgency: "alta",
+            },
+          },
+          phase,
+          latency_ms: latencyMs,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
     if (tool === "send_media") {
       const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
       if (!picked || !picked.url) {
