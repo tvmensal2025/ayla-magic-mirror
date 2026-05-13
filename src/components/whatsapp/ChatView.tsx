@@ -10,7 +10,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import type { MessageTemplate } from "@/types/whatsapp";
 import type { ChatItem } from "@/hooks/useChats";
-import { Loader2, MessageSquareText, UserPlus, UserCheck, KanbanSquare } from "lucide-react";
+import { Loader2, MessageSquareText, UserPlus, UserCheck, KanbanSquare, RotateCcw } from "lucide-react";
+import { resetLeadConversation } from "@/services/resetConversation";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { createLogger } from "@/lib/logger";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Tables } from "@/integrations/supabase/types";
@@ -39,6 +44,19 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [kanbanStages, setKanbanStages] = useState<Tables<"kanban_stages">[]>([]);
   const [sendingToCrm, setSendingToCrm] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  const handleReset = useCallback(async () => {
+    if (!chat) return;
+    setResetting(true);
+    const r = await resetLeadConversation({ consultantId, remoteJid: chat.remoteJid });
+    setResetting(false);
+    if (r.ok) {
+      toast({ title: "Conversa zerada", description: "O bot vai começar do zero na próxima mensagem." });
+    } else {
+      toast({ title: "Erro ao zerar", description: (r as { error: string }).error, variant: "destructive" });
+    }
+  }, [chat, consultantId, toast]);
 
   // Fetch kanban stages
   useEffect(() => {
@@ -168,6 +186,36 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
             </SelectContent>
           </Select>
         )}
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px] gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
+              disabled={resetting}
+              title="Apaga histórico do bot e reinicia o fluxo do zero"
+            >
+              {resetting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+              Zerar
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Zerar conversa deste lead?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Vai apagar o histórico de mensagens do bot, decisões da IA, áudios disparados e
+                resetar a etapa do funil. O cliente continua cadastrado, mas o bot vai começar do zero
+                na próxima mensagem que ele mandar. Útil pra você testar o fluxo.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={handleReset} className="bg-destructive hover:bg-destructive/90">
+                Sim, zerar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       {/* Messages area */}
