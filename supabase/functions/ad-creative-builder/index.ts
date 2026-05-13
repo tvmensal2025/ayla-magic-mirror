@@ -56,25 +56,32 @@ function variationScore(s: string, kind: "headline" | "primary"): number {
 
 const FALLBACK = {
   headlines: [
-    { text: "Conta de luz 20% mais barata", framework: "específico", score: 90 },
-    { text: "Sua conta de luz subiu de novo?", framework: "PAS", score: 80 },
-    { text: "Pague menos sem obra nem taxa", framework: "objeção", score: 85 },
-    { text: "Em até 30 dias na sua fatura", framework: "urgência", score: 78 },
-    { text: "+50 mil famílias economizam", framework: "prova social", score: 82 },
+    { text: "Conta de luz 20% mais barata", framework: "específico", angle: "economia_concreta", score: 90 },
+    { text: "Sua conta de luz subiu de novo?", framework: "PAS", angle: "quebra_objecao", score: 80 },
+    { text: "Pague menos sem obra nem taxa", framework: "objeção", angle: "quebra_objecao", score: 85 },
+    { text: "Em até 30 dias na sua fatura", framework: "urgência", angle: "urgencia", score: 78 },
+    { text: "+50 mil famílias economizam", framework: "prova social", angle: "prova_social", score: 82 },
   ],
   primary_texts: [
-    { text: "Sua conta de luz até 20% mais barata. Sem obra. Fala no zap 👇", framework: "AIDA", score: 92 },
-    { text: "Cansado da conta alta? Desconto direto na fatura. Toca aqui.", framework: "PAS", score: 86 },
-    { text: "Energia limpa, conta leve. Sem instalar nada. Garante a sua 🌱", framework: "benefício", score: 88 },
+    { text: "Sua conta de luz até 20% mais barata. Sem obra. Fala no zap 👇", framework: "AIDA", angle: "economia_concreta", score: 92 },
+    { text: "Cansado da conta alta? Desconto direto na fatura. Toca aqui.", framework: "PAS", angle: "quebra_objecao", score: 86 },
+    { text: "Energia limpa, conta leve. Sem instalar nada. Garante a sua 🌱", framework: "benefício", angle: "curiosidade", score: 88 },
   ],
   description: "Sem obra. Sem taxa.",
+  image_briefs: [
+    { format: "estatico", brief: "Foto real de uma fatura de luz na mão, valores 'antes/depois' destacados em verde, sem stock photo." },
+    { format: "estatico", brief: "Pessoa real (não modelo) sorrindo segurando a conta, fundo de cozinha simples, texto pequeno: 'Diminuí R$ 1.200/ano'." },
+    { format: "carrossel", brief: "Slide 1 fundo amarelo texto preto: 'A Lei 14.300 te dá direito a desconto. Quase ninguém sabe.' Slides seguintes explicam." },
+  ],
 };
 
-interface Variation { text: string; framework: string; score: number }
+interface Variation { text: string; framework: string; angle?: string; score: number }
+interface ImageBrief { format: string; brief: string }
 interface CopyPack {
   headlines: Variation[];
   primary_texts: Variation[];
   description: string;
+  image_briefs: ImageBrief[];
   // Backwards compatibility — clientes antigos esperam string[]
   legacy?: { headlines: string[]; primary_texts: string[] };
 }
