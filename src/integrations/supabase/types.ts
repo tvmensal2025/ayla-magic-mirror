@@ -585,6 +585,7 @@ export type Database = {
           created_at: string
           description: string | null
           fallback_text: string | null
+          is_testing: boolean
           label: string
           min_interval_minutes: number
           position: number
@@ -598,6 +599,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           fallback_text?: string | null
+          is_testing?: boolean
           label: string
           min_interval_minutes?: number
           position?: number
@@ -611,6 +613,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           fallback_text?: string | null
+          is_testing?: boolean
           label?: string
           min_interval_minutes?: number
           position?: number
@@ -788,6 +791,7 @@ export type Database = {
         Row: {
           consultant_id: string
           customer_id: string | null
+          dispatch_status: string
           id: string
           media_id: string | null
           reply_within_min: number | null
@@ -798,6 +802,7 @@ export type Database = {
         Insert: {
           consultant_id: string
           customer_id?: string | null
+          dispatch_status?: string
           id?: string
           media_id?: string | null
           reply_within_min?: number | null
@@ -808,6 +813,7 @@ export type Database = {
         Update: {
           consultant_id?: string
           customer_id?: string | null
+          dispatch_status?: string
           id?: string
           media_id?: string | null
           reply_within_min?: number | null
