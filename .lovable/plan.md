@@ -1,56 +1,54 @@
-## Análise final e ajustes da biblioteca de mídias da IA
+## Objetivo
 
-### Diagnóstico
-A IA já consulta `ai_media_library` com filtros por `step_tags` (fase do funil), `intent_tags` (perfil) e `priority`. Hoje temos 15 vídeos públicos (14 + Conexão Green 1min), mas:
-1. **Prioridades estão bagunçadas** — vários empatados, sem hierarquia clara por funil.
-2. **Nomes técnicos** (ex: `Green_Energy.mp4`, `Casa_Sustentavel_v2`) atrapalham leitura no painel.
-3. **Tela "Mídias" não permite renomear** — só editar tags/ativar/desativar/excluir.
-4. **Falta upload com classificação assistida** — hoje todo upload entra como `step_tags=['any']`, sem perfil.
+Hoje você só vê status ("Ativa", "Pausada") e métricas agregadas dos últimos 30 dias. Isso não responde a pergunta real: **"o anúncio que está rodando agora está mesmo entregando e levando gente pro meu WhatsApp?"**
 
----
+Vou adicionar um painel **"Está funcionando?"** em cada card de campanha em `CampaignsList.tsx` que checa 4 sinais ao vivo e mostra um veredito claro (verde/amarelo/vermelho) com um botão de teste prático.
 
-### O que vou fazer
+## Os 4 sinais checados
 
-**1. Reorganizar prioridades + renomear (migração de UPDATE)**
+1. **Entrega na Meta (ao vivo)** — chama uma nova edge function `facebook-campaign-status` que consulta `effective_status` da campanha + adset + ad direto na Graph API. Possíveis resultados: `ACTIVE`, `IN_PROCESS` (em revisão), `PAUSED`, `WITH_ISSUES`, `DISAPPROVED`. Retorna também o motivo se houver pendência.
 
-Nova ordem por fase do funil (priority decrescente = enviado primeiro quando elegível):
+2. **Impressões nas últimas 24h** — busca em `facebook_metrics_daily` (já existe) o registro de hoje + ontem. Se `impressions > 0` nas últimas 24h → entregando. Se zero há mais de 24h com status ativo → bandeira amarela "Meta ainda aquecendo" ou vermelha "Pode ter problema de pagamento/segmentação".
 
-| # | Nome novo (label) | Fase (step_tags) | Perfil | Prio |
-|---|---|---|---|---|
-| 1 | Conexão Green – Apresentação (1min) | descoberta, pitch, any | any | 100 |
-| 2 | Como Funciona a Economia | descoberta | any | 95 |
-| 3 | Cashback iGreen Club | pitch | conta_alta, conta_media | 92 |
-| 4 | Casa Sustentável – Cliente Real | prova_social, objecao_confianca | any | 90 |
-| 5 | Depoimento – Conta Alta Aprovada | prova_social | conta_alta | 88 |
-| 6 | iGreen Club – Lojas Parceiras | pitch | any | 85 |
-| 7 | Indicações & Cashback Recorrente | pitch | any | 82 |
-| 8 | Reportagem TV – Energia Limpa | objecao_confianca, prova_social | any | 80 |
-| 9 | Reportagem – Mais de 600 mil clientes | objecao_confianca | any | 78 |
-| 10 | Conexão Telecom (bônus) | pitch | any | 60 |
-| 11 | Conexão Expansão (bônus licenciado) | licenciado | any | 55 |
-| 12 | Plano de Carreira – Licenciada | licenciado | any | 50 |
-| 13 | Conexão Solar / Placas | licenciado | any | 45 |
-| 14 | Conexão Livre | licenciado | any | 40 |
-| 15 | Conexão PJ – Empresarial | descoberta, pitch | conta_alta | 70 |
+3. **Cliques chegando no WhatsApp** — soma `messaging_conversations_started` das últimas 48h. Se houver impressões mas zero conversas → o anúncio é visto mas o link não converte (provável problema no destino).
 
-(Ajusto labels por SQL `UPDATE` — sem mexer em URL/storage.)
+4. **Teste do link de destino** — botão **"Testar meu link agora"** que abre `https://wa.me/<numero-da-campanha>?text=Teste` em nova aba. É exatamente o link que o usuário do Facebook abriria. Se abrir o WhatsApp na sua tela, abre na de qualquer pessoa. (Já corrigimos para `wa.me` que funciona dentro do navegador interno do Facebook.)
 
-**2. UI "Mídias" — adicionar renomear inline**
-- Em `src/components/admin/AIAgentTab/MediaColumn.tsx`: clique no nome abre input de edição (Enter salva, Esc cancela), com `UPDATE ai_media_library SET label`.
-- Adicionar campo de **prioridade** (input numérico compacto) ao lado do switch Ativo, para o consultor reordenar suas próprias mídias.
-- Ordenar lista por `priority DESC, created_at DESC` em vez de só `created_at`.
+## Veredito final
 
-**3. Upload já existe (botão "Nova" + drag&drop)** — só vou:
-- Aumentar texto auxiliar para "Após enviar, defina **quando** e **para quem**" (lembrete).
-- Default ao enviar: `priority=10` (em vez de 0) para novas mídias aparecerem acima das antigas zeradas.
+Combina os 4 sinais em uma frase única no topo do card:
 
-**4. Validação**
-- Confirmar via `supabase.read_query` que os 15 registros foram atualizados com novos labels/prioridades.
-- Conferir no preview (`/admin` aba IA) que renomear, editar prioridade e reordenar funcionam.
+- 🟢 **"Funcionando — gente vendo e conversando"** — Meta ACTIVE + impressões 24h > 0 + conversas 48h > 0
+- 🟡 **"Rodando, mas sem conversas ainda"** — Meta ACTIVE + impressões > 0 + conversas = 0
+- 🟡 **"Aquecendo na Meta"** — Meta ACTIVE + impressões = 0 + < 24h desde publicação
+- 🔴 **"Não está entregando"** — Meta ACTIVE há > 24h sem impressões → problema de pagamento ou segmentação muito restrita
+- 🔴 **"Reprovado / pausado"** — Meta DISAPPROVED ou PAUSED → mostra motivo + botão "Tentar reativar" (já existe)
 
----
+## Onde aparece
 
-### Detalhes técnicos
-- 1 migração `UPDATE` (não cria tabela; usa tool de insert/update).
-- 1 edição em `MediaColumn.tsx` (~40 linhas: input editável + campo priority + sort).
-- Nenhuma mudança em `ai-sales-agent` — a lógica já respeita `priority` e tags.
+Dentro do card de cada campanha em **Anúncios → lista de campanhas**, logo abaixo das métricas atuais. Em mobile fica empilhado; em desktop fica em uma faixa horizontal.
+
+## Mudanças técnicas
+
+```text
+supabase/functions/facebook-campaign-status/   ← NOVA edge function
+  index.ts        chama Graph API /{fb_campaign_id}?fields=effective_status,issues_info
+                  + /{adset_id}?fields=effective_status
+                  retorna { status, delivery, issues[], last_impression_at }
+
+src/components/admin/ads/
+  CampaignsList.tsx        adiciona <CampaignHealthBadge campaign={c} metric={m} />
+  CampaignHealthBadge.tsx  ← NOVO componente
+                           - busca status ao vivo (cache 60s)
+                           - calcula veredito
+                           - renderiza badge grande + botão "Testar link agora"
+                           - botão "Ver no Gerenciador de Anúncios" (deep link Meta)
+```
+
+Sem mudança de banco. A edge function só lê da Graph API com o token já salvo em `facebook_connections`.
+
+## Fora de escopo
+
+- Não vou mexer na criação/pausa de campanhas.
+- Não vou mudar layout de outras seções.
+- Não vou adicionar notificações por e-mail/push (pode virar próximo passo se quiser).
