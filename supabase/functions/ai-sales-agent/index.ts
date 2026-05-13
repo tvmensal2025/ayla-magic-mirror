@@ -127,6 +127,20 @@ const tools = [
         required: ["reason"],
       },
     },
+  {
+    type: "function",
+    function: {
+      name: "ask_for_name",
+      description: "Pergunta o nome do lead de forma natural. Use quando ainda não houver 'Nome confiável' no contexto e a conversa estiver em descoberta/pitch.",
+      parameters: {
+        type: "object",
+        properties: {
+          message: { type: "string", description: "Pergunta natural pedindo o nome" },
+          reasoning: { type: "string" },
+        },
+        required: ["message", "reasoning"],
+      },
+    },
   },
 ];
 
