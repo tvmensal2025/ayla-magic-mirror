@@ -44,23 +44,23 @@ export function AdsTab({ consultantId }: Props) {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-heading font-bold text-foreground flex items-center gap-2">
-            <Megaphone className="w-6 h-6 text-primary" />
+      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+        <div className="min-w-0">
+          <h2 className="text-xl sm:text-2xl font-heading font-bold text-foreground flex items-center gap-2">
+            <Megaphone className="w-5 h-5 sm:w-6 sm:h-6 text-primary shrink-0" />
             Anúncios iGreen
           </h2>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
             Campanhas no Facebook e Instagram pré-otimizadas pela plataforma. Você só recarrega, escolhe cidades e fotos.
           </p>
         </div>
         {ready && (
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setView("gallery")} className="gap-2">
-            <LayoutGrid className="w-4 h-4" /> Galeria de modelos
+        <div className="flex gap-2 w-full sm:w-auto shrink-0">
+          <Button variant="outline" onClick={() => setView("gallery")} className="gap-2 flex-1 sm:flex-none">
+            <LayoutGrid className="w-4 h-4" /> <span className="truncate">Galeria</span>
           </Button>
-          <Button onClick={() => { setPrefillImageUrl(null); setExpressOpen(true); }} className="gap-2">
-            <Plus className="w-4 h-4" /> Nova campanha
+          <Button onClick={() => { setPrefillImageUrl(null); setExpressOpen(true); }} className="gap-2 flex-1 sm:flex-none">
+            <Plus className="w-4 h-4" /> <span className="truncate">Nova campanha</span>
           </Button>
         </div>
         )}
