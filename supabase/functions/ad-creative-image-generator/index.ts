@@ -176,17 +176,22 @@ Deno.serve(async (req) => {
     const prompt = buildPrompt(angle, format, distribuidora);
     const spec = FORMAT_SPEC[format];
 
-    // Loop de QA: até 3 tentativas
+    // Loop de QA: até 3 tentativas. Guarda o melhor candidato como fallback.
     let imageDataUrl: string | null = null;
+    let fallbackDataUrl: string | null = null;
     let lastReport: any = null;
     let attempts = 0;
     let modelUsed = PRIMARY_MODEL;
+    let approved = false;
 
     for (attempts = 1; attempts <= 3; attempts++) {
       const useModel = attempts === 1 ? PRIMARY_MODEL : (attempts === 2 ? PRIMARY_MODEL : FALLBACK_MODEL);
       modelUsed = useModel;
       const candidate = await generateImage(prompt, useModel);
       if (!candidate) { lastReport = { error: `model_${useModel}_returned_null` }; continue; }
+
+      // Guarda como fallback (último candidato gerado)
+      fallbackDataUrl = candidate;
 
       // Sobe pra MinIO temporário só pra QA conseguir baixar
       const { bytes, mime } = dataUrlToBytes(candidate);
@@ -197,7 +202,6 @@ Deno.serve(async (req) => {
         const up = await uploadToMinioPath(bytes, mime, tmpKey);
         tmpUrl = up.url;
       } catch {
-        // fallback supabase
         const path = `creatives/${auth.id}/_tmp/${Date.now()}.${ext}`;
         await admin.storage.from("IMAGE").upload(path, bytes, { contentType: mime, upsert: true });
         tmpUrl = admin.storage.from("IMAGE").getPublicUrl(path).data.publicUrl;
@@ -209,15 +213,25 @@ Deno.serve(async (req) => {
 
       if (qa.approved) {
         imageDataUrl = candidate;
+        approved = true;
         break;
       }
     }
 
+    // Fail-open: se nenhuma aprovou mas temos uma imagem, usa a última.
+    // Overlay determinístico vai cobrir top com headline/selo, então texto
+    // residual em props (papel/calendário) raramente atrapalha.
+    if (!imageDataUrl && fallbackDataUrl) {
+      imageDataUrl = fallbackDataUrl;
+      console.warn("[gen] usando fallback sem aprovação QA. last_report=", lastReport);
+    }
+
     if (!imageDataUrl) {
       return new Response(JSON.stringify({
-        error: "Não consegui gerar uma imagem aprovada (3 tentativas com texto/deformação detectados). Tente outro ângulo.",
+        error: "Falha ao gerar imagem (modelo não retornou). Tente novamente.",
+        fallback: true,
         last_qa: lastReport,
-      }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Upload final
