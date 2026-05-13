@@ -58,9 +58,9 @@ Se não encontrar ou não tiver certeza, retorne {"ads": []}. Não invente. Não
     const data = await res.json();
     const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text).filter(Boolean).join("\n") || "";
     const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return [];
+    if (!match) return { ads: [], debug: { status: res.status, no_json: true, text_preview: text.slice(0, 300), data_preview: JSON.stringify(data).slice(0, 500) } };
     const parsed = JSON.parse(match[0]);
-    return (parsed.ads || [])
+    const ads = (parsed.ads || [])
       .map((a: any) => ({
         advertiser,
         headline: String(a?.headline || "").slice(0, 200) || undefined,
@@ -71,8 +71,9 @@ Se não encontrar ou não tiver certeza, retorne {"ads": []}. Não invente. Não
         active_days: Number.isFinite(a?.active_days) ? Math.max(0, Math.min(365, Math.floor(a.active_days))) : undefined,
       }))
       .filter((a: CompetitorAd) => a.headline || a.primary_text);
-  } catch {
-    return [];
+    return { ads, debug: { status: res.status, parsed_count: ads.length } };
+  } catch (err) {
+    return { ads: [], debug: { error: (err as Error).message } };
   }
 }
 
@@ -81,10 +82,12 @@ Deno.serve(async (req) => {
   try {
     const admin = adminClient();
     const all: CompetitorAd[] = [];
+    const debugByAdv: Record<string, any> = {};
     for (const advertiser of COMPETITORS) {
-      const ads = await research(advertiser);
+      const { ads, debug } = await research(advertiser);
+      debugByAdv[advertiser] = debug;
+      console.log(`[scraper] ${advertiser}:`, JSON.stringify(debug));
       all.push(...ads);
-      // Pequeno delay para respeitar limites do Gemini
       await new Promise((r) => setTimeout(r, 800));
     }
 
