@@ -52,16 +52,24 @@ export function CreateCampaignExpress({ open, onClose, consultantId, onCreated, 
   const [stepLog, setStepLog] = useState<string>("");
   const [applyCta, setApplyCta] = useState(true);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const overlayRefs = useRef<Array<CreativeOverlayHandle | null>>([]);
+  // Para cada foto: { square, vertical, story } refs do CreativeOverlay
+  const overlayRefs = useRef<Array<{ square: CreativeOverlayHandle | null; vertical: CreativeOverlayHandle | null; story: CreativeOverlayHandle | null }>>([]);
 
   const preset = useMemo(
     () => DISTRIBUIDORAS_PRESETS.find((p) => p.id === presetId) || null,
     [presetId],
   );
-  const headline = preset
+  const defaultHeadline = preset
     ? `Conta de luz até 20% mais barata em ${preset.nome}`
     : "Conta de luz até 20% mais barata";
+  const [liveHeadline, setLiveHeadline] = useState(defaultHeadline);
+  useEffect(() => { setLiveHeadline(defaultHeadline); }, [defaultHeadline]);
   const badge = "ATÉ 20% OFF";
+
+  function getOverlayRef(i: number) {
+    if (!overlayRefs.current[i]) overlayRefs.current[i] = { square: null, vertical: null, story: null };
+    return overlayRefs.current[i];
+  }
 
   useEffect(() => {
     if (!open) return;
