@@ -2234,6 +2234,66 @@ export type Database = {
           },
         ]
       }
+      storage_migration_log: {
+        Row: {
+          attempts: number
+          completed_at: string | null
+          consultant_id: string | null
+          created_at: string
+          customer_jid: string | null
+          error: string | null
+          id: string
+          media_kind: string | null
+          size_bytes: number | null
+          source_bucket: string
+          source_path: string
+          source_url: string | null
+          started_at: string | null
+          status: string
+          target_object_key: string | null
+          target_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          completed_at?: string | null
+          consultant_id?: string | null
+          created_at?: string
+          customer_jid?: string | null
+          error?: string | null
+          id?: string
+          media_kind?: string | null
+          size_bytes?: number | null
+          source_bucket: string
+          source_path: string
+          source_url?: string | null
+          started_at?: string | null
+          status?: string
+          target_object_key?: string | null
+          target_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          completed_at?: string | null
+          consultant_id?: string | null
+          created_at?: string
+          customer_jid?: string | null
+          error?: string | null
+          id?: string
+          media_kind?: string | null
+          size_bytes?: number | null
+          source_bucket?: string
+          source_path?: string
+          source_url?: string | null
+          started_at?: string | null
+          status?: string
+          target_object_key?: string | null
+          target_url?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
