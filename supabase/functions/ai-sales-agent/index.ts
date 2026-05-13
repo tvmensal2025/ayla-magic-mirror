@@ -55,6 +55,10 @@ const tools = [
             type: "string",
             enum: ["abertura", "descoberta", "pitch", "objecao", "fechamento"],
           },
+          score_delta: {
+            type: "number",
+            description: "Quanto somar/subtrair no qualification_score (0-100).",
+          },
           reasoning: { type: "string" },
         },
         required: ["media_id", "reasoning"],
