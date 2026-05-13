@@ -81,7 +81,7 @@ export function buildConsultantSlug(idOrIgreen: string, name?: string | null): s
 export function sanitizeJid(jid: string): string {
   return (jid || "sem_cliente").replace(/[^0-9]/g, "") || "sem_cliente";
 }
- */
+/** Sobe bytes brutos diretamente ao MinIO via AWS SigV4. */
 export async function uploadBytesToMinio(input: MinioUploadInput): Promise<MinioUploadResult> {
   const serverUrl = Deno.env.get("MINIO_SERVER_URL") || "";
   const accessKey = Deno.env.get("MINIO_ROOT_USER") || "";
