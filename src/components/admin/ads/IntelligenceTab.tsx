@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Activity, Calendar } from "lucide-react";
@@ -6,7 +6,6 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CompetitorsPanel } from "./CompetitorsPanel";
 import { InsightsPanel } from "./InsightsPanel";
-import { CreativeImageGenerator, type CreativeImageGeneratorHandle } from "./CreativeImageGenerator";
 
 interface Props {
   consultantId: string;
@@ -15,21 +14,18 @@ interface Props {
 
 interface Event { ts: string; label: string; emoji: string }
 
-export function IntelligenceTab({ consultantId, onUseCreativeInAd }: Props) {
+export function IntelligenceTab({ consultantId }: Props) {
   const [events, setEvents] = useState<Event[]>([]);
-  const generatorRef = useRef<CreativeImageGeneratorHandle>(null);
 
   useEffect(() => {
     (async () => {
-      const [comp, ins, gen] = await Promise.all([
+      const [comp, ins] = await Promise.all([
         supabase.from("ad_competitor_creatives").select("ingested_at, advertiser").order("ingested_at", { ascending: false }).limit(20),
         supabase.from("ad_creative_insights").select("updated_at, sample_size").eq("consultant_id", consultantId).order("updated_at", { ascending: false }).limit(5),
-        supabase.from("ad_generated_creatives").select("created_at, format").eq("consultant_id", consultantId).order("created_at", { ascending: false }).limit(10),
       ]);
 
       const ev: Event[] = [];
 
-      // Agrupar scrapes por timestamp aproximado (mesmo minuto)
       const scrapeBuckets = new Map<string, number>();
       (comp.data || []).forEach((c: any) => {
         const key = c.ingested_at?.slice(0, 16) || "";
@@ -43,10 +39,6 @@ export function IntelligenceTab({ consultantId, onUseCreativeInAd }: Props) {
         ev.push({ ts: i.updated_at, emoji: "🧠", label: `Análise da IA executada — ${i.sample_size} anúncios avaliados` });
       });
 
-      (gen.data || []).forEach((g: any) => {
-        ev.push({ ts: g.created_at, emoji: "✨", label: `Criativo gerado — ${g.format.replace("_", " ")}` });
-      });
-
       ev.sort((a, b) => +new Date(b.ts) - +new Date(a.ts));
       setEvents(ev.slice(0, 15));
     })();
@@ -54,9 +46,6 @@ export function IntelligenceTab({ consultantId, onUseCreativeInAd }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* Botão estrela: gerador de criativo */}
-      <CreativeImageGenerator ref={generatorRef} consultantId={consultantId} onUseInAd={onUseCreativeInAd} />
-
       <div className="grid lg:grid-cols-2 gap-4">
         <InsightsPanel consultantId={consultantId} />
         <Card className="p-5 bg-card/50 backdrop-blur border-border/60">
@@ -88,7 +77,7 @@ export function IntelligenceTab({ consultantId, onUseCreativeInAd }: Props) {
         </Card>
       </div>
 
-      <CompetitorsPanel onInspire={(adId, hint) => generatorRef.current?.generateInspired(adId, hint)} />
+      <CompetitorsPanel />
     </div>
   );
 }

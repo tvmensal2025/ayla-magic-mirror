@@ -83,7 +83,7 @@ export function AdsTab({ consultantId }: Props) {
       {view === "gallery" && (
         <AdTemplatesGallery consultantId={consultantId} onPublished={() => { setRefreshKey(k => k + 1); setView("campaigns"); }} />
       )}
-      {view === "intel" && <IntelligenceTab consultantId={consultantId} onUseCreativeInAd={openExpressWithCreative} />}
+      {view === "intel" && <IntelligenceTab consultantId={consultantId} />}
 
       <div className="rounded-xl border border-dashed border-border/50 bg-card/30 p-3 flex items-start gap-2 text-xs text-muted-foreground">
         <Sparkles className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" />
