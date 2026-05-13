@@ -13,19 +13,19 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 type Format = "feed_1x1" | "story_9x16" | "reels_9x16" | "carousel_4x5";
 
 const FORMAT_SPEC: Record<Format, { ratio: string; w: number; h: number; safeZone: string; placement: string }> = {
-  feed_1x1:     { ratio: "1:1",  w: 1080, h: 1080, safeZone: "deixe um terço SUPERIOR da imagem com fundo limpo/desfocado para receber texto sobreposto",          placement: "Feed FB/IG" },
-  story_9x16:   { ratio: "9:16", w: 1080, h: 1920, safeZone: "deixe o terço SUPERIOR e o terço INFERIOR com fundo limpo/desfocado para receber texto e CTA",       placement: "Stories" },
-  reels_9x16:   { ratio: "9:16", w: 1080, h: 1920, safeZone: "deixe o terço SUPERIOR com fundo limpo/desfocado para receber a headline",                            placement: "Reels" },
-  carousel_4x5: { ratio: "4:5",  w: 1080, h: 1350, safeZone: "deixe o terço SUPERIOR com fundo limpo/desfocado para receber a headline",                            placement: "Carrossel feed" },
+  feed_1x1:     { ratio: "1:1",  w: 1080, h: 1080, safeZone: "Subject (person + bill) MUST occupy ONLY the RIGHT 45% of the frame. The LEFT 55% must be a clean, softly out-of-focus, BRIGHT off-white/very-light interior wall (no furniture clutter, no patterns) so we can place a design panel over it.", placement: "Feed FB/IG" },
+  story_9x16:   { ratio: "9:16", w: 1080, h: 1920, safeZone: "Subject (person + bill) MUST occupy the BOTTOM-CENTER 55% of the frame from waist up. The TOP 45% must be a clean, softly out-of-focus, BRIGHT off-white wall (so we can place a big headline + design panel on top).", placement: "Stories" },
+  reels_9x16:   { ratio: "9:16", w: 1080, h: 1920, safeZone: "Subject (person + bill) MUST occupy the BOTTOM-CENTER 55%. The TOP 45% must be a clean, softly out-of-focus, BRIGHT off-white wall.", placement: "Reels" },
+  carousel_4x5: { ratio: "4:5",  w: 1080, h: 1350, safeZone: "Subject (person + bill) MUST occupy ONLY the RIGHT 45% of the frame. The LEFT 55% must be a clean, softly out-of-focus, BRIGHT off-white/very-light wall (no clutter).", placement: "Carrossel feed" },
 };
 
 const ANGLE_DESC: Record<string, string> = {
-  economia_concreta: "pessoa real brasileira em casa simples sorrindo aliviada segurando uma conta de energia, iluminação natural quente, expressão de alívio financeiro",
-  quebra_objecao:    "close em mãos brasileiras segurando smartphone com app de energia aberto (interface borrada/genérica, SEM texto legível), em ambiente residencial brasileiro",
-  prova_social:      "família brasileira de classe média (pai, mãe, filho) sorrindo na sala de casa simples, autêntica, não-posada, iluminação natural",
-  curiosidade:       "pessoa brasileira em cozinha simples olhando para conta de luz com expressão de surpresa e dúvida, fundo desfocado",
-  dor_pas:           "pessoa brasileira preocupada na sala de casa olhando uma conta de luz alta, luz fria desbotada (clima de problema), fundo simples",
-  urgencia_local:    "vista de bairro residencial brasileiro de classe média ao entardecer, casas simples, postes, atmosfera regional",
+  economia_concreta: "Brazilian woman, 30-40 years old, wearing a casual green or white t-shirt, BIG genuine surprised-happy smile, holding a COMPLETELY BLANK white paper sheet (no text, no logo, no numbers, no marks) in front of her chest like an electricity bill, pointing at it with the other hand, bright modern simple Brazilian living room background softly out of focus",
+  quebra_objecao:    "Brazilian woman 30s, casual clothes, confident relaxed smile, one hand holding a smartphone with COMPLETELY BLACK turned-off screen, the other hand holding a BLANK white paper sheet, bright clean residential background out of focus",
+  prova_social:      "Brazilian woman 30s smiling warmly at camera, holding a BLANK white paper sheet in both hands at chest height, bright clean modern living room background softly out of focus",
+  curiosidade:       "Brazilian woman 30s with curious raised-eyebrow expression, holding a COMPLETELY BLANK white paper sheet up close looking at it, bright simple kitchen/living room background softly out of focus",
+  dor_pas:           "Brazilian woman 30s with worried concerned expression, holding a BLANK white paper sheet, hand on forehead, bright clean residential background softly out of focus",
+  urgencia_local:    "Brazilian woman 30s with hopeful excited expression, holding a BLANK white paper sheet, bright clean residential background softly out of focus",
 };
 
 const ANGLE_HEADLINE: Record<string, { headline: string; badge: string }> = {
