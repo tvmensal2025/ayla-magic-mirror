@@ -27,8 +27,31 @@ export interface CreativeOverlayHandle {
 export const CreativeOverlay = forwardRef<CreativeOverlayHandle, CreativeOverlayProps>(
   function CreativeOverlay({ imageUrl, format, headline, badge, brand = "iGreen", className }, ref) {
     const containerRef = useRef<HTMLDivElement | null>(null);
+    const [localUrl, setLocalUrl] = useState<string>(imageUrl);
     const spec = ASPECT[format];
 
+    // Pré-baixa a imagem como blob para evitar canvas "tainted" no html2canvas (CORS).
+    useEffect(() => {
+      let revoked = false;
+      let createdUrl: string | null = null;
+      (async () => {
+        try {
+          const r = await fetch(imageUrl, { mode: "cors", cache: "force-cache" });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const blob = await r.blob();
+          if (revoked) return;
+          createdUrl = URL.createObjectURL(blob);
+          setLocalUrl(createdUrl);
+        } catch {
+          // mantém a URL original — html2canvas pode falhar mas o preview funciona
+          setLocalUrl(imageUrl);
+        }
+      })();
+      return () => {
+        revoked = true;
+        if (createdUrl) URL.revokeObjectURL(createdUrl);
+      };
+    }, [imageUrl]);
     useImperativeHandle(ref, () => ({
       async toFile(filename = `criativo-${Date.now()}.png`) {
         if (!containerRef.current) throw new Error("overlay não montado");
