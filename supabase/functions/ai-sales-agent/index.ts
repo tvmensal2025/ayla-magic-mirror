@@ -5,13 +5,18 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+import { geminiGenerate, type GeminiTool } from "../_shared/gemini.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
-const MODEL = "google/gemini-3-flash-preview";
 
-// ---------- Tools available to the LLM ----------
+// Modelos por tarefa (Google API direto)
+const MODEL_DECISION = "gemini-2.5-pro";          // decisão principal — Pro com thinking
+const MODEL_RESCUE = "gemini-2.5-flash";          // resgate / texto rápido
+const MODEL_SELFCHECK = "gemini-2.5-flash-lite";  // self-check barato
+const MODEL_FALLBACK = "gemini-2.5-flash";        // se Pro retornar 429
+
+// ---------- Tools available to the LLM (OpenAI-style; convertidas para Google abaixo) ----------
 const tools = [
   {
     type: "function",
