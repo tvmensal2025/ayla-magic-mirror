@@ -98,8 +98,19 @@ Deno.serve(async (req) => {
     const distribuidora = settings?.distribuidora_default || insights?.distribuidora || "sua distribuidora";
     const cidades = Array.isArray(settings?.cities) ? settings!.cities.slice(0, 3).join(", ") : "";
 
-    // 4. Escolher ângulo (parâmetro > vencedor histórico > default)
-    const angle = requestedAngle || (Array.isArray(insights?.winning_patterns) && insights!.winning_patterns[0]?.angle) || "economia_concreta";
+    // 3b. "Anúncio inspiração" (concorrente campeão escolhido pelo usuário)
+    let inspired: any = null;
+    if (inspiredById) {
+      const { data } = await admin
+        .from("ad_competitor_creatives")
+        .select("advertiser, headline, primary_text, cta, angle, creative_format, active_days, image_url, thumbnail_url")
+        .eq("id", inspiredById)
+        .maybeSingle();
+      inspired = data || null;
+    }
+
+    // 4. Escolher ângulo (inspiração > parâmetro > vencedor histórico > default)
+    const angle = inspired?.angle || requestedAngle || (Array.isArray(insights?.winning_patterns) && insights!.winning_patterns[0]?.angle) || "economia_concreta";
     const angleDesc = ANGLE_DESC[angle] || ANGLE_DESC.economia_concreta;
 
     const spec = FORMAT_SPEC[format];
