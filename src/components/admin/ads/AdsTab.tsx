@@ -18,7 +18,7 @@ export function AdsTab({ consultantId }: Props) {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [expressOpen, setExpressOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [view, setView] = useState<"campaigns" | "results" | "gallery">("results");
+  const [view, setView] = useState<"campaigns" | "results" | "gallery" | "intel">("results");
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
