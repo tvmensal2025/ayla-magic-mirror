@@ -13,10 +13,10 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 type Format = "feed_1x1" | "story_9x16" | "reels_9x16" | "carousel_4x5";
 
 const FORMAT_SPEC: Record<Format, { ratio: string; w: number; h: number; safeZone: string; placement: string }> = {
-  feed_1x1:     { ratio: "1:1",  w: 1080, h: 1080, safeZone: "deixe um terço SUPERIOR da imagem com fundo limpo/desfocado para receber texto sobreposto",          placement: "Feed FB/IG" },
-  story_9x16:   { ratio: "9:16", w: 1080, h: 1920, safeZone: "deixe o terço SUPERIOR e o terço INFERIOR com fundo limpo/desfocado para receber texto e CTA",       placement: "Stories" },
-  reels_9x16:   { ratio: "9:16", w: 1080, h: 1920, safeZone: "deixe o terço SUPERIOR com fundo limpo/desfocado para receber a headline",                            placement: "Reels" },
-  carousel_4x5: { ratio: "4:5",  w: 1080, h: 1350, safeZone: "deixe o terço SUPERIOR com fundo limpo/desfocado para receber a headline",                            placement: "Carrossel feed" },
+  feed_1x1:     { ratio: "1:1",  w: 1080, h: 1080, safeZone: "Subject (person + bill) MUST occupy ONLY the RIGHT 45% of the frame. The LEFT 55% must be a clean, softly out-of-focus, BRIGHT off-white/very-light interior wall (no furniture clutter, no patterns) so we can place a design panel over it.", placement: "Feed FB/IG" },
+  story_9x16:   { ratio: "9:16", w: 1080, h: 1920, safeZone: "Subject (person + bill) MUST occupy the BOTTOM-CENTER 55% of the frame from waist up. The TOP 45% must be a clean, softly out-of-focus, BRIGHT off-white wall (so we can place a big headline + design panel on top).", placement: "Stories" },
+  reels_9x16:   { ratio: "9:16", w: 1080, h: 1920, safeZone: "Subject (person + bill) MUST occupy the BOTTOM-CENTER 55%. The TOP 45% must be a clean, softly out-of-focus, BRIGHT off-white wall.", placement: "Reels" },
+  carousel_4x5: { ratio: "4:5",  w: 1080, h: 1350, safeZone: "Subject (person + bill) MUST occupy ONLY the RIGHT 45% of the frame. The LEFT 55% must be a clean, softly out-of-focus, BRIGHT off-white/very-light wall (no clutter).", placement: "Carrossel feed" },
 };
 
 const ANGLE_DESC: Record<string, string> = {
