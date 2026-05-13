@@ -26,7 +26,7 @@ async function analyze(imageUrl: string): Promise<QaReport> {
         {
           role: "system",
           content:
-            "Você é auditor visual de anúncios pagos. Responda APENAS chamando a função qa_report. Seja rigoroso: qualquer letra/número visível na imagem (mesmo no fundo, em placas, pôsteres, conta de luz com texto legível, watermarks, logos com palavras) conta como has_text=true.",
+            "Você é auditor visual de anúncios. Responda APENAS chamando qa_report. Marque has_text=true SOMENTE se houver texto/letras GRANDES, LEGÍVEIS e em DESTAQUE ocupando área significativa da imagem (headlines, watermarks grandes, logos com nome, infográficos, selos com %). IGNORE texto pequeno/incidental/desfocado em props (folha de papel, calendário, conta de luz, embalagens, placas distantes, livros) — esses são naturais da cena e serão cobertos por overlay depois.",
         },
         {
           role: "user",
@@ -45,7 +45,7 @@ async function analyze(imageUrl: string): Promise<QaReport> {
             parameters: {
               type: "object",
               properties: {
-                has_text: { type: "boolean", description: "Há QUALQUER letra, palavra, número ou caractere visível na imagem (incluindo em fundos, placas, pôsteres, contas de luz com texto legível, logos com palavras, watermarks, infográficos)" },
+                has_text: { type: "boolean", description: "Há texto GRANDE e em DESTAQUE (headline, watermark grande, logo com nome, infográfico, selo com porcentagem) ocupando área significativa? IGNORAR texto pequeno em papel/calendário/conta nas mãos da pessoa." },
                 has_panel: { type: "boolean", description: "Aparece painel solar fotovoltaico em telhado ou paisagem" },
                 looks_stock: { type: "boolean", description: "Parece foto de banco de imagens americana/genérica (pessoas obviamente posadas, cenário não-brasileiro)" },
                 has_deformed_face_or_hand: { type: "boolean", description: "Mão, dedo, rosto ou olho visivelmente deformado/anatomicamente errado" },
