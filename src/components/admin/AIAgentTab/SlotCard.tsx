@@ -137,9 +137,16 @@ export function SlotCard({ userId, slot, defaultMedia, personalMedia, onChange }
             <p className="text-xs text-muted-foreground mt-0.5">{slot.description}</p>
           )}
         </div>
-        <Badge variant={hasPersonalActive && usingPersonal ? "default" : "secondary"} className="shrink-0">
-          {hasPersonalActive && usingPersonal ? "Em uso: Meu áudio" : "Em uso: Padrão"}
-        </Badge>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <Badge variant={hasPersonalActive && usingPersonal ? "default" : "secondary"}>
+            {hasPersonalActive && usingPersonal ? "Em uso: Meu áudio" : "Em uso: Padrão"}
+          </Badge>
+          {slot.is_testing && (
+            <Badge variant="outline" className="border-amber-500/60 text-amber-500 text-[10px]">
+              🧪 Em teste — não envia
+            </Badge>
+          )}
+        </div>
       </div>
 
       <div className="flex gap-2">
