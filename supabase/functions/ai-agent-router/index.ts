@@ -284,6 +284,10 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
       };
     }
 
+    if (decision.reply_text) {
+      decision.reply_text = sanitizeHumanReply(decision.reply_text, stepBefore, user_input || "");
+    }
+
     // 9b) Anti-loop: se reply for ≥80% similar à última msg outbound, esvazia
     if (decision.reply_text && decision.reply_text.trim()) {
       const lastOut = [...historyChrono].reverse().find((m: any) => m.message_direction === "outbound");
