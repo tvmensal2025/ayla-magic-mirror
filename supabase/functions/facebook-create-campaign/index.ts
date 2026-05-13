@@ -248,12 +248,13 @@ Deno.serve(async (req) => {
     }
     const adlabelsParam = consultantLabelId ? JSON.stringify([{ id: consultantLabelId }]) : null;
 
-    // Decide objetivo: se tiver Pixel, otimiza por Lead (CPL menor); senão, fica em ENGAGEMENT/messaging.
+    // Click-to-WhatsApp via link wa.me — funciona com QUALQUER número de WhatsApp
+    // (pessoal ou Business app), sem precisar vincular WABA no Meta Business Manager.
+    // Trade-off: Meta otimiza por LINK_CLICKS em vez de CONVERSATIONS (~10-20% mais caro),
+    // mas evita o erro 1487246 e elimina configuração manual pelo consultor.
     const hasPixel = !!conn.pixel_id;
-    // Para destination=WHATSAPP, sempre otimizar por CONVERSATIONS (mais barato e compatível).
-    // Pixel é usado só pra CAPI/tracking, não pra otimização do AdSet.
-    const objective = "OUTCOME_ENGAGEMENT";
-    const optimizationGoal = "CONVERSATIONS";
+    const objective = "OUTCOME_TRAFFIC";
+    const optimizationGoal = "LINK_CLICKS";
     const pixelEvent = hasPixel ? "LEAD" : null;
 
     // 1) Campaign
@@ -319,19 +320,13 @@ Deno.serve(async (req) => {
     if (platformCustomAudId) {
       (targeting as any).excluded_custom_audiences = [{ id: platformCustomAudId }];
     }
-    // promoted_object para click-to-WhatsApp: page_id + número WhatsApp Business.
-    // Sem pixel/custom_event_type, pois não são aceitos com CONVERSATIONS + WHATSAPP.
-    const promotedObject = {
-      page_id: conn.page_id,
-      whatsapp_phone_number: conn.whatsapp_destination_number,
-    };
+    // Sem promoted_object/destination_type=WHATSAPP: o link wa.me no creative é
+    // que leva o lead pra conversa. Assim QUALQUER número funciona, sem WABA.
     const adsetParams: Record<string, string> = {
       name: `[${consultantTag}] ${distribTag} · Conjunto Principal · ${cityPrincipal}`,
       campaign_id: campaignId,
       billing_event: "IMPRESSIONS",
       optimization_goal: optimizationGoal,
-      destination_type: "WHATSAPP",
-      promoted_object: JSON.stringify(promotedObject),
       targeting: JSON.stringify(targeting),
       status: "PAUSED",
       start_time: new Date(Date.now() + 60_000).toISOString(),
