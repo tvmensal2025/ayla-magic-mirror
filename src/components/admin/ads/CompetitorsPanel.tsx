@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, RefreshCw, Search, Trophy } from "lucide-react";
+import { Eye, RefreshCw, Search, Trophy, Wand2, ExternalLink } from "lucide-react";
 
 interface Row {
   id: string;
