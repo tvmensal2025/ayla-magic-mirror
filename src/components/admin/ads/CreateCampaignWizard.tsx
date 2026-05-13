@@ -463,6 +463,15 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
     }
     setSubmitting(true);
     try {
+      // GARANTIA: persiste o telefone resolvido em consultant_ad_settings antes
+      // de chamar a edge function — assim o backend nunca falha por WHATSAPP_NOT_CONFIGURED.
+      try {
+        const { supabase } = await import("@/integrations/supabase/client");
+        await supabase.from("consultant_ad_settings").upsert(
+          { consultant_id: consultantId, whatsapp_destination_number: consultantPhone },
+          { onConflict: "consultant_id" }
+        );
+      } catch (e) { console.warn("[wizard] persist phone failed:", e); }
       // Mantém formato de cada foto pra que o backend monte asset_feed_spec
       // com customization por posicionamento (sem corte de cabeça em Reels).
       const tagged: { file: AdFile; format: AdFormat }[] = [
