@@ -91,6 +91,38 @@ function fmtBytes(n: number) {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function EditableLabel({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="group/lbl flex items-center gap-1 text-sm text-foreground truncate w-full text-left hover:text-primary transition-colors"
+        title="Clique para renomear"
+      >
+        <span className="truncate">{value}</span>
+        <Pencil className="w-3 h-3 opacity-0 group-hover/lbl:opacity-60 shrink-0" />
+      </button>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { setEditing(false); onSave(draft); }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); }
+        if (e.key === "Escape") { setDraft(value); setEditing(false); }
+      }}
+      className="w-full text-sm bg-background border border-primary/40 rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-primary"
+    />
+  );
+}
+
 export function MediaColumn({ userId }: { userId: string }) {
   const { toast } = useToast();
   const [view, setView] = useState<"mine" | "public">("mine");
