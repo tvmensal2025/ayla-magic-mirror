@@ -149,10 +149,20 @@ export async function uploadAdPhotos(consultantId: string, files: File[]): Promi
       const { data } = supabase.storage.from("consultant-photos").getPublicUrl(path);
       urls.push(data.publicUrl);
     } catch (directUploadError) {
-      const formData = new FormData();
-      formData.append("file", f);
-      formData.append("consultant_id", consultantId);
-      const { data, error } = await supabase.functions.invoke("upload-ad-photo", { body: formData });
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(reader.error || new Error("Falha ao ler imagem."));
+        reader.readAsDataURL(f);
+      });
+      const { data, error } = await supabase.functions.invoke("upload-ad-photo", {
+        body: {
+          consultant_id: consultantId,
+          filename: f.name,
+          content_type: f.type,
+          data_base64: dataUrl,
+        },
+      });
       if (error) await throwFunctionError(error);
       if ((data as any)?.error || !(data as any)?.url) {
         throw new Error((data as any)?.error || (directUploadError as Error)?.message || "Falha ao enviar imagem.");
