@@ -14,11 +14,80 @@ export type Database = {
   }
   public: {
     Tables: {
+      ad_competitor_creatives: {
+        Row: {
+          active_days: number | null
+          ad_archive_id: string | null
+          advertiser: string
+          angle: string | null
+          created_at: string
+          creative_format: string | null
+          cta: string | null
+          first_seen_at: string | null
+          headline: string | null
+          id: string
+          image_url: string | null
+          ingested_at: string
+          last_seen_at: string | null
+          page_id: string | null
+          primary_text: string | null
+          raw: Json | null
+          region: string | null
+          thumbnail_url: string | null
+          video_url: string | null
+        }
+        Insert: {
+          active_days?: number | null
+          ad_archive_id?: string | null
+          advertiser: string
+          angle?: string | null
+          created_at?: string
+          creative_format?: string | null
+          cta?: string | null
+          first_seen_at?: string | null
+          headline?: string | null
+          id?: string
+          image_url?: string | null
+          ingested_at?: string
+          last_seen_at?: string | null
+          page_id?: string | null
+          primary_text?: string | null
+          raw?: Json | null
+          region?: string | null
+          thumbnail_url?: string | null
+          video_url?: string | null
+        }
+        Update: {
+          active_days?: number | null
+          ad_archive_id?: string | null
+          advertiser?: string
+          angle?: string | null
+          created_at?: string
+          creative_format?: string | null
+          cta?: string | null
+          first_seen_at?: string | null
+          headline?: string | null
+          id?: string
+          image_url?: string | null
+          ingested_at?: string
+          last_seen_at?: string | null
+          page_id?: string | null
+          primary_text?: string | null
+          raw?: Json | null
+          region?: string | null
+          thumbnail_url?: string | null
+          video_url?: string | null
+        }
+        Relationships: []
+      }
       ad_creative_insights: {
         Row: {
           best_cpa_cents: number | null
           best_ctr_bps: number
+          best_formats: Json
+          best_image_briefs: Json
           best_image_traits: Json
+          competitor_summary: string | null
           consultant_id: string
           created_at: string
           distribuidora: string | null
@@ -32,7 +101,10 @@ export type Database = {
         Insert: {
           best_cpa_cents?: number | null
           best_ctr_bps?: number
+          best_formats?: Json
+          best_image_briefs?: Json
           best_image_traits?: Json
+          competitor_summary?: string | null
           consultant_id: string
           created_at?: string
           distribuidora?: string | null
@@ -46,7 +118,10 @@ export type Database = {
         Update: {
           best_cpa_cents?: number | null
           best_ctr_bps?: number
+          best_formats?: Json
+          best_image_briefs?: Json
           best_image_traits?: Json
+          competitor_summary?: string | null
           consultant_id?: string
           created_at?: string
           distribuidora?: string | null
@@ -61,14 +136,17 @@ export type Database = {
       }
       ad_creative_performance: {
         Row: {
+          angle: string | null
           campaign_id: string
           clicks: number
           consultant_id: string
+          creative_format: string | null
           evaluated_at: string
           fb_ad_id: string
           framework: string | null
           headline: string | null
           id: string
+          image_brief: string | null
           impressions: number
           is_loser: boolean
           is_winner: boolean
@@ -80,14 +158,17 @@ export type Database = {
           spend_cents: number
         }
         Insert: {
+          angle?: string | null
           campaign_id: string
           clicks?: number
           consultant_id: string
+          creative_format?: string | null
           evaluated_at?: string
           fb_ad_id: string
           framework?: string | null
           headline?: string | null
           id?: string
+          image_brief?: string | null
           impressions?: number
           is_loser?: boolean
           is_winner?: boolean
@@ -99,14 +180,17 @@ export type Database = {
           spend_cents?: number
         }
         Update: {
+          angle?: string | null
           campaign_id?: string
           clicks?: number
           consultant_id?: string
+          creative_format?: string | null
           evaluated_at?: string
           fb_ad_id?: string
           framework?: string | null
           headline?: string | null
           id?: string
+          image_brief?: string | null
           impressions?: number
           is_loser?: boolean
           is_winner?: boolean

@@ -15,6 +15,19 @@ async function loadInsights(consultantId: string, distribuidora?: string) {
   } catch { return null; }
 }
 
+// Carrega criativos de concorrentes que estão há mais tempo no ar (sinal de que convertem).
+async function loadCompetitorWinners(limit = 8) {
+  try {
+    const admin = adminClient();
+    const { data } = await admin
+      .from("ad_competitor_creatives")
+      .select("advertiser, headline, primary_text, angle, creative_format, active_days")
+      .order("active_days", { ascending: false })
+      .limit(limit);
+    return data || [];
+  } catch { return []; }
+}
+
 // Termos que a Meta rejeita ou penaliza fortemente — copy regenera/filtra automaticamente.
 const FORBIDDEN = [
   /\bgarantid[oa]s?\b/i, /\b100\s*%\b/, /\bmilagre|milagros[oa]\b/i,
