@@ -203,6 +203,48 @@ export type Database = {
         }
         Relationships: []
       }
+      ad_generated_creatives: {
+        Row: {
+          angle: string | null
+          brief_used: string | null
+          consultant_id: string
+          created_at: string
+          format: string
+          id: string
+          image_url: string
+          inspired_by_advertisers: string[] | null
+          prompt_used: string | null
+          storage_path: string | null
+          used_in_campaign_id: string | null
+        }
+        Insert: {
+          angle?: string | null
+          brief_used?: string | null
+          consultant_id: string
+          created_at?: string
+          format: string
+          id?: string
+          image_url: string
+          inspired_by_advertisers?: string[] | null
+          prompt_used?: string | null
+          storage_path?: string | null
+          used_in_campaign_id?: string | null
+        }
+        Update: {
+          angle?: string | null
+          brief_used?: string | null
+          consultant_id?: string
+          created_at?: string
+          format?: string
+          id?: string
+          image_url?: string
+          inspired_by_advertisers?: string[] | null
+          prompt_used?: string | null
+          storage_path?: string | null
+          used_in_campaign_id?: string | null
+        }
+        Relationships: []
+      }
       ad_image_validations: {
         Row: {
           created_at: string

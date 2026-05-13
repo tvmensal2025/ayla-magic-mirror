@@ -6,9 +6,10 @@ import { ResultsDashboard } from "./ResultsDashboard";
 import { WalletCard } from "./WalletCard";
 import { ConsultantAdSettingsCard } from "./ConsultantAdSettingsCard";
 import { AdTemplatesGallery } from "./AdTemplatesGallery";
+import { IntelligenceTab } from "./IntelligenceTab";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Megaphone, Sparkles, Plus, BarChart3, ListChecks, LayoutGrid } from "lucide-react";
+import { Megaphone, Sparkles, Plus, BarChart3, ListChecks, LayoutGrid, Brain } from "lucide-react";
 
 interface Props { consultantId: string }
 
@@ -17,7 +18,7 @@ export function AdsTab({ consultantId }: Props) {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [expressOpen, setExpressOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [view, setView] = useState<"campaigns" | "results" | "gallery">("results");
+  const [view, setView] = useState<"campaigns" | "results" | "gallery" | "intel">("results");
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -78,7 +79,7 @@ export function AdsTab({ consultantId }: Props) {
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-1 rounded-lg bg-secondary p-1 w-fit">
+          <div className="flex items-center gap-1 rounded-lg bg-secondary p-1 w-fit flex-wrap">
             <Button size="sm" variant={view === "results" ? "default" : "ghost"} onClick={() => setView("results")} className="h-8 gap-1.5">
               <BarChart3 className="w-3.5 h-3.5" /> Resultados
             </Button>
@@ -88,12 +89,16 @@ export function AdsTab({ consultantId }: Props) {
             <Button size="sm" variant={view === "gallery" ? "default" : "ghost"} onClick={() => setView("gallery")} className="h-8 gap-1.5">
               <LayoutGrid className="w-3.5 h-3.5" /> Modelos
             </Button>
+            <Button size="sm" variant={view === "intel" ? "default" : "ghost"} onClick={() => setView("intel")} className="h-8 gap-1.5">
+              <Brain className="w-3.5 h-3.5" /> Inteligência
+            </Button>
           </div>
           {view === "results" && <ResultsDashboard consultantId={consultantId} />}
           {view === "campaigns" && <CampaignsList consultantId={consultantId} refreshKey={refreshKey} />}
           {view === "gallery" && (
             <AdTemplatesGallery consultantId={consultantId} onPublished={() => { setRefreshKey(k => k + 1); setView("campaigns"); }} />
           )}
+          {view === "intel" && <IntelligenceTab consultantId={consultantId} />}
         </>
       )}
 
