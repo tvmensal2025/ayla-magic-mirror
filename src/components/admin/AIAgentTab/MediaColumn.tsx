@@ -396,25 +396,36 @@ export function MediaColumn({ userId }: { userId: string }) {
           <p className="text-sm text-muted-foreground text-center py-6">Nenhuma mídia ainda.</p>
         ) : (
           <ul className="space-y-1.5">
-            {items.map((m) => (
+            {items.map((m) => {
+              const isMine = m.consultant_id === userId;
+              return (
               <li
                 key={m.id}
-                className="group flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-muted/40 transition-colors"
+                className="group flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-muted/40 transition-colors"
               >
                 {iconFor(m.kind)}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-foreground truncate">{m.label}</p>
-                  <p className="text-[10px] text-muted-foreground uppercase">{m.kind}</p>
+                  {isMine ? (
+                    <EditableLabel value={m.label} onSave={(v) => updateLabel(m, v)} />
+                  ) : (
+                    <p className="text-sm text-foreground truncate">{m.label}</p>
+                  )}
+                  <p className="text-[10px] text-muted-foreground uppercase">{m.kind} · prio {m.priority}</p>
                 </div>
                 {view === "mine" ? (
                   <>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={999}
+                      defaultValue={m.priority}
+                      key={`${m.id}-${m.priority}`}
+                      onBlur={(e) => updatePriority(m, parseInt(e.target.value, 10))}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      className="h-6 w-12 text-[10px] px-1.5 text-center"
+                      title="Prioridade (maior = enviado primeiro)"
+                    />
                     <TagEditor m={m} />
-                    <Badge
-                      variant={m.active ? "default" : "outline"}
-                      className={`text-[10px] ${m.active ? "bg-primary/15 text-primary border-primary/20" : ""}`}
-                    >
-                      {m.active ? "Ativo" : "Off"}
-                    </Badge>
                     <Switch
                       checked={m.active}
                       onCheckedChange={(v) => toggleActive(m, v)}
@@ -434,7 +445,8 @@ export function MediaColumn({ userId }: { userId: string }) {
                   </Button>
                 )}
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>
