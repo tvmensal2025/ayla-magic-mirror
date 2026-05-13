@@ -11,9 +11,24 @@ Deno.serve(async (req) => {
     const auth = await authConsultant(req);
     if (!auth) return json({ error: "Unauthorized" }, 401);
 
-    const formData = await req.formData();
-    const file = formData.get("file") as File | null;
-    const requestedConsultantId = String(formData.get("consultant_id") || auth.id);
+    let file: File | null = null;
+    let requestedConsultantId = auth.id;
+    const contentType = req.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const body = await req.json().catch(() => ({}));
+      requestedConsultantId = String(body.consultant_id || auth.id);
+      const rawBase64 = String(body.data_base64 || "");
+      const base64 = rawBase64.includes(",") ? rawBase64.split(",").pop() || "" : rawBase64;
+      if (base64) {
+        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        const filename = String(body.filename || `upload-${crypto.randomUUID()}.jpg`);
+        file = new File([bytes], filename, { type: String(body.content_type || "image/jpeg") });
+      }
+    } else {
+      const formData = await req.formData();
+      file = formData.get("file") as File | null;
+      requestedConsultantId = String(formData.get("consultant_id") || auth.id);
+    }
 
     if (!file) return json({ error: "Imagem não enviada." }, 400);
     if (!ALLOWED_IMAGE_TYPES.has(file.type)) return json({ error: "Use JPG, PNG ou WebP." }, 400);
