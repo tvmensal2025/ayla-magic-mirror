@@ -429,6 +429,13 @@ Deno.serve(async (req) => {
       args = {};
     }
 
+    if (tool === "send_text" || tool === "advance_to_closing") {
+      args.message = sanitizeHumanMessage(args.message || "", phase, mode === "rescue" ? "" : user_input);
+    }
+    if (tool === "send_media" && args.caption) {
+      args.caption = sanitizeHumanMessage(args.caption, phase, mode === "rescue" ? "" : user_input);
+    }
+
     const latencyMs = Date.now() - t0;
 
     // Validate media_id and resolve URL/kind for downstream sender
@@ -443,7 +450,7 @@ Deno.serve(async (req) => {
             decision: {
               tool: "send_text",
               args: {
-                message: args.caption || "Posso te explicar melhor?",
+                message: sanitizeHumanMessage(args.caption || "", phase, mode === "rescue" ? "" : user_input),
                 next_phase: args.next_phase || phase,
                 reasoning: args.reasoning,
               },
