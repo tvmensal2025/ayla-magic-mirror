@@ -206,43 +206,61 @@ export type Database = {
       ad_generated_creatives: {
         Row: {
           angle: string | null
+          badge_text: string | null
           brief_used: string | null
+          composite_url: string | null
           consultant_id: string
           created_at: string
           format: string
+          headline_used: string | null
           id: string
           image_url: string
           inspired_by_advertisers: string[] | null
           is_public: boolean
+          overlay_layout: Json | null
           prompt_used: string | null
+          qa_attempts: number | null
+          qa_report: Json | null
           storage_path: string | null
           used_in_campaign_id: string | null
         }
         Insert: {
           angle?: string | null
+          badge_text?: string | null
           brief_used?: string | null
+          composite_url?: string | null
           consultant_id: string
           created_at?: string
           format: string
+          headline_used?: string | null
           id?: string
           image_url: string
           inspired_by_advertisers?: string[] | null
           is_public?: boolean
+          overlay_layout?: Json | null
           prompt_used?: string | null
+          qa_attempts?: number | null
+          qa_report?: Json | null
           storage_path?: string | null
           used_in_campaign_id?: string | null
         }
         Update: {
           angle?: string | null
+          badge_text?: string | null
           brief_used?: string | null
+          composite_url?: string | null
           consultant_id?: string
           created_at?: string
           format?: string
+          headline_used?: string | null
           id?: string
           image_url?: string
           inspired_by_advertisers?: string[] | null
           is_public?: boolean
+          overlay_layout?: Json | null
           prompt_used?: string | null
+          qa_attempts?: number | null
+          qa_report?: Json | null
           storage_path?: string | null
           used_in_campaign_id?: string | null
         }

@@ -1,10 +1,11 @@
-import { useEffect, useImperativeHandle, useState, forwardRef } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Sparkles, Download, Loader2, Wand2, Globe, Lock, Megaphone, Users } from "lucide-react";
+import { Sparkles, Download, Loader2, Wand2, Globe, Lock, Megaphone, Users, RefreshCw } from "lucide-react";
+import { CreativeOverlay, type CreativeOverlayHandle } from "./CreativeOverlay";
 
 type Format = "feed_1x1" | "story_9x16" | "reels_9x16" | "carousel_4x5";
 
@@ -34,6 +35,8 @@ interface Generated {
   consultant_id: string;
   inspired_by_advertisers: string[] | null;
   created_at: string;
+  headline_used: string | null;
+  badge_text: string | null;
 }
 
 export interface CreativeImageGeneratorHandle {
@@ -42,7 +45,7 @@ export interface CreativeImageGeneratorHandle {
 
 interface Props {
   consultantId: string;
-  onUseInAd?: (imageUrl: string) => void;
+  onUseInAd?: (creative: { image_url: string; format: Format; headline: string; badge: string }) => void;
 }
 
 export const CreativeImageGenerator = forwardRef<CreativeImageGeneratorHandle, Props>(
@@ -59,7 +62,7 @@ export const CreativeImageGenerator = forwardRef<CreativeImageGeneratorHandle, P
     async function loadHistory() {
       let q = supabase
         .from("ad_generated_creatives")
-        .select("id, format, image_url, angle, brief_used, is_public, consultant_id, inspired_by_advertisers, created_at")
+        .select("id, format, image_url, angle, brief_used, is_public, consultant_id, inspired_by_advertisers, created_at, headline_used, badge_text")
         .order("created_at", { ascending: false })
         .limit(24);
       if (galleryView === "mine") q = q.eq("consultant_id", consultantId);
@@ -248,7 +251,7 @@ export const CreativeImageGenerator = forwardRef<CreativeImageGeneratorHandle, P
                     <Badge variant="secondary" className="text-[9px]">{h.format.replace("_", " ")}</Badge>
                     {h.angle && <Badge variant="outline" className="text-[9px]">{h.angle}</Badge>}
                     {onUseInAd && (
-                      <Button size="sm" className="h-7 text-[10px] gap-1 w-full" onClick={() => onUseInAd(h.image_url)}>
+                      <Button size="sm" className="h-7 text-[10px] gap-1 w-full" onClick={() => onUseInAd({ image_url: h.image_url, format: h.format, headline: h.headline_used || "", badge: h.badge_text || "" })}>
                         <Megaphone className="w-3 h-3" /> Usar neste anúncio
                       </Button>
                     )}
