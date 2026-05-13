@@ -88,7 +88,7 @@ export function ConnectFacebookCard({ connection, onReconnect }: Props) {
       setManualAdAccount(connection?.ad_account_id || "");
       setManualPage(connection?.page_id || "");
       setManualPixel(connection?.pixel_id || "");
-      setWaNumber(connection?.whatsapp_destination_number || "5511971254913");
+      setWaNumber(connection?.whatsapp_destination_number || "");
       // Se Meta não devolveu páginas E nem contas, força modo manual.
       if ((a.ad_accounts?.length || 0) === 0 && (a.pages?.length || 0) === 0) {
         setManualMode(true);
@@ -96,7 +96,7 @@ export function ConnectFacebookCard({ connection, onReconnect }: Props) {
     } catch (e) {
       toast({ title: "Falha ao listar assets", description: (e as Error).message, variant: "destructive" });
       setManualMode(true);
-      setWaNumber(connection?.whatsapp_destination_number || "5511971254913");
+      setWaNumber(connection?.whatsapp_destination_number || "");
     } finally {
       setAssetsLoading(false);
     }

@@ -173,11 +173,19 @@ Deno.serve(async (req) => {
     const platformCustomAudId = pfAud?.custom_audience_id || null;
     // Configurações específicas do consultor: telefone WhatsApp + cidades.
     const settings = await loadConsultantAdSettings(auth.id);
-    const waNumberSetting = settings?.whatsapp_destination_number;
-    if (!waNumberSetting) {
+    const waDigitsRaw = String(settings?.whatsapp_destination_number || "").replace(/\D/g, "");
+    if (!waDigitsRaw) {
       return new Response(JSON.stringify({
-        error: "Não encontramos seu número de WhatsApp. Conecte o WhatsApp na aba Dados antes de publicar.",
+        error: "Não encontramos seu número de WhatsApp. Adicione na aba Dados antes de publicar.",
         code: "WHATSAPP_NOT_CONFIGURED",
+      }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    // Aceita formato BR: 55 + DDD (2) + número (8 ou 9). Se vier sem 55, prefixa.
+    const waNumberSetting = waDigitsRaw.startsWith("55") ? waDigitsRaw : `55${waDigitsRaw}`;
+    if (waNumberSetting.length < 12 || waNumberSetting.length > 13) {
+      return new Response(JSON.stringify({
+        error: `Número de WhatsApp inválido (${waNumberSetting}). Use 55 + DDD + número (ex: 5511990092401). Corrija na aba Dados.`,
+        code: "WHATSAPP_INVALID_FORMAT",
       }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     // Trava de saldo: precisa cobrir budget × duração (default 7 dias se omitido).
@@ -248,12 +256,13 @@ Deno.serve(async (req) => {
     }
     const adlabelsParam = consultantLabelId ? JSON.stringify([{ id: consultantLabelId }]) : null;
 
-    // Decide objetivo: se tiver Pixel, otimiza por Lead (CPL menor); senão, fica em ENGAGEMENT/messaging.
+    // Click-to-WhatsApp via link wa.me — funciona com QUALQUER número de WhatsApp
+    // (pessoal ou Business app), sem precisar vincular WABA no Meta Business Manager.
+    // Trade-off: Meta otimiza por LINK_CLICKS em vez de CONVERSATIONS (~10-20% mais caro),
+    // mas evita o erro 1487246 e elimina configuração manual pelo consultor.
     const hasPixel = !!conn.pixel_id;
-    // Para destination=WHATSAPP, sempre otimizar por CONVERSATIONS (mais barato e compatível).
-    // Pixel é usado só pra CAPI/tracking, não pra otimização do AdSet.
-    const objective = "OUTCOME_ENGAGEMENT";
-    const optimizationGoal = "CONVERSATIONS";
+    const objective = "OUTCOME_TRAFFIC";
+    const optimizationGoal = "LINK_CLICKS";
     const pixelEvent = hasPixel ? "LEAD" : null;
 
     // 1) Campaign
@@ -319,19 +328,13 @@ Deno.serve(async (req) => {
     if (platformCustomAudId) {
       (targeting as any).excluded_custom_audiences = [{ id: platformCustomAudId }];
     }
-    // promoted_object para click-to-WhatsApp: page_id + número WhatsApp Business.
-    // Sem pixel/custom_event_type, pois não são aceitos com CONVERSATIONS + WHATSAPP.
-    const promotedObject = {
-      page_id: conn.page_id,
-      whatsapp_phone_number: conn.whatsapp_destination_number,
-    };
+    // Sem promoted_object/destination_type=WHATSAPP: o link wa.me no creative é
+    // que leva o lead pra conversa. Assim QUALQUER número funciona, sem WABA.
     const adsetParams: Record<string, string> = {
       name: `[${consultantTag}] ${distribTag} · Conjunto Principal · ${cityPrincipal}`,
       campaign_id: campaignId,
       billing_event: "IMPRESSIONS",
       optimization_goal: optimizationGoal,
-      destination_type: "WHATSAPP",
-      promoted_object: JSON.stringify(promotedObject),
       targeting: JSON.stringify(targeting),
       status: "PAUSED",
       start_time: new Date(Date.now() + 60_000).toISOString(),
@@ -344,33 +347,11 @@ Deno.serve(async (req) => {
     if (body.duration_days && body.duration_days > 0) {
       adsetParams.end_time = new Date(Date.now() + body.duration_days * 86400_000).toISOString();
     }
-    let adset: any;
-    try {
-      adset = await fbFetch(`/${accId}/adsets`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams(adsetParams),
-      });
-    } catch (e: any) {
-      const msg = String(e?.message || e);
-      // Meta: WhatsApp number não vinculado ao WABA da Página (subcode 1487246)
-      if (msg.includes("1487246") || msg.includes("not linked to your account")) {
-        const friendly =
-          `O número de WhatsApp ${conn.whatsapp_destination_number} não está vinculado à conta do WhatsApp Business (WABA) da Página do Facebook usada na plataforma.\n\n` +
-          `Como resolver:\n` +
-          `1) Acesse business.facebook.com → Configurações do Negócio → Contas do WhatsApp\n` +
-          `2) Adicione/verifique o número ${conn.whatsapp_destination_number} na WABA vinculada à Página\n` +
-          `3) Ou peça ao Super Admin para vincular o número ao WABA da plataforma\n\n` +
-          `Sem esse vínculo, o Meta não permite criar anúncios Click-to-WhatsApp para esse número.`;
-        await notifyConsultant(auth.id, "error", "Número WhatsApp não vinculado", friendly);
-        return new Response(JSON.stringify({
-          error: friendly,
-          code: "WHATSAPP_NOT_LINKED_TO_WABA",
-          phone: conn.whatsapp_destination_number,
-        }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      throw e;
-    }
+    const adset = await fbFetch(`/${accId}/adsets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(adsetParams),
+    });
     const adsetId = adset.id as string;
 
     // 3) Upload de imagens — preserva o formato (square / vertical / story).
