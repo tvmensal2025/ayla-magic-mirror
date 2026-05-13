@@ -1079,7 +1079,16 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
                   <div className="text-muted-foreground">📍 {cities.length} cidade(s) — {cities.slice(0, 3).map(c => c.name).join(", ")}{cities.length > 3 ? "..." : ""}</div>
                   <div className="text-muted-foreground">🖼️ {totalFiles} foto(s) — {filesByFormat.square.length} quadrada(s), {filesByFormat.vertical.length} vertical(is), {filesByFormat.story.length} story</div>
                   <div className="text-muted-foreground">💰 R$ {budget}/dia × {duration === 0 ? "contínuo" : `${duration} dias`} = <strong className="text-foreground">R$ {duration === 0 ? `${budget * 30}/mês est.` : (budget * duration)}</strong></div>
-                  <div className="text-muted-foreground">🎯 Mensagens vão para WhatsApp <strong className="text-primary">+{(connection?.whatsapp_destination_number || "5511971254913").replace(/^(\d{2})(\d{2})(\d+)(\d{4})$/, "$1 $2 $3-$4")}</strong></div>
+                  <div className={consultantPhone ? "text-muted-foreground" : "text-destructive font-semibold"}>
+                    🎯 Mensagens vão para WhatsApp{" "}
+                    {consultantPhone ? (
+                      <strong className="text-primary">{formatBrPhone(consultantPhone)}</strong>
+                    ) : phoneLoading ? (
+                      <span>carregando...</span>
+                    ) : (
+                      <span>⚠️ não configurado — adicione seu telefone na aba <strong>Dados</strong> antes de publicar</span>
+                    )}
+                  </div>
                 </Card>
 
                 <Card className="p-4 space-y-3 text-sm">
