@@ -35,6 +35,8 @@ interface Generated {
   consultant_id: string;
   inspired_by_advertisers: string[] | null;
   created_at: string;
+  headline_used: string | null;
+  badge_text: string | null;
 }
 
 export interface CreativeImageGeneratorHandle {
