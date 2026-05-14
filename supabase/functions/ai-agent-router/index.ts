@@ -394,8 +394,11 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
         const tooSoonGlobal = lastSentAt && (Date.now() - lastSentAt) < 5 * 60_000;
         const overGlobalLimit = sentCount24h >= 3;
 
-        // Cooldown por slot
-        const cutoff = new Date(Date.now() - (slot.min_interval_minutes || 0) * 60_000).toISOString();
+        // Cooldown por slot — boas_vindas tem idempotência ETERNA por cliente
+        const isWelcome = slotKey === "boas_vindas";
+        const cutoff = isWelcome
+          ? new Date(0).toISOString()
+          : new Date(Date.now() - (slot.min_interval_minutes || 0) * 60_000).toISOString();
         const { data: recent } = await supabase
           .from("ai_slot_dispatch_log")
           .select("id")
