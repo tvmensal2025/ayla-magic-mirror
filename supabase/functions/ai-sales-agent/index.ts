@@ -608,6 +608,40 @@ Deno.serve(async (req) => {
     const sentMediaIds = new Set((recentMediaSent || []).map((r: any) => r.media_sent_id));
     const freshMedia = eligibleMedia.filter((m: any) => !sentMediaIds.has(m.id));
 
+    // ---------- DETERMINISTIC SHORT-CIRCUIT: áudio de boas-vindas ----------
+    // Se é a 1ª resposta da IA para esse lead E existe áudio com slot_key
+    // 'boas_vindas' / 'first_response' / 'first_touch' ainda não enviado,
+    // dispara direto sem depender do LLM.
+    const priorOutboundEarly = history.filter((h: any) => h.message_direction !== "inbound");
+    const isFirstReply = priorOutboundEarly.length === 0 && mode === "reply";
+    const FIRST_SLOTS = new Set(["boas_vindas", "first_response", "first_touch", "primeira_resposta"]);
+    if (isFirstReply && !billAlreadyReceivedEarly) {
+      const firstAudio = freshMedia
+        .filter((m: any) => m.kind === "audio" && m.slot_key && FIRST_SLOTS.has(m.slot_key))
+        .sort((a: any, b: any) => (b.priority || 0) - (a.priority || 0))[0];
+      if (firstAudio?.url) {
+        await supabase.from("ai_decisions").insert({
+          customer_id, consultant_id: customer.consultant_id, phase,
+          tool_called: "send_media", reasoning: `deterministic_first_audio:${firstAudio.slot_key}`,
+          user_input, ai_output: { media_ids: [firstAudio.id], slot_key: firstAudio.slot_key },
+          media_sent_id: firstAudio.id, latency_ms: Date.now() - t0,
+        });
+        return new Response(JSON.stringify({
+          decision: {
+            tool: "send_media",
+            args: {
+              media_ids: [firstAudio.id],
+              medias: [{ id: firstAudio.id, url: firstAudio.url, kind: firstAudio.kind, label: firstAudio.label }],
+              caption: "",
+              next_phase: phase,
+              reasoning: `deterministic_first_audio:${firstAudio.slot_key}`,
+            },
+          },
+          phase, latency_ms: Date.now() - t0,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
     const formatTags = (arr: any) => {
       const a = Array.isArray(arr) ? arr.filter((x: any) => x && x !== "any") : [];
       return a.length ? a.join(",") : "—";
