@@ -885,18 +885,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   switch (step) {
     // ─── 1. BOAS-VINDAS ────────────────────
     case "welcome": {
-      const welcomeMsg =
-        `Oi! 👋 Aqui é o assistente digital de *${nomeRepresentante}*.\n\n` +
-        `Já pensou em pagar menos na sua conta de luz todo mês? 💚\n` +
-        `Com a *iGreen Energy* dá pra economizar de *8% a 20%*, de forma simples e sem complicação. ☀️\n\n` +
-        `Posso te explicar rapidinho como funciona?`;
-      await sendOptions(remoteJid, welcomeMsg, [
-        { id: "entender_desconto", title: "💡 Quero saber mais" },
-        { id: "cadastrar_agora", title: "📋 Já quero participar" },
-        { id: "falar_humano", title: "🧑 Falar com humano" },
-      ]);
-      updates.conversation_step = "menu_inicial";
-      reply = "";
+      // Vendedor humano: saudação curta sem botões. O áudio de abertura (slot)
+      // já tocou. A partir daqui a IA assume a conversa em "qualificacao".
+      const first = ((customer as any).name || "").split(/\s+/)[0];
+      const saud = first ? `Oi, ${first}! ` : "Oi! ";
+      reply = `${saud}Tudo bem? Aqui é da equipe da *${nomeRepresentante}* 💚\n\nMe conta rapidinho: você paga em torno de quanto na sua conta de luz hoje?`;
+      updates.conversation_step = "qualificacao";
       break;
     }
 
