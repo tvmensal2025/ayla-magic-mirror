@@ -184,8 +184,6 @@ Deno.serve(async (req) => {
       .select("slot_key, label, trigger_hint, fallback_text, min_interval_minutes, is_testing, video_url, video_label")
       .eq("active", true)
       .order("position");
-      .eq("active", true)
-      .order("position");
     const slots = slotsRaw || [];
     const validSlotKeys = new Set(slots.map((s: any) => s.slot_key));
 
@@ -396,8 +394,11 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
         const tooSoonGlobal = lastSentAt && (Date.now() - lastSentAt) < 5 * 60_000;
         const overGlobalLimit = sentCount24h >= 3;
 
-        // Cooldown por slot
-        const cutoff = new Date(Date.now() - (slot.min_interval_minutes || 0) * 60_000).toISOString();
+        // Cooldown por slot — boas_vindas tem idempotência ETERNA por cliente
+        const isWelcome = slotKey === "boas_vindas";
+        const cutoff = isWelcome
+          ? new Date(0).toISOString()
+          : new Date(Date.now() - (slot.min_interval_minutes || 0) * 60_000).toISOString();
         const { data: recent } = await supabase
           .from("ai_slot_dispatch_log")
           .select("id")
@@ -509,6 +510,39 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
           }
         }
       }
+    }
+
+    // Se um slot foi despachado, suprime reply_text para não duplicar a fala do áudio
+    if (dispatchedSlot) {
+      decision.reply_text = "";
+      // Avanço determinístico após boas_vindas
+      if (dispatchedSlot.slot_key === "boas_vindas" && stepBefore === "welcome") {
+        updates.conversation_step = "qualificacao";
+      }
+    }
+
+    // Auto-progresso determinístico (não depende do LLM)
+    const hasBill = !!customer.electricity_bill_value;
+    const hasDoc = !!customer.cpf && (!!customer.rg || !!customer.birth_date);
+    if (user_input_kind === "image_caption" || user_input_kind === "document") {
+      if (["welcome", "qualificacao", "apresentacao"].includes(updates.conversation_step || stepBefore)) {
+        updates.conversation_step = "coleta_conta";
+      }
+    }
+    if (hasBill && hasDoc && !["cadastro_portal", "aguardando_otp", "aguardando_facial", "complete", "handoff_humano"].includes(updates.conversation_step || stepBefore)) {
+      updates.conversation_step = "cadastro_portal";
+      // Dispara portal worker direto (fire-and-forget)
+      try {
+        const portalWorkerUrl = (Deno.env.get("PORTAL_WORKER_URL") || "").replace(/\/$/, "");
+        const workerSecret = Deno.env.get("WORKER_SECRET") || "";
+        if (portalWorkerUrl && workerSecret) {
+          fetch(`${portalWorkerUrl}/submit-lead`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${workerSecret}` },
+            body: JSON.stringify({ customer_id }),
+          }).catch((e) => console.error("portal worker submit-lead error:", e));
+        }
+      } catch (e) { console.error("portal worker invoke error:", e); }
     }
 
     // Enviar mídias primeiro (mais humano: áudio chega antes do texto)
