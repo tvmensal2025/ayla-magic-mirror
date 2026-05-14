@@ -515,6 +515,45 @@ export function MediaColumn({ userId }: { userId: string }) {
           </ul>
         )}
       </div>
+
+      <Dialog open={!!previewMedia} onOpenChange={(o) => !o && setPreviewMedia(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base truncate pr-6">{previewMedia?.label}</DialogTitle>
+          </DialogHeader>
+          {previewMedia?.url && (
+            <div className="w-full rounded-lg overflow-hidden bg-black/40">
+              {previewMedia.kind === "video" && (
+                <video src={previewMedia.url} controls autoPlay playsInline className="w-full max-h-[70vh]" />
+              )}
+              {previewMedia.kind === "audio" && (
+                <audio src={previewMedia.url} controls autoPlay className="w-full p-4" />
+              )}
+              {previewMedia.kind === "image" && (
+                <img src={previewMedia.url} alt={previewMedia.label} className="w-full max-h-[70vh] object-contain" />
+              )}
+              {previewMedia.kind === "document" && (
+                <iframe src={previewMedia.url} className="w-full h-[70vh] bg-white" title={previewMedia.label} />
+              )}
+            </div>
+          )}
+          {previewMedia?.url && (
+            <div className="flex items-center justify-between gap-2 pt-2">
+              <a
+                href={previewMedia.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-muted-foreground hover:text-primary truncate"
+              >
+                Abrir em nova aba
+              </a>
+              <Button size="sm" variant="outline" onClick={() => setPreviewMedia(null)}>
+                Fechar
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
