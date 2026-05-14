@@ -715,8 +715,36 @@ Deno.serve(async (req) => {
         : "";
     }
 
+    // ---- Resumo da conversa (cacheado) substitui parte do histórico ----
+    const summaryLine = (summaryFresh && customer.conversation_summary)
+      ? `\n[RESUMO DA CONVERSA ATÉ AGORA]\n${customer.conversation_summary}\n(Use o resumo para contexto; as últimas mensagens cruas vêm depois.)\n`
+      : "";
+
+    // ---- Padrões aprendidos do feedback do consultor (👍/👎) ----
+    let learnedLine = "";
+    try {
+      const intentForLookup = earlyIntent || (phase === "objecao" ? "objecao_custo" : null);
+      if (intentForLookup) {
+        const { data: pat } = await supabase
+          .from("ai_learned_patterns")
+          .select("good_examples, bad_examples")
+          .eq("consultant_id", customer.consultant_id)
+          .eq("intent", intentForLookup)
+          .maybeSingle();
+        if (pat) {
+          const goods = (pat.good_examples || []).slice(0, 2)
+            .map((g: any) => `+ "${(g.output || "").slice(0, 100)}"`).join("\n");
+          const bads = (pat.bad_examples || []).slice(0, 1)
+            .map((b: any) => `- "${(b.output || "").slice(0, 100)}"`).join("\n");
+          if (goods || bads) {
+            learnedLine = `\n[PADRÕES APRENDIDOS — intent=${intentForLookup}]\n${goods}\n${bads}\n`;
+          }
+        }
+      }
+    } catch (_) { /* best-effort */ }
+
     // ---- Construir contents no formato Gemini ----
-    const sys = systemPrompt(persona, tone, customPrompt) + fewShotLine + negShotLine + "\n\n" + contextLine;
+    const sys = systemPrompt(persona, tone, customPrompt) + summaryLine + learnedLine + fewShotLine + negShotLine + "\n\n" + contextLine;
 
     const contents: any[] = history.map((m: any) => ({
       role: m.message_direction === "inbound" ? "user" : "model",
