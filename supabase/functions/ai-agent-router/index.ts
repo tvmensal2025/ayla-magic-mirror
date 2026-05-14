@@ -454,6 +454,8 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
             // Modo sugestão: usa slot quando bate intenção, mas mantém reply do LLM
             slotKey = firstSlot.slot_key;
             if (selectedMediaIds.length) decision.media_to_send_ids = selectedMediaIds;
+          } else if (selectedMediaIds.length) {
+            decision.media_to_send_ids = selectedMediaIds;
           }
         }
       }
