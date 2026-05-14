@@ -148,6 +148,50 @@ const tools = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "update_lead_field",
+      description:
+        "Quando o lead REVELAR um dado estruturado (nome, distribuidora, valor da conta, cidade, dor), grave no cadastro e em seguida responda com send_text na mesma rodada NÃO — use só esta tool e o sistema cuidará de continuar. Use APENAS quando você tem certeza do dado dito pelo lead nesta mensagem.",
+      parameters: {
+        type: "object",
+        properties: {
+          field: {
+            type: "string",
+            enum: ["name", "distribuidora", "electricity_bill_value", "address_city", "pain_point"],
+          },
+          value: { type: "string", description: "Valor exato a salvar (texto ou número como string)" },
+          followup_message: { type: "string", description: "Resposta curta após salvar (acusa recebimento + próxima pergunta)" },
+          next_phase: {
+            type: "string",
+            enum: ["abertura", "descoberta", "pitch", "objecao", "fechamento"],
+          },
+          reasoning: { type: "string" },
+        },
+        required: ["field", "value", "followup_message", "reasoning"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "confirm_and_handoff",
+      description:
+        "USE quando a conta JÁ foi recebida (OCR done) e os dados estão prontos. Confirma os dados em UMA frase e dispara handoff humano de uma vez. Substitui o fluxo confirmar+aguardar+handoff em 2 turnos.",
+      parameters: {
+        type: "object",
+        properties: {
+          message: {
+            type: "string",
+            description: "Frase única confirmando titular, distribuidora, valor e dizendo que vai conectar para finalizar.",
+          },
+          reasoning: { type: "string" },
+        },
+        required: ["message", "reasoning"],
+      },
+    },
+  },
 ];
 
 function systemPrompt(personaName: string, tone: string, custom?: string) {
