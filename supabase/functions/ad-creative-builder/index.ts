@@ -1,8 +1,7 @@
 // Gera copy de elite (6 frameworks), filtra termos proibidos pela Meta e atribui score por variação.
 // Injeta padrões aprendidos pelo ad-creative-learner pra cada novo anúncio sair melhor que o anterior.
 import { adminClient, authConsultant, corsHeaders } from "../_shared/fb-graph.ts";
-
-const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY");
+import { geminiGenerate } from "../_shared/gemini.ts";
 
 async function loadInsights(consultantId: string, distribuidora?: string) {
   try {
@@ -96,8 +95,7 @@ const REQUIRED_ANGLES = [
   "dor_pas",           // PAS — começa pela dor
 ];
 
-async function generate(cities: string[], insights?: any, competitors: any[] = []): Promise<CopyPack> {
-  if (!GEMINI_KEY) return packWithLegacy(FALLBACK);
+async function generate(cities: string[], insights?: any, competitors: any[] = [], consultantId?: string): Promise<CopyPack> {
   const ctx = cities.join(", ") || "Brasil";
   const isDistribuidora = ctx.toLowerCase().includes("clientes da");
 
@@ -159,19 +157,17 @@ Exemplo do nível de qualidade esperado:
 - primary: "Cansado da conta alta? Desconto de até 20% direto no boleto. Sem obra. Fala no zap 👇"`;
 
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, responseMimeType: "application/json" },
-        }),
-      },
-    );
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const result = await geminiGenerate({
+      model: "gemini-2.5-pro",
+      fallbackModel: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      temperature: 0.75,
+      responseMimeType: "application/json",
+      thinkingBudget: 1024,
+      functionName: "ad-creative-builder",
+      consultantId,
+    });
+    const text = result.text;
     if (!text) return packWithLegacy(FALLBACK);
     const parsed = JSON.parse(text);
     const trim = (s: string, n: number) => (typeof s === "string" ? s.trim().slice(0, n) : "");
@@ -237,7 +233,7 @@ Deno.serve(async (req) => {
       loadInsights(auth.id, distribuidora),
       loadCompetitorWinners(8),
     ]);
-    const copy = await generate(cities || [], insights, competitors);
+    const copy = await generate(cities || [], insights, competitors, auth.id);
     const flat = {
       headlines: copy.legacy!.headlines,
       primary_texts: copy.legacy!.primary_texts,

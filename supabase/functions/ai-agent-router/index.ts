@@ -16,7 +16,7 @@
 // }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { aiChat } from "../_shared/ai-gateway.ts";
+import { geminiGenerate } from "../_shared/gemini.ts";
 import { createEvolutionSender } from "../_shared/evolution-api.ts";
 
 const corsHeaders = {
@@ -248,18 +248,27 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
     let decision: any = null;
     let llmError: string | null = null;
     try {
-      const result = await aiChat({
-        model: "google/gemini-3-flash-preview",
+      const contents = [
+        ...userMessages.map((m) => ({
+          role: m.role === "assistant" ? ("model" as const) : ("user" as const),
+          parts: [{ text: m.content }],
+        })),
+        { role: "user" as const, parts: [{ text: lastInboundLabel }] },
+      ];
+      const result = await geminiGenerate({
+        model: "gemini-2.5-flash",
+        fallbackModel: "gemini-2.5-flash-lite",
+        system: systemPrompt,
+        contents,
         temperature: 0.4,
-        maxTokens: 800,
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...userMessages,
-          { role: "user", content: lastInboundLabel },
-        ],
-        jsonSchema: { name: "AgentDecision", schema: DECISION_SCHEMA as any },
+        maxOutputTokens: 800,
+        responseMimeType: "application/json",
+        responseSchema: DECISION_SCHEMA as any,
+        functionName: "ai-agent-router",
+        consultantId,
+        customerId: customer_id,
       });
-      decision = result.json;
+      decision = result.text ? JSON.parse(result.text) : null;
     } catch (e: any) {
       llmError = e?.message || String(e);
       console.error("LLM error:", llmError);

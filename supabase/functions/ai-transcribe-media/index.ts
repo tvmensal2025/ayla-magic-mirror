@@ -3,7 +3,7 @@
 // Resp: { transcript: string }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { aiMultimodal, aiChat } from "../_shared/ai-gateway.ts";
+import { geminiMultimodal } from "../_shared/gemini.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -34,12 +34,15 @@ Deno.serve(async (req) => {
         ? `Transcreva este áudio em ${language} com pontuação correta. Retorne APENAS a transcrição, sem comentários.`
         : `Descreva o conteúdo deste arquivo em ${language}. Seja conciso.`;
 
-    const transcript = await aiMultimodal({
+    const result = await geminiMultimodal({
       prompt,
       base64,
       mimeType,
-      model: "google/gemini-3-flash-preview",
+      model: "gemini-2.5-flash",
+      fallbackModel: "gemini-2.5-pro",
+      functionName: "ai-transcribe-media",
     });
+    const transcript = result.text;
 
     return new Response(JSON.stringify({ transcript: transcript.trim() }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
