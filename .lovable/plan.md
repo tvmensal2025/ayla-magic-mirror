@@ -1,119 +1,94 @@
-## Mudança de filosofia
+## O que muda
 
-O bot vira um **vendedor humano de verdade**. Sem botões no meio da conversa — eles existem **apenas em 3 momentos críticos** onde precisa de confirmação clara:
-1. Confirmar dados da conta de energia (após OCR)
-2. Confirmar dados do RG/CNH (após OCR)
-3. Escolher tipo de documento (RG Novo / RG Antigo / CNH)
-
-Em todo o resto, é conversa pura. O lead nunca deve perceber que é uma IA.
+Quatro ajustes finos no fluxo do bot, mantendo o tom humano que já está rodando.
 
 ---
 
-## Como vai soar
+### 1) Ritmo: áudio (2min) primeiro, vídeo só depois
 
-**Hoje (robô com botões):**
-> 💡 Quer ativar o iGreen Club?
-> [✅ QUERO] [❓ MAIS INFOS] [⏰ DEPOIS]
+**Hoje:** as mídias do "opening" e dos Q&A são enviadas em sequência com pausa fixa de 1,2s a 1,5s entre elas. Resultado: o vídeo cai antes do lead nem ouvir o áudio.
 
-**Depois (humano de verdade):**
-> Boa, Larissa! Com R$ 380 de conta dá pra economizar uns R$ 76 todo mês 💚
-> 
-> E ó, além da economia, você ainda entra no nosso clube — desconto em farmácia, mercado, posto… minha mãe usa direto kkk
-> 
-> Bora seguir? É rapidinho, só preciso de uma foto do seu RG ou CNH 📄
+**Mudança:**
+- No envio de mídias do `bot_flow_qa_media` (e do opening), se a sequência tiver `audio` seguido de `video`/`image`, calcular uma **espera proporcional à duração do áudio** antes de mandar a próxima mídia.
+- Estratégia simples e sem dependências novas: usar `duration_seconds` do `ai_media_library` (já existe na tabela; se vazio, fallback de 90s para áudio e 30s para vídeo). Aplicar `await sleep(min(duration * 1000, 120_000))` entre áudio→vídeo.
+- Manter a pausa atual (1,5s) só entre mídias do mesmo tipo (ex.: dois vídeos).
 
----
+### 2) Pergunta "deu pra entender?" depois do áudio + vídeo
 
-## Plano
+**Hoje:** depois do opening (áudio + vídeo), o bot já pula direto para perguntar o valor da conta.
 
-### 1) Corrigir o nome trocado (bug do "Pedro" / "Larissa")
-- `bot-flow.ts`: detectar reapresentação em qualquer mensagem (`/me chamo|meu nome é|sou (o|a)|aqui é (o|a)\s+\w+/i`) e **sobrescrever** `customer.name` mesmo se já houver nome salvo.
-- Marcar `name_source = 'self_introduced'` (fonte mais confiável que `whatsapp_push`).
-- No prompt do `ai-sales-agent`: "Se o lead disser outro nome na última mensagem, use o novo nome a partir de agora — não insista no anterior."
+**Mudança:**
+- Após terminar de enviar o opening (áudio + vídeo do consultor), enviar **uma única mensagem de texto**: `"Deu pra entender, {nome}? Posso te explicar melhor se precisar 😊"`.
+- Setar `conversation_step = "checkin_pos_video"` (novo step).
+- No handler do `checkin_pos_video`:
+  - Se a resposta for afirmativa (`sim|entendi|claro|deu|sim sim|ok|beleza|👍|👌|✅`) → segue para `qualificacao` ("Boa! Então me conta: quanto vem em média na sua conta de luz?").
+  - Se for dúvida ou negativa → IA assume (mesmo path do `qualificacao`/Q&A) e responde a pergunta; depois manda o nudge pra valor da conta.
+  - Sem botões — texto puro.
 
-### 2) Tirar os botões do meio da conversa
-**Manter botões apenas em:**
-- `confirmando_dados_conta` (SIM / NÃO / EDITAR)
-- `confirmando_dados_doc` (SIM / NÃO / EDITAR)
-- `ask_tipo_documento` (RG Novo / RG Antigo / CNH)
+### 3) OCR da conta de energia precisa rodar de verdade
 
-**Remover botões de:**
-- Boas-vindas / menu inicial → vira texto conversacional ("oi! tudo bem? eu sou a [nome do consultor]…")
-- Pedido de foto da conta → texto natural ("me manda uma foto da sua conta de luz aí…")
-- Qualquer "intermediário" do funil
+**Hoje:** a tela do print mostra que o bot recebeu a conta, disse "Analisando..." e travou. Olhando o código (`processando_ocr_conta` em `bot-flow.ts` linha 1024+), o OCR é chamado mas:
+- Quando `fileBase64` está vazio e `fileUrl = "evolution-media:pending"`, o `ocrContaEnergia` recebe inputs inválidos e dá erro silencioso.
+- Quando dá erro, ele cai no fluxo de "ask_name" manual sem nem confirmar — mas no print nem isso aconteceu (ficou parado).
 
-### 3) IA conduz a venda 100% conversacional
-Reescrever o `system_prompt` no `ai-sales-agent` para vendedor consultivo iGreen:
+**Mudança:**
+- **Garantir base64 antes de chamar OCR:** se `fileBase64` estiver vazio mas `fileUrl` for HTTP válido, baixar o arquivo on-demand (fetch + arrayBuffer → base64) antes de chamar `ocrContaEnergia`.
+- **Timeout explícito de 25s** no OCR; se estourar ou der erro de rede, **logar com `customer_id` e `mensagem do erro`** e responder ao lead com a mensagem clara de retry (já existe, só não estava sendo executada).
+- **Confirmação dos dados continua com botões** (✅ SIM / ❌ NÃO / ✏️ EDITAR) — isso é o ponto crítico onde o usuário **quer** botões.
+- Se mesmo após 2 tentativas o OCR falhar, segue para `ask_name` manual com texto natural ("Tive dificuldade em ler a conta, vamos preencher rapidinho juntos. Qual o seu nome completo?").
 
-**Tom:**
-- 100% humano, brasileiro, descontraído mas profissional
-- Usa o primeiro nome do lead naturalmente (1x a cada 2-3 mensagens, não martela)
-- Emojis com moderação (1 por mensagem, no máximo)
-- Frases curtas (WhatsApp), no máximo 3 linhas
-- Pode usar "kkk", "rs", gírias leves quando o lead for informal
-- **Nunca** diz "sou um assistente", "sou IA", "como modelo de linguagem", etc.
+### 4) Pitch do Conexão Club logo após confirmar a conta
 
-**Estratégia de venda (progressiva, sem pressa):**
-1. **Aquece** — pergunta o nome, depois quanto vem na conta, demonstra interesse genuíno
-2. **Quantifica o ganho** — calcula economia (12% sobre o valor) e entrega o número de cara
-3. **Empilha valor** — quando sentir abertura, menciona iGreen Club (farmácia, mercado, cashback) como bônus, **não como pitch**
-4. **Pede a conta** quando o lead estiver curioso ("pra eu confirmar tua distribuidora e travar a economia exata, me manda uma foto da última conta")
-5. **Só depois** pede RG/CNH ("agora pra fechar o cadastro, preciso de uma foto do teu documento")
-6. **Quebra objeção** com empatia, nunca com script
+**Hoje:** depois do `confirmando_dados_conta` (SIM), o bot vai direto para `ask_tipo_documento` (RG/CNH).
 
-**Regras anti-erro:**
-- Nunca menciona valor/preço/comissão fora do que está no FAQ
-- Se não sabe, fala "deixa eu confirmar isso com a equipe e te volto" + flag handoff
-- Se o lead recusar a foto da conta → aceita só o valor digitado e segue
-- Se o lead disser "vou pensar" → respeita ("tranquilo! qualquer coisa me chama") e despausa automaticamente quando ele voltar a falar
-
-### 4) Despausa automática
-Hoje quando `bot_paused = true` ele só sai por humano. Adicionar:
-- Se `bot_paused_reason in ('lead_nao_pronto','lead_quer_pensar')` E o lead mandar nova mensagem → **despausa automaticamente** e a IA retoma a conversa do ponto onde parou (lendo o histórico).
-
-### 5) Aceitar lead que não manda foto
-- Se o lead recusar mandar a conta E já tiver dito o valor → segue para a fase de RG/CNH normalmente, salvando só o valor.
-- A IA decide na hora se insiste 1x ("a foto me ajuda a travar o valor exato, mas se preferir seguimos só com a média") ou aceita.
-
-### 6) Progressão de dados (sem etapa explícita)
-Não cria step novo. A IA naturalmente, durante a conversa, já vai colhendo:
-- Nome (qualificação)
-- Valor da conta (qualificação ou OCR)
-- Cidade/distribuidora (OCR ou pergunta casual)
-- Telefone (já temos do WhatsApp)
-
-Quando o lead aceitar seguir, **o único botão que aparece** é o de tipo de documento (RG/CNH) — porque ali precisa de input estruturado pro OCR.
+**Mudança:**
+- Inserir um novo step **`pitch_conexao_club`** entre `confirmando_dados_conta` (resposta SIM) e `ask_tipo_documento`.
+- Comportamento do step:
+  1. Mensagem de texto curta e humana com a economia calculada:
+     `"Show, {nome}! Com R$ {valor} de conta dá pra economizar até 20% todo mês na luz 💚\n\nE tem mais: você ainda entra no nosso *Conexão Club* — até *70% de desconto em farmácia*, mercado, posto e várias lojas parceiras. Minha mãe usa direto kkk"`
+  2. Em seguida, enviar o **vídeo do Conexão Club** (slot `conexao_club` no `ai_media_library` — já existe a mídia "5. Conexão Club – Lojas, Saúde e Farmácias" mostrada no print do Super Admin).
+  3. Depois do vídeo, mensagem de fechamento: `"Bora finalizar seu cadastro? Pra travar tudo eu preciso só de uma foto do seu *RG ou CNH* 📄"`.
+  4. Setar `conversation_step = "ask_tipo_documento"` (botões RG Novo / RG Antigo / CNH).
+- Aplicar a regra de timing do item 1 (esperar a duração do vídeo antes da mensagem final, se quisermos texto pós-vídeo — ou mandar texto antes do vídeo para o lead já saber o que vem).
+- Decisão: **texto antes**, **vídeo no final**, e a próxima interação acontece quando o lead responder.
 
 ---
 
 ## Detalhes técnicos
 
-**Arquivos a editar:**
+**Arquivo único editado:** `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
 
-1. `supabase/functions/ai-sales-agent/index.ts`
-   - Reescrever `system_prompt` base (vendedor humano, sem revelar IA, regras de tom)
-   - Reforço sobre nome do lead (usar último nome dito)
-   - Tool `pause_bot` aceita razão `lead_quer_pensar` mas a despausa é automática
+**Mudanças por bloco:**
 
-2. `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
-   - Adicionar `RE_SELF_INTRO` e sobrescrita de nome em qualquer step
-   - Adicionar `RE_REFUSE_BILL` em `aguardando_conta` → vai para coleta de doc se já tiver valor; senão pede valor
-   - Bloco de despausa automática no início do handler (se `bot_paused_reason in (...)` e lead mandou msg, seta `bot_paused = false` e segue)
-   - **Remover envio de botões** dos steps `welcome`, `menu_inicial`, `pos_video` — substituir por mensagem texto que a IA pega o controle
-   - **Manter** botões em `confirmando_dados_conta`, `confirmando_dados_doc`, `ask_tipo_documento`
-   - Expandir `conversationalSteps` para incluir `aguardando_conta` quando a mensagem **não for** foto/PDF (perguntas livres no meio da espera ainda vão pra IA)
+1. **Helper `sleepForMedia(kind, duration)`** no topo do arquivo (após os imports):
+```text
+async function sleepForMedia(kind, durationSec) {
+  if (kind !== 'audio') return 1500;
+  const ms = Math.min((durationSec || 90) * 1000, 120_000);
+  await new Promise(r => setTimeout(r, ms));
+}
+```
 
-3. `supabase/functions/_shared/ai-sales-prompts.ts` (novo, opcional)
-   - Centralizar o prompt do vendedor pra facilitar ajustes futuros sem mexer na função
+2. **Loop de envio do opening (linha ~466)** e **loop do Q&A (linha ~339)**: trocar a pausa fixa pelo helper, lendo `duration_seconds` do `ai_media_library` (incluir no select).
 
-**Sem mudanças de schema.**
+3. **Novo step `checkin_pos_video`** no `switch(step)` (depois do `qualificacao`, antes do `menu_inicial`).
 
-**Deploy:** redeploy de `whapi-webhook` e `ai-sales-agent`.
+4. **Opening (linha ~540)**: ao final do envio das mídias, em vez de deixar `step=welcome` e cair na IA, setar `updates.conversation_step = "checkin_pos_video"` e enviar o texto "Deu pra entender, {nome}?".
+
+5. **`processando_ocr_conta` (linha ~1024)**: adicionar fetch on-demand de base64 + `Promise.race` com timeout de 25s no `ocrContaEnergia`.
+
+6. **`confirmando_dados_conta` (linha ~1154)**: trocar `updates.conversation_step = "ask_tipo_documento"` por `"pitch_conexao_club"` e remover o `sendOptions` do tipo de documento dali.
+
+7. **Novo case `pitch_conexao_club`**: monta a economia (12-20%), envia texto, busca slot `conexao_club` no `ai_media_library` (personal → público), envia o vídeo, e seta `step=ask_tipo_documento`.
+
+**Sem mudanças de schema.** O slot `conexao_club` já existe no Flow Builder do Super Admin (print confirma).
+
+**Deploy:** redeploy de `whapi-webhook` (automático).
 
 ---
 
 ## Fora de escopo
-- Não muda OCR, portal-worker, OTP, MinIO
-- Não muda o painel SuperAdmin
-- Não cria embeddings/RAG (FAQ continua direto no prompt)
-- Não treina modelo próprio
+
+- Não mexe em OCR de RG/CNH, portal-worker, MinIO, OTP.
+- Não muda a IA do `ai-sales-agent` (só o flow determinístico).
+- Não cria novos slots no Flow Builder — usa o que o consultor já configurou.

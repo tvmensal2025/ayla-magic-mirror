@@ -54,6 +54,40 @@ function trigramSim(a: string, b: string): number {
   return inter / Math.max(ta.size, tb.size);
 }
 
+// ── Sleep based on media duration (lets audio finish before sending video) ──
+async function sleepForMedia(kind: string, durationSec?: number | null): Promise<void> {
+  if (kind === "audio") {
+    const ms = Math.min(((durationSec && durationSec > 0) ? durationSec : 90) * 1000, 120_000);
+    await new Promise((r) => setTimeout(r, ms));
+    return;
+  }
+  if (kind === "video") {
+    const ms = Math.min(((durationSec && durationSec > 0) ? durationSec : 30) * 1000, 90_000);
+    await new Promise((r) => setTimeout(r, ms));
+    return;
+  }
+  await new Promise((r) => setTimeout(r, 1500));
+}
+
+// ── Fetch URL → base64 (for OCR when proxy didn't deliver bytes) ──
+async function fetchUrlToBase64(url: string, timeoutMs = 15_000): Promise<{ base64: string; mime: string } | null> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!r.ok) return null;
+    const mime = r.headers.get("content-type") || "application/octet-stream";
+    const buf = new Uint8Array(await r.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+    return { base64: btoa(bin), mime };
+  } catch (e) {
+    console.warn("[fetchUrlToBase64] falhou:", (e as any)?.message);
+    return null;
+  }
+}
+
 // ── Auto-resolve CEP from address data (avoid asking user) ──
 async function autoResolveCepIfNeeded(merged: any, updates: any): Promise<string> {
   let step = getNextMissingStep(merged);
@@ -336,35 +370,39 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       .order("position");
     let sentSomething = false;
 
-    for (const m of ((mediaRows as any[]) || [])) {
+    const qaMediaList = ((mediaRows as any[]) || []);
+    for (let mi = 0; mi < qaMediaList.length; mi++) {
+      const m = qaMediaList[mi];
       let url: string | null = null;
       let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
+      let durationSec: number | null = null;
       if (m.media_id) {
-        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind").eq("id", m.media_id).maybeSingle();
+        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind, duration_seconds").eq("id", m.media_id).maybeSingle();
         if (mediaRow?.url) {
           url = mediaRow.url;
           if (mediaRow.kind) kind = mediaRow.kind;
+          if ((mediaRow as any).duration_seconds) durationSec = Number((mediaRow as any).duration_seconds);
         }
       }
       if (!url && m.slot_key) {
         const { data: personal } = await supabase
           .from("ai_media_library")
-          .select("url")
+          .select("url, duration_seconds")
           .eq("consultant_id", customer.consultant_id)
           .eq("slot_key", m.slot_key)
           .eq("active", true)
           .eq("is_draft", false)
           .maybeSingle();
-        if (personal?.url) url = personal.url;
+        if (personal?.url) { url = personal.url; durationSec = Number((personal as any).duration_seconds || 0) || null; }
         else {
           const { data: pub } = await supabase
             .from("ai_media_library")
-            .select("url")
+            .select("url, duration_seconds")
             .eq("is_public", true)
             .eq("slot_key", m.slot_key)
             .eq("active", true)
             .maybeSingle();
-          if (pub?.url) url = pub.url;
+          if (pub?.url) { url = pub.url; durationSec = Number((pub as any).duration_seconds || 0) || null; }
         }
       }
       if (!url) continue;
@@ -377,7 +415,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         message_type: kind,
         conversation_step: step,
       });
-      await new Promise((r) => setTimeout(r, 1200));
+      // Espera proporcional à duração (áudio longo → não atropela com vídeo)
+      const isLast = mi === qaMediaList.length - 1;
+      if (!isLast) await sleepForMedia(kind, durationSec);
     }
 
     const baseText = qa.text_response
@@ -463,20 +503,23 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             const orderedMedia = (medias as any[]) || [];
             let sentSomething = false;
 
-            for (const m of orderedMedia) {
+            for (let oi = 0; oi < orderedMedia.length; oi++) {
+              const m = orderedMedia[oi];
               let url: string | null = null;
               let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
+              let durationSec: number | null = null;
 
               // 1) Resolve por media_id direto
               if (m.media_id) {
                 const { data: mediaRow } = await supabase
                   .from("ai_media_library")
-                  .select("url, kind")
+                  .select("url, kind, duration_seconds")
                   .eq("id", m.media_id)
                   .maybeSingle();
                 if (mediaRow?.url) {
                   url = mediaRow.url;
                   if (mediaRow.kind) kind = mediaRow.kind;
+                  if ((mediaRow as any).duration_seconds) durationSec = Number((mediaRow as any).duration_seconds);
                 }
               }
 
@@ -484,7 +527,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (!url && m.slot_key) {
                 const { data: personal } = await supabase
                   .from("ai_media_library")
-                  .select("url")
+                  .select("url, duration_seconds")
                   .eq("consultant_id", customer.consultant_id)
                   .eq("slot_key", m.slot_key)
                   .eq("active", true)
@@ -492,15 +535,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   .maybeSingle();
                 if (personal?.url) {
                   url = personal.url;
+                  durationSec = Number((personal as any).duration_seconds || 0) || null;
                 } else {
                   const { data: pub } = await supabase
                     .from("ai_media_library")
-                    .select("url")
+                    .select("url, duration_seconds")
                     .eq("is_public", true)
                     .eq("slot_key", m.slot_key)
                     .eq("active", true)
                     .maybeSingle();
-                  if (pub?.url) url = pub.url;
+                  if (pub?.url) {
+                    url = pub.url;
+                    durationSec = Number((pub as any).duration_seconds || 0) || null;
+                  }
                 }
               }
 
@@ -517,8 +564,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                     message_type: kind,
                     conversation_step: step,
                   });
-                  // Pequena pausa entre mídias (mais natural)
-                  if (orderedMedia.length > 1) await new Promise((r) => setTimeout(r, 1500));
+                  // Espera proporcional à duração da mídia (áudio de 2min → não joga vídeo em cima)
+                  const isLast = oi === orderedMedia.length - 1;
+                  if (!isLast) await sleepForMedia(kind, durationSec);
                 }
               } catch (e) {
                 console.warn("[bot-flow] opening media send failed:", (e as any)?.message);
@@ -547,10 +595,26 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
             if (sentSomething) {
               console.log(`🎙️ [opening-flow] Áudio/mídia de abertura enviado para customer ${customer.id}`);
-              // Avança o step para qualificação para que o próximo input siga o fluxo
+              // Pergunta "deu pra entender?" antes de qualificar — dá tempo do lead absorver áudio+vídeo
+              const firstName = ((customer as any).name || "").split(/\s+/)[0];
+              const checkinMsg = firstName
+                ? `Deu pra entender, ${firstName}? Posso te explicar melhor se precisar 😊`
+                : `Deu pra entender? Posso te explicar melhor se precisar 😊`;
+              try {
+                await sendText(remoteJid, checkinMsg);
+                await supabase.from("conversations").insert({
+                  customer_id: customer.id,
+                  message_direction: "outbound",
+                  message_text: checkinMsg,
+                  message_type: "text",
+                  conversation_step: "checkin_pos_video",
+                });
+              } catch (e) {
+                console.warn("[bot-flow] checkin send failed:", (e as any)?.message);
+              }
               return {
                 reply: "",
-                updates: { conversation_step: "qualificacao", __inline_sent: true } as any,
+                updates: { conversation_step: "checkin_pos_video", __inline_sent: true } as any,
               };
             }
           }
@@ -714,7 +778,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   // E o step está em fase conversacional (antes da coleta de docs).
   // Steps de coleta (aguardando_conta em diante) seguem determinísticos.
   // ═══════════════════════════════════════════════════════════════════
-  const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "aguardando_humano", "qualificacao"]);
+  const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "checkin_pos_video", "aguardando_humano", "qualificacao"]);
   // Steps de coleta também aceitam pergunta off-script (FAQ), mas só se a mensagem PARECE pergunta.
   const collectionSteps = new Set(["aguardando_conta", "coleta_doc", "ask_email", "ask_cep"]);
   const looksLikeQuestion = !!messageText && (
@@ -932,6 +996,46 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       break;
     }
 
+    // ─── 1b. CHECK-IN PÓS ÁUDIO/VÍDEO ────────────
+    // Pergunta "deu pra entender?" depois do opening. Se afirmativo, vai pra qualificacao.
+    // Se for dúvida/negativa, deixa a IA responder (mesma rota do qualificacao).
+    case "checkin_pos_video": {
+      const txt = String(messageText || "").trim().toLowerCase();
+      const first = ((customer as any).name || "").split(/\s+/)[0];
+      const v = first ? `${first}, ` : "";
+      const RE_AFFIRM = /^(sim|ss+|s|deu|entendi|entendido|claro|ok|okay|beleza|blz|certo|positivo|isso|🆗|👌|👍|✅|com\s*certeza|perfeito|bacana|massa|legal|joia|tranquilo)\b/i;
+      const RE_NEG = /^(n[aã]o|nn|n|nada|n[aã]o\s*entendi|n[aã]o\s*muito|mais\s*ou\s*menos|m[ãa]is\s*menos|confuso)\b/i;
+      if (RE_AFFIRM.test(txt)) {
+        reply = `Boa! ${v}me conta uma coisa: quanto vem em média na sua conta de luz? Assim eu já te calculo quanto dá pra economizar 💡`;
+        updates.conversation_step = "qualificacao";
+        break;
+      }
+      if (RE_NEG.test(txt) || /\?/.test(txt)) {
+        // Tenta Q&A configurado primeiro
+        const qaResult = await trySendConfiguredQa();
+        if (qaResult) return qaResult;
+        // Caso contrário, resposta padrão e empurra pra qualificação
+        reply = `Sem problema! Em resumo: a iGreen reduz o valor da sua conta de luz aplicando descontos da energia limpa, sem trocar nada na sua casa 💚\n\nMe diz: quanto vem em média na sua conta hoje?`;
+        updates.conversation_step = "qualificacao";
+        break;
+      }
+      // Não deu pra classificar → trata como começo de qualificação
+      const valueMatch = txt.match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
+      if (valueMatch) {
+        const billValue = Number(valueMatch[1].replace(".", "").replace(",", "."));
+        if (Number.isFinite(billValue) && billValue >= 30) {
+          updates.electricity_bill_value = billValue;
+          updates.sales_phase = "fechamento";
+          reply = `Show! Com R$ ${billValue.toFixed(0)} dá pra calcular sua economia. Me envia uma *foto* (ou PDF) da sua conta de luz pra eu confirmar os dados 📸`;
+          updates.conversation_step = "aguardando_conta";
+          break;
+        }
+      }
+      reply = `${v}deu pra ouvir o áudio? Se quiser, me conta já o valor médio da sua conta de luz que eu adianto a economia pra você 💡`;
+      updates.conversation_step = "qualificacao";
+      break;
+    }
+
     case "menu_inicial":
     case "pos_video": {
       // Legado: leads existentes presos no menu de botões. Migra direto pra IA conversacional.
@@ -1055,7 +1159,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
       try {
         console.log("📡 Chamando OCR Gemini para conta:", fileUrl?.substring(0, 100));
-        const ocrData = await ocrContaEnergia(fileUrl, geminiApiKey, fileBase64 || undefined, mediaMsg);
+        // Garante bytes: se não temos base64 mas temos URL HTTP, baixa on-demand
+        let ocrBase64 = fileBase64 || undefined;
+        if (!ocrBase64 && fileUrl && /^https?:\/\//i.test(fileUrl)) {
+          const fetched = await fetchUrlToBase64(fileUrl);
+          if (fetched?.base64) {
+            ocrBase64 = fetched.base64;
+            if (!mediaMsg.mimetype) (mediaMsg as any).mimetype = fetched.mime;
+            console.log(`📥 OCR base64 baixado on-demand: ${ocrBase64.length} bytes`);
+          }
+        }
+        // Timeout de 25s para o OCR (evita travar "Analisando...")
+        const ocrData: any = await Promise.race([
+          ocrContaEnergia(fileUrl, geminiApiKey, ocrBase64, mediaMsg),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("OCR_TIMEOUT_25s")), 25_000)),
+        ]);
         console.log("📊 OCR Conta resultado:", JSON.stringify(ocrData).substring(0, 400));
         if (ocrData.sucesso && ocrData.dados) {
           const d = ocrData.dados;
@@ -1152,13 +1270,77 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "confirmando_dados_conta": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
       if (resp === "sim_conta" || resp === "sim" || resp === "s" || resp === "1" || resp === "ok" || resp === "correto" || resp === "✅") {
-        updates.conversation_step = "ask_tipo_documento";
-        const tipoMsg = "✅ Dados da conta confirmados!\n\n📋 Qual documento de identidade você vai enviar?\n\nToque em uma opção:";
-        await sendOptions(remoteJid, tipoMsg, [
+        // Vai para o pitch do Conexão Club ANTES de pedir RG/CNH
+        updates.conversation_step = "pitch_conexao_club";
+        // O case pitch_conexao_club abaixo vai ser disparado via re-entrada,
+        // mas para já enviar a mensagem agora, executamos inline aqui:
+        const first = ((customer as any).name || "").split(/\s+/)[0];
+        const v = first ? `${first}, ` : "";
+        const valor = Number((customer as any).electricity_bill_value || 0);
+        const economiaMsg = valor >= 30
+          ? `Show, ${v.trim().replace(/,$/, "")}! Com R$ ${valor.toFixed(0)} de conta dá pra economizar até *20%* todo mês na sua luz 💚\n\nE tem mais: você ainda entra no nosso *Conexão Club* — até *70% de desconto em farmácia*, mercado, posto e várias lojas parceiras. Minha mãe usa direto kkk`
+          : `Show, ${v}dados confirmados! 💚\n\nE tem mais: você ainda entra no nosso *Conexão Club* — até *20% de desconto na luz* e até *70% de desconto em farmácia*, mercado, posto e várias lojas parceiras.`;
+        try {
+          await sendText(remoteJid, economiaMsg);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id, message_direction: "outbound",
+            message_text: economiaMsg, message_type: "text",
+            conversation_step: "pitch_conexao_club",
+          });
+        } catch (e) { console.warn("[pitch] texto inicial falhou:", (e as any)?.message); }
+
+        // Busca o vídeo do Conexão Club: personal → público
+        let clubUrl: string | null = null;
+        let clubDur: number | null = null;
+        try {
+          const { data: personal } = await supabase
+            .from("ai_media_library")
+            .select("url, duration_seconds")
+            .eq("consultant_id", customer.consultant_id)
+            .eq("slot_key", "conexao_club")
+            .eq("active", true)
+            .eq("is_draft", false)
+            .maybeSingle();
+          if (personal?.url) { clubUrl = personal.url; clubDur = Number((personal as any).duration_seconds || 0) || null; }
+          if (!clubUrl) {
+            const { data: pub } = await supabase
+              .from("ai_media_library")
+              .select("url, duration_seconds")
+              .eq("is_public", true)
+              .eq("slot_key", "conexao_club")
+              .eq("active", true)
+              .maybeSingle();
+            if (pub?.url) { clubUrl = pub.url; clubDur = Number((pub as any).duration_seconds || 0) || null; }
+          }
+        } catch (e) { console.warn("[pitch] busca slot conexao_club falhou:", (e as any)?.message); }
+
+        if (clubUrl) {
+          try {
+            await sendMedia(remoteJid, clubUrl, "", "video");
+            await supabase.from("conversations").insert({
+              customer_id: customer.id, message_direction: "outbound",
+              message_text: `[video:conexao_club]`, message_type: "video",
+              conversation_step: "pitch_conexao_club",
+            });
+            // Espera o vídeo terminar (proporcional) antes do CTA final
+            await sleepForMedia("video", clubDur);
+          } catch (e) { console.warn("[pitch] envio do vídeo conexao_club falhou:", (e as any)?.message); }
+        }
+
+        // CTA final + botões do tipo de documento
+        const ctaMsg = `Bora finalizar seu cadastro? Pra travar tudo eu preciso só de uma foto do seu *RG ou CNH* 📄`;
+        await sendOptions(remoteJid, ctaMsg, [
           { id: "tipo_rg_novo", title: "📄 RG Novo" },
           { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
           { id: "tipo_cnh", title: "🪪 CNH" },
         ]);
+        await supabase.from("conversations").insert({
+          customer_id: customer.id, message_direction: "outbound",
+          message_text: ctaMsg, message_type: "text",
+          conversation_step: "ask_tipo_documento",
+        });
+        updates.conversation_step = "ask_tipo_documento";
+        (updates as any).__inline_sent = true;
         reply = "";
       } else if (resp === "nao_conta" || resp === "nao" || resp === "não" || resp === "n" || resp === "2" || resp === "errado" || resp === "❌") {
         updates.conversation_step = "aguardando_conta";
@@ -1174,6 +1356,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         ]);
         if (!sent) reply = "Digite *SIM*, *NÃO* ou *EDITAR*:";
       }
+      break;
+    }
+
+    // ─── 3a. PITCH CONEXÃO CLUB (fallback caso lead reentre nesse step) ─────────
+    case "pitch_conexao_club": {
+      // Se o lead voltar a falar nesse estado, joga direto pros botões do doc.
+      const ctaMsg = `Pra finalizar, me manda a foto do seu *RG ou CNH* 📄`;
+      await sendOptions(remoteJid, ctaMsg, [
+        { id: "tipo_rg_novo", title: "📄 RG Novo" },
+        { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
+        { id: "tipo_cnh", title: "🪪 CNH" },
+      ]);
+      updates.conversation_step = "ask_tipo_documento";
+      (updates as any).__inline_sent = true;
+      reply = "";
       break;
     }
 
