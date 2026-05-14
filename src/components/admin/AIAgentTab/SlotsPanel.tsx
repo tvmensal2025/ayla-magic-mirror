@@ -332,50 +332,40 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
                 )}
                 <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-1">
                   <div className="text-xs font-medium text-primary">🎬 Vídeo enviado logo após o áudio (opcional)</div>
-                  {s.video_url ? (
+                  {s.video_url && (
                     <>
                       <video src={s.video_url} controls className="w-full max-h-40 rounded" />
                       <input type="text" placeholder="Legenda do vídeo (opcional)"
                         value={s.video_label || ""}
                         onChange={(e) => setSlots((p) => p.map((x) => x.slot_key === s.slot_key ? { ...x, video_label: e.target.value } : x))}
                         className="w-full px-2 py-1 text-xs rounded border border-border bg-background" />
+                    </>
+                  )}
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <select
+                      className="text-xs px-2 py-1 rounded border border-border bg-background min-w-[220px]"
+                      value=""
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        selectExistingVideo(s.slot_key, e.target.value);
+                      }}
+                    >
+                      <option value="">🎬 Selecionar vídeo já enviado…</option>
+                      {availableVideos.map((video) => (
+                        <option key={video.id} value={video.id}>{video.label}</option>
+                      ))}
+                    </select>
+                    <label className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-border bg-background hover:bg-muted cursor-pointer">
+                      📤 Enviar vídeo novo
+                      <input type="file" accept="video/*" className="hidden"
+                        onChange={(e) => e.target.files?.[0] && uploadSlotVideo(s.slot_key, e.target.files[0])} />
+                    </label>
+                    {s.video_url && (
                       <Button size="sm" variant="ghost" onClick={() => removeSlotVideo(s.slot_key)} className="text-destructive h-7 text-xs">
                         Remover vídeo
                       </Button>
-                    </>
-                  ) : (
-                    <div className="flex flex-wrap gap-2 items-center">
-                      <label className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-border bg-background hover:bg-muted cursor-pointer">
-                        📤 Enviar vídeo novo
-                        <input type="file" accept="video/*" className="hidden"
-                          onChange={(e) => e.target.files?.[0] && uploadSlotVideo(s.slot_key, e.target.files[0])} />
-                      </label>
-                      {(() => {
-                        const reusable = slots.filter((x) => x.video_url && x.slot_key !== s.slot_key);
-                        if (reusable.length === 0) return null;
-                        return (
-                          <select
-                            className="text-xs px-2 py-1 rounded border border-border bg-background"
-                            defaultValue=""
-                            onChange={(e) => {
-                              const src = reusable.find((x) => x.slot_key === e.target.value);
-                              if (!src) return;
-                              setSlots((p) => p.map((x) => x.slot_key === s.slot_key
-                                ? { ...x, video_url: src.video_url, video_storage_path: src.video_storage_path, video_label: src.video_label }
-                                : x));
-                              toast({ title: "Vídeo reutilizado — clique Salvar para confirmar" });
-                              e.target.value = "";
-                            }}
-                          >
-                            <option value="">♻️ Reutilizar vídeo de outro slot…</option>
-                            {reusable.map((x) => (
-                              <option key={x.slot_key} value={x.slot_key}>{x.label} ({x.slot_key})</option>
-                            ))}
-                          </select>
-                        );
-                      })()}
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
                 <div className="flex gap-2 items-center">
                   <AudioRecorderInline onRecorded={(b, d) => uploadDefault(s.slot_key, b, d)} />
