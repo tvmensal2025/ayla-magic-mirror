@@ -949,6 +949,46 @@ Deno.serve(async (req) => {
       };
     }
 
+    // ---- OVERRIDE 1b: lead mandou ÁUDIO → espelhar com áudio principal se IA escolheu texto ----
+    const primaryAudio = freshMedia.find(
+      (m: any) => m.kind === "audio" && m.is_primary_explainer === true,
+    );
+    const canAutoSendAudio =
+      !billAlreadyReceivedEarly &&
+      lastInboundKind === "audio" &&
+      recentMediaCount < 1 &&
+      tool === "send_text" &&
+      !!primaryAudio;
+    if (canAutoSendAudio) {
+      tool = "send_media";
+      args = {
+        media_id: primaryAudio.id,
+        caption: "",
+        next_phase: phase,
+        reasoning: "auto_primary_audio: lead respondeu em áudio; espelhando com áudio principal",
+      };
+    }
+
+    // ---- OVERRIDE 1c: bloqueia vídeo NÃO-principal se o principal ainda não foi enviado ----
+    // Evita que a IA mande "vídeo de benefícios/club" antes do vídeo de apresentação.
+    if (tool === "send_media") {
+      const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
+      const primaryVideoFresh = freshMedia.find(
+        (m: any) => m.kind === "video" && m.is_primary_explainer === true,
+      );
+      if (
+        picked && picked.kind === "video" && !picked.is_primary_explainer &&
+        primaryVideoFresh && !videoCooldownActive
+      ) {
+        args = {
+          ...args,
+          media_id: primaryVideoFresh.id,
+          caption: args.caption || "Te mando primeiro o vídeo de 1 minuto que explica como funciona — depois respondo o resto.",
+          reasoning: (args.reasoning || "") + " [substituído por PRINCIPAL-VÍDEO: lead ainda não viu o de apresentação]",
+        };
+      }
+    }
+
     // ---- OVERRIDE 2: bloqueia ask_for_name se foto da conta foi pedida/recebida ----
     if (tool === "ask_for_name" && (customer.electricity_bill_photo_url || billRequestedRecently)) {
       tool = "send_text";
