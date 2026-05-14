@@ -235,7 +235,7 @@ Deno.serve(async (req) => {
         tags: { function: "whapi-webhook", kind: "bot_flow_crash" },
         extra: { customer_id: customer.id, step: stepBefore },
       });
-      reply = "🤖 Tive um probleminha técnico. Pode me enviar novamente, por favor?";
+      reply = "Tive um probleminha aqui. Pode me mandar de novo, por favor?";
       updates = {};
     }
 
