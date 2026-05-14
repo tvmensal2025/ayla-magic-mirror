@@ -518,6 +518,42 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
   }
 
+  // A etapa de qualificação é determinística: primeiro captura nome/valor.
+  // A IA só entra aqui para perguntas reais depois que já temos um nome confiável.
+  if (
+    step === "qualificacao" &&
+    messageText &&
+    !isFile &&
+    !isButton
+  ) {
+    const txt = messageText.trim();
+    const currentNameTrusted = !!(customer as any).name && !isBogusCapturedName((customer as any).name);
+    const typedName = normalizeLeadName(txt);
+    const valueMatch = String(txt || "").match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
+    const typedBillValue = valueMatch ? Number(valueMatch[1].replace(".", "").replace(",", ".")) : 0;
+
+    if (RE_GREETING_ONLY.test(txt)) {
+      return {
+        reply: currentNameTrusted ? `Oi, ${(customer as any).name.split(/\s+/)[0]}! Qual a média da sua conta de luz?` : "Oi! Qual é o seu nome?",
+        updates: { conversation_step: "qualificacao" },
+      };
+    }
+
+    if (typedName) {
+      return {
+        reply: `${typedName.split(/\s+/)[0]}, qual a média da sua conta de luz?`,
+        updates: { name: typedName, name_source: "self_introduced", conversation_step: "qualificacao" },
+      };
+    }
+
+    if (Number.isFinite(typedBillValue) && typedBillValue >= 30) {
+      return {
+        reply: "Com essa média, já dá para calcular sua economia. Me envie uma FOTO ou PDF da sua conta de energia para eu confirmar os dados.",
+        updates: { electricity_bill_value: typedBillValue, sales_phase: "fechamento", conversation_step: "aguardando_conta" },
+      };
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // 🤖 SALES AI — delegação opcional para LLM com tool-calling.
   // Ativa quando: ai_agent_config.handoff_rules.use_sales_ai = true
