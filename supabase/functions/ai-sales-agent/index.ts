@@ -446,6 +446,17 @@ async function loadContext(supabase: any, customerId: string) {
     .order("last_confirmed_at", { ascending: false })
     .limit(15);
 
+  // FAQ oficial — respostas aprovadas (carrega do banco para o cérebro responder qualquer pergunta sem inventar)
+  const { data: knowledge } = await supabase
+    .from("ai_knowledge_sections")
+    .select("title, content")
+    .eq("is_active", true)
+    .order("position");
+  const knowledgeBlock = (knowledge || [])
+    .map((k: any) => `## ${k.title}\n${k.content}`)
+    .join("\n\n")
+    .slice(0, 6000);
+
   return {
     customer,
     history: (history || []).reverse(),
@@ -454,6 +465,7 @@ async function loadContext(supabase: any, customerId: string) {
     customPrompt: agentCfg?.system_prompt || "",
     summaryFresh,
     memoryFacts: memoryFacts || [],
+    knowledgeBlock,
   };
 }
 
