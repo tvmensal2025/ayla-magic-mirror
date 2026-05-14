@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Bot, MessagesSquare, Library, Loader2, Brain, Mic, FileText, BookOpen } from "lucide-react";
+import { Bot, MessagesSquare, Library, Loader2, Brain, Mic, FileText, BookOpen, Workflow } from "lucide-react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
