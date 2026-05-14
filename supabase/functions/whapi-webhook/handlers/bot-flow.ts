@@ -503,20 +503,23 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             const orderedMedia = (medias as any[]) || [];
             let sentSomething = false;
 
-            for (const m of orderedMedia) {
+            for (let oi = 0; oi < orderedMedia.length; oi++) {
+              const m = orderedMedia[oi];
               let url: string | null = null;
               let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
+              let durationSec: number | null = null;
 
               // 1) Resolve por media_id direto
               if (m.media_id) {
                 const { data: mediaRow } = await supabase
                   .from("ai_media_library")
-                  .select("url, kind")
+                  .select("url, kind, duration_seconds")
                   .eq("id", m.media_id)
                   .maybeSingle();
                 if (mediaRow?.url) {
                   url = mediaRow.url;
                   if (mediaRow.kind) kind = mediaRow.kind;
+                  if ((mediaRow as any).duration_seconds) durationSec = Number((mediaRow as any).duration_seconds);
                 }
               }
 
@@ -524,7 +527,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (!url && m.slot_key) {
                 const { data: personal } = await supabase
                   .from("ai_media_library")
-                  .select("url")
+                  .select("url, duration_seconds")
                   .eq("consultant_id", customer.consultant_id)
                   .eq("slot_key", m.slot_key)
                   .eq("active", true)
@@ -532,15 +535,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   .maybeSingle();
                 if (personal?.url) {
                   url = personal.url;
+                  durationSec = Number((personal as any).duration_seconds || 0) || null;
                 } else {
                   const { data: pub } = await supabase
                     .from("ai_media_library")
-                    .select("url")
+                    .select("url, duration_seconds")
                     .eq("is_public", true)
                     .eq("slot_key", m.slot_key)
                     .eq("active", true)
                     .maybeSingle();
-                  if (pub?.url) url = pub.url;
+                  if (pub?.url) {
+                    url = pub.url;
+                    durationSec = Number((pub as any).duration_seconds || 0) || null;
+                  }
                 }
               }
 
@@ -557,8 +564,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                     message_type: kind,
                     conversation_step: step,
                   });
-                  // Pequena pausa entre mídias (mais natural)
-                  if (orderedMedia.length > 1) await new Promise((r) => setTimeout(r, 1500));
+                  // Espera proporcional à duração da mídia (áudio de 2min → não joga vídeo em cima)
+                  const isLast = oi === orderedMedia.length - 1;
+                  if (!isLast) await sleepForMedia(kind, durationSec);
                 }
               } catch (e) {
                 console.warn("[bot-flow] opening media send failed:", (e as any)?.message);
@@ -587,10 +595,26 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
             if (sentSomething) {
               console.log(`🎙️ [opening-flow] Áudio/mídia de abertura enviado para customer ${customer.id}`);
-              // Avança o step para qualificação para que o próximo input siga o fluxo
+              // Pergunta "deu pra entender?" antes de qualificar — dá tempo do lead absorver áudio+vídeo
+              const firstName = ((customer as any).name || "").split(/\s+/)[0];
+              const checkinMsg = firstName
+                ? `Deu pra entender, ${firstName}? Posso te explicar melhor se precisar 😊`
+                : `Deu pra entender? Posso te explicar melhor se precisar 😊`;
+              try {
+                await sendText(remoteJid, checkinMsg);
+                await supabase.from("conversations").insert({
+                  customer_id: customer.id,
+                  message_direction: "outbound",
+                  message_text: checkinMsg,
+                  message_type: "text",
+                  conversation_step: "checkin_pos_video",
+                });
+              } catch (e) {
+                console.warn("[bot-flow] checkin send failed:", (e as any)?.message);
+              }
               return {
                 reply: "",
-                updates: { conversation_step: "qualificacao", __inline_sent: true } as any,
+                updates: { conversation_step: "checkin_pos_video", __inline_sent: true } as any,
               };
             }
           }
