@@ -97,6 +97,13 @@ export function AIAgentTab({ userId }: { userId: string }) {
             Atendimento humanizado 24/7. Quando você assumir, ela pausa automaticamente.
           </p>
         </div>
+        <Link
+          to="/admin/fluxos"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/40 bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors"
+        >
+          <Workflow className="w-3.5 h-3.5" />
+          Construtor de Fluxos
+        </Link>
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card">
           {savingEnabled || enabled === null ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
