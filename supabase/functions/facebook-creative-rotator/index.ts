@@ -89,16 +89,49 @@ Deno.serve(async (req) => {
         }
       }
       if (items!.length > 0) {
-        // recomendação: avisa que pausou e sugere gerar variações inspiradas no vencedor
         await supabase.from("ad_recommendations").insert({
           consultant_id: consultantId,
           type: "rotator_paused",
           title: `Pausamos ${items!.length} anúncio${items!.length > 1 ? "s" : ""} fraco${items!.length > 1 ? "s" : ""}`,
-          message: "A IA pausou criativos que não estavam trazendo conversas. Crie novas variações inspiradas nos vencedores pra continuar evoluindo.",
+          message: "A IA pausou criativos fracos e já está gerando variações inspiradas nos vencedores.",
           severity: "info",
-          action_label: "Gerar variações vencedoras",
+          action_label: "Ver novas variações",
           action_payload: { kind: "regenerate_from_winners" },
         });
+
+        // Promove o winner do consultor: bump de +20% no adset + builder gera variações.
+        const { data: winner } = await supabase
+          .from("ad_creative_performance")
+          .select("id, fb_ad_id, campaign_id")
+          .eq("consultant_id", consultantId)
+          .eq("is_winner", true)
+          .order("score", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (winner) {
+          // Busca adset ids da campanha vencedora
+          const { data: camp } = await supabase
+            .from("facebook_campaigns")
+            .select("fb_adset_ids, daily_budget_cents")
+            .eq("id", winner.campaign_id)
+            .maybeSingle();
+          const adsetIds = (camp?.fb_adset_ids as string[]) || [];
+          for (const adsetId of adsetIds.slice(0, 1)) {
+            const bump = await bumpAdSetBudget(conn.token, adsetId, camp?.daily_budget_cents || 3000);
+            if (bump.ok) {
+              await supabase.from("ad_recommendations").insert({
+                consultant_id: consultantId,
+                type: "winner_promoted",
+                title: `Vencedor promovido +${PROMOTE_PCT}%`,
+                message: `Budget diário do anúncio campeão subiu para R$ ${(bump.newCents / 100).toFixed(2)} (teto R$ ${(MAX_DAILY_BUDGET_CENTS / 100).toFixed(0)}).`,
+                severity: "info",
+              });
+            }
+          }
+          // Dispara builder pra gerar 2 variações
+          await invokeBuilder(consultantId, winner.id);
+        }
       }
     }
 
