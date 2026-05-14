@@ -169,6 +169,40 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  // 🪪 CAPTURA DETERMINÍSTICA DE NOME
+  // O primeiro áudio de boas-vindas já pede o nome do lead. Se ainda
+  // não temos `customer.name` e a resposta atual parece um nome (1-4
+  // palavras alfabéticas), salvamos imediatamente para não perder.
+  // ═══════════════════════════════════════════════════════════════════
+  if (
+    messageText &&
+    !isFile &&
+    !isButton &&
+    !customer.name &&
+    !customer.electricity_bill_photo_url
+  ) {
+    const raw = messageText.trim().replace(/[.!?,;:"']/g, "");
+    const looksLikeName =
+      raw.length >= 2 &&
+      raw.length <= 60 &&
+      /^[A-Za-zÀ-ÖØ-öø-ÿ' ]+$/.test(raw) &&
+      raw.split(/\s+/).length <= 4 &&
+      !/^(oi|ola|olá|hey|opa|bom dia|boa tarde|boa noite|sim|nao|não|ok|tudo bem|pode|quero|cadastrar|humano|atendente|menu|reset|recomecar|recomeçar|nao sou eu|não sou eu)$/i.test(raw);
+    if (looksLikeName) {
+      const formatted = raw
+        .toLowerCase()
+        .split(/\s+/)
+        .map((w) => (w.length > 2 ? w[0].toUpperCase() + w.slice(1) : w))
+        .join(" ");
+      updates.name = formatted;
+      updates.name_source = "self_introduced";
+      (customer as any).name = formatted;
+      (customer as any).name_source = "self_introduced";
+      console.log(`🪪 [name-capture] Nome capturado: "${formatted}"`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // 🤖 SALES AI — delegação opcional para LLM com tool-calling.
   // Ativa quando: ai_agent_config.handoff_rules.use_sales_ai = true
   // E o step está em fase conversacional (antes da coleta de docs).
