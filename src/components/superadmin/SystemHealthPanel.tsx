@@ -45,11 +45,13 @@ export function SystemHealthPanel() {
   async function load() {
     setLoading(true);
     const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-    const [paused, needReconnect, errors, decisions, trans] = await Promise.all([
+    const downStatuses = ["needs_reconnect", "disconnected", "close"];
+    const [paused, downRows, errors, decisions, trans] = await Promise.all([
       supabase.from("customers").select("id", { count: "exact", head: true })
         .eq("bot_paused", true).eq("bot_paused_reason", "manual_global_pause"),
-      supabase.from("whatsapp_instances" as any).select("id", { count: "exact", head: true })
-        .eq("status", "needs_reconnect"),
+      supabase.from("whatsapp_instances" as any)
+        .select("id, instance_name, connected_phone, status, last_health_check_at, consultant_id, consultants:consultant_id(name, license)")
+        .in("status", downStatuses),
       supabase.from("customers").select("id", { count: "exact", head: true })
         .not("error_message", "is", null).gte("updated_at", since),
       supabase.from("ai_decisions" as any).select("id", { count: "exact", head: true })
@@ -57,12 +59,23 @@ export function SystemHealthPanel() {
       supabase.from("bot_step_transitions" as any).select("id", { count: "exact", head: true })
         .gte("created_at", since),
     ]);
+    const rows: any[] = (downRows as any).data || [];
+    const downInstances: DownInstance[] = rows.map((r) => ({
+      id: r.id,
+      consultantName: r.consultants?.name || "Sem consultor",
+      license: r.consultants?.license ?? null,
+      phone: r.connected_phone ?? null,
+      instanceName: r.instance_name,
+      status: r.status,
+      lastSeen: r.last_health_check_at,
+    }));
     setData({
       pausedGlobal: paused.count ?? 0,
-      instancesNeedReconnect: needReconnect.count ?? 0,
+      instancesNeedReconnect: downInstances.length,
       errors24h: errors.count ?? 0,
       decisions24h: decisions.count ?? 0,
       transitions24h: trans.count ?? 0,
+      downInstances,
     });
     setLoading(false);
   }
