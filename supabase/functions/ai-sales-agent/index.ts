@@ -879,13 +879,22 @@ Deno.serve(async (req) => {
     const introVideo = freshMedia.find((m: any) =>
       /conex[aã]o green.*apresenta/i.test(String(m.label || "")) && m.kind === "video"
     );
-    if (isDoubtIntent && introVideo && tool !== "send_media" && tool !== "request_handoff" && recentMediaCount < 1) {
+    // Gating do auto-intro: só se NÃO está no início (precisa lead ter falado pelo menos 2x),
+    // não houve vídeo nas últimas 6h, e a IA não escolheu send_media manualmente.
+    const inboundCount = history.filter((h: any) => h.message_direction === "inbound").length;
+    const canAutoSendVideo =
+      !videoCooldownActive &&
+      inboundCount >= 2 &&
+      tool !== "send_media" &&
+      tool !== "request_handoff" &&
+      recentMediaCount < 1;
+    if (isDoubtIntent && introVideo && canAutoSendVideo) {
       tool = "send_media";
       args = {
         media_id: introVideo.id,
         caption: "Vou te mandar um vídeo curto de 1 minuto que explica direitinho — depois te respondo qualquer dúvida.",
         next_phase: phase === "abertura" ? "descoberta" : phase,
-        reasoning: "auto_intro_video: dúvida/objeção detectada e vídeo de 1min ainda não enviado",
+        reasoning: "auto_intro_video: dúvida/objeção detectada (passou nos gates de cooldown e turnos)",
       };
     }
 
