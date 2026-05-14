@@ -357,11 +357,14 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
                     </div>
                   )}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
                   <AudioRecorderInline onRecorded={(b, d) => uploadDefault(s.slot_key, b, d)} />
                   <Button size="sm" onClick={() => saveSlot(s)} disabled={saving === s.slot_key}>
                     {saving === s.slot_key ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Save className="w-4 h-4 mr-1" />}
                     Salvar
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-destructive ml-auto" onClick={() => deleteSlot(s.slot_key)}>
+                    Excluir
                   </Button>
                 </div>
               </div>
