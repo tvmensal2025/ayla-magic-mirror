@@ -267,6 +267,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             reply = "Compreendo. Se mudar de ideia, estarei à disposição.";
             return { reply, updates };
           }
+          if (tool === "update_lead_field") {
+            // ai-sales-agent já gravou o campo no customer; aqui só enviamos o texto de continuidade.
+            reply = args.followup_message || "";
+            return { reply, updates };
+          }
+          if (tool === "confirm_and_handoff") {
+            // ai-sales-agent já marcou bot_paused=true; aqui enviamos a confirmação ao lead.
+            reply = args.message || `Vou conectar você com ${nomeRepresentante} para finalizar.`;
+            updates.conversation_step = "aguardando_humano";
+            return { reply, updates };
+          }
         } else {
           console.warn("[bot-flow] ai-sales-agent falhou, caindo no fluxo determinístico", aiResp.status);
         }

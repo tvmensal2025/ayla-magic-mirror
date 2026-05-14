@@ -11,10 +11,12 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 // Modelos por tarefa (Google API direto)
-const MODEL_DECISION = "gemini-2.5-pro";          // decisão principal — Pro com thinking
-const MODEL_RESCUE = "gemini-2.5-flash";          // resgate / texto rápido
-const MODEL_SELFCHECK = "gemini-2.5-flash-lite";  // self-check barato
-const MODEL_FALLBACK = "gemini-2.5-flash";        // se Pro retornar 429
+// Default: flash rápido. Pro só em situações que valem a latência extra (objeção, alto score, fechamento).
+const MODEL_DEFAULT = "gemini-2.5-flash";          // resposta padrão (rápida, 1-2s)
+const MODEL_DECISION = "gemini-2.5-pro";           // decisão complexa (objeção/fechamento)
+const MODEL_RESCUE = "gemini-2.5-flash";           // resgate / texto rápido
+const MODEL_SELFCHECK = "gemini-2.5-flash-lite";   // self-check barato
+const MODEL_FALLBACK = "gemini-2.5-flash";         // se Pro retornar 429
 
 // ---------- Tools available to the LLM (OpenAI-style; convertidas para Google abaixo) ----------
 const tools = [
@@ -294,13 +296,23 @@ function stripEmojis(s: string): string {
     .trim();
 }
 
+// Palavras que NÃO são nomes próprios — não devem ser removidas como vocativo.
+const NON_NAME_WORDS = new Set([
+  "tudo", "bem", "bom", "boa", "tarde", "noite", "dia", "como", "vai", "está", "esta",
+  "olá", "ola", "oi", "opa", "obrigado", "obrigada", "certo", "claro", "então", "entao",
+  "para", "pra", "por", "que", "qual", "quem", "onde", "quando", "sim", "não", "nao",
+  "consultora", "consultor", "vendedora", "vendedor", "atendente",
+]);
+
 function stripUntrustedVocative(message: string, trustedFirstName: string | null): string {
   if (!message) return message;
-  // Remove "Olá NOME," / "Oi NOME!" / "NOME, ..." se NOME não for o confiável.
+  // Remove "Olá NOME," / "Oi NOME!" se NOME não for o confiável E parecer realmente um nome próprio.
   const re = /^(ol[aá]|oi|opa|bom dia|boa tarde|boa noite)[,!\s]+([A-ZÀ-Ý][a-zà-ÿ]{1,20})([,!.\s])/i;
   const m = message.match(re);
   if (m) {
     const used = m[2];
+    // Não remover se for palavra de gramática (Tudo, Bem, Como, etc.)
+    if (NON_NAME_WORDS.has(used.toLowerCase())) return message;
     if (!trustedFirstName || used.toLowerCase() !== trustedFirstName.toLowerCase()) {
       return message.replace(re, "$1$3");
     }
@@ -642,8 +654,17 @@ Deno.serve(async (req) => {
       })),
     }];
 
-    // Decide qual modelo usar
-    const modelToUse = mode === "rescue" ? MODEL_RESCUE : MODEL_DECISION;
+    // Decide qual modelo usar — Pro só quando vale a latência extra
+    const score = Number(customer.qualification_score ?? 0);
+    const useProModel =
+      mode === "closer" ||
+      phase === "objecao" ||
+      phase === "fechamento" ||
+      score >= 70 ||
+      billAlreadyReceivedEarly;
+    const modelToUse = mode === "rescue"
+      ? MODEL_RESCUE
+      : (useProModel ? MODEL_DECISION : MODEL_DEFAULT);
 
     let aiResult;
     try {
@@ -654,8 +675,8 @@ Deno.serve(async (req) => {
         tools: geminiTools,
         toolChoice: { mode: "ANY" },
         temperature: 0.5,
-        thinkingBudget: modelToUse === MODEL_DECISION ? 2048 : 0,
-        maxOutputTokens: 1500,
+        thinkingBudget: modelToUse === MODEL_DECISION ? 512 : 0,
+        maxOutputTokens: 1200,
         fallbackModel: MODEL_FALLBACK,
         functionName: "ai-sales-agent",
         consultantId: customer.consultant_id,
@@ -779,10 +800,14 @@ Deno.serve(async (req) => {
     // Detecção de intenção determinística (para auditoria)
     const ui = (user_input || "").toLowerCase();
     const intentDetected =
-      /\b(cadastr|quero entrar|fazer adesao|fazer cadastro|me cadastra)/i.test(ui) ? "cadastrar" :
-      /\b(humano|atendente|pessoa|operador|consultor real)\b/i.test(ui) ? "humano" :
-      /\b(parar|cancelar|nao quero|sem interesse|desisto|me deixa)\b/i.test(ui) ? "desistir" :
-      /\b(quanto|valor|economia|preco|preço)\b/i.test(ui) ? "interesse_valor" :
+      /\b(cadastr|quero (entrar|participar|aderir|economizar|fazer)|fazer (adesao|adesão|cadastro)|me cadastra|vamos l[aá]|bora|bora la|aceito|topo|fechado|pode (cadastrar|prosseguir|seguir)|j[aá] quero)\b/i.test(ui) ? "cadastrar" :
+      /\b(humano|atendente|pessoa|operador|consultor real|fala com (algu[eé]m|gente|pessoa)|chama (o|a) (consultor|atendente))\b/i.test(ui) ? "humano" :
+      /\b(parar|cancelar|n[aã]o quero|sem interesse|desisto|me deixa|para de|tira meu|nao tenho interesse|n[aã]o me|n[aã]o gostei)\b/i.test(ui) ? "desistir" :
+      /\b(golpe|fraude|seguro\?|confi[aá]vel|enganaç[aã]o|verdade)\b/i.test(ui) ? "objecao_confianca" :
+      /\b(fidelidade|multa|trocar|mudar de empresa|distribuidora vai)\b/i.test(ui) ? "objecao_contrato" :
+      /\b(custo|caro|gratuito|de gra[çc]a|paga|mensalidade|taxa)\b/i.test(ui) ? "objecao_custo" :
+      /\b(quanto|valor|economia|pre[çc]o|desconto|porcentagem)\b/i.test(ui) ? "interesse_valor" :
+      /\b(como funciona|me explica|n[aã]o entendi|o que [eé]|quem [eé])\b/i.test(ui) ? "informacao" :
       null;
 
     // Audit (best-effort)
