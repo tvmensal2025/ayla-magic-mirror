@@ -49,17 +49,47 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
     "Content-Type": "application/json",
   };
 
-  async function sendText(remoteJid: string, text: string): Promise<boolean> {
+  // Calcula tempo de "digitando" (em segundos) baseado no tamanho do texto.
+  // Whapi mantém o status até `typing_time` segundos antes de entregar a mensagem.
+  // Limite seguro: 1s mínimo, 15s máximo.
+  function typingTimeFor(text: string): number {
+    const len = (text || "").length;
+    const ms = 1500 + len * 35; // ~mesma curva do humanPace
+    return Math.max(1, Math.min(15, Math.round(ms / 1000)));
+  }
+
+  async function sendPresence(
+    remoteJid: string,
+    presence: "typing" | "recording" | "paused" = "typing",
+    delaySec = 3,
+  ): Promise<boolean> {
+    const to = remoteJid.includes("@") ? remoteJid : `${remoteJid}@s.whatsapp.net`;
+    return sendWithRetry("send_presence", () =>
+      fetchWithTimeout(`${url}/presences/${encodeURIComponent(to)}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ presence, delay: Math.max(1, Math.min(25, delaySec)) }),
+        timeout: TIMEOUT_WHAPI,
+      })
+    );
+  }
+
+  async function sendText(
+    remoteJid: string,
+    text: string,
+    opts?: { typingSec?: number },
+  ): Promise<boolean> {
     // Whapi usa chatId no formato "5511999990001@s.whatsapp.net"
     const to = remoteJid.includes("@") ? remoteJid : `${remoteJid}@s.whatsapp.net`;
     const preview = (text || "").substring(0, 60).replace(/\n/g, " ");
-    console.log(`📤 [whapi:sendText] -> ${to} | "${preview}${text.length > 60 ? "..." : ""}"`);
+    const typing = opts?.typingSec ?? typingTimeFor(text);
+    console.log(`📤 [whapi:sendText] -> ${to} (typing ${typing}s) | "${preview}${text.length > 60 ? "..." : ""}"`);
     const ok = await sendWithRetry("send_text", () =>
       fetchWithTimeout(`${url}/messages/text`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ to, body: text, typing_time: 0 }),
-        timeout: TIMEOUT_WHAPI,
+        body: JSON.stringify({ to, body: text, typing_time: typing }),
+        timeout: TIMEOUT_WHAPI + typing * 1000,
       })
     );
     console.log(`${ok ? "✅" : "❌"} [whapi:sendText] resultado=${ok}`);
@@ -101,11 +131,19 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
     return sendText(remoteJid, textWithOptions);
   }
 
-  async function sendMedia(remoteJid: string, mediaUrl: string, caption: string, mediatype: "video" | "image" | "document" = "video"): Promise<boolean> {
+  async function sendMedia(
+    remoteJid: string,
+    mediaUrl: string,
+    caption: string,
+    mediatype: "video" | "image" | "document" = "video",
+  ): Promise<boolean> {
     const to = remoteJid.includes("@") ? remoteJid : `${remoteJid}@s.whatsapp.net`;
     const endpoint = mediatype === "video" ? "messages/video"
       : mediatype === "image" ? "messages/image"
       : "messages/document";
+
+    // Mostra "digitando..." curto antes da mídia para humanizar.
+    sendPresence(remoteJid, "typing", 3).catch(() => {});
 
     console.log(`📤 [whapi:sendMedia] -> ${to} (${mediatype})`);
     const ok = await sendWithRetry("send_media", () =>
@@ -127,7 +165,7 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
     return null;
   }
 
-  return { sendText, sendButtons, downloadMedia, sendMedia };
+  return { sendText, sendButtons, downloadMedia, sendMedia, sendPresence };
 }
 
 /**

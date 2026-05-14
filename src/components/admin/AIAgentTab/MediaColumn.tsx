@@ -23,6 +23,9 @@ import {
   Pencil,
   Play,
   Eye,
+  Star,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 type Kind = "audio" | "video" | "image" | "document" | "text";
@@ -38,6 +41,7 @@ type Media = {
   priority: number;
   step_tags: string[];
   intent_tags: string[];
+  is_primary_explainer?: boolean | null;
 };
 
 const STEP_OPTIONS: { value: string; label: string }[] = [
@@ -135,6 +139,7 @@ export function MediaColumn({ userId }: { userId: string }) {
   const [usedBytes, setUsedBytes] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const [previewMedia, setPreviewMedia] = useState<Media | null>(null);
+  const [uploaderOpen, setUploaderOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function loadList() {
@@ -266,6 +271,34 @@ export function MediaColumn({ userId }: { userId: string }) {
     });
   }
 
+  async function togglePrimary(m: Media) {
+    const next = !m.is_primary_explainer;
+    if (next) {
+      // Desmarca qualquer outro vídeo principal deste consultor (índice único exige isso).
+      await supabase
+        .from("ai_media_library")
+        .update({ is_primary_explainer: false } as any)
+        .eq("consultant_id", userId)
+        .eq("is_primary_explainer", true);
+    }
+    const { error } = await supabase
+      .from("ai_media_library")
+      .update({ is_primary_explainer: next } as any)
+      .eq("id", m.id);
+    if (error) { toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
+    toast({
+      title: next ? "⭐ Vídeo principal definido" : "Vídeo principal removido",
+      description: next ? `"${m.label}" será enviado primeiro quando o lead pedir explicação.` : undefined,
+    });
+    setItems((prev) =>
+      prev.map((x) => {
+        if (x.id === m.id) return { ...x, is_primary_explainer: next };
+        if (next && x.consultant_id === userId) return { ...x, is_primary_explainer: false };
+        return x;
+      })
+    );
+  }
+
   function TagEditor({ m }: { m: Media }) {
     const stepTags = m.step_tags || [];
     const intentTags = m.intent_tags || [];
@@ -341,23 +374,40 @@ export function MediaColumn({ userId }: { userId: string }) {
 
   return (
     <div className="flex flex-col h-full bg-card border border-border rounded-2xl overflow-hidden">
-      <header className="flex items-center justify-between px-5 py-4 border-b border-border">
-        <div>
-          <h3 className="font-semibold text-foreground">Mídias</h3>
-          <p className="text-xs text-muted-foreground">Arquivos que o agente pode enviar nas conversas</p>
+      <header className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold text-foreground text-sm sm:text-base">Mídias</h3>
+          <div className="flex items-center gap-2 mt-0.5">
+            <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden max-w-[140px]">
+              <div
+                className={`h-full transition-all ${usagePct > 85 ? "bg-red-400" : "bg-primary"}`}
+                style={{ width: `${usagePct}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+              {fmtBytes(usedBytes)} / 100 MB
+            </span>
+          </div>
         </div>
         <Button
           size="sm"
-          onClick={() => inputRef.current?.click()}
+          onClick={() => setUploaderOpen((v) => !v)}
           disabled={uploading}
-          className="gap-1.5"
+          variant={uploaderOpen ? "secondary" : "default"}
+          className="gap-1.5 shrink-0"
         >
-          {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-          Nova
+          {uploading ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : uploaderOpen ? (
+            <ChevronUp className="w-3.5 h-3.5" />
+          ) : (
+            <Plus className="w-3.5 h-3.5" />
+          )}
+          {uploaderOpen ? "Fechar" : "Enviar"}
         </Button>
       </header>
 
-      <div className="px-5 pt-4">
+      <div className="px-4 sm:px-5 pt-3">
         <div className="inline-flex items-center gap-1 p-1 bg-muted/40 rounded-lg border border-border/60">
           <button
             onClick={() => setView("mine")}
@@ -378,50 +428,37 @@ export function MediaColumn({ userId }: { userId: string }) {
         </div>
       </div>
 
-      <div className="px-5 pt-4">
-        <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            uploadFiles(e.dataTransfer.files);
-          }}
-          onClick={() => inputRef.current?.click()}
-          className={`flex flex-col items-center justify-center gap-2 px-4 py-8 rounded-xl border-2 border-dashed cursor-pointer transition-colors ${
-            dragOver ? "border-primary bg-primary/5" : "border-border bg-muted/20 hover:border-primary/40 hover:bg-muted/30"
-          }`}
-        >
-          <UploadCloud className="w-7 h-7 text-muted-foreground" />
-          <p className="text-sm text-foreground font-medium">Arraste ou clique</p>
-          <p className="text-xs text-muted-foreground">PNG, JPG, PDF, MP3, MP4 — máx. 50 MB</p>
-        </div>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(e) => e.target.files && uploadFiles(e.target.files)}
-        />
-      </div>
-
-      <div className="px-5 pt-5">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-medium text-foreground">Armazenamento</span>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {fmtBytes(usedBytes)} / 100 MB
-          </span>
-        </div>
-        <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+      {uploaderOpen && (
+        <div className="px-4 sm:px-5 pt-3">
           <div
-            className={`h-full transition-all ${usagePct > 85 ? "bg-red-400" : "bg-primary"}`}
-            style={{ width: `${usagePct}%` }}
-          />
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              uploadFiles(e.dataTransfer.files);
+            }}
+            onClick={() => inputRef.current?.click()}
+            className={`flex flex-col items-center justify-center gap-1.5 px-4 py-5 rounded-xl border-2 border-dashed cursor-pointer transition-colors ${
+              dragOver ? "border-primary bg-primary/5" : "border-border bg-muted/20 hover:border-primary/40 hover:bg-muted/30"
+            }`}
+          >
+            <UploadCloud className="w-6 h-6 text-muted-foreground" />
+            <p className="text-sm text-foreground font-medium">Arraste ou clique</p>
+            <p className="text-[11px] text-muted-foreground">PNG, JPG, PDF, MP3, MP4 — máx. 50 MB</p>
+          </div>
         </div>
-      </div>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => e.target.files && uploadFiles(e.target.files)}
+      />
 
       <div className="flex-1 overflow-y-auto px-3 pt-5 pb-4">
         {loading ? (
@@ -437,12 +474,12 @@ export function MediaColumn({ userId }: { userId: string }) {
               return (
               <li
                 key={m.id}
-                className="group flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-muted/40 transition-colors"
+                className="group flex items-center gap-2 px-2 sm:px-2.5 py-2 rounded-lg hover:bg-muted/40 transition-colors"
               >
                 {m.url && (m.kind === "image" || m.kind === "video") ? (
                   <button
                     onClick={() => setPreviewMedia(m)}
-                    className="relative w-10 h-10 rounded-md overflow-hidden bg-muted/40 border border-border/60 shrink-0 group/thumb"
+                    className="relative w-14 h-14 sm:w-12 sm:h-12 rounded-md overflow-hidden bg-muted/40 border border-border/60 shrink-0 group/thumb"
                     title="Pré-visualizar"
                   >
                     {m.kind === "image" ? (
@@ -450,12 +487,17 @@ export function MediaColumn({ userId }: { userId: string }) {
                     ) : (
                       <video src={m.url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
                     )}
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity">
-                      <Play className="w-4 h-4 text-white fill-white" />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 sm:opacity-0 sm:group-hover/thumb:opacity-100 transition-opacity">
+                      <Play className="w-5 h-5 text-white fill-white" />
                     </div>
+                    {m.is_primary_explainer && (
+                      <span className="absolute top-0.5 left-0.5 bg-amber-400 text-black rounded-full p-0.5">
+                        <Star className="w-2.5 h-2.5 fill-current" />
+                      </span>
+                    )}
                   </button>
                 ) : (
-                  <span className="w-10 h-10 rounded-md bg-muted/40 border border-border/60 shrink-0 flex items-center justify-center">
+                  <span className="w-14 h-14 sm:w-12 sm:h-12 rounded-md bg-muted/40 border border-border/60 shrink-0 flex items-center justify-center">
                     {iconFor(m.kind)}
                   </span>
                 )}
@@ -465,20 +507,39 @@ export function MediaColumn({ userId }: { userId: string }) {
                   ) : (
                     <p className="text-sm text-foreground truncate">{m.label}</p>
                   )}
-                  <p className="text-[10px] text-muted-foreground uppercase">{m.kind} · prio {m.priority}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase">
+                    {m.kind} · prio {m.priority}
+                    {m.is_primary_explainer && <span className="ml-1 text-amber-400 normal-case">⭐ principal</span>}
+                  </p>
                 </div>
                 {m.url && (
                   <button
                     onClick={() => setPreviewMedia(m)}
-                    className="text-muted-foreground hover:text-primary p-1 transition-colors"
+                    className="text-muted-foreground hover:text-primary p-2 transition-colors shrink-0"
                     aria-label="Pré-visualizar"
                     title="Ver mídia"
                   >
-                    <Eye className="w-4 h-4" />
+                    <Eye className="w-5 h-5" />
                   </button>
                 )}
                 {view === "mine" ? (
                   <>
+                    {m.kind === "video" && (
+                      <button
+                        onClick={() => togglePrimary(m)}
+                        className={`p-1.5 rounded transition-colors shrink-0 ${
+                          m.is_primary_explainer
+                            ? "text-amber-400 hover:text-amber-300"
+                            : "text-muted-foreground hover:text-amber-400"
+                        }`}
+                        title={m.is_primary_explainer
+                          ? "Vídeo principal — clique para remover"
+                          : "Marcar como vídeo principal de explicação"}
+                        aria-label="Vídeo principal"
+                      >
+                        <Star className={`w-4 h-4 ${m.is_primary_explainer ? "fill-current" : ""}`} />
+                      </button>
+                    )}
                     <Input
                       type="number"
                       min={0}
@@ -487,7 +548,7 @@ export function MediaColumn({ userId }: { userId: string }) {
                       key={`${m.id}-${m.priority}`}
                       onBlur={(e) => updatePriority(m, parseInt(e.target.value, 10))}
                       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                      className="h-6 w-12 text-[10px] px-1.5 text-center"
+                      className="h-6 w-10 text-[10px] px-1 text-center hidden sm:block"
                       title="Prioridade (maior = enviado primeiro)"
                     />
                     <TagEditor m={m} />
@@ -498,10 +559,10 @@ export function MediaColumn({ userId }: { userId: string }) {
                     />
                     <button
                       onClick={() => remove(m)}
-                      className="text-muted-foreground hover:text-destructive p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="text-muted-foreground hover:text-destructive p-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0"
                       aria-label="Excluir"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </>
                 ) : (
