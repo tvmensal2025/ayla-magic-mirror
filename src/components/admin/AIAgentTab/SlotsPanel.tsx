@@ -132,12 +132,43 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
         min_interval_minutes: slot.min_interval_minutes,
         position: slot.position,
         active: slot.active,
+        video_url: slot.video_url || null,
+        video_storage_path: slot.video_storage_path || null,
+        video_label: slot.video_label || null,
         version: (slot.version || 1) + 1,
       })
       .eq("slot_key", slot.slot_key);
     setSaving(null);
     if (error) toast({ title: "Erro", description: error.message, variant: "destructive" });
     else toast({ title: "✓ Slot atualizado" });
+  }
+
+  async function uploadSlotVideo(slotKey: string, file: File) {
+    if (!file.type.startsWith("video/")) {
+      toast({ title: "Envie um arquivo de vídeo", variant: "destructive" });
+      return;
+    }
+    const ext = file.name.split(".").pop() || "mp4";
+    const path = `public/slots/${slotKey}-video.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from("ai-agent-media")
+      .upload(path, file, { upsert: true, contentType: file.type });
+    if (upErr) {
+      toast({ title: "Erro upload vídeo", description: upErr.message, variant: "destructive" });
+      return;
+    }
+    const { data } = supabase.storage.from("ai-agent-media").getPublicUrl(path);
+    setSlots((p) => p.map((x) => x.slot_key === slotKey
+      ? { ...x, video_url: data.publicUrl, video_storage_path: path }
+      : x));
+    toast({ title: "Vídeo carregado — clique Salvar para confirmar" });
+  }
+
+  async function removeSlotVideo(slotKey: string) {
+    setSlots((p) => p.map((x) => x.slot_key === slotKey
+      ? { ...x, video_url: null, video_storage_path: null, video_label: null }
+      : x));
+    toast({ title: "Vídeo removido — clique Salvar para confirmar" });
   }
 
   async function uploadDefault(slotKey: string, blob: Blob, durationSec: number) {
