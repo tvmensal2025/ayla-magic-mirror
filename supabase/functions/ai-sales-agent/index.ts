@@ -376,7 +376,7 @@ async function loadContext(supabase: any, customerId: string) {
     .select("message_direction, message_text, message_type, created_at")
     .eq("customer_id", customerId)
     .order("created_at", { ascending: false })
-    .limit(20);
+    .limit(60);
 
   const { data: agentCfg } = await supabase
     .from("ai_agent_config")
