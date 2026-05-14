@@ -127,6 +127,108 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     return sendButtons(jid, msg, options);
   }
 
+  async function trySendConfiguredQa(): Promise<BotResult | null> {
+    if (!messageText || isFile || isButton || !customer.consultant_id) return null;
+    const normalizedText = messageText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const { data: activeFlow } = await supabase
+      .from("bot_flows")
+      .select("id")
+      .eq("consultant_id", customer.consultant_id)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (!activeFlow) return null;
+
+    const { data: qaRows } = await supabase
+      .from("bot_flow_qa")
+      .select("id, text_response, is_closing")
+      .eq("flow_id", (activeFlow as any).id)
+      .eq("is_opening", false);
+    const qaIds = ((qaRows as any[]) || []).map((q) => q.id);
+    if (!qaIds.length) return null;
+
+    const { data: triggers } = await supabase
+      .from("bot_flow_qa_triggers")
+      .select("qa_id, phrase")
+      .in("qa_id", qaIds);
+    const matchedTrigger = ((triggers as any[]) || []).find((t) => {
+      const phrase = String(t.phrase || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      return phrase && (normalizedText === phrase || normalizedText.includes(phrase));
+    });
+    if (!matchedTrigger) return null;
+
+    const qa = ((qaRows as any[]) || []).find((q) => q.id === matchedTrigger.qa_id);
+    if (!qa) return null;
+
+    const { data: mediaRows } = await supabase
+      .from("bot_flow_qa_media")
+      .select("media_kind, slot_key, media_id, position")
+      .eq("qa_id", qa.id)
+      .order("position");
+    let sentSomething = false;
+
+    for (const m of ((mediaRows as any[]) || [])) {
+      let url: string | null = null;
+      let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
+      if (m.media_id) {
+        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind").eq("id", m.media_id).maybeSingle();
+        if (mediaRow?.url) {
+          url = mediaRow.url;
+          if (mediaRow.kind) kind = mediaRow.kind;
+        }
+      }
+      if (!url && m.slot_key) {
+        const { data: personal } = await supabase
+          .from("ai_media_library")
+          .select("url")
+          .eq("consultant_id", customer.consultant_id)
+          .eq("slot_key", m.slot_key)
+          .eq("active", true)
+          .eq("is_draft", false)
+          .maybeSingle();
+        if (personal?.url) url = personal.url;
+        else {
+          const { data: pub } = await supabase
+            .from("ai_media_library")
+            .select("url")
+            .eq("is_public", true)
+            .eq("slot_key", m.slot_key)
+            .eq("active", true)
+            .maybeSingle();
+          if (pub?.url) url = pub.url;
+        }
+      }
+      if (!url) continue;
+      await sendMedia(remoteJid, url, "", kind);
+      sentSomething = true;
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "outbound",
+        message_text: `[flow-qa:${qa.id}:${kind}]`,
+        message_type: kind,
+        conversation_step: step,
+      });
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+
+    const responseText = qa.text_response
+      ? String(qa.text_response).replaceAll("{nome}", customer.name || "").replaceAll("{representante}", nomeRepresentante || "")
+      : "";
+    if (responseText) {
+      await sendText(remoteJid, responseText);
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "outbound",
+        message_text: responseText,
+        message_type: "text",
+        conversation_step: step,
+      });
+      sentSomething = true;
+    }
+
+    if (!sentSomething) return null;
+    return { reply: "", updates: { conversation_step: qa.is_closing ? "aguardando_conta" : "qualificacao", __inline_sent: true } as any };
+  }
+
   const step = customer.conversation_step || "welcome";
   let reply = "";
   const updates: Record<string, any> = {};
