@@ -969,7 +969,36 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     // ─── 2. AGUARDANDO CONTA ──────────────
     case "aguardando_conta": {
       if (!isFile) {
-        reply = "📸 Por favor, envie a *FOTO ou PDF da sua conta de energia*.\n\nFormatos aceitos: JPG, PNG ou PDF";
+        const txt = String(messageText || "").trim();
+        const first = ((customer as any).name || "").split(/\s+/)[0];
+        const v = first ? `${first}, ` : "";
+
+        // Lead recusa mandar a foto → aceita seguir só com o valor.
+        if (txt && RE_REFUSE_BILL.test(txt)) {
+          const billVal = Number((customer as any).electricity_bill_value || 0);
+          if (billVal >= 30) {
+            reply = `Tranquilo, ${first || "vamos"}! Já tenho o valor que você passou (R$ ${billVal.toFixed(0)}), seguimos sem a foto então 👍\n\nPra fechar o cadastro eu vou precisar só de uma foto do seu *RG ou CNH*. Pode mandar?`;
+            updates.conversation_step = "ask_tipo_documento";
+            break;
+          }
+          // Sem valor ainda → pede só o valor, sem cobrar foto.
+          reply = `Sem problema! Então me passa só o valor médio que vem na sua conta de luz (uns R$?). Com isso eu já consigo te dar a economia 💡`;
+          updates.conversation_step = "qualificacao";
+          break;
+        }
+
+        // Captura valor digitado no meio do aguardando_conta (lead já mandando dado útil)
+        const valueMatch = txt.match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
+        if (valueMatch && !((customer as any).electricity_bill_value)) {
+          const billValue = Number(valueMatch[1].replace(".", "").replace(",", "."));
+          if (Number.isFinite(billValue) && billValue >= 30) {
+            updates.electricity_bill_value = billValue;
+            reply = `Boa, ${first || "anotado"}! Anotei R$ ${billValue.toFixed(0)} 💚\n\nSe puder mandar a *foto* (ou PDF) da sua conta também, eu trava o cálculo exato. Mas se preferir, dá pra seguir só com a média mesmo.`;
+            break;
+          }
+        }
+
+        reply = `${v}me manda uma *foto* (ou PDF) da sua conta de luz, por favor 📸\n\nSe estiver sem a conta agora, é só me dizer o valor médio que você paga que eu já te calculo a economia.`;
         break;
       }
       if (fileBase64) {
