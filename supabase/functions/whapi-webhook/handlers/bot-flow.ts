@@ -377,32 +377,32 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
       let durationSec: number | null = null;
       if (m.media_id) {
-        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind, duration_seconds").eq("id", m.media_id).maybeSingle();
+        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind, duration_sec").eq("id", m.media_id).maybeSingle();
         if (mediaRow?.url) {
           url = mediaRow.url;
           if (mediaRow.kind) kind = mediaRow.kind;
-          if ((mediaRow as any).duration_seconds) durationSec = Number((mediaRow as any).duration_seconds);
+          if ((mediaRow as any).duration_sec) durationSec = Number((mediaRow as any).duration_sec);
         }
       }
       if (!url && m.slot_key) {
         const { data: personal } = await supabase
           .from("ai_media_library")
-          .select("url, duration_seconds")
+          .select("url, duration_sec")
           .eq("consultant_id", customer.consultant_id)
           .eq("slot_key", m.slot_key)
           .eq("active", true)
           .eq("is_draft", false)
           .maybeSingle();
-        if (personal?.url) { url = personal.url; durationSec = Number((personal as any).duration_seconds || 0) || null; }
+        if (personal?.url) { url = personal.url; durationSec = Number((personal as any).duration_sec || 0) || null; }
         else {
           const { data: pub } = await supabase
             .from("ai_media_library")
-            .select("url, duration_seconds")
+            .select("url, duration_sec")
             .eq("is_public", true)
             .eq("slot_key", m.slot_key)
             .eq("active", true)
             .maybeSingle();
-          if (pub?.url) { url = pub.url; durationSec = Number((pub as any).duration_seconds || 0) || null; }
+          if (pub?.url) { url = pub.url; durationSec = Number((pub as any).duration_sec || 0) || null; }
         }
       }
       if (!url) continue;
@@ -513,13 +513,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (m.media_id) {
                 const { data: mediaRow } = await supabase
                   .from("ai_media_library")
-                  .select("url, kind, duration_seconds")
+                  .select("url, kind, duration_sec")
                   .eq("id", m.media_id)
                   .maybeSingle();
                 if (mediaRow?.url) {
                   url = mediaRow.url;
                   if (mediaRow.kind) kind = mediaRow.kind;
-                  if ((mediaRow as any).duration_seconds) durationSec = Number((mediaRow as any).duration_seconds);
+                  if ((mediaRow as any).duration_sec) durationSec = Number((mediaRow as any).duration_sec);
                 }
               }
 
@@ -527,7 +527,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (!url && m.slot_key) {
                 const { data: personal } = await supabase
                   .from("ai_media_library")
-                  .select("url, duration_seconds")
+                  .select("url, duration_sec")
                   .eq("consultant_id", customer.consultant_id)
                   .eq("slot_key", m.slot_key)
                   .eq("active", true)
@@ -535,18 +535,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   .maybeSingle();
                 if (personal?.url) {
                   url = personal.url;
-                  durationSec = Number((personal as any).duration_seconds || 0) || null;
+                  durationSec = Number((personal as any).duration_sec || 0) || null;
                 } else {
                   const { data: pub } = await supabase
                     .from("ai_media_library")
-                    .select("url, duration_seconds")
+                    .select("url, duration_sec")
                     .eq("is_public", true)
                     .eq("slot_key", m.slot_key)
                     .eq("active", true)
                     .maybeSingle();
                   if (pub?.url) {
                     url = pub.url;
-                    durationSec = Number((pub as any).duration_seconds || 0) || null;
+                    durationSec = Number((pub as any).duration_sec || 0) || null;
                   }
                 }
               }
@@ -1295,22 +1295,22 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         try {
           const { data: personal } = await supabase
             .from("ai_media_library")
-            .select("url, duration_seconds")
+            .select("url, duration_sec")
             .eq("consultant_id", customer.consultant_id)
             .eq("slot_key", "conexao_club")
             .eq("active", true)
             .eq("is_draft", false)
             .maybeSingle();
-          if (personal?.url) { clubUrl = personal.url; clubDur = Number((personal as any).duration_seconds || 0) || null; }
+          if (personal?.url) { clubUrl = personal.url; clubDur = Number((personal as any).duration_sec || 0) || null; }
           if (!clubUrl) {
             const { data: pub } = await supabase
               .from("ai_media_library")
-              .select("url, duration_seconds")
+              .select("url, duration_sec")
               .eq("is_public", true)
               .eq("slot_key", "conexao_club")
               .eq("active", true)
               .maybeSingle();
-            if (pub?.url) { clubUrl = pub.url; clubDur = Number((pub as any).duration_seconds || 0) || null; }
+            if (pub?.url) { clubUrl = pub.url; clubDur = Number((pub as any).duration_sec || 0) || null; }
           }
         } catch (e) { console.warn("[pitch] busca slot conexao_club falhou:", (e as any)?.message); }
 
