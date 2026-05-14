@@ -1625,6 +1625,7 @@ export type Database = {
           fb_adset_ids: Json
           fb_campaign_id: string | null
           id: string
+          initial_message: string | null
           leads_count: number
           migrated_to_abo_at: string | null
           name: string
@@ -1651,6 +1652,7 @@ export type Database = {
           fb_adset_ids?: Json
           fb_campaign_id?: string | null
           id?: string
+          initial_message?: string | null
           leads_count?: number
           migrated_to_abo_at?: string | null
           name: string
@@ -1677,6 +1679,7 @@ export type Database = {
           fb_adset_ids?: Json
           fb_campaign_id?: string | null
           id?: string
+          initial_message?: string | null
           leads_count?: number
           migrated_to_abo_at?: string | null
           name?: string

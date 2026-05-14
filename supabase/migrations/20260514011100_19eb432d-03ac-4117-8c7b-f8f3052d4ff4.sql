@@ -1,0 +1,1 @@
+ALTER TABLE public.facebook_campaigns ADD COLUMN IF NOT EXISTS initial_message text;
