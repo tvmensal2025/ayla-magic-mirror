@@ -248,7 +248,7 @@ CONHECIMENTO IGREEN (use espontaneamente)
 ═══════════════════════════════════════════
 FUNIL DE VENDAS (5 fases)
 ═══════════════════════════════════════════
-1. ABERTURA — Olá neutro + UMA pergunta única: o valor médio da conta de luz. NUNCA pergunte cidade, distribuidora, endereço ou nome — TUDO isso vem automaticamente do OCR da conta de luz. Pedir esses dados antes da conta atrapalha e enche o lead.
+1. ABERTURA — Olá neutro + DUAS perguntas curtas na MESMA mensagem: (a) o NOME do lead e (b) o valor médio da conta de luz. Exemplo: "Olá, tudo bem? Pra começar, qual seu nome? E quanto vem em média sua conta de luz?". NUNCA pergunte cidade, distribuidora ou endereço — esses dados vêm automaticamente do OCR da conta de luz. Só pergunte nome+valor; nada além disso na abertura.
 2. DESCOBERTA — Se o valor da conta ainda está em [FALTA DESCOBRIR], pergunte UMA vez. Caso contrário, vá direto ao pitch ou peça a foto da conta. JAMAIS repergunte um campo que já está em [JÁ SABEMOS].
 3. PITCH — Com o valor da conta em mãos, faça o cálculo CONCRETO:
    "Uma conta de R$ X representa em torno de R$ Y de economia por mês com a iGreen, R$ Z por ano. Tudo isso sem instalar nada e mantendo a mesma [distribuidora]."
@@ -375,7 +375,7 @@ function sanitizeHumanMessage(
 ): string {
   let out = (message || "").trim();
   if (!out) {
-    if (phase === "abertura") return "Olá. Para eu te dar o número exato de economia, qual a média da sua conta de luz?";
+    if (phase === "abertura") return "Olá, tudo bem? Pra começar, qual seu nome? E quanto vem em média sua conta de luz?";
     if (phase === "descoberta") return "Quanto vem em média a sua conta de luz?";
     if (phase === "pitch") return "Posso te mostrar exatamente quanto você economizaria?";
     if (phase === "objecao") return "Faz sentido. O que especificamente está pesando na decisão?";
