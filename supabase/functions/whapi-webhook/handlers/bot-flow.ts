@@ -1375,6 +1375,40 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       break;
     }
 
+    // ─── 3a-bis. DÚVIDAS PÓS-CLUB ─────────
+    // O lead recebeu o vídeo + pitch e foi convidado a tirar dúvidas.
+    // - Afirmativo / "pode seguir" / "sem dúvida" → dispara botões do doc.
+    // - Negativo OU pergunta livre → não fecha aqui; deixa a IA responder
+    //   (esse case nem chega a executar nesse caminho, pois conversationalSteps
+    //   inclui "duvidas_pos_club" e o ramo da IA roda antes do switch).
+    case "duvidas_pos_club": {
+      const txt = (messageText || "").trim().toLowerCase();
+      const segueAgora =
+        isButton ||
+        /^(sim|s|ok|pode|pode seguir|bora|vamos|partiu|segue|seguir|tudo certo|sem d[uú]vida|nenhuma|nao tenho|n[ãa]o tenho|n[ãa]o|t[ãa]|fechou|beleza|blz)\b/.test(txt) ||
+        /(quero|vamos|bora).*(cadastr|seguir|finaliz)/i.test(messageText || "");
+      if (segueAgora) {
+        const ctaMsg = `Show! Pra finalizar seu cadastro me manda só a foto do seu *RG ou CNH* 📄`;
+        await sendOptions(remoteJid, ctaMsg, [
+          { id: "tipo_rg_novo", title: "📄 RG Novo" },
+          { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
+          { id: "tipo_cnh", title: "🪪 CNH" },
+        ]);
+        await supabase.from("conversations").insert({
+          customer_id: customer.id, message_direction: "outbound",
+          message_text: ctaMsg, message_type: "text",
+          conversation_step: "ask_tipo_documento",
+        });
+        updates.conversation_step = "ask_tipo_documento";
+        (updates as any).__inline_sent = true;
+        reply = "";
+      } else {
+        // Resposta de fallback se a IA não tiver pegado a dúvida acima.
+        reply = "Pode mandar sua dúvida que eu te explico 😊 ou diga *pode seguir* pra avançar pro cadastro.";
+      }
+      break;
+    }
+
     // ─── 3b. TIPO DE DOCUMENTO ─────────
     case "ask_tipo_documento": {
       const resp = isButton ? buttonId : messageText.trim().toLowerCase();
