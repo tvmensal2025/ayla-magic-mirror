@@ -548,7 +548,7 @@ Deno.serve(async (req) => {
     const billAlreadyReceived = billAlreadyReceivedEarly;
     const ocrDone = !!customer.ocr_done;
     const billRequestedRecently = customer.bill_requested_at
-      && (Date.now() - new Date(customer.bill_requested_at).getTime()) < 10 * 60 * 1000;
+      && (Date.now() - new Date(customer.bill_requested_at).getTime()) < 60 * 60 * 1000;
 
     const billStatusBlock = billAlreadyReceived
       ? `\n[CONTA JÁ RECEBIDA E ANALISADA]\n` +
@@ -563,21 +563,38 @@ Deno.serve(async (req) => {
           ? `\n[CONTA JÁ FOI SOLICITADA HÁ POUCOS MINUTOS — não repita o pedido, apenas reforce gentilmente]\n`
           : "");
 
+    // Construir [JÁ SABEMOS] / [FALTA DESCOBRIR] dinamicamente — evita repergunta
+    const known: string[] = [];
+    const missing: string[] = [];
+    if (firstName) known.push(`Nome: ${firstName}`);
+    if (customer.distribuidora) known.push(`Distribuidora: ${customer.distribuidora}`);
+    else missing.push("distribuidora");
+    if (billNum > 0) known.push(`Valor da conta: R$ ${billNum}`);
+    else missing.push("valor médio da conta");
+    if (customer.address_city) known.push(`Cidade: ${customer.address_city}/${customer.address_state || ""}`.trim());
+    if (customer.pain_point) known.push(`Dor: ${customer.pain_point}`);
+    else if (billNum > 0 && customer.distribuidora) missing.push("dor/motivo principal (opcional)");
+
+    const knownBlock = known.length
+      ? `\n[JÁ SABEMOS — NÃO pergunte de novo, USE livremente]\n- ${known.join("\n- ")}\n`
+      : "";
+    const missingBlock = (missing.length && !billAlreadyReceived)
+      ? `\n[FALTA DESCOBRIR — pergunte UM por vez nesta ordem]\n- ${missing.join("\n- ")}\n`
+      : (!billAlreadyReceived ? `\n[FALTA DESCOBRIR]\n- Nada essencial. Pode partir para o pitch ou pedir a foto da conta.\n` : "");
+
     const contextLine =
       `[Contexto do lead]\n` +
       (firstName
-        ? `Nome confiável: ${firstName}\n`
-        : `Nome: DESCONHECIDO — NÃO chame por nome. Use saudação neutra ("Olá! Tudo bem?"). Se a conversa avançar sem nome, considere ask_for_name.\n`) +
-      `Distribuidora: ${customer.distribuidora || "?"}\n` +
-      `Cidade: ${customer.address_city || "?"}/${customer.address_state || "?"}\n` +
-      `Valor da conta: ${billNum > 0 ? `R$ ${billNum}` : "?"}\n` +
-      `Dor: ${customer.pain_point || "?"}\n` +
+        ? ``
+        : `Nome: DESCONHECIDO — NÃO chame por nome. Use saudação neutra. Se a conversa avançar sem nome, considere ask_for_name (mas NÃO se a foto da conta já foi pedida/recebida).\n`) +
       `Score atual: ${customer.qualification_score ?? 0}/100\n` +
       `Fase atual: ${phase}\n` +
       `Origem: ${customer.lead_source?.utm_source || "organico"}\n` +
       (customer.customer_referred_by_name
         ? `Indicado por: ${customer.customer_referred_by_name}\n`
         : "") +
+      knownBlock +
+      missingBlock +
       billStatusBlock +
       billCalcLine +
       mediaListLine +
