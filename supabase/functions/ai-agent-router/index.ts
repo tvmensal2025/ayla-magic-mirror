@@ -531,14 +531,18 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
     }
     if (hasBill && hasDoc && !["cadastro_portal", "aguardando_otp", "aguardando_facial", "complete", "handoff_humano"].includes(updates.conversation_step || stepBefore)) {
       updates.conversation_step = "cadastro_portal";
-      // Dispara portal worker (fire-and-forget)
+      // Dispara portal worker direto (fire-and-forget)
       try {
-        fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/submit-lead`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
-          body: JSON.stringify({ customer_id }),
-        }).catch((e) => console.error("submit-lead invoke error:", e));
-      } catch (e) { console.error("submit-lead invoke error:", e); }
+        const portalWorkerUrl = (Deno.env.get("PORTAL_WORKER_URL") || "").replace(/\/$/, "");
+        const workerSecret = Deno.env.get("WORKER_SECRET") || "";
+        if (portalWorkerUrl && workerSecret) {
+          fetch(`${portalWorkerUrl}/submit-lead`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${workerSecret}` },
+            body: JSON.stringify({ customer_id }),
+          }).catch((e) => console.error("portal worker submit-lead error:", e));
+        }
+      } catch (e) { console.error("portal worker invoke error:", e); }
     }
 
     // Enviar mídias primeiro (mais humano: áudio chega antes do texto)
