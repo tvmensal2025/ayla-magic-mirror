@@ -122,7 +122,13 @@ export function SystemHealthPanel() {
         <Metric label="Decisões IA / 24h" value={data.decisions24h} good={data.decisions24h > 0} />
         <Metric label="Transições / 24h" value={data.transitions24h} good={data.transitions24h > 0} />
         <Metric label="Erros / 24h" value={data.errors24h} good={data.errors24h === 0} />
-        <Metric label="Inst. derrubadas" value={data.instancesNeedReconnect} good={data.instancesNeedReconnect === 0} icon={evolutionDown ? <WifiOff className="w-3 h-3" /> : <Wifi className="w-3 h-3" />} />
+        <Metric
+          label="Inst. derrubadas"
+          value={data.instancesNeedReconnect}
+          good={data.instancesNeedReconnect === 0}
+          icon={evolutionDown ? <WifiOff className="w-3 h-3" /> : <Wifi className="w-3 h-3" />}
+          tooltip={data.downInstances.map((i) => `${i.consultantName}${i.license ? ` (${i.license})` : ""}`).join("\n")}
+        />
         <Metric label="Pausa global" value={data.pausedGlobal} good={data.pausedGlobal === 0} />
       </div>
 
