@@ -1159,7 +1159,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
       try {
         console.log("📡 Chamando OCR Gemini para conta:", fileUrl?.substring(0, 100));
-        const ocrData = await ocrContaEnergia(fileUrl, geminiApiKey, fileBase64 || undefined, mediaMsg);
+        // Garante bytes: se não temos base64 mas temos URL HTTP, baixa on-demand
+        let ocrBase64 = fileBase64 || undefined;
+        if (!ocrBase64 && fileUrl && /^https?:\/\//i.test(fileUrl)) {
+          const fetched = await fetchUrlToBase64(fileUrl);
+          if (fetched?.base64) {
+            ocrBase64 = fetched.base64;
+            if (!mediaMsg.mimetype) (mediaMsg as any).mimetype = fetched.mime;
+            console.log(`📥 OCR base64 baixado on-demand: ${ocrBase64.length} bytes`);
+          }
+        }
+        // Timeout de 25s para o OCR (evita travar "Analisando...")
+        const ocrData: any = await Promise.race([
+          ocrContaEnergia(fileUrl, geminiApiKey, ocrBase64, mediaMsg),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("OCR_TIMEOUT_25s")), 25_000)),
+        ]);
         console.log("📊 OCR Conta resultado:", JSON.stringify(ocrData).substring(0, 400));
         if (ocrData.sucesso && ocrData.dados) {
           const d = ocrData.dados;
