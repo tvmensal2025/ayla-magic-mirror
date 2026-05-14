@@ -272,6 +272,13 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
     return () => clearTimeout(t);
   }, [search, toast]);
 
+  // Mantém a primeira mensagem do WhatsApp em sincronia com a distribuidora
+  // enquanto o usuário não editar manualmente.
+  useEffect(() => {
+    if (initialMessageTouched) return;
+    setInitialMessage(buildDefaultInitialMessage(distribuidoraPrimary));
+  }, [distribuidoraPrimary, initialMessageTouched]);
+
   function addCity(c: CityHit) {
     if (cities.find(x => x.key === c.key)) return;
     if (cities.length >= 200) { toast({ title: "Máximo de 200 cidades (limite Facebook)" }); return; }
