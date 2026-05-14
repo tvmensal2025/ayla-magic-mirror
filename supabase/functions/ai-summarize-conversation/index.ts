@@ -1,0 +1,81 @@
+// Gera/atualiza um resumo curto da conversa do lead.
+// Chamada em background pelo ai-sales-agent quando histórico cresce.
+// Usa modelo barato (flash-lite) e grava em customers.conversation_summary.
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+import { geminiGenerate } from "../_shared/gemini.ts";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  try {
+    const { customer_id } = await req.json();
+    if (!customer_id) {
+      return new Response(JSON.stringify({ error: "customer_id required" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("id, consultant_id, name, distribuidora, electricity_bill_value, sales_phase, conversation_summary")
+      .eq("id", customer_id)
+      .maybeSingle();
+    if (!customer) {
+      return new Response(JSON.stringify({ error: "not found" }), {
+        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { data: history } = await supabase
+      .from("conversations")
+      .select("message_direction, message_text, message_type, created_at")
+      .eq("customer_id", customer_id)
+      .order("created_at", { ascending: false })
+      .limit(80);
+
+    const recent = (history || []).reverse();
+    if (recent.length < 6) {
+      return new Response(JSON.stringify({ skipped: "too_few_messages" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const transcript = recent.map((m: any) =>
+      `${m.message_direction === "inbound" ? "Lead" : "IA"} (${m.message_type || "text"}): ${(m.message_text || "(mídia)").slice(0, 200)}`
+    ).join("\n");
+
+    const prompt = `Resuma em até 6 linhas em PT-BR a conversa abaixo entre uma vendedora (IA) e um lead da iGreen Energy. Inclua: estágio atual, dados que já sabemos do lead (nome, valor da conta, distribuidora se mencionados), objeções levantadas, mídias enviadas, e qual seria o próximo passo natural. Nada de bullets — texto corrido, conciso.\n\nResumo anterior (se houver, atualize-o): ${customer.conversation_summary || "(nenhum)"}\n\nConversa recente:\n${transcript}`;
+
+    const result = await geminiGenerate({
+      model: "gemini-2.5-flash-lite",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      temperature: 0.3,
+      maxOutputTokens: 350,
+      functionName: "ai-summarize-conversation",
+      consultantId: customer.consultant_id,
+      customerId: customer_id,
+    });
+
+    const summary = (result.text || "").trim().slice(0, 1500);
+    if (summary) {
+      await supabase.from("customers").update({
+        conversation_summary: summary,
+        summary_updated_at: new Date().toISOString(),
+      }).eq("id", customer_id);
+    }
+
+    return new Response(JSON.stringify({ ok: true, length: summary.length }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    console.error("ai-summarize error:", e);
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "unknown" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});

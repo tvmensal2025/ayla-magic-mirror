@@ -155,13 +155,13 @@ const tools = [
     function: {
       name: "update_lead_field",
       description:
-        "Quando o lead REVELAR um dado estruturado (nome, distribuidora, valor da conta, dor), grave no cadastro. NÃO existe campo cidade — não pergunte cidade. Use APENAS quando você tem certeza do dado dito pelo lead nesta mensagem.",
+        "Quando o lead REVELAR um dado estruturado (nome, valor da conta, dor), grave no cadastro. NÃO existe campo cidade nem distribuidora — esses dados vêm AUTOMATICAMENTE do OCR da conta de luz. Use APENAS quando você tem certeza do dado dito pelo lead nesta mensagem.",
       parameters: {
         type: "object",
         properties: {
           field: {
             type: "string",
-            enum: ["name", "distribuidora", "electricity_bill_value", "pain_point"],
+            enum: ["name", "electricity_bill_value", "pain_point"],
           },
           value: { type: "string", description: "Valor exato a salvar (texto ou número como string)" },
           followup_message: { type: "string", description: "Resposta curta após salvar (acusa recebimento + próxima pergunta)" },
@@ -244,8 +244,8 @@ CONHECIMENTO IGREEN (use espontaneamente)
 ═══════════════════════════════════════════
 FUNIL DE VENDAS (5 fases)
 ═══════════════════════════════════════════
-1. ABERTURA — Olá neutro + UMA pergunta: distribuidora OU valor médio da conta. NUNCA pergunte cidade — já sabemos pela campanha; quando vier a foto da conta saberemos endereço, distribuidora, instalação e titular automaticamente.
-2. DESCOBERTA — Falte SOMENTE o que está em [FALTA DESCOBRIR]. Uma pergunta por turno, na ordem listada. Se [JÁ SABEMOS] mostra o dado, USE-O — jamais repergunte.
+1. ABERTURA — Olá neutro + UMA pergunta única: o valor médio da conta de luz. NUNCA pergunte cidade, distribuidora, endereço ou nome — TUDO isso vem automaticamente do OCR da conta de luz. Pedir esses dados antes da conta atrapalha e enche o lead.
+2. DESCOBERTA — Se o valor da conta ainda está em [FALTA DESCOBRIR], pergunte UMA vez. Caso contrário, vá direto ao pitch ou peça a foto da conta. JAMAIS repergunte um campo que já está em [JÁ SABEMOS].
 3. PITCH — Com o valor da conta em mãos, faça o cálculo CONCRETO:
    "Uma conta de R$ X representa em torno de R$ Y de economia por mês com a iGreen, R$ Z por ano. Tudo isso sem instalar nada e mantendo a mesma [distribuidora]."
    Mencione Conexão Club como bônus se o lead demonstrar interesse.
@@ -351,7 +351,7 @@ function sanitizeHumanMessage(
 ): string {
   let out = (message || "").trim();
   if (!out) {
-    if (phase === "abertura") return "Olá! Tudo bem? Qual a média da sua conta de luz?";
+    if (phase === "abertura") return "Olá. Para eu te dar o número exato de economia, qual a média da sua conta de luz?";
     if (phase === "descoberta") return "Quanto vem em média a sua conta de luz?";
     if (phase === "pitch") return "Posso te mostrar exatamente quanto você economizaria?";
     if (phase === "objecao") return "Faz sentido. O que especificamente está pesando na decisão?";
@@ -382,19 +382,25 @@ async function loadContext(supabase: any, customerId: string) {
   const { data: customer } = await supabase
     .from("customers")
     .select(
-      "id, consultant_id, name, name_source, phone_whatsapp, distribuidora, address_city, address_state, address_street, electricity_bill_value, electricity_bill_photo_url, ocr_done, bill_requested_at, numero_instalacao, pain_point, sales_phase, qualification_score, lead_source, customer_referred_by_name",
+      "id, consultant_id, name, name_source, phone_whatsapp, distribuidora, address_city, address_state, address_street, electricity_bill_value, electricity_bill_photo_url, ocr_done, bill_requested_at, numero_instalacao, pain_point, sales_phase, qualification_score, lead_source, customer_referred_by_name, conversation_summary, summary_updated_at",
     )
     .eq("id", customerId)
     .maybeSingle();
 
   if (!customer) return null;
 
+  // Se há resumo recente (<24h) usamos só as últimas 12 mensagens. Senão, 60.
+  const summaryFresh = customer.conversation_summary
+    && customer.summary_updated_at
+    && (Date.now() - new Date(customer.summary_updated_at).getTime()) < 24 * 3600 * 1000;
+  const histLimit = summaryFresh ? 12 : 60;
+
   const { data: history } = await supabase
     .from("conversations")
     .select("message_direction, message_text, message_type, created_at")
     .eq("customer_id", customerId)
     .order("created_at", { ascending: false })
-    .limit(60);
+    .limit(histLimit);
 
   const { data: agentCfg } = await supabase
     .from("ai_agent_config")
@@ -410,7 +416,45 @@ async function loadContext(supabase: any, customerId: string) {
     persona: agentCfg?.persona_name || "Camila",
     tone: agentCfg?.tone || "humano, breve, cordial",
     customPrompt: agentCfg?.system_prompt || "",
+    summaryFresh,
   };
+}
+
+// ---------- INTENT-FIRST: detecta intenção determinística ANTES do LLM ----------
+// Para sinais claros (cadastrar/humano/desistir) podemos pular o LLM totalmente.
+function detectIntent(text: string): string | null {
+  const ui = (text || "").toLowerCase();
+  if (/\b(cadastr|quero (entrar|participar|aderir|economizar|fazer)|fazer (adesao|adesão|cadastro)|me cadastra|vamos l[aá]|bora|aceito|topo|fechado|pode (cadastrar|prosseguir|seguir)|j[aá] quero)\b/i.test(ui)) return "cadastrar";
+  if (/\b(humano|atendente|pessoa|operador|consultor real|fala com (algu[eé]m|gente|pessoa)|chama (o|a) (consultor|atendente))\b/i.test(ui)) return "humano";
+  if (/\b(parar|cancelar|n[aã]o quero|sem interesse|desisto|me deixa|para de|tira meu|nao tenho interesse|n[aã]o me incomod|n[aã]o gostei)\b/i.test(ui)) return "desistir";
+  if (/\b(golpe|fraude|seguro\?|confi[aá]vel|enganaç[aã]o|verdade)\b/i.test(ui)) return "objecao_confianca";
+  if (/\b(fidelidade|multa|trocar|mudar de empresa|distribuidora vai)\b/i.test(ui)) return "objecao_contrato";
+  if (/\b(custo|caro|gratuito|de gra[çc]a|paga|mensalidade|taxa)\b/i.test(ui)) return "objecao_custo";
+  if (/\b(quanto|valor|economia|pre[çc]o|desconto|porcentagem)\b/i.test(ui)) return "interesse_valor";
+  if (/\b(como funciona|me explica|n[aã]o entendi|o que [eé]|quem [eé])\b/i.test(ui)) return "informacao";
+  return null;
+}
+
+// ---------- GUARDRAIL: bloqueia números inventados ----------
+// Apenas valores derivados da conta são permitidos. Tudo mais vira texto neutro.
+function sanitizeNumbers(message: string, billValue: number): string {
+  if (!message) return message;
+  const allowedExact = new Set<string>(["2017", "600", "20", "12", "70"]);
+  // Permite "R$ <valor>" se for ~ bill, bill*0.12 ou bill*0.12*12
+  const targets = billValue > 0
+    ? [Math.round(billValue), Math.round(billValue * 0.12), Math.round(billValue * 0.12 * 12)]
+    : [];
+  return message.replace(/R\$\s?(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+)/gi, (full, num) => {
+    const n = Number(String(num).replace(/\./g, "").replace(",", "."));
+    if (!Number.isFinite(n)) return full;
+    if (targets.some((t) => Math.abs(t - n) <= Math.max(2, t * 0.05))) return full;
+    return ""; // remove números fora da whitelist
+  }).replace(/\b(\d{1,3})\s?%/g, (full, num) => {
+    if (allowedExact.has(String(num))) return full;
+    const n = Number(num);
+    if (n >= 8 && n <= 22) return full; // faixa de desconto plausível
+    return "";
+  }).replace(/\s{2,}/g, " ").trim();
 }
 
 Deno.serve(async (req) => {
@@ -436,8 +480,45 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { customer, history, persona, tone, customPrompt } = ctx;
+    const { customer, history, persona, tone, customPrompt, summaryFresh } = ctx;
     const phase = customer.sales_phase || "abertura";
+
+    // ---------- INTENT-FIRST short-circuit (sem LLM) ----------
+    // "humano" → handoff direto. "desistir" → mark_lost. Latência ~50ms, custo zero.
+    const earlyIntent = mode === "reply" ? detectIntent(user_input || "") : null;
+    if (earlyIntent === "humano") {
+      await supabase.from("customers").update({
+        bot_paused: true,
+        bot_paused_reason: "intent_humano: lead pediu atendimento humano",
+        bot_paused_at: new Date().toISOString(),
+      }).eq("id", customer_id);
+      await supabase.from("ai_decisions").insert({
+        customer_id, consultant_id: customer.consultant_id, phase,
+        tool_called: "request_handoff", reasoning: "early_intent_humano",
+        user_input, ai_output: { reason: "lead pediu humano", urgency: "alta" },
+        latency_ms: Date.now() - t0, intent_detected: "humano",
+      });
+      return new Response(JSON.stringify({
+        decision: { tool: "request_handoff", args: { reason: "lead pediu humano", urgency: "alta" } },
+        phase, latency_ms: Date.now() - t0,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (earlyIntent === "desistir") {
+      await supabase.from("customers").update({
+        sales_phase: "perdido", bot_paused: true,
+        bot_paused_reason: "intent_desistir: lead disse que não quer",
+      }).eq("id", customer_id);
+      await supabase.from("ai_decisions").insert({
+        customer_id, consultant_id: customer.consultant_id, phase,
+        tool_called: "mark_lost", reasoning: "early_intent_desistir",
+        user_input, ai_output: { reason: "lead recusou explicitamente" },
+        latency_ms: Date.now() - t0, intent_detected: "desistir",
+      });
+      return new Response(JSON.stringify({
+        decision: { tool: "mark_lost", args: { reason: "lead recusou explicitamente" } },
+        phase, latency_ms: Date.now() - t0,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // Profile inference for media filtering
     const bill = Number(customer.electricity_bill_value || 0);
@@ -563,24 +644,25 @@ Deno.serve(async (req) => {
           ? `\n[CONTA JÁ FOI SOLICITADA HÁ POUCOS MINUTOS — não repita o pedido, apenas reforce gentilmente]\n`
           : "");
 
-    // Construir [JÁ SABEMOS] / [FALTA DESCOBRIR] dinamicamente — evita repergunta
+    // Construir [JÁ SABEMOS] / [FALTA DESCOBRIR] dinamicamente — evita repergunta.
+    // REGRA: a IA SÓ pergunta valor da conta. Distribuidora, cidade, endereço, titular vêm do OCR.
     const known: string[] = [];
     const missing: string[] = [];
     if (firstName) known.push(`Nome: ${firstName}`);
     if (customer.distribuidora) known.push(`Distribuidora: ${customer.distribuidora}`);
-    else missing.push("distribuidora");
     if (billNum > 0) known.push(`Valor da conta: R$ ${billNum}`);
-    else missing.push("valor médio da conta");
+    else missing.push("valor médio da conta de luz");
     if (customer.address_city) known.push(`Cidade: ${customer.address_city}/${customer.address_state || ""}`.trim());
     if (customer.pain_point) known.push(`Dor: ${customer.pain_point}`);
-    else if (billNum > 0 && customer.distribuidora) missing.push("dor/motivo principal (opcional)");
 
     const knownBlock = known.length
       ? `\n[JÁ SABEMOS — NÃO pergunte de novo, USE livremente]\n- ${known.join("\n- ")}\n`
       : "";
     const missingBlock = (missing.length && !billAlreadyReceived)
       ? `\n[FALTA DESCOBRIR — pergunte UM por vez nesta ordem]\n- ${missing.join("\n- ")}\n`
-      : (!billAlreadyReceived ? `\n[FALTA DESCOBRIR]\n- Nada essencial. Pode partir para o pitch ou pedir a foto da conta.\n` : "");
+      : (!billAlreadyReceived
+          ? `\n[FALTA DESCOBRIR]\n- Nada essencial. Faça o pitch com o cálculo OU peça a foto da conta para fechar.\n`
+          : "");
 
     const contextLine =
       `[Contexto do lead]\n` +
@@ -633,8 +715,36 @@ Deno.serve(async (req) => {
         : "";
     }
 
+    // ---- Resumo da conversa (cacheado) substitui parte do histórico ----
+    const summaryLine = (summaryFresh && customer.conversation_summary)
+      ? `\n[RESUMO DA CONVERSA ATÉ AGORA]\n${customer.conversation_summary}\n(Use o resumo para contexto; as últimas mensagens cruas vêm depois.)\n`
+      : "";
+
+    // ---- Padrões aprendidos do feedback do consultor (👍/👎) ----
+    let learnedLine = "";
+    try {
+      const intentForLookup = earlyIntent || (phase === "objecao" ? "objecao_custo" : null);
+      if (intentForLookup) {
+        const { data: pat } = await supabase
+          .from("ai_learned_patterns")
+          .select("good_examples, bad_examples")
+          .eq("consultant_id", customer.consultant_id)
+          .eq("intent", intentForLookup)
+          .maybeSingle();
+        if (pat) {
+          const goods = (pat.good_examples || []).slice(0, 2)
+            .map((g: any) => `+ "${(g.output || "").slice(0, 100)}"`).join("\n");
+          const bads = (pat.bad_examples || []).slice(0, 1)
+            .map((b: any) => `- "${(b.output || "").slice(0, 100)}"`).join("\n");
+          if (goods || bads) {
+            learnedLine = `\n[PADRÕES APRENDIDOS — intent=${intentForLookup}]\n${goods}\n${bads}\n`;
+          }
+        }
+      }
+    } catch (_) { /* best-effort */ }
+
     // ---- Construir contents no formato Gemini ----
-    const sys = systemPrompt(persona, tone, customPrompt) + fewShotLine + negShotLine + "\n\n" + contextLine;
+    const sys = systemPrompt(persona, tone, customPrompt) + summaryLine + learnedLine + fewShotLine + negShotLine + "\n\n" + contextLine;
 
     const contents: any[] = history.map((m: any) => ({
       role: m.message_direction === "inbound" ? "user" : "model",
@@ -755,13 +865,33 @@ Deno.serve(async (req) => {
 
     if (tool === "send_text" || tool === "advance_to_closing" || tool === "ask_for_name" || tool === "confirm_and_handoff") {
       args.message = sanitizeHumanMessage(args.message || "", phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
+      args.message = sanitizeNumbers(args.message, billNum);
     }
     if (tool === "update_lead_field") {
       args.followup_message = sanitizeHumanMessage(args.followup_message || "", phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
+      args.followup_message = sanitizeNumbers(args.followup_message, billNum);
     }
     if (tool === "send_media" && args.caption) {
       args.caption = sanitizeHumanMessage(args.caption, phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
+      args.caption = sanitizeNumbers(args.caption, billNum);
     }
+
+    // ---- Dispara summarize em background a cada 10 mensagens ou se resumo > 24h ----
+    const totalMsgs = history.length;
+    const needSummary = (totalMsgs >= 10 && totalMsgs % 10 === 0) || (!summaryFresh && totalMsgs >= 12);
+    if (needSummary) {
+      // Fire-and-forget — não bloqueia a resposta
+      fetch(`${SUPABASE_URL}/functions/v1/ai-summarize-conversation`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+        },
+        body: JSON.stringify({ customer_id }),
+      }).catch(() => {});
+    }
+
 
     const latencyMs = Date.now() - t0;
 
