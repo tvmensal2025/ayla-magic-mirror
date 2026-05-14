@@ -974,10 +974,13 @@ Deno.serve(async (req) => {
       const alreadySentSameId = sentMediaIds.has(args.media_id);
       const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
       const invalidId = !picked || !picked.url;
+      const isVideoBlockedByCooldown = !!picked && picked.kind === "video" && videoCooldownActive;
 
-      if (invalidId || justSentMedia || alreadySentSameId) {
+      if (invalidId || justSentMedia || alreadySentSameId || isVideoBlockedByCooldown) {
         const tag = invalidId
           ? "[media_id inválido]"
+          : isVideoBlockedByCooldown
+          ? "[vídeo bloqueado: cooldown 6h]"
           : alreadySentSameId
           ? "[mídia repetida — bloqueada]"
           : "[mídia consecutiva — bloqueada]";
