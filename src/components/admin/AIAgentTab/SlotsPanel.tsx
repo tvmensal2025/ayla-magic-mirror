@@ -252,6 +252,27 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
                 {defaultMedia[s.slot_key]?.url && (
                   <audio src={defaultMedia[s.slot_key]!.url!} controls className="w-full h-8" />
                 )}
+                <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-1">
+                  <div className="text-xs font-medium text-primary">🎬 Vídeo enviado logo após o áudio (opcional)</div>
+                  {s.video_url ? (
+                    <>
+                      <video src={s.video_url} controls className="w-full max-h-40 rounded" />
+                      <input type="text" placeholder="Legenda do vídeo (opcional)"
+                        value={s.video_label || ""}
+                        onChange={(e) => setSlots((p) => p.map((x) => x.slot_key === s.slot_key ? { ...x, video_label: e.target.value } : x))}
+                        className="w-full px-2 py-1 text-xs rounded border border-border bg-background" />
+                      <Button size="sm" variant="ghost" onClick={() => removeSlotVideo(s.slot_key)} className="text-destructive h-7 text-xs">
+                        Remover vídeo
+                      </Button>
+                    </>
+                  ) : (
+                    <label className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-border bg-background hover:bg-muted cursor-pointer">
+                      📤 Enviar vídeo
+                      <input type="file" accept="video/*" className="hidden"
+                        onChange={(e) => e.target.files?.[0] && uploadSlotVideo(s.slot_key, e.target.files[0])} />
+                    </label>
+                  )}
+                </div>
                 <div className="flex gap-2">
                   <AudioRecorderInline onRecorded={(b, d) => uploadDefault(s.slot_key, b, d)} />
                   <Button size="sm" onClick={() => saveSlot(s)} disabled={saving === s.slot_key}>
