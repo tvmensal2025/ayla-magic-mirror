@@ -623,6 +623,9 @@ export type Database = {
           trigger_hint: string | null
           updated_at: string
           version: number
+          video_label: string | null
+          video_storage_path: string | null
+          video_url: string | null
         }
         Insert: {
           active?: boolean
@@ -637,6 +640,9 @@ export type Database = {
           trigger_hint?: string | null
           updated_at?: string
           version?: number
+          video_label?: string | null
+          video_storage_path?: string | null
+          video_url?: string | null
         }
         Update: {
           active?: boolean
@@ -651,6 +657,9 @@ export type Database = {
           trigger_hint?: string | null
           updated_at?: string
           version?: number
+          video_label?: string | null
+          video_storage_path?: string | null
+          video_url?: string | null
         }
         Relationships: []
       }
