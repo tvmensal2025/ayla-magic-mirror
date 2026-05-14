@@ -333,13 +333,27 @@ Deno.serve(async (req) => {
     if (platformCustomAudId) {
       (targeting as any).excluded_custom_audiences = [{ id: platformCustomAudId }];
     }
-    // Sem promoted_object/destination_type=WHATSAPP: o link wa.me no creative é
-    // que leva o lead pra conversa. Assim QUALQUER número funciona, sem WABA.
+    // CTWA WABA: destination=WHATSAPP + promoted_object liga anúncio ↔ número WABA.
+    // Tracking specs: messaging_first_reply (Meta nativo) + offsite_conversion via pixel/CAPI.
+    const waNumberClean = String(conn.whatsapp_destination_number).replace(/\D/g, "");
+    const promotedObject: Record<string, string> = {
+      page_id: conn.page_id,
+      whatsapp_phone_number: waNumberClean,
+    };
+    const trackingSpecs: any[] = [
+      { "action.type": ["onsite_conversion.messaging_first_reply"] },
+    ];
+    if (hasPixel) {
+      trackingSpecs.push({ "action.type": ["offsite_conversion"], fb_pixel: [conn.pixel_id] });
+    }
     const adsetParams: Record<string, string> = {
       name: `[${consultantTag}] ${distribTag} · Conjunto Principal · ${cityPrincipal}`,
       campaign_id: campaignId,
       billing_event: "IMPRESSIONS",
       optimization_goal: optimizationGoal,
+      destination_type: "WHATSAPP",
+      promoted_object: JSON.stringify(promotedObject),
+      tracking_specs: JSON.stringify(trackingSpecs),
       targeting: JSON.stringify(targeting),
       status: "PAUSED",
       start_time: new Date(Date.now() + 60_000).toISOString(),
