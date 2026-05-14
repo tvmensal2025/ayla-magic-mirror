@@ -49,26 +49,30 @@ const tools = [
     function: {
       name: "send_media",
       description:
-        "Envia uma mídia ESPECÍFICA da biblioteca. Você DEVE escolher um media_id da lista [MÍDIAS DISPONÍVEIS] fornecida no contexto. Não invente IDs.",
+        "Envia 1 ou 2 mídias da biblioteca (ex.: 1 áudio + 1 vídeo) que respondem à dúvida atual do lead. Use media_ids (array) com 1 ou 2 UUIDs DIFERENTES da lista [MÍDIAS DISPONÍVEIS]. Combine áudio+vídeo SOMENTE quando ambos esclarecem a MESMA dúvida e não foram enviados antes. Nunca repita kind (não mande 2 áudios ou 2 vídeos juntos). Não invente IDs.",
       parameters: {
         type: "object",
         properties: {
+          media_ids: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+            maxItems: 2,
+            description: "1 ou 2 UUIDs (kinds diferentes) da lista [MÍDIAS DISPONÍVEIS]",
+          },
           media_id: {
             type: "string",
-            description: "UUID exato de uma mídia listada em [MÍDIAS DISPONÍVEIS]",
+            description: "(legado) Use media_ids. Se preencher, mande só este UUID.",
           },
-          caption: { type: "string", description: "Legenda curta (1 linha) que acompanha a mídia" },
+          caption: { type: "string", description: "Legenda curta (1 linha) que acompanha a 1ª mídia" },
           next_phase: {
             type: "string",
             enum: ["abertura", "descoberta", "pitch", "objecao", "fechamento"],
           },
-          score_delta: {
-            type: "number",
-            description: "Quanto somar/subtrair no qualification_score (0-100).",
-          },
+          score_delta: { type: "number" },
           reasoning: { type: "string" },
         },
-        required: ["media_id", "reasoning"],
+        required: ["reasoning"],
       },
     },
   },
