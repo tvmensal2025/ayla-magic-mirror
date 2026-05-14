@@ -15,16 +15,36 @@ async function loadInsights(consultantId: string, distribuidora?: string) {
 }
 
 // Carrega criativos de concorrentes que estão há mais tempo no ar (sinal de que convertem).
+// Prioriza os que têm imagem real coletada (referência visual concreta para o builder).
 async function loadCompetitorWinners(limit = 8) {
   try {
     const admin = adminClient();
     const { data } = await admin
       .from("ad_competitor_creatives")
-      .select("advertiser, headline, primary_text, angle, creative_format, active_days")
+      .select("advertiser, headline, primary_text, angle, creative_format, active_days, image_url")
       .order("active_days", { ascending: false })
-      .limit(limit);
-    return data || [];
+      .limit(limit * 2);
+    const arr = data || [];
+    const withImg = arr.filter((c: any) => c.image_url);
+    const withoutImg = arr.filter((c: any) => !c.image_url);
+    return [...withImg, ...withoutImg].slice(0, limit);
   } catch { return []; }
+}
+
+// Insight global da rede (últimos 7 dias) — gravado pelo ad-creative-learner em ad_playbooks.
+async function loadGlobalPlaybook() {
+  try {
+    const admin = adminClient();
+    const { data } = await admin
+      .from("ad_playbooks")
+      .select("payload, generated_at")
+      .eq("scope", "global")
+      .eq("source_metric", "learner_daily_aggregate")
+      .order("generated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return data?.payload || null;
+  } catch { return null; }
 }
 
 // Termos que a Meta rejeita ou penaliza fortemente — copy regenera/filtra automaticamente.
