@@ -324,9 +324,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       await new Promise((r) => setTimeout(r, 1200));
     }
 
-    const responseText = qa.text_response
+    const baseText = qa.text_response
       ? String(qa.text_response).replaceAll("{nome}", customer.name || "").replaceAll("{representante}", nomeRepresentante || "")
       : "";
+    // Sempre puxa o lead para o próximo passo do funil (a não ser que o próprio Q&A seja o fechamento)
+    const nudgeStep = qa.is_closing ? "aguardando_conta" : (step || "qualificacao");
+    const nudge = qa.is_closing ? "" : buildStepNudge(nudgeStep, customer.name || null);
+    const responseText = (baseText + nudge).trim();
     if (responseText) {
       await sendText(remoteJid, responseText);
       await supabase.from("conversations").insert({
@@ -337,11 +341,25 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         conversation_step: step,
       });
       sentSomething = true;
+    } else if (sentSomething && !qa.is_closing) {
+      // Mídia foi enviada sem texto: ainda assim mande um nudge curto pro próximo passo
+      const nudgeOnly = buildStepNudge(step || "qualificacao", customer.name || null).trim();
+      if (nudgeOnly) {
+        await sendText(remoteJid, nudgeOnly);
+        await supabase.from("conversations").insert({
+          customer_id: customer.id,
+          message_direction: "outbound",
+          message_text: nudgeOnly,
+          message_type: "text",
+          conversation_step: step,
+        });
+      }
     }
 
     if (!sentSomething) return null;
-    return { reply: "", updates: { conversation_step: qa.is_closing ? "aguardando_conta" : "qualificacao", __inline_sent: true } as any };
+    return { reply: "", updates: { conversation_step: qa.is_closing ? "aguardando_conta" : (step || "qualificacao"), __inline_sent: true } as any };
   }
+
 
   const step = customer.conversation_step || "welcome";
   let reply = "";
