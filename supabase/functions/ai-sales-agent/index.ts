@@ -593,64 +593,40 @@ Deno.serve(async (req) => {
     const billAlreadyReceivedEarly =
       !!customer.electricity_bill_photo_url && !!customer.ocr_done && nameSourceTrusted;
 
-    // Cooldown de mídia: pega últimas 5 mídias enviadas para esse lead e marca como "já enviadas".
+    // Cooldown 1× por vida: mídia enviada uma vez para este lead nunca aparece de novo.
     const { data: recentMediaSent } = await supabase
       .from("ai_decisions")
       .select("media_sent_id")
       .eq("customer_id", customer_id)
       .not("media_sent_id", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(5);
+      .limit(500);
     const sentMediaIds = new Set((recentMediaSent || []).map((r: any) => r.media_sent_id));
     const freshMedia = eligibleMedia.filter((m: any) => !sentMediaIds.has(m.id));
 
-    // Cooldown de VÍDEO em janela de 6h: se qualquer vídeo foi enviado a este lead nas
-    // últimas 6h, bloqueia novos vídeos (mas permite áudio/imagem).
-    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
-    const { data: recentVideoOutbound } = await supabase
-      .from("messages")
-      .select("id")
-      .eq("customer_id", customer_id)
-      .eq("message_direction", "outbound")
-      .eq("message_type", "video")
-      .gte("created_at", sixHoursAgo)
-      .limit(1);
-    const videoCooldownActive = !!(recentVideoOutbound && recentVideoOutbound.length > 0);
+    const formatTags = (arr: any) => {
+      const a = Array.isArray(arr) ? arr.filter((x: any) => x && x !== "any") : [];
+      return a.length ? a.join(",") : "—";
+    };
 
     const mediaListLine = billAlreadyReceivedEarly
       ? `\n[MÍDIAS DISPONÍVEIS]\nNENHUMA — a conta já foi recebida. Confirme os dados em send_text e em seguida use request_handoff. PROIBIDO send_media nesta etapa.`
       : freshMedia.length
-      ? `\n[MÍDIAS DISPONÍVEIS para fase ${phase}]\n` +
+      ? `\n[MÍDIAS DISPONÍVEIS para fase ${phase}] (cada uma só pode ser enviada 1× na vida do lead)\n` +
         freshMedia
-          .map(
-            (m: any, i: number) => {
-              const kindUpper = String(m.kind || "").toUpperCase();
-              const primaryTag = m.is_primary_explainer
-                ? ` [PRINCIPAL-${kindUpper} — use SEMPRE este ${m.kind} quando a MATRIZ DE MÍDIA mandar enviar ${m.kind}; outros do mesmo tipo só se o lead disser que ainda não entendeu]`
-                : "";
-              return `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""}${primaryTag}`;
-            },
+          .map((m: any, i: number) =>
+            `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""} | etapa=[${formatTags(m.step_tags)}] | intencao=[${formatTags(m.intent_tags)}]`
           )
           .join("\n") +
-        `\nUse send_media APENAS com um desses media_id. ${
-          sentMediaIds.size
-            ? `(${sentMediaIds.size} mídia(s) já enviada(s) recentemente foram ocultadas — NÃO repita.)`
-            : ""
+        `\nUse send_media com media_ids=[id]. Combine 1 áudio + 1 vídeo (kinds DIFERENTES) no mesmo send_media só quando ambos casam com a MESMA intenção da dúvida atual.${
+          sentMediaIds.size ? ` (${sentMediaIds.size} mídia(s) já enviada(s) anteriormente foram ocultadas — NÃO repita.)` : ""
         }`
       : `\n[MÍDIAS DISPONÍVEIS]\nNenhuma nova para esta fase (todas já enviadas). Use send_text.`;
 
     const cadenceLine =
       `\n[CADÊNCIA]\n` +
-      `- Mídias enviadas nas últimas 4 respostas: ${recentMediaCount}\n` +
       `- Última msg do lead foi do tipo: ${lastInboundKind}\n` +
-      (recentMediaCount >= 1
-        ? `- ⚠️ NÃO envie mídia agora — a última resposta JÁ foi mídia. Use send_text.\n`
-        : ``) +
-      (videoCooldownActive
-        ? `- 🚫 VÍDEO BLOQUEADO: já enviamos um vídeo a este lead nas últimas 6h. Responda por TEXTO curto, sem prometer outro vídeo.\n`
-        : ``) +
       (lastInboundKind === "audio"
-        ? `- Lead mandou áudio: prefira responder com áudio também (espelho).\n`
+        ? `- Lead mandou áudio: prefira responder com áudio também (espelho), se houver áudio compatível em [MÍDIAS DISPONÍVEIS].\n`
         : ``) +
       (lastInbound && (lastInbound.message_text || "").length < 20
         ? `- Lead foi breve: responda breve também.\n`
