@@ -54,6 +54,40 @@ function trigramSim(a: string, b: string): number {
   return inter / Math.max(ta.size, tb.size);
 }
 
+// ── Sleep based on media duration (lets audio finish before sending video) ──
+async function sleepForMedia(kind: string, durationSec?: number | null): Promise<void> {
+  if (kind === "audio") {
+    const ms = Math.min(((durationSec && durationSec > 0) ? durationSec : 90) * 1000, 120_000);
+    await new Promise((r) => setTimeout(r, ms));
+    return;
+  }
+  if (kind === "video") {
+    const ms = Math.min(((durationSec && durationSec > 0) ? durationSec : 30) * 1000, 90_000);
+    await new Promise((r) => setTimeout(r, ms));
+    return;
+  }
+  await new Promise((r) => setTimeout(r, 1500));
+}
+
+// ── Fetch URL → base64 (for OCR when proxy didn't deliver bytes) ──
+async function fetchUrlToBase64(url: string, timeoutMs = 15_000): Promise<{ base64: string; mime: string } | null> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!r.ok) return null;
+    const mime = r.headers.get("content-type") || "application/octet-stream";
+    const buf = new Uint8Array(await r.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+    return { base64: btoa(bin), mime };
+  } catch (e) {
+    console.warn("[fetchUrlToBase64] falhou:", (e as any)?.message);
+    return null;
+  }
+}
+
 // ── Auto-resolve CEP from address data (avoid asking user) ──
 async function autoResolveCepIfNeeded(merged: any, updates: any): Promise<string> {
   let step = getNextMissingStep(merged);
