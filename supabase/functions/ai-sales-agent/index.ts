@@ -570,14 +570,21 @@ Deno.serve(async (req) => {
     const lastInboundKind = (lastInbound?.message_type || "text").toLowerCase();
 
     // Load candidate media for this phase + profile (consultant own + public)
-    const { data: candidates } = await supabase
+    // Inclui também rows com step_tags vazias OU com slot_key (mídias-slot ex.: boas_vindas).
+    const { data: candidatesRaw } = await supabase
       .from("ai_media_library")
-      .select("id, kind, label, url, step_tags, intent_tags, priority, duration_sec, is_primary_explainer")
+      .select("id, kind, label, url, step_tags, intent_tags, priority, duration_sec, is_primary_explainer, slot_key")
       .eq("active", true)
       .or(`consultant_id.eq.${customer.consultant_id},is_public.eq.true`)
-      .overlaps("step_tags", [phase, "any"])
       .order("priority", { ascending: false })
-      .limit(15);
+      .limit(40);
+    const candidates = (candidatesRaw || []).filter((m: any) => {
+      const tags = Array.isArray(m.step_tags) ? m.step_tags : [];
+      // Aceita: tem slot_key (mídia deterministica) OU step vazio OU bate na fase/any.
+      if (m.slot_key) return true;
+      if (tags.length === 0) return true;
+      return tags.includes(phase) || tags.includes("any");
+    });
 
     // intent_tags agora descrevem a DÚVIDA que a mídia responde (ex.: "e_golpe", "tem_custo").
     // O matching com a dúvida do lead é feito pela própria IA via prompt — não filtramos aqui.
@@ -600,6 +607,37 @@ Deno.serve(async (req) => {
       .limit(500);
     const sentMediaIds = new Set((recentMediaSent || []).map((r: any) => r.media_sent_id));
     const freshMedia = eligibleMedia.filter((m: any) => !sentMediaIds.has(m.id));
+
+    // ---------- DETERMINISTIC SHORT-CIRCUIT: áudio de boas-vindas ----------
+    // Se é a 1ª resposta da IA para esse lead E existe áudio com slot_key
+    // 'boas_vindas' / 'first_response' / 'first_touch' ainda não enviado,
+    // dispara direto sem depender do LLM.
+    const priorOutboundEarly = history.filter((h: any) => h.message_direction !== "inbound");
+    const isFirstReply = priorOutboundEarly.length === 0 && mode === "reply";
+    const FIRST_SLOTS = new Set(["boas_vindas", "first_response", "first_touch", "primeira_resposta"]);
+    if (isFirstReply && !billAlreadyReceivedEarly) {
+      const firstAudio = freshMedia
+        .filter((m: any) => m.kind === "audio" && m.slot_key && FIRST_SLOTS.has(m.slot_key))
+        .sort((a: any, b: any) => (b.priority || 0) - (a.priority || 0))[0];
+      if (firstAudio?.url) {
+        await supabase.from("ai_decisions").insert({
+          customer_id, consultant_id: customer.consultant_id, phase,
+          tool_called: "send_media", reasoning: `deterministic_first_audio:${firstAudio.slot_key}`,
+          user_input, ai_output: { media_ids: [firstAudio.id], slot_key: firstAudio.slot_key },
+          media_sent_id: firstAudio.id, latency_ms: Date.now() - t0,
+        });
+        const mediaPayload = { id: firstAudio.id, url: firstAudio.url, kind: firstAudio.kind, label: firstAudio.label };
+        return new Response(JSON.stringify({
+          decision: {
+            tool: "send_media",
+            args: { media_ids: [firstAudio.id], caption: "", next_phase: phase, reasoning: `deterministic_first_audio:${firstAudio.slot_key}` },
+          },
+          media: mediaPayload,
+          medias: [mediaPayload],
+          phase, latency_ms: Date.now() - t0,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
 
     const formatTags = (arr: any) => {
       const a = Array.isArray(arr) ? arr.filter((x: any) => x && x !== "any") : [];
