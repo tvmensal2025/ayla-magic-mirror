@@ -1336,6 +1336,7 @@ export type Database = {
           name: string | null
           name_source: string | null
           next_followup_at: string | null
+          next_rescue_allowed_at: string | null
           nivel_licenciado: string | null
           nome_mae: string | null
           nome_pai: string | null
@@ -1426,6 +1427,7 @@ export type Database = {
           name?: string | null
           name_source?: string | null
           next_followup_at?: string | null
+          next_rescue_allowed_at?: string | null
           nivel_licenciado?: string | null
           nome_mae?: string | null
           nome_pai?: string | null
@@ -1516,6 +1518,7 @@ export type Database = {
           name?: string | null
           name_source?: string | null
           next_followup_at?: string | null
+          next_rescue_allowed_at?: string | null
           nivel_licenciado?: string | null
           nome_mae?: string | null
           nome_pai?: string | null
@@ -2603,6 +2606,9 @@ export type Database = {
           created_at: string | null
           id: string
           instance_name: string
+          last_health_check_at: string | null
+          status: string
+          updated_at: string
         }
         Insert: {
           connected_phone?: string | null
@@ -2610,6 +2616,9 @@ export type Database = {
           created_at?: string | null
           id?: string
           instance_name: string
+          last_health_check_at?: string | null
+          status?: string
+          updated_at?: string
         }
         Update: {
           connected_phone?: string | null
@@ -2617,6 +2626,9 @@ export type Database = {
           created_at?: string | null
           id?: string
           instance_name?: string
+          last_health_check_at?: string | null
+          status?: string
+          updated_at?: string
         }
         Relationships: []
       }
