@@ -626,17 +626,14 @@ Deno.serve(async (req) => {
           user_input, ai_output: { media_ids: [firstAudio.id], slot_key: firstAudio.slot_key },
           media_sent_id: firstAudio.id, latency_ms: Date.now() - t0,
         });
+        const mediaPayload = { id: firstAudio.id, url: firstAudio.url, kind: firstAudio.kind, label: firstAudio.label };
         return new Response(JSON.stringify({
           decision: {
             tool: "send_media",
-            args: {
-              media_ids: [firstAudio.id],
-              medias: [{ id: firstAudio.id, url: firstAudio.url, kind: firstAudio.kind, label: firstAudio.label }],
-              caption: "",
-              next_phase: phase,
-              reasoning: `deterministic_first_audio:${firstAudio.slot_key}`,
-            },
+            args: { media_ids: [firstAudio.id], caption: "", next_phase: phase, reasoning: `deterministic_first_audio:${firstAudio.slot_key}` },
           },
+          media: mediaPayload,
+          medias: [mediaPayload],
           phase, latency_ms: Date.now() - t0,
         }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
