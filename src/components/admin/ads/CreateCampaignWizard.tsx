@@ -152,6 +152,14 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
   const [primaryText, setPrimaryText] = useState("");
   const [description, setDescription] = useState("");
   const [copyLoading, setCopyLoading] = useState(false);
+  // Primeira mensagem que abre no WhatsApp ao clicar no anúncio (CTWA).
+  const INITIAL_MSG_LIMIT = 160;
+  const buildDefaultInitialMessage = (distrib: string | null) =>
+    distrib
+      ? `Olá! Quero saber mais sobre a redução na conta de luz ${distrib}.`
+      : "Olá! Quero saber mais sobre a redução na minha conta de luz.";
+  const [initialMessage, setInitialMessage] = useState<string>(() => buildDefaultInitialMessage(null));
+  const [initialMessageTouched, setInitialMessageTouched] = useState(false);
 
   // Step 4: orçamento
   const [budget, setBudget] = useState(30); // R$/dia
