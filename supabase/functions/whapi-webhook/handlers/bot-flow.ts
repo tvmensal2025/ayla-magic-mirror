@@ -90,6 +90,8 @@ async function urlExists(url: string): Promise<boolean> {
 }
 
 const NON_NAME_RESPONSES = /^(oi|ola|olá|hey|opa|bom dia|boa tarde|boa noite|sim|nao|não|ok|tudo bem|pode|quero|cadastrar|humano|atendente|menu|reset|recomecar|recomeçar|nao sou eu|não sou eu|como funciona|me explica|o que é|que é isso|quanto custa|é caro|preço|valor|tem taxa|minha distribuidora|qual distribuidora|atende aqui|cidade)$/i;
+const RE_GREETING_ONLY = /^(oi|ol[aá]|opa|bom dia|boa tarde|boa noite|hey)$/i;
+const RE_NOT_READY = /\b(vou pensar|pensar melhor|depois|mais tarde|agora n[aã]o|n[aã]o quero ainda|n[aã]o quero (cadastrar|prosseguir|seguir)|sem interesse|n[aã]o tenho interesse)\b/i;
 
 function normalizeLeadName(rawText: string | null | undefined): string | null {
   const raw = String(rawText || "").trim().replace(/[.!?,;:"']/g, "").replace(/\s+/g, " ");
@@ -110,6 +112,10 @@ function normalizeLeadName(rawText: string | null | undefined): string | null {
 function isBogusCapturedName(name: string | null | undefined): boolean {
   if (!name) return false;
   return NON_NAME_RESPONSES.test(String(name).trim());
+}
+
+function buildNotReadyReply(nomeRepresentante: string): string {
+  return `Sem problema, vou respeitar seu tempo 😊\n\nSe quiser continuar depois, é só mandar *cadastrar* ou chamar ${nomeRepresentante}.`;
 }
 
 export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
@@ -434,6 +440,20 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       };
     }
 
+    // 2.5) Recusa/adiamento explícito → não insistir pedindo conta.
+    if (RE_NOT_READY.test(txt)) {
+      console.log(`[intent-override] NOT_READY detectado: "${txt.slice(0, 60)}"`);
+      return {
+        reply: buildNotReadyReply(nomeRepresentante),
+        updates: {
+          conversation_step: "aguardando_humano",
+          bot_paused: true,
+          bot_paused_reason: "lead_nao_pronto",
+          bot_paused_at: new Date().toISOString(),
+        },
+      };
+    }
+
     // 3) "humano / atendente" → handoff explícito.
     if (RE_INTENT_HUMANO.test(txt)) {
       console.log(`[intent-override] HUMANO detectado: "${txt.slice(0, 60)}"`);
@@ -495,6 +515,42 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       (customer as any).name = formatted;
       (customer as any).name_source = "self_introduced";
       console.log(`🪪 [name-capture] Nome capturado: "${formatted}"`);
+    }
+  }
+
+  // A etapa de qualificação é determinística: primeiro captura nome/valor.
+  // A IA só entra aqui para perguntas reais depois que já temos um nome confiável.
+  if (
+    step === "qualificacao" &&
+    messageText &&
+    !isFile &&
+    !isButton
+  ) {
+    const txt = messageText.trim();
+    const currentNameTrusted = !!(customer as any).name && !isBogusCapturedName((customer as any).name);
+    const typedName = normalizeLeadName(txt);
+    const valueMatch = String(txt || "").match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
+    const typedBillValue = valueMatch ? Number(valueMatch[1].replace(".", "").replace(",", ".")) : 0;
+
+    if (RE_GREETING_ONLY.test(txt)) {
+      return {
+        reply: currentNameTrusted ? "Oi! Qual a média da sua conta de luz?" : "Oi! Qual é o seu nome?",
+        updates: { conversation_step: "qualificacao" },
+      };
+    }
+
+    if (typedName) {
+      return {
+        reply: `${typedName.split(/\s+/)[0]}, qual a média da sua conta de luz?`,
+        updates: { name: typedName, name_source: "self_introduced", conversation_step: "qualificacao" },
+      };
+    }
+
+    if (Number.isFinite(typedBillValue) && typedBillValue >= 30) {
+      return {
+        reply: "Com essa média, já dá para calcular sua economia. Me envie uma FOTO ou PDF da sua conta de energia para eu confirmar os dados.",
+        updates: { electricity_bill_value: typedBillValue, sales_phase: "fechamento", conversation_step: "aguardando_conta" },
+      };
     }
   }
 
