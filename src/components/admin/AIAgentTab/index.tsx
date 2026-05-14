@@ -136,7 +136,7 @@ export function AIAgentTab({ userId }: { userId: string }) {
           <div className="flex flex-col h-full gap-3">
             <div className="flex gap-1 flex-wrap">
               {[
-                { id: "audios" as const, label: "Áudios da Camila", icon: Mic },
+                { id: "audios" as const, label: `Áudios de ${personaName}`, icon: Mic },
                 { id: "midias" as const, label: "Mídias livres", icon: FileText },
                 { id: "roteiro" as const, label: "Roteiro", icon: BookOpen },
               ].map((t) => {
