@@ -887,77 +887,26 @@ Deno.serve(async (req) => {
     let tool = toolCallG.name;
     let args: any = toolCallG.args || {};
 
-    // ---- OVERRIDE 1: dúvida/objeção → forçar vídeo de 1min se ainda não foi enviado ----
-    const uiLow = (user_input || "").toLowerCase();
-    const isDoubtIntent = !billAlreadyReceivedEarly && (
-      /\b(como funciona|me explica|n[aã]o entendi|o que [eé]|funciona como|explica|explicar)\b/i.test(uiLow) ||
-      /\b(golpe|fraude|seguro|confi[aá]vel|enganaç[aã]o|verdade|mesmo|s[eé]rio)\b/i.test(uiLow) ||
-      /\b(custo|caro|gratuito|de gra[çc]a|paga|pagar|mensalidade|taxa|tem que pagar)\b/i.test(uiLow)
-    );
-    // Vídeo principal: prioriza o que o consultor marcou como is_primary_explainer.
-    // Fallback: regex no nome (Conexão Green - Apresentação) por compatibilidade.
-    const introVideo =
-      freshMedia.find((m: any) => m.kind === "video" && m.is_primary_explainer === true) ||
-      freshMedia.find((m: any) =>
-        /conex[aã]o green.*apresenta/i.test(String(m.label || "")) && m.kind === "video"
-      );
-    // Gating do auto-intro: só se NÃO está no início (precisa lead ter falado pelo menos 2x),
-    // não houve vídeo nas últimas 6h, e a IA não escolheu send_media manualmente.
-    const inboundCount = history.filter((h: any) => h.message_direction === "inbound").length;
-    const canAutoSendVideo =
-      !videoCooldownActive &&
-      inboundCount >= 2 &&
-      tool !== "send_media" &&
-      tool !== "request_handoff" &&
-      recentMediaCount < 1;
-    if (isDoubtIntent && introVideo && canAutoSendVideo) {
-      tool = "send_media";
-      args = {
-        media_id: introVideo.id,
-        caption: "Vou te mandar um vídeo curto de 1 minuto que explica direitinho — depois te respondo qualquer dúvida.",
-        next_phase: phase === "abertura" ? "descoberta" : phase,
-        reasoning: "auto_intro_video: dúvida/objeção detectada (passou nos gates de cooldown e turnos)",
-      };
-    }
-
-    // ---- OVERRIDE 1b: lead mandou ÁUDIO → espelhar com áudio principal se IA escolheu texto ----
-    const primaryAudio = freshMedia.find(
-      (m: any) => m.kind === "audio" && m.is_primary_explainer === true,
-    );
-    const canAutoSendAudio =
-      !billAlreadyReceivedEarly &&
-      lastInboundKind === "audio" &&
-      recentMediaCount < 1 &&
-      tool === "send_text" &&
-      !!primaryAudio;
-    if (canAutoSendAudio) {
-      tool = "send_media";
-      args = {
-        media_id: primaryAudio.id,
-        caption: "",
-        next_phase: phase,
-        reasoning: "auto_primary_audio: lead respondeu em áudio; espelhando com áudio principal",
-      };
-    }
-
-    // ---- OVERRIDE 1c: bloqueia vídeo NÃO-principal se o principal ainda não foi enviado ----
-    // Evita que a IA mande "vídeo de benefícios/club" antes do vídeo de apresentação.
+    // Modelo "1 principal" foi descontinuado em favor de seleção por intent_tags.
+    // A IA escolhe a mídia compatível direto pela lista [MÍDIAS DISPONÍVEIS].
+    // Normaliza media_id (legado) → media_ids (array novo).
     if (tool === "send_media") {
-      const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
-      const primaryVideoFresh = freshMedia.find(
-        (m: any) => m.kind === "video" && m.is_primary_explainer === true,
-      );
-      if (
-        picked && picked.kind === "video" && !picked.is_primary_explainer &&
-        primaryVideoFresh && !videoCooldownActive
-      ) {
-        args = {
-          ...args,
-          media_id: primaryVideoFresh.id,
-          caption: args.caption || "Te mando primeiro o vídeo de 1 minuto que explica como funciona — depois respondo o resto.",
-          reasoning: (args.reasoning || "") + " [substituído por PRINCIPAL-VÍDEO: lead ainda não viu o de apresentação]",
-        };
+      if (!Array.isArray(args.media_ids) || args.media_ids.length === 0) {
+        if (args.media_id) args.media_ids = [args.media_id];
       }
+      // Dedup + máximo 2 + kinds diferentes (descarta o segundo se for mesmo kind)
+      const ids = Array.from(new Set((args.media_ids || []).filter((x: any) => typeof x === "string")));
+      const seenKinds = new Set<string>();
+      const filtered: string[] = [];
+      for (const id of ids) {
+        const m = eligibleMedia.find((x: any) => x.id === id);
+        if (!m) continue;
+        if (seenKinds.has(m.kind)) continue;
+        seenKinds.add(m.kind);
+        filtered.push(id);
+        if (filtered.length === 2) break;
+      }
+      args.media_ids = filtered;
     }
 
     // ---- OVERRIDE 2: bloqueia ask_for_name se foto da conta foi pedida/recebida ----
