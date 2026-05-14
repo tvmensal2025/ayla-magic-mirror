@@ -1,8 +1,7 @@
 // Cron diário: analisa últimos 30 dias de criativos por consultor,
 // identifica padrões vencedores/perdedores e gera recomendações.
 import { adminClient, corsHeaders } from "../_shared/fb-graph.ts";
-
-const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+import { geminiGenerate } from "../_shared/gemini.ts";
 
 interface AdRow {
   id: string;
@@ -31,10 +30,9 @@ async function summarizeWithAI(samples: { winners: AdRow[]; losers: AdRow[] }): 
   best_image_traits: string[];
   summary: string;
 } | null> {
-  if (!LOVABLE_API_KEY) return null;
   const w = samples.winners.slice(0, 5).map(s => `[${s.framework || "?"}] "${s.headline}" — ${s.primary_text} | leads:${s.leads} cad:${s.registrations} R$:${(s.spend_cents/100).toFixed(2)}`).join("\n");
   const l = samples.losers.slice(0, 5).map(s => `[${s.framework || "?"}] "${s.headline}" — ${s.primary_text} | leads:${s.leads} cad:${s.registrations} R$:${(s.spend_cents/100).toFixed(2)}`).join("\n");
-  const prompt = `Você é analista de copy de Facebook Ads em pt-BR. Analise os anúncios abaixo e extraia padrões.
+  const prompt = `Você é analista sênior de copy de Facebook Ads em pt-BR. Analise os anúncios abaixo e extraia padrões acionáveis.
 
 VENCEDORES (geraram leads/cadastros):
 ${w || "(nenhum)"}
@@ -44,26 +42,23 @@ ${l || "(nenhum)"}
 
 Retorne JSON ESTRITO:
 {
-  "winning_patterns": ["padrão curto 1", "padrão curto 2", ...],   // máx 5, ex: "títulos com número específico", "menciona CPFL", "tom de pergunta"
-  "losing_patterns": ["padrão a evitar 1", ...],                    // máx 5
-  "best_image_traits": ["traço visual 1", ...],                     // máx 3 (deduzido do contexto)
-  "summary": "1 frase curta com a principal lição da semana"
+  "winning_patterns": ["padrão curto 1", "padrão curto 2", ...],
+  "losing_patterns": ["padrão a evitar 1", ...],
+  "best_image_traits": ["traço visual 1", ...],
+  "summary": "1 frase curta com a principal lição"
 }`;
 
   try {
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-      }),
+    const r = await geminiGenerate({
+      model: "gemini-2.5-pro",
+      fallbackModel: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      temperature: 0.3,
+      responseMimeType: "application/json",
+      thinkingBudget: 2048,
+      functionName: "ad-creative-learner",
     });
-    if (!r.ok) return null;
-    const data = await r.json();
-    const text = data?.choices?.[0]?.message?.content;
-    return text ? JSON.parse(text) : null;
+    return r.text ? JSON.parse(r.text) : null;
   } catch {
     return null;
   }
