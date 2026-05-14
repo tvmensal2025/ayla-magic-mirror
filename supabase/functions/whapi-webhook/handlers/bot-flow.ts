@@ -932,60 +932,25 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       break;
     }
 
-    case "menu_inicial": {
-      const resp = isButton ? buttonId : messageText.toLowerCase().trim();
-      if (resp === "entender_desconto" || resp === "1" || resp?.includes("funciona") || resp?.includes("entender") || resp?.includes("desconto")) {
-        const videoUrl = "https://zlzasfhcxcznaprrragl.supabase.co/storage/v1/object/public/video%20igreen/Green_Energy.mp4";
-        await sendText(remoteJid, "🎬 Assista este vídeo rápido e entenda como funciona o desconto na sua conta de luz:");
-        if (await urlExists(videoUrl)) {
-          const sent = await sendMedia(remoteJid, videoUrl, "☀️ Conexão Green — Energia limpa com até 20% de desconto!", "video");
-          if (!sent) {
-            console.warn("[bot-flow] sendMedia retornou false para Green_Energy.mp4 — seguindo sem mensagem de erro ao cliente.");
-          }
-        } else {
-          console.warn("[bot-flow] vídeo Green_Energy.mp4 indisponível (HEAD != 200) — pulando envio.");
-        }
-        await new Promise((r) => setTimeout(r, 1500));
-        const posVideoMsg = "📺 Assistiu o vídeo? Agora escolha como deseja prosseguir:";
-        await sendOptions(remoteJid, posVideoMsg, [
-          { id: "cadastrar_agora", title: "📋 Cadastrar agora" },
-          { id: "falar_humano", title: "🧑 Falar com humano" },
-        ]);
-        updates.conversation_step = "pos_video";
-        reply = "";
-      } else if (resp === "cadastrar_agora" || resp === "2" || resp?.includes("cadastr")) {
-        reply = "📋 Ótimo! Vamos iniciar seu cadastro.\n\n📸 *Envie uma FOTO ou PDF da sua conta de energia* para começarmos!\n\nFormatos aceitos: JPG, PNG ou PDF";
-        updates.conversation_step = "aguardando_conta";
-      } else if (resp === "falar_humano" || resp === "3" || resp?.includes("humano") || resp?.includes("atendente") || resp?.includes("pessoa")) {
-        reply = `🧑 Entendido! Um consultor da equipe *${nomeRepresentante}* entrará em contato com você em breve.\n\n⏰ Nosso horário de atendimento é de segunda a sexta, das 8h às 18h.\n\nEnquanto isso, se mudar de ideia, é só digitar *cadastrar* para iniciar!`;
-        updates.conversation_step = "aguardando_humano";
-      } else {
-        const retryMsg = "Sem problemas 😊 Me conta: como prefere seguir?";
-        await sendOptions(remoteJid, retryMsg, [
-          { id: "entender_desconto", title: "💡 Quero saber mais" },
-          { id: "cadastrar_agora", title: "📋 Já quero participar" },
-          { id: "falar_humano", title: "🧑 Falar com humano" },
-        ]);
-        reply = "";
-      }
-      break;
-    }
-
+    case "menu_inicial":
     case "pos_video": {
-      const resp = isButton ? buttonId : messageText.toLowerCase().trim();
-      if (resp === "cadastrar_agora" || resp === "1" || resp?.includes("cadastr")) {
-        reply = "📋 Ótimo! Vamos iniciar seu cadastro.\n\n📸 *Envie uma FOTO ou PDF da sua conta de energia* para começarmos!\n\nFormatos aceitos: JPG, PNG ou PDF";
+      // Legado: leads existentes presos no menu de botões. Migra direto pra IA conversacional.
+      const resp = isButton ? buttonId : (messageText || "").toLowerCase().trim();
+      if (resp === "cadastrar_agora" || resp?.includes("cadastr") || resp?.includes("participar")) {
+        const first = ((customer as any).name || "").split(/\s+/)[0];
+        const v = first ? `${first}, ` : "";
+        reply = `Boa! ${v}pra eu travar a sua economia exata, me manda uma *foto* (ou PDF) da sua última conta de luz aqui no chat 📸`;
         updates.conversation_step = "aguardando_conta";
-      } else if (resp === "falar_humano" || resp === "2" || resp?.includes("humano") || resp?.includes("atendente") || resp?.includes("pessoa")) {
-        reply = `🧑 Entendido! Um consultor da equipe *${nomeRepresentante}* entrará em contato com você em breve.\n\n⏰ Nosso horário de atendimento é de segunda a sexta, das 8h às 18h.\n\nEnquanto isso, se mudar de ideia, é só digitar *cadastrar* para iniciar!`;
+        updates.sales_phase = "fechamento";
+      } else if (resp === "falar_humano" || resp?.includes("humano") || resp?.includes("atendente")) {
+        reply = `Tranquilo! Já te encaminhei pra *${nomeRepresentante}*, ela te chama aqui mesmo, ok?`;
         updates.conversation_step = "aguardando_humano";
       } else {
-        const retryMsg = "🤔 Não entendi. Escolha uma opção:";
-        await sendOptions(remoteJid, retryMsg, [
-          { id: "cadastrar_agora", title: "📋 Cadastrar agora" },
-          { id: "falar_humano", title: "🧑 Falar com humano" },
-        ]);
-        reply = "";
+        // Qualquer outra coisa → vira conversa livre, IA assume.
+        const first = ((customer as any).name || "").split(/\s+/)[0];
+        const v = first ? `${first}, ` : "";
+        reply = `${v}me conta: quanto vem em média na sua conta de luz? Assim eu já te calculo quanto dá pra economizar 💡`;
+        updates.conversation_step = "qualificacao";
       }
       break;
     }
