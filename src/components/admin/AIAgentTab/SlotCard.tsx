@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, Upload, Trash2, Loader2, CheckCircle2, Sparkles } from "lucide-react";
+import { Upload, Trash2, Sparkles, Film } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
@@ -14,6 +14,8 @@ export type SlotRow = {
   fallback_text: string | null;
   position: number;
   is_testing?: boolean;
+  video_url?: string | null;
+  video_label?: string | null;
 };
 
 export type SlotMedia = {
@@ -36,17 +38,10 @@ type Props = {
 
 export function SlotCard({ userId, slot, defaultMedia, personalMedia, onChange }: Props) {
   const { toast } = useToast();
-  const [usingPersonal, setUsingPersonal] = useState(!!personalMedia?.active);
-  const hasPersonal = !!personalMedia;
-  const hasPersonalActive = !!(personalMedia && personalMedia.active && !personalMedia.is_draft);
-
-  const activeMedia = usingPersonal && personalMedia ? personalMedia : defaultMedia;
-  const personalReplyRate = personalMedia && personalMedia.sent_count > 0
-    ? Math.round((personalMedia.reply_count / personalMedia.sent_count) * 100)
-    : null;
-  const defaultReplyRate = defaultMedia && defaultMedia.sent_count > 0
-    ? Math.round((defaultMedia.reply_count / defaultMedia.sent_count) * 100)
-    : null;
+  const hasPersonal = !!(personalMedia && personalMedia.url && !personalMedia.is_draft);
+  // Princípio único: usa o áudio personalizado se existir, senão o padrão.
+  const activeMedia = hasPersonal ? personalMedia : defaultMedia;
+  const variantLabel = hasPersonal ? "Meu áudio" : "Padrão (Camila)";
 
   async function uploadAudioBlob(blob: Blob) {
     const path = `${userId}/slots/${slot.slot_key}.webm`;
@@ -73,7 +68,6 @@ export function SlotCard({ userId, slot, defaultMedia, personalMedia, onChange }
         is_draft: false,
         is_public: false,
       };
-      // upsert por (consultant_id, slot_key) onde is_public=false
       if (personalMedia) {
         const { error } = await supabase
           .from("ai_media_library")
@@ -85,7 +79,6 @@ export function SlotCard({ userId, slot, defaultMedia, personalMedia, onChange }
         if (error) throw error;
       }
       toast({ title: "🎙️ Áudio salvo e ativado!" });
-      setUsingPersonal(true);
       onChange();
     } catch (e: any) {
       toast({ title: "Erro ao salvar", description: e.message, variant: "destructive" });
@@ -102,27 +95,14 @@ export function SlotCard({ userId, slot, defaultMedia, personalMedia, onChange }
 
   async function removePersonal() {
     if (!personalMedia) return;
-    if (!confirm("Remover seu áudio personalizado e voltar ao padrão?")) return;
+    if (!confirm("Remover seu áudio e voltar ao padrão da Camila?")) return;
     const { error } = await supabase.from("ai_media_library").delete().eq("id", personalMedia.id);
     if (error) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
       return;
     }
     toast({ title: "Voltou para o áudio padrão" });
-    setUsingPersonal(false);
     onChange();
-  }
-
-  async function toggleActive(usePersonalNow: boolean) {
-    if (usePersonalNow && !hasPersonal) return;
-    setUsingPersonal(usePersonalNow);
-    if (personalMedia) {
-      await supabase
-        .from("ai_media_library")
-        .update({ active: usePersonalNow })
-        .eq("id", personalMedia.id);
-      onChange();
-    }
   }
 
   return (
@@ -138,9 +118,7 @@ export function SlotCard({ userId, slot, defaultMedia, personalMedia, onChange }
           )}
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
-          <Badge variant={hasPersonalActive && usingPersonal ? "default" : "secondary"}>
-            {hasPersonalActive && usingPersonal ? "Em uso: Meu áudio" : "Em uso: Padrão"}
-          </Badge>
+          <Badge variant={hasPersonal ? "default" : "secondary"}>{variantLabel}</Badge>
           {slot.is_testing && (
             <Badge variant="outline" className="border-amber-500/60 text-amber-500 text-[10px]">
               🧪 Em teste — não envia
@@ -149,41 +127,22 @@ export function SlotCard({ userId, slot, defaultMedia, personalMedia, onChange }
         </div>
       </div>
 
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant={!usingPersonal ? "default" : "outline"}
-          onClick={() => toggleActive(false)}
-          className="flex-1"
-        >
-          {!usingPersonal && <CheckCircle2 className="w-4 h-4 mr-1" />}
-          Padrão (Camila)
-        </Button>
-        <Button
-          size="sm"
-          variant={usingPersonal ? "default" : "outline"}
-          onClick={() => toggleActive(true)}
-          disabled={!hasPersonalActive}
-          title={!hasPersonalActive ? "Grave abaixo para ativar" : ""}
-          className="flex-1"
-        >
-          {usingPersonal && <CheckCircle2 className="w-4 h-4 mr-1" />}
-          Meu áudio
-        </Button>
-      </div>
-
       {activeMedia?.url ? (
         <audio src={activeMedia.url} controls className="w-full h-9" />
       ) : (
         <div className="text-xs text-muted-foreground italic p-2 rounded-md bg-muted/30">
-          Sem áudio ainda — a IA enviará: <span className="text-foreground">"{slot.fallback_text}"</span>
+          Sem áudio — a IA enviará: <span className="text-foreground">"{slot.fallback_text}"</span>
         </div>
       )}
 
-      {(personalReplyRate !== null || defaultReplyRate !== null) && (
-        <div className="text-xs text-muted-foreground flex gap-4">
-          {defaultReplyRate !== null && <span>📊 Padrão: {defaultReplyRate}% resposta</span>}
-          {personalReplyRate !== null && <span className="text-primary">Seu: {personalReplyRate}% resposta</span>}
+      {slot.video_url && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-2 space-y-1">
+          <div className="flex items-center gap-2 text-xs text-primary font-medium">
+            <Film className="w-3.5 h-3.5" />
+            Vídeo enviado logo após este áudio
+            {slot.video_label && <span className="text-muted-foreground font-normal">— {slot.video_label}</span>}
+          </div>
+          <video src={slot.video_url} controls className="w-full max-h-48 rounded-md" />
         </div>
       )}
 
@@ -201,7 +160,7 @@ export function SlotCard({ userId, slot, defaultMedia, personalMedia, onChange }
         </label>
         {personalMedia && (
           <Button size="sm" variant="ghost" onClick={removePersonal} className="text-destructive">
-            <Trash2 className="w-4 h-4 mr-1" /> Remover meu
+            <Trash2 className="w-4 h-4 mr-1" /> Voltar ao padrão
           </Button>
         )}
       </div>

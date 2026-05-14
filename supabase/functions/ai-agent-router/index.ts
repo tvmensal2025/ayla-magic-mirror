@@ -181,7 +181,9 @@ Deno.serve(async (req) => {
     // 6b) Slots de áudio (Camila)
     const { data: slotsRaw } = await supabase
       .from("ai_agent_slots")
-      .select("slot_key, label, trigger_hint, fallback_text, min_interval_minutes, is_testing")
+      .select("slot_key, label, trigger_hint, fallback_text, min_interval_minutes, is_testing, video_url, video_label")
+      .eq("active", true)
+      .order("position");
       .eq("active", true)
       .order("position");
     const slots = slotsRaw || [];
@@ -227,8 +229,8 @@ ${JSON.stringify({
 BIBLIOTECA DE MÍDIAS DISPONÍVEIS PARA ESTA ETAPA (use o id em media_to_send_ids):
 ${relevantMedia.map((m: any) => `- id=${m.id} kind=${m.kind} label="${m.label}" intent_tags=${JSON.stringify(m.intent_tags || [])}${m.transcript ? ` transcript="${(m.transcript || "").slice(0, 120)}"` : ""}`).join("\n") || "(nenhuma)"}
 
-ÁUDIOS DA CAMILA (slots fixos — preencha "audio_slot_key" com o slot_key apropriado quando o gatilho bater; deixe vazio se nenhum se aplica):
-${slots.map((s: any) => `- slot_key=${s.slot_key} (${s.label}): ${s.trigger_hint || ""}`).join("\n") || "(nenhum)"}
+ÁUDIOS DA CAMILA (slots fixos — preencha "audio_slot_key" com o slot_key apropriado quando o gatilho bater; deixe vazio se nenhum se aplica). Slots marcados com 🎬 enviam um vídeo automaticamente logo após o áudio:
+${slots.map((s: any) => `- slot_key=${s.slot_key} (${s.label})${s.video_url ? " 🎬+vídeo" : ""}: ${s.trigger_hint || ""}`).join("\n") || "(nenhum)"}
 
 RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se for enviar áudio/vídeo, geralmente reply_text fica vazio ou bem curto. Se houver um slot_key apropriado, prefira "audio_slot_key" em vez de "media_to_send_ids".`;
 
@@ -466,6 +468,21 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
                   await supabase.from("ai_media_library")
                     .update({ sent_count: (cur.sent_count || 0) + 1 })
                     .eq("id", chosen.id);
+                }
+              }
+              // Vídeo do slot — enviado logo após o áudio
+              if (slot.video_url) {
+                try {
+                  await sleep(randInt(typingMin, typingMax));
+                  await sender.sendMedia(remote_jid, slot.video_url, slot.video_label || "", "video");
+                  await supabase.from("conversations").insert({
+                    customer_id, message_direction: "outbound",
+                    message_text: `[video:${slotKey}] ${slot.video_label || ""}`.trim(),
+                    message_type: "video",
+                    conversation_step: updates.conversation_step || stepBefore,
+                  });
+                } catch (e) {
+                  console.error("slot video send error:", e);
                 }
               }
             } else if (slot.fallback_text) {
