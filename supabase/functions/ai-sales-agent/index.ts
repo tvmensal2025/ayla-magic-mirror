@@ -375,7 +375,7 @@ function sanitizeHumanMessage(
 ): string {
   let out = (message || "").trim();
   if (!out) {
-    if (phase === "abertura") return "Qual seu nome? E quanto você está pagando em média na sua conta de luz?";
+    if (phase === "abertura") return trustedFirstName ? `${trustedFirstName}, quanto você está pagando em média na sua conta de luz?` : "Quanto você está pagando em média na sua conta de luz?";
     if (phase === "descoberta") return "Quanto vem em média a sua conta de luz?";
     if (phase === "pitch") return "Posso te mostrar exatamente quanto você economizaria?";
     if (phase === "objecao") return "Faz sentido. O que especificamente está pesando na decisão?";
