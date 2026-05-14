@@ -563,24 +563,25 @@ Deno.serve(async (req) => {
           ? `\n[CONTA JÁ FOI SOLICITADA HÁ POUCOS MINUTOS — não repita o pedido, apenas reforce gentilmente]\n`
           : "");
 
-    // Construir [JÁ SABEMOS] / [FALTA DESCOBRIR] dinamicamente — evita repergunta
+    // Construir [JÁ SABEMOS] / [FALTA DESCOBRIR] dinamicamente — evita repergunta.
+    // REGRA: a IA SÓ pergunta valor da conta. Distribuidora, cidade, endereço, titular vêm do OCR.
     const known: string[] = [];
     const missing: string[] = [];
     if (firstName) known.push(`Nome: ${firstName}`);
     if (customer.distribuidora) known.push(`Distribuidora: ${customer.distribuidora}`);
-    else missing.push("distribuidora");
     if (billNum > 0) known.push(`Valor da conta: R$ ${billNum}`);
-    else missing.push("valor médio da conta");
+    else missing.push("valor médio da conta de luz");
     if (customer.address_city) known.push(`Cidade: ${customer.address_city}/${customer.address_state || ""}`.trim());
     if (customer.pain_point) known.push(`Dor: ${customer.pain_point}`);
-    else if (billNum > 0 && customer.distribuidora) missing.push("dor/motivo principal (opcional)");
 
     const knownBlock = known.length
       ? `\n[JÁ SABEMOS — NÃO pergunte de novo, USE livremente]\n- ${known.join("\n- ")}\n`
       : "";
     const missingBlock = (missing.length && !billAlreadyReceived)
       ? `\n[FALTA DESCOBRIR — pergunte UM por vez nesta ordem]\n- ${missing.join("\n- ")}\n`
-      : (!billAlreadyReceived ? `\n[FALTA DESCOBRIR]\n- Nada essencial. Pode partir para o pitch ou pedir a foto da conta.\n` : "");
+      : (!billAlreadyReceived
+          ? `\n[FALTA DESCOBRIR]\n- Nada essencial. Faça o pitch com o cálculo OU peça a foto da conta para fechar.\n`
+          : "");
 
     const contextLine =
       `[Contexto do lead]\n` +
