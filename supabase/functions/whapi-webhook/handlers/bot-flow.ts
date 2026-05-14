@@ -146,6 +146,59 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   } = ctx;
 
   // ═══════════════════════════════════════════════════════════════════
+  // 🔁 AUTO-RESUME: se o bot foi pausado por "lead_nao_pronto" / "lead_quer_pensar"
+  // e o lead voltou a falar, despausa automaticamente. Vendedor humano não fica mudo.
+  // ═══════════════════════════════════════════════════════════════════
+  if (
+    (customer as any).bot_paused &&
+    ["lead_nao_pronto", "lead_quer_pensar"].includes(String((customer as any).bot_paused_reason || ""))
+  ) {
+    console.log(`[auto-resume] Despausando bot — lead voltou a falar (motivo: ${(customer as any).bot_paused_reason})`);
+    try {
+      await supabase
+        .from("customers")
+        .update({ bot_paused: false, bot_paused_reason: null, bot_paused_at: null })
+        .eq("id", customer.id);
+    } catch (e) {
+      console.warn("[auto-resume] update falhou:", (e as any)?.message);
+    }
+    (customer as any).bot_paused = false;
+    (customer as any).bot_paused_reason = null;
+    (customer as any).bot_paused_at = null;
+    if ((customer as any).conversation_step === "aguardando_humano") {
+      (customer as any).conversation_step = "qualificacao";
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 🪪 NOME — sobrescreve se o lead se reapresentou ("me chamo X", "sou a X", etc.)
+  // Resolve o bug do "Olá, Pedro" quando o lead na verdade é Larissa.
+  // ═══════════════════════════════════════════════════════════════════
+  if (messageText && !isFile && !isButton) {
+    const intro = String(messageText).match(RE_SELF_INTRO);
+    if (intro && intro[1]) {
+      const candidate = normalizeLeadName(intro[1]);
+      if (candidate) {
+        const currentFirst = String((customer as any).name || "").trim().split(/\s+/)[0]?.toLowerCase();
+        if (currentFirst !== candidate.toLowerCase()) {
+          console.log(`[name-overwrite] "${(customer as any).name || "—"}" → "${candidate}" (auto-introdução)`);
+          try {
+            await supabase
+              .from("customers")
+              .update({ name: candidate, name_source: "self_introduced" })
+              .eq("id", customer.id);
+          } catch (e) {
+            console.warn("[name-overwrite] update falhou:", (e as any)?.message);
+          }
+          (customer as any).name = candidate;
+          (customer as any).name_source = "self_introduced";
+        }
+      }
+    }
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════
   // HELPER: Envia opções como TEXTO (botões não funcionam na Evolution API atual)
   // Formato: mensagem + opções numeradas
   // ═══════════════════════════════════════════════════════════════════
