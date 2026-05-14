@@ -181,16 +181,17 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
       return;
     }
     const { data } = supabase.storage.from("ai-agent-media").getPublicUrl(path);
+    const bustedUrl = `${data.publicUrl}?v=${Date.now()}`;
     const existing = defaultMedia[slotKey];
     const slot = slots.find((s) => s.slot_key === slotKey);
     if (existing?.id) {
       await supabase.from("ai_media_library").update({
-        url: data.publicUrl, storage_path: path, duration_sec: durationSec, active: true,
+        url: bustedUrl, storage_path: path, duration_sec: durationSec, active: true,
       }).eq("id", existing.id);
     } else {
       await supabase.from("ai_media_library").insert({
         consultant_id: null, kind: "audio", slot_key: slotKey,
-        label: slot?.label || slotKey, url: data.publicUrl, storage_path: path,
+        label: slot?.label || slotKey, url: bustedUrl, storage_path: path,
         duration_sec: durationSec, active: true, is_public: true, is_draft: false,
       });
     }
