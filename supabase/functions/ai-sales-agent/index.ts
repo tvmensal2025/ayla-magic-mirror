@@ -681,10 +681,23 @@ Deno.serve(async (req) => {
     if (customer.address_city) known.push(`Cidade: ${customer.address_city}/${customer.address_state || ""}`.trim());
     if (customer.pain_point) known.push(`Dor: ${customer.pain_point}`);
 
+    // Quantas vezes a IA já perguntou o valor da conta? Se ≥2, parar de perguntar
+    // e pedir a foto direto (evita loop irritante).
+    const billAskCount = history.filter(
+      (h: any) =>
+        h.message_direction !== "inbound" &&
+        /(valor|quanto.*paga|quanto.*vem|m[eé]dia).*(conta|luz)|conta.*(valor|m[eé]dia)/i.test(
+          String(h.message_text || ""),
+        ),
+    ).length;
+    const stopAskingBill = billNum === 0 && billAskCount >= 2;
+
     const knownBlock = known.length
       ? `\n[JÁ SABEMOS — NÃO pergunte de novo, USE livremente]\n- ${known.join("\n- ")}\n`
       : "";
-    const missingBlock = (missing.length && !billAlreadyReceived)
+    const missingBlock = stopAskingBill
+      ? `\n[FALTA DESCOBRIR]\n- O lead JÁ foi perguntado 2x sobre o valor da conta e não respondeu. PARE DE PERGUNTAR. Peça a FOTO da conta de luz: "Me manda uma foto da sua conta de luz que eu já vejo tudo por ali, fica mais fácil pra você 💚".\n`
+      : (missing.length && !billAlreadyReceived)
       ? `\n[FALTA DESCOBRIR — pergunte UM por vez nesta ordem]\n- ${missing.join("\n- ")}\n`
       : (!billAlreadyReceived
           ? `\n[FALTA DESCOBRIR]\n- Nada essencial. Faça o pitch com o cálculo OU peça a foto da conta para fechar.\n`
