@@ -223,7 +223,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         if (aiResp.ok) {
           const aiBody = await aiResp.json();
           const decision = aiBody?.decision;
-          const media = aiBody?.media; // { id, url, kind, label } | null
+          const media = aiBody?.media;
+          const medias: Array<{ id: string; url: string; kind: string; label: string }> = Array.isArray(aiBody?.medias) && aiBody.medias.length > 0 ? aiBody.medias : (media ? [media] : []);
           const tool = decision?.tool;
           const args = decision?.args || {};
 
@@ -248,16 +249,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             return { reply, updates };
           }
           if (tool === "send_media") {
-            // Send the media now via Evolution; reply carries the caption (or empty)
-            if (media?.url) {
-              const kind = ["audio", "video", "image"].includes(media.kind) ? media.kind : "document";
+            const ordered = [...medias].sort((a, b) => (a.kind === "audio" ? -1 : b.kind === "audio" ? 1 : 0));
+            for (let i = 0; i < ordered.length; i++) {
+              const m = ordered[i];
+              const k = ["audio", "video", "image"].includes(m.kind) ? m.kind : "document";
+              const cap = i === 0 ? (args.caption || "") : "";
               try {
-                await sendMedia(remoteJid, media.url, args.caption || "", kind);
+                await sendMedia(remoteJid, m.url, cap, k);
+                if (i < ordered.length - 1) await new Promise((r) => setTimeout(r, 1500));
               } catch (e) {
                 console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);
               }
             }
-            reply = ""; // caption already attached to media
+            reply = "";
             return { reply, updates };
           }
           if (tool === "mark_lost") {

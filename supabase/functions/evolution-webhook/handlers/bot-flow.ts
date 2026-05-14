@@ -218,7 +218,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         if (aiResp.ok) {
           const aiBody = await aiResp.json();
           const decision = aiBody?.decision;
-          const media = aiBody?.media; // { id, url, kind, label } | null
+          const media = aiBody?.media; // legado: 1 mídia
+          const medias: Array<{ id: string; url: string; kind: string; label: string }> = Array.isArray(aiBody?.medias) && aiBody.medias.length > 0 ? aiBody.medias : (media ? [media] : []);
           const tool = decision?.tool;
           const args = decision?.args || {};
 
@@ -251,11 +252,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             return { reply, updates };
           }
           if (tool === "send_media") {
-            if (media?.url) {
-              const kind = ["audio", "video", "image"].includes(media.kind) ? media.kind : "document";
+            // Ordem: áudio primeiro (acolhe), depois vídeo/imagem (prova). Caption só na 1ª.
+            const ordered = [...medias].sort((a, b) => (a.kind === "audio" ? -1 : b.kind === "audio" ? 1 : 0));
+            for (let i = 0; i < ordered.length; i++) {
+              const m = ordered[i];
+              const k = ["audio", "video", "image"].includes(m.kind) ? m.kind : "document";
+              const cap = i === 0 ? (args.caption || "") : "";
               try {
-                await humanPace(args.caption || media.label || "");
-                await sendMedia(remoteJid, media.url, args.caption || "", kind);
+                await humanPace(cap || m.label || "");
+                await sendMedia(remoteJid, m.url, cap, k);
+                if (i < ordered.length - 1) await new Promise((r) => setTimeout(r, 1500));
               } catch (e) {
                 console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);
               }

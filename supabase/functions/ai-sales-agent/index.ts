@@ -49,26 +49,30 @@ const tools = [
     function: {
       name: "send_media",
       description:
-        "Envia uma mídia ESPECÍFICA da biblioteca. Você DEVE escolher um media_id da lista [MÍDIAS DISPONÍVEIS] fornecida no contexto. Não invente IDs.",
+        "Envia 1 ou 2 mídias da biblioteca (ex.: 1 áudio + 1 vídeo) que respondem à dúvida atual do lead. Use media_ids (array) com 1 ou 2 UUIDs DIFERENTES da lista [MÍDIAS DISPONÍVEIS]. Combine áudio+vídeo SOMENTE quando ambos esclarecem a MESMA dúvida e não foram enviados antes. Nunca repita kind (não mande 2 áudios ou 2 vídeos juntos). Não invente IDs.",
       parameters: {
         type: "object",
         properties: {
+          media_ids: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+            maxItems: 2,
+            description: "1 ou 2 UUIDs (kinds diferentes) da lista [MÍDIAS DISPONÍVEIS]",
+          },
           media_id: {
             type: "string",
-            description: "UUID exato de uma mídia listada em [MÍDIAS DISPONÍVEIS]",
+            description: "(legado) Use media_ids. Se preencher, mande só este UUID.",
           },
-          caption: { type: "string", description: "Legenda curta (1 linha) que acompanha a mídia" },
+          caption: { type: "string", description: "Legenda curta (1 linha) que acompanha a 1ª mídia" },
           next_phase: {
             type: "string",
             enum: ["abertura", "descoberta", "pitch", "objecao", "fechamento"],
           },
-          score_delta: {
-            type: "number",
-            description: "Quanto somar/subtrair no qualification_score (0-100).",
-          },
+          score_delta: { type: "number" },
           reasoning: { type: "string" },
         },
-        required: ["media_id", "reasoning"],
+        required: ["reasoning"],
       },
     },
   },
@@ -249,70 +253,61 @@ FUNIL DE VENDAS (5 fases)
 3. PITCH — Com o valor da conta em mãos, faça o cálculo CONCRETO:
    "Uma conta de R$ X representa em torno de R$ Y de economia por mês com a iGreen, R$ Z por ano. Tudo isso sem instalar nada e mantendo a mesma [distribuidora]."
    Mencione Conexão Club como bônus se o lead demonstrar interesse.
-4. OBJEÇÃO / DÚVIDA — siga a MATRIZ DE MÍDIA abaixo. Respostas firmes:
-   • "É golpe?" → vídeo PRINCIPAL + 1 frase: "É regulamentada pela ANEEL desde 2017, mais de 600 mil clientes."
-   • "Tem fidelidade?" → "Não há. Pode encerrar quando quiser, sem multa."
-   • "Vou trocar de empresa?" → "Não. A energia continua sendo da [distribuidora]."
-   • "Tem custo?" → vídeo PRINCIPAL + "Nenhum. Sem instalação, sem taxa, sem mensalidade."
-   • "Vou pensar" → não pressione; pergunte o que especificamente o faz hesitar.
+4. OBJEÇÃO / DÚVIDA — siga a MATRIZ DE MÍDIA POR INTENÇÃO abaixo. Respostas firmes e curtas.
 5. FECHAMENTO — Sinal de compra ("quero", "como faço", "vamos lá") → use advance_to_closing pedindo a foto da conta de luz. Se a conta JÁ foi recebida (verifique [Contexto]), NÃO peça de novo — confirme os dados extraídos.
 
 ═══════════════════════════════════════════
-MATRIZ DE MÍDIA — QUANDO ENVIAR CADA TIPO (LEI)
+MATRIZ DE MÍDIA POR INTENÇÃO (LEI)
 ═══════════════════════════════════════════
-Esta matriz é DETERMINÍSTICA. Aplique a TODA decisão de send_media. Em dúvida → send_text.
+Cada item de [MÍDIAS DISPONÍVEIS] traz step_tags (etapa do funil) e intent_tags (a dúvida específica que ele responde: ex. "e_golpe", "como_funciona", "tem_custo", "fidelidade", "instalacao", "desconto", "club", "depoimento", "cadastro").
 
-VÍDEO (send_media kind=video) — APENAS se TODAS verdadeiras:
-  a) o lead fez DÚVIDA GERAL ("como funciona", "é golpe", "é seguro", "é confiável", "tem custo", "explica melhor") OU pediu explicitamente "manda um vídeo".
-  b) [CADÊNCIA] não indica cooldown de vídeo (sem vídeo nas últimas 6h).
-  c) existe vídeo marcado [PRINCIPAL-VÍDEO] em [MÍDIAS DISPONÍVEIS].
-  → use SEMPRE o vídeo [PRINCIPAL-VÍDEO]. Outros vídeos (benefícios, club, depoimento) APENAS se o lead disser explicitamente "ainda não entendi" DEPOIS de já ter visto o principal.
-  PROIBIDO: mandar vídeo de "benefícios"/"club"/"depoimento" sem o lead pedir, ou antes do vídeo principal.
+REGRA DE SELEÇÃO (deterministic):
+  1) Identifique a INTENÇÃO da última mensagem do lead (a dúvida ou objeção dela).
+  2) Procure em [MÍDIAS DISPONÍVEIS] o item cujos intent_tags casam com essa intenção E cujo step_tags inclui a fase atual (ou "any").
+  3) Se houver MATCH, use send_media com media_ids = [esse_id].
+  4) Se a dúvida for densa/emocional ("é golpe?", "minha mãe disse", "tô com medo", "explica direito") E houver UM ÁUDIO + UM VÍDEO ambos com intent_tag compatível, mande os DOIS no mesmo send_media (media_ids=[audio_id, video_id]) — áudio acolhe, vídeo prova.
+  5) Se NÃO houver mídia compatível, responda por send_text. NÃO invente "vou te mandar um vídeo".
 
-ÁUDIO (send_media kind=audio) — envie quando:
-  a) [CADÊNCIA] mostra "Última msg do lead: audio" (espelho — responda em áudio também), OU
-  b) o lead pediu "manda áudio", "prefiro áudio", "explica por voz", "fala em áudio", OU
-  c) é a 1ª resposta a uma OBJEÇÃO EMOCIONAL ("tô com medo", "já me enganaram", "não confio", "minha mãe disse", "tenho receio") E existe áudio [PRINCIPAL-ÁUDIO] disponível.
-  Use SEMPRE o áudio marcado [PRINCIPAL-ÁUDIO]. Nunca prometa áudio se não houver na lista. Nunca mande áudio depois que a conta foi recebida.
+REGRA DE REPETIÇÃO (LEI ABSOLUTA):
+  - Cada mídia é enviada NO MÁXIMO 1× por lead na vida toda. As que já foram enviadas NÃO aparecem mais em [MÍDIAS DISPONÍVEIS].
+  - Se a mídia ideal já foi enviada (não está na lista), responda por TEXTO curto reforçando o ponto — NÃO substitua por outra mídia "para preencher".
 
-IMAGEM (send_media kind=image) — apenas se o lead pedir comprovação visual (print, tabela, exemplo de fatura).
+REGRA DE COMBINAÇÃO:
+  - Pode mandar 1 ÁUDIO + 1 VÍDEO juntos (kinds diferentes). NUNCA 2 do mesmo kind.
+  - IMAGEM apenas se o lead pedir comprovação visual.
+  - TEXTO é o default — em qualquer dúvida, prefira texto.
 
-TEXTO (send_text) — DEFAULT. Use sempre que NENHUMA regra de mídia acima dispare. Em qualquer dúvida, prefira texto.
-
-REGRAS DURAS (violar = falha grave):
-  - NUNCA 2 mídias seguidas. [CADÊNCIA] já bloqueia, mas não force.
+REGRAS DURAS:
   - NUNCA mídia depois de "CONTA JÁ RECEBIDA E ANALISADA".
   - NUNCA cite media_id que não está em [MÍDIAS DISPONÍVEIS].
-  - Se a mídia [PRINCIPAL] do tipo já foi enviada (não aparece mais), responda por TEXTO curto — NÃO substitua por outra mídia do mesmo tipo "para preencher".
-  - NUNCA prometa "vou te mandar áudio/vídeo agora" se não está acionando send_media nesta MESMA decisão com media_id válido.
+  - NUNCA prometa "vou te mandar áudio/vídeo agora" sem acionar send_media na MESMA decisão com media_ids válidos.
+  - Se o lead mandou ÁUDIO, prefira responder com áudio também (espelho), se houver áudio compatível disponível.
 
 ═══════════════════════════════════════════
 PÓS-CONTA → HANDOFF PARA OPERADOR (CRÍTICO)
 ═══════════════════════════════════════════
 Quando [Contexto] indicar "CONTA JÁ RECEBIDA E ANALISADA":
 1. Em UMA mensagem curta, confirme os dados (titular + valor + distribuidora) e pergunte "Está tudo correto para eu seguir com o cadastro?".
-2. Assim que o lead confirmar (sim, pode, vamos, correto, isso, etc.), use IMEDIATAMENTE request_handoff com urgency="alta" e reason="lead_pronto_cadastro: operador deve clicar Cadastrar no Portal, depois Enviar OTP e Enviar Link Facial".
-3. PROIBIDO continuar enviando vídeos, áudios ou explicações depois que a conta foi recebida. O operador humano tem botões no painel para: (a) Cadastrar no portal iGreen, (b) Enviar código OTP, (c) Enviar link de validação facial. Sua função terminou — entregue o lead.
-4. Se o lead pedir mais um vídeo/explicação após a conta, responda send_text breve ("Vou te conectar com nossa equipe para finalizar agora") e em seguida, na próxima rodada, request_handoff.
+2. Assim que o lead confirmar, use IMEDIATAMENTE request_handoff com urgency="alta" e reason="lead_pronto_cadastro: operador deve clicar Cadastrar no Portal, depois Enviar OTP e Enviar Link Facial".
+3. PROIBIDO continuar enviando vídeos, áudios ou explicações depois que a conta foi recebida.
 
 ═══════════════════════════════════════════
 REGRAS CRÍTICAS
 ═══════════════════════════════════════════
 - Use SEMPRE uma das tools. Nunca responda fora de tool.
-- Se [Contexto] indicar "CONTA JÁ RECEBIDA E ANALISADA": JAMAIS peça a foto da conta. Use os dados extraídos para confirmar com o cliente e siga para o cadastro (handoff).
-- Se [Contexto] indicar "Bill_requested_at recente (<10 min)": NÃO repita o pedido — apenas reforce gentilmente que aguarda o envio.
+- Se [Contexto] indicar "CONTA JÁ RECEBIDA E ANALISADA": JAMAIS peça a foto da conta. Confirme com o cliente e siga para handoff.
+- Se [Contexto] indicar "Bill_requested_at recente (<10 min)": NÃO repita o pedido.
 - Se o lead pedir humano explicitamente, request_handoff.
-- Se sumir/"depois eu vejo", schedule_followup (1h, 24h ou 72h conforme contexto).
-- Se ainda não tem nome confiável e o lead já demonstrou interesse, use ask_for_name.
-- score_delta: +20 sinal de compra/foto • +10 valor revelado • +5 engajamento curto • 0 neutro • -10 objeção forte • -20 desistência clara.
+- Se sumir/"depois eu vejo", schedule_followup (1h, 24h ou 72h).
+- Se ainda não tem nome confiável e o lead já demonstrou interesse, ask_for_name.
+- score_delta: +20 sinal de compra/foto • +10 valor revelado • +5 engajamento • -10 objeção forte • -20 desistência.
 
-NÃO INVENTE preços, prazos contratuais, percentuais ou condições. Quando não souber, diga que vai verificar.
+NÃO INVENTE preços, prazos ou percentuais.
 
-PROIBIDO INVENTAR DADOS DO LEAD OU MÍDIAS:
-- NUNCA cite a cidade, bairro, distribuidora ou nome do lead se não estiver explicitamente em [Contexto do lead]. Se não tiver, PERGUNTE — não chute.
-- NUNCA prometa "vou te mandar um áudio/vídeo/imagem" se não houver mídia compatível em [MÍDIAS DISPONÍVEIS]. Se não houver áudio na lista, NÃO mencione áudio.
-- NUNCA escreva frases como "estou preparando", "vou te enviar agora", "segue áudio", "veja este vídeo" sem que a tool send_media esteja sendo de fato usada com um media_id válido.
-- Se não houver mídia, use APENAS send_text com o conteúdo direto.
+PROIBIDO INVENTAR DADOS:
+- NUNCA cite cidade, distribuidora ou nome do lead se não estiver em [Contexto do lead]. Se não tiver, PERGUNTE.
+- NUNCA prometa mídia que não existe na lista.
+- Se não houver mídia compatível, use APENAS send_text.
 
 ${custom ? `\n═══════════════════════════════════════════\nINSTRUÇÕES ADICIONAIS DO CONSULTOR\n═══════════════════════════════════════════\n${custom}` : ""}`;
 }
@@ -584,11 +579,9 @@ Deno.serve(async (req) => {
       .order("priority", { ascending: false })
       .limit(15);
 
-    const eligibleMedia = (candidates || []).filter((m: any) => {
-      const intents = m.intent_tags || [];
-      if (!intents.length) return true;
-      return intents.some((t: string) => profileTags.includes(t));
-    });
+    // intent_tags agora descrevem a DÚVIDA que a mídia responde (ex.: "e_golpe", "tem_custo").
+    // O matching com a dúvida do lead é feito pela própria IA via prompt — não filtramos aqui.
+    const eligibleMedia = candidates || [];
 
     // Conta só conta como "recebida" se OCR concluído E nome veio de fonte confiável.
     // Sem isso, o LLM ficava preso confirmando dados de um lead anterior reaproveitado.
@@ -598,64 +591,40 @@ Deno.serve(async (req) => {
     const billAlreadyReceivedEarly =
       !!customer.electricity_bill_photo_url && !!customer.ocr_done && nameSourceTrusted;
 
-    // Cooldown de mídia: pega últimas 5 mídias enviadas para esse lead e marca como "já enviadas".
+    // Cooldown 1× por vida: mídia enviada uma vez para este lead nunca aparece de novo.
     const { data: recentMediaSent } = await supabase
       .from("ai_decisions")
       .select("media_sent_id")
       .eq("customer_id", customer_id)
       .not("media_sent_id", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(5);
+      .limit(500);
     const sentMediaIds = new Set((recentMediaSent || []).map((r: any) => r.media_sent_id));
     const freshMedia = eligibleMedia.filter((m: any) => !sentMediaIds.has(m.id));
 
-    // Cooldown de VÍDEO em janela de 6h: se qualquer vídeo foi enviado a este lead nas
-    // últimas 6h, bloqueia novos vídeos (mas permite áudio/imagem).
-    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
-    const { data: recentVideoOutbound } = await supabase
-      .from("messages")
-      .select("id")
-      .eq("customer_id", customer_id)
-      .eq("message_direction", "outbound")
-      .eq("message_type", "video")
-      .gte("created_at", sixHoursAgo)
-      .limit(1);
-    const videoCooldownActive = !!(recentVideoOutbound && recentVideoOutbound.length > 0);
+    const formatTags = (arr: any) => {
+      const a = Array.isArray(arr) ? arr.filter((x: any) => x && x !== "any") : [];
+      return a.length ? a.join(",") : "—";
+    };
 
     const mediaListLine = billAlreadyReceivedEarly
       ? `\n[MÍDIAS DISPONÍVEIS]\nNENHUMA — a conta já foi recebida. Confirme os dados em send_text e em seguida use request_handoff. PROIBIDO send_media nesta etapa.`
       : freshMedia.length
-      ? `\n[MÍDIAS DISPONÍVEIS para fase ${phase}]\n` +
+      ? `\n[MÍDIAS DISPONÍVEIS para fase ${phase}] (cada uma só pode ser enviada 1× na vida do lead)\n` +
         freshMedia
-          .map(
-            (m: any, i: number) => {
-              const kindUpper = String(m.kind || "").toUpperCase();
-              const primaryTag = m.is_primary_explainer
-                ? ` [PRINCIPAL-${kindUpper} — use SEMPRE este ${m.kind} quando a MATRIZ DE MÍDIA mandar enviar ${m.kind}; outros do mesmo tipo só se o lead disser que ainda não entendeu]`
-                : "";
-              return `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""}${primaryTag}`;
-            },
+          .map((m: any, i: number) =>
+            `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""} | etapa=[${formatTags(m.step_tags)}] | intencao=[${formatTags(m.intent_tags)}]`
           )
           .join("\n") +
-        `\nUse send_media APENAS com um desses media_id. ${
-          sentMediaIds.size
-            ? `(${sentMediaIds.size} mídia(s) já enviada(s) recentemente foram ocultadas — NÃO repita.)`
-            : ""
+        `\nUse send_media com media_ids=[id]. Combine 1 áudio + 1 vídeo (kinds DIFERENTES) no mesmo send_media só quando ambos casam com a MESMA intenção da dúvida atual.${
+          sentMediaIds.size ? ` (${sentMediaIds.size} mídia(s) já enviada(s) anteriormente foram ocultadas — NÃO repita.)` : ""
         }`
       : `\n[MÍDIAS DISPONÍVEIS]\nNenhuma nova para esta fase (todas já enviadas). Use send_text.`;
 
     const cadenceLine =
       `\n[CADÊNCIA]\n` +
-      `- Mídias enviadas nas últimas 4 respostas: ${recentMediaCount}\n` +
       `- Última msg do lead foi do tipo: ${lastInboundKind}\n` +
-      (recentMediaCount >= 1
-        ? `- ⚠️ NÃO envie mídia agora — a última resposta JÁ foi mídia. Use send_text.\n`
-        : ``) +
-      (videoCooldownActive
-        ? `- 🚫 VÍDEO BLOQUEADO: já enviamos um vídeo a este lead nas últimas 6h. Responda por TEXTO curto, sem prometer outro vídeo.\n`
-        : ``) +
       (lastInboundKind === "audio"
-        ? `- Lead mandou áudio: prefira responder com áudio também (espelho).\n`
+        ? `- Lead mandou áudio: prefira responder com áudio também (espelho), se houver áudio compatível em [MÍDIAS DISPONÍVEIS].\n`
         : ``) +
       (lastInbound && (lastInbound.message_text || "").length < 20
         ? `- Lead foi breve: responda breve também.\n`
@@ -916,77 +885,26 @@ Deno.serve(async (req) => {
     let tool = toolCallG.name;
     let args: any = toolCallG.args || {};
 
-    // ---- OVERRIDE 1: dúvida/objeção → forçar vídeo de 1min se ainda não foi enviado ----
-    const uiLow = (user_input || "").toLowerCase();
-    const isDoubtIntent = !billAlreadyReceivedEarly && (
-      /\b(como funciona|me explica|n[aã]o entendi|o que [eé]|funciona como|explica|explicar)\b/i.test(uiLow) ||
-      /\b(golpe|fraude|seguro|confi[aá]vel|enganaç[aã]o|verdade|mesmo|s[eé]rio)\b/i.test(uiLow) ||
-      /\b(custo|caro|gratuito|de gra[çc]a|paga|pagar|mensalidade|taxa|tem que pagar)\b/i.test(uiLow)
-    );
-    // Vídeo principal: prioriza o que o consultor marcou como is_primary_explainer.
-    // Fallback: regex no nome (Conexão Green - Apresentação) por compatibilidade.
-    const introVideo =
-      freshMedia.find((m: any) => m.kind === "video" && m.is_primary_explainer === true) ||
-      freshMedia.find((m: any) =>
-        /conex[aã]o green.*apresenta/i.test(String(m.label || "")) && m.kind === "video"
-      );
-    // Gating do auto-intro: só se NÃO está no início (precisa lead ter falado pelo menos 2x),
-    // não houve vídeo nas últimas 6h, e a IA não escolheu send_media manualmente.
-    const inboundCount = history.filter((h: any) => h.message_direction === "inbound").length;
-    const canAutoSendVideo =
-      !videoCooldownActive &&
-      inboundCount >= 2 &&
-      tool !== "send_media" &&
-      tool !== "request_handoff" &&
-      recentMediaCount < 1;
-    if (isDoubtIntent && introVideo && canAutoSendVideo) {
-      tool = "send_media";
-      args = {
-        media_id: introVideo.id,
-        caption: "Vou te mandar um vídeo curto de 1 minuto que explica direitinho — depois te respondo qualquer dúvida.",
-        next_phase: phase === "abertura" ? "descoberta" : phase,
-        reasoning: "auto_intro_video: dúvida/objeção detectada (passou nos gates de cooldown e turnos)",
-      };
-    }
-
-    // ---- OVERRIDE 1b: lead mandou ÁUDIO → espelhar com áudio principal se IA escolheu texto ----
-    const primaryAudio = freshMedia.find(
-      (m: any) => m.kind === "audio" && m.is_primary_explainer === true,
-    );
-    const canAutoSendAudio =
-      !billAlreadyReceivedEarly &&
-      lastInboundKind === "audio" &&
-      recentMediaCount < 1 &&
-      tool === "send_text" &&
-      !!primaryAudio;
-    if (canAutoSendAudio) {
-      tool = "send_media";
-      args = {
-        media_id: primaryAudio.id,
-        caption: "",
-        next_phase: phase,
-        reasoning: "auto_primary_audio: lead respondeu em áudio; espelhando com áudio principal",
-      };
-    }
-
-    // ---- OVERRIDE 1c: bloqueia vídeo NÃO-principal se o principal ainda não foi enviado ----
-    // Evita que a IA mande "vídeo de benefícios/club" antes do vídeo de apresentação.
+    // Modelo "1 principal" foi descontinuado em favor de seleção por intent_tags.
+    // A IA escolhe a mídia compatível direto pela lista [MÍDIAS DISPONÍVEIS].
+    // Normaliza media_id (legado) → media_ids (array novo).
     if (tool === "send_media") {
-      const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
-      const primaryVideoFresh = freshMedia.find(
-        (m: any) => m.kind === "video" && m.is_primary_explainer === true,
-      );
-      if (
-        picked && picked.kind === "video" && !picked.is_primary_explainer &&
-        primaryVideoFresh && !videoCooldownActive
-      ) {
-        args = {
-          ...args,
-          media_id: primaryVideoFresh.id,
-          caption: args.caption || "Te mando primeiro o vídeo de 1 minuto que explica como funciona — depois respondo o resto.",
-          reasoning: (args.reasoning || "") + " [substituído por PRINCIPAL-VÍDEO: lead ainda não viu o de apresentação]",
-        };
+      if (!Array.isArray(args.media_ids) || args.media_ids.length === 0) {
+        if (args.media_id) args.media_ids = [args.media_id];
       }
+      // Dedup + máximo 2 + kinds diferentes (descarta o segundo se for mesmo kind)
+      const ids = Array.from(new Set((args.media_ids || []).filter((x: any) => typeof x === "string")));
+      const seenKinds = new Set<string>();
+      const filtered: string[] = [];
+      for (const id of ids) {
+        const m = eligibleMedia.find((x: any) => x.id === id);
+        if (!m) continue;
+        if (seenKinds.has(m.kind)) continue;
+        seenKinds.add(m.kind);
+        filtered.push(id);
+        if (filtered.length === 2) break;
+      }
+      args.media_ids = filtered;
     }
 
     // ---- OVERRIDE 2: bloqueia ask_for_name se foto da conta foi pedida/recebida ----
@@ -1039,8 +957,9 @@ Deno.serve(async (req) => {
 
     const latencyMs = Date.now() - t0;
 
-    // Validate media_id and resolve URL/kind for downstream sender
-    let resolvedMedia: { id: string; url: string; kind: string; label: string } | null = null;
+    // Resolve média(s) selecionada(s). Suporta combo (1 áudio + 1 vídeo).
+    type ResolvedMedia = { id: string; url: string; kind: string; label: string };
+    let resolvedMedias: ResolvedMedia[] = [];
     if (tool === "send_media" && billAlreadyReceivedEarly) {
       // Hard guard: nunca enviar mídia depois da conta — sempre handoff.
       return new Response(
@@ -1059,29 +978,25 @@ Deno.serve(async (req) => {
       );
     }
     if (tool === "send_media") {
-      // Server-side anti-spam: se a última saída já foi mídia OU se essa media_id já foi
-      // enviada nas últimas 5 vezes, degrada para send_text (caption como mensagem).
-      const justSentMedia = recentMediaCount >= 1;
-      const alreadySentSameId = sentMediaIds.has(args.media_id);
-      const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
-      const invalidId = !picked || !picked.url;
-      const isVideoBlockedByCooldown = !!picked && picked.kind === "video" && videoCooldownActive;
+      const ids: string[] = Array.isArray(args.media_ids) ? args.media_ids : [];
+      // Filtra: deve estar em freshMedia (não enviada antes), ter URL, kind único na seleção.
+      const seenKinds = new Set<string>();
+      for (const id of ids) {
+        const m = freshMedia.find((x: any) => x.id === id);
+        if (!m || !m.url) continue;
+        if (seenKinds.has(m.kind)) continue;
+        seenKinds.add(m.kind);
+        resolvedMedias.push({ id: m.id, url: m.url, kind: m.kind, label: m.label });
+        if (resolvedMedias.length === 2) break;
+      }
 
-      if (invalidId || justSentMedia || alreadySentSameId || isVideoBlockedByCooldown) {
-        const tag = invalidId
-          ? "[media_id inválido]"
-          : isVideoBlockedByCooldown
-          ? "[vídeo bloqueado: cooldown 6h]"
-          : alreadySentSameId
-          ? "[mídia repetida — bloqueada]"
-          : "[mídia consecutiva — bloqueada]";
-        args.reasoning = (args.reasoning || "") + ` ${tag} fallback texto`;
+      if (resolvedMedias.length === 0) {
+        // Nenhum ID válido → fallback texto.
         const fallbackMsg =
           args.caption && args.caption.trim().length > 0
             ? args.caption
-            : (picked?.label
-              ? `Sobre ${picked.label.toLowerCase()}: posso te explicar em poucas linhas se preferir.`
-              : "Posso te explicar em poucas linhas se preferir.");
+            : "Posso te explicar em poucas linhas se preferir.";
+        args.reasoning = (args.reasoning || "") + " [media_ids inválidos/repetidos] fallback texto";
         return new Response(
           JSON.stringify({
             decision: {
@@ -1098,8 +1013,10 @@ Deno.serve(async (req) => {
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
-      resolvedMedia = { id: picked.id, url: picked.url, kind: picked.kind, label: picked.label };
+      // Atualiza args.media_ids com a lista validada (para auditoria).
+      args.media_ids = resolvedMedias.map((m) => m.id);
     }
+    const resolvedMedia: ResolvedMedia | null = resolvedMedias[0] || null;
 
     // ---- Self-check barato (flash-lite) — bloqueia tools absurdas ----
     let selfCheckRisk: string | null = null;
@@ -1132,20 +1049,36 @@ Deno.serve(async (req) => {
       /\b(como funciona|me explica|n[aã]o entendi|o que [eé]|quem [eé])\b/i.test(ui) ? "informacao" :
       null;
 
-    // Audit (best-effort)
-    await supabase.from("ai_decisions").insert({
-      customer_id,
-      consultant_id: customer.consultant_id,
-      phase,
-      tool_called: tool,
-      reasoning: (args.reasoning || args.reason || "") + (selfCheckRisk ? ` | ${selfCheckRisk}` : ""),
-      user_input: mode === "rescue" ? "[rescue]" : user_input,
-      ai_output: args,
-      latency_ms: latencyMs,
-      model: aiResult.modelUsed,
-      media_sent_id: resolvedMedia?.id || null,
-      intent_detected: intentDetected,
-    });
+    // Audit (best-effort) — uma linha por mídia enviada (para cooldown 1× por lead pegar todas).
+    const auditRows =
+      resolvedMedias.length > 1
+        ? resolvedMedias.map((m) => ({
+            customer_id,
+            consultant_id: customer.consultant_id,
+            phase,
+            tool_called: tool,
+            reasoning: (args.reasoning || args.reason || "") + (selfCheckRisk ? ` | ${selfCheckRisk}` : "") + ` [combo:${m.kind}]`,
+            user_input: mode === "rescue" ? "[rescue]" : user_input,
+            ai_output: args,
+            latency_ms: latencyMs,
+            model: aiResult.modelUsed,
+            media_sent_id: m.id,
+            intent_detected: intentDetected,
+          }))
+        : [{
+            customer_id,
+            consultant_id: customer.consultant_id,
+            phase,
+            tool_called: tool,
+            reasoning: (args.reasoning || args.reason || "") + (selfCheckRisk ? ` | ${selfCheckRisk}` : ""),
+            user_input: mode === "rescue" ? "[rescue]" : user_input,
+            ai_output: args,
+            latency_ms: latencyMs,
+            model: aiResult.modelUsed,
+            media_sent_id: resolvedMedia?.id || null,
+            intent_detected: intentDetected,
+          }];
+    await supabase.from("ai_decisions").insert(auditRows);
 
     // Se self-check sinalizou RISCO em tool sensível, força fallback texto neutro
     if (selfCheckRisk && (tool === "send_media" || tool === "advance_to_closing")) {
@@ -1212,6 +1145,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         decision: { tool, args },
         media: resolvedMedia,
+        medias: resolvedMedias,
         phase,
         latency_ms: latencyMs,
       }),

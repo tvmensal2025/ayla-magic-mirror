@@ -58,12 +58,22 @@ const STEP_OPTIONS: { value: string; label: string }[] = [
   { value: "any", label: "Qualquer momento" },
 ];
 
+// Cada item descreve uma DÚVIDA específica do lead que essa mídia resolve.
+// A IA escolhe a mídia cujo intent_tag bate com a dúvida atual da conversa.
 const INTENT_OPTIONS: { value: string; label: string }[] = [
-  { value: "todos", label: "Todos os perfis" },
-  { value: "conta_alta", label: "Conta alta (>R$500)" },
-  { value: "conta_media", label: "Conta média (R$200–500)" },
-  { value: "conta_baixa", label: "Conta baixa (<R$200)" },
-  { value: "lead_frio", label: "Lead frio (>3 dias)" },
+  { value: "como_funciona", label: "Como funciona / explicação geral" },
+  { value: "e_golpe", label: "É golpe? / é seguro?" },
+  { value: "tem_custo", label: "Tem custo? / é gratuito?" },
+  { value: "fidelidade", label: "Tem fidelidade / multa?" },
+  { value: "instalacao", label: "Precisa instalar placa?" },
+  { value: "trocar_empresa", label: "Vou trocar de distribuidora?" },
+  { value: "desconto", label: "Quanto de desconto?" },
+  { value: "depoimento", label: "Depoimento / prova social" },
+  { value: "club", label: "Conexão Club / benefícios" },
+  { value: "cadastro", label: "Como faço o cadastro?" },
+  { value: "documentos", label: "Documentos necessários" },
+  { value: "demora", label: "Quanto tempo demora?" },
+  { value: "objecao_emocional", label: "Medo / receio / 'já me enganaram'" },
 ];
 
 const QUOTA_BYTES = 100 * 1024 * 1024; // 100 MB
@@ -347,7 +357,7 @@ export function MediaColumn({ userId }: { userId: string }) {
             </div>
           </div>
           <div className="border-t border-border pt-3">
-            <p className="text-xs font-semibold mb-2 text-foreground">Para qual perfil?</p>
+            <p className="text-xs font-semibold mb-2 text-foreground">Qual dúvida essa mídia resolve?</p>
             <div className="space-y-1.5">
               {INTENT_OPTIONS.map((opt) => {
                 const checked = intentTags.includes(opt.value);
