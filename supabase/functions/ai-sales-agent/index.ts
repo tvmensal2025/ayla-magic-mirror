@@ -200,8 +200,11 @@ const tools = [
   },
 ];
 
-function systemPrompt(personaName: string, tone: string, custom?: string) {
-  return `Você é ${personaName}, consultora comercial sênior da iGreen Energy. Atendimento via WhatsApp para clientes residenciais e PMEs.
+function systemPrompt(personaName: string, tone: string, custom?: string, knowledgeBlock?: string) {
+  const faqSection = knowledgeBlock && knowledgeBlock.trim()
+    ? `\n\n═══════════════════════════════════════════\nFAQ OFICIAL — RESPOSTAS APROVADAS (use TEXTUALMENTE)\n═══════════════════════════════════════════\nUse APENAS o conteúdo abaixo para responder dúvidas factuais (preço, prazo, fidelidade, instalação, app, distribuidora, segurança, etc.). NÃO invente nada que não esteja aqui. Se a pergunta não tem resposta clara abaixo, use request_handoff.\n\n${knowledgeBlock}\n`
+    : "";
+  return `Você é ${personaName}, consultora comercial sênior da iGreen Energy. Atendimento via WhatsApp para clientes residenciais e PMEs.${faqSection}
 
 ═══════════════════════════════════════════
 IDENTIDADE E POSTURA — VENDEDORA EXECUTIVA
@@ -443,6 +446,17 @@ async function loadContext(supabase: any, customerId: string) {
     .order("last_confirmed_at", { ascending: false })
     .limit(15);
 
+  // FAQ oficial — respostas aprovadas (carrega do banco para o cérebro responder qualquer pergunta sem inventar)
+  const { data: knowledge } = await supabase
+    .from("ai_knowledge_sections")
+    .select("title, content")
+    .eq("is_active", true)
+    .order("position");
+  const knowledgeBlock = (knowledge || [])
+    .map((k: any) => `## ${k.title}\n${k.content}`)
+    .join("\n\n")
+    .slice(0, 6000);
+
   return {
     customer,
     history: (history || []).reverse(),
@@ -451,6 +465,7 @@ async function loadContext(supabase: any, customerId: string) {
     customPrompt: agentCfg?.system_prompt || "",
     summaryFresh,
     memoryFacts: memoryFacts || [],
+    knowledgeBlock,
   };
 }
 
@@ -514,7 +529,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { customer, history, persona, tone, customPrompt, summaryFresh, memoryFacts } = ctx;
+    const { customer, history, persona, tone, customPrompt, summaryFresh, memoryFacts, knowledgeBlock } = ctx;
     const phase = customer.sales_phase || "abertura";
 
     // ---------- INTENT-FIRST short-circuit (sem LLM) ----------
@@ -838,7 +853,7 @@ Deno.serve(async (req) => {
     } catch (_) { /* best-effort */ }
 
     // ---- Construir contents no formato Gemini ----
-    const sys = systemPrompt(persona, tone, customPrompt) + summaryLine + memoryLine + learnedLine + fewShotLine + negShotLine + "\n\n" + contextLine;
+    const sys = systemPrompt(persona, tone, customPrompt, knowledgeBlock) + summaryLine + memoryLine + learnedLine + fewShotLine + negShotLine + "\n\n" + contextLine;
 
     const contents: any[] = history.map((m: any) => ({
       role: m.message_direction === "inbound" ? "user" : "model",

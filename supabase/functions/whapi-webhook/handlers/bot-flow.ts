@@ -36,6 +36,24 @@ import { uploadMediaToMinio, OCR_CONFIDENCE_THRESHOLD } from "../_helpers.ts";
 import { jsonLog } from "../../_shared/audit.ts";
 import type { BotContext, BotResult } from "./types.ts";
 
+// Trigrama similarity para anti-loop (0..1)
+function trigramSim(a: string, b: string): number {
+  const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-zà-ú0-9 ]/gi, "").replace(/\s+/g, " ").trim();
+  const A = norm(a), B = norm(b);
+  if (!A || !B) return 0;
+  if (A === B) return 1;
+  const trig = (s: string) => {
+    const set = new Set<string>();
+    const p = `  ${s}  `;
+    for (let i = 0; i < p.length - 2; i++) set.add(p.slice(i, i + 3));
+    return set;
+  };
+  const ta = trig(A), tb = trig(B);
+  let inter = 0;
+  ta.forEach((t) => { if (tb.has(t)) inter++; });
+  return inter / Math.max(ta.size, tb.size);
+}
+
 // ── Auto-resolve CEP from address data (avoid asking user) ──
 async function autoResolveCepIfNeeded(merged: any, updates: any): Promise<string> {
   let step = getNextMissingStep(merged);
@@ -486,7 +504,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   // E o step está em fase conversacional (antes da coleta de docs).
   // Steps de coleta (aguardando_conta em diante) seguem determinísticos.
   // ═══════════════════════════════════════════════════════════════════
-  const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "aguardando_humano"]);
+  const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "aguardando_humano", "qualificacao"]);
+  // Steps de coleta também aceitam pergunta off-script (FAQ), mas só se a mensagem PARECE pergunta.
+  const collectionSteps = new Set(["aguardando_conta", "coleta_doc", "ask_email", "ask_cep"]);
+  const looksLikeQuestion = !!messageText && (
+    /\?/.test(messageText) ||
+    /^(como|quanto|quando|onde|quem|qual|posso|preciso|funciona|é|tem|vou|vai|porqu[eê]|por que|sera|será|sera que|me explica|me conta|d[uú]vida)/i.test(messageText.trim())
+  );
   // Bypass: se já temos a conta com OCR + nome confiável, NÃO chamar a IA —
   // o switch determinístico vai cuidar de confirmar/avançar sem virar handoff loop.
   const billTrusted =
@@ -497,7 +521,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     !isFile &&
     !customer.bot_paused &&
     !billTrusted &&
-    conversationalSteps.has(step) &&
+    (conversationalSteps.has(step) || (collectionSteps.has(step) && looksLikeQuestion)) &&
     messageText &&
     messageText.trim().length > 0
   ) {
@@ -547,6 +571,32 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (!reply) {
                 reply = "Perfeito! 📸 Para iniciar seu cadastro, me envie uma *foto ou PDF da sua conta de luz*.";
               }
+            }
+            // Anti-loop: se o reply for ≥80% similar à última msg outbound, troca por lembrete do step atual.
+            try {
+              const { data: lastOut } = await supabase
+                .from("conversations")
+                .select("message_text")
+                .eq("customer_id", customer.id)
+                .eq("message_direction", "outbound")
+                .order("created_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              if (lastOut?.message_text && reply && trigramSim(reply, lastOut.message_text) >= 0.8) {
+                console.warn("[anti-loop] reply parecido com última outbound — trocando por lembrete do step");
+                if (collectionSteps.has(step)) {
+                  reply = step === "aguardando_conta"
+                    ? "Para seguir, me envie uma foto ou PDF da sua conta de luz, por favor."
+                    : "Vamos continuar de onde paramos.";
+                } else {
+                  reply = "";
+                }
+              }
+            } catch (_) { /* best-effort */ }
+            // Lembrete do step de coleta após responder dúvida off-script
+            if (reply && collectionSteps.has(step) && !updates.conversation_step) {
+              if (step === "aguardando_conta") reply += "\n\nVoltando: me manda a foto ou PDF da sua conta de luz pra eu seguir 📸";
+              else if (step === "coleta_doc") reply += "\n\nVoltando: me manda a frente do seu documento (CNH ou RG) pra eu seguir 🪪";
             }
             return { reply, updates };
           }
