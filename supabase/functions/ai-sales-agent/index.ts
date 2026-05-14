@@ -853,7 +853,7 @@ Deno.serve(async (req) => {
     } catch (_) { /* best-effort */ }
 
     // ---- Construir contents no formato Gemini ----
-    const sys = systemPrompt(persona, tone, customPrompt) + summaryLine + memoryLine + learnedLine + fewShotLine + negShotLine + "\n\n" + contextLine;
+    const sys = systemPrompt(persona, tone, customPrompt, knowledgeBlock) + summaryLine + memoryLine + learnedLine + fewShotLine + negShotLine + "\n\n" + contextLine;
 
     const contents: any[] = history.map((m: any) => ({
       role: m.message_direction === "inbound" ? "user" : "model",
