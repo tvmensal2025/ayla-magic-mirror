@@ -368,7 +368,17 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
 
     // 10a) Resolver e enviar áudio do slot (Camila) — prioridade: personal → public → fallback_text
     let dispatchedSlot: { slot_key: string; variant: string; media_id: string | null } | null = null;
-    const slotKey = (decision.audio_slot_key || "").trim();
+    let slotKey = (decision.audio_slot_key || "").trim();
+
+    // 🔒 REGRA DETERMINÍSTICA: primeiro contato (zero outbound prévio) sempre dispara "boas_vindas".
+    // Independe da decisão da LLM — garante que o áudio inicial sempre seja enviado.
+    const hadOutboundBefore = historyChrono.some((m: any) => m.message_direction === "outbound");
+    if (!hadOutboundBefore && validSlotKeys.has("boas_vindas")) {
+      slotKey = "boas_vindas";
+      // Limpa reply_text para não duplicar a abertura — o áudio já cumprimenta.
+      decision.reply_text = "";
+    }
+
     if (slotKey) {
       // Validação: slot_key inexistente -> log e ignora
       if (!validSlotKeys.has(slotKey)) {
