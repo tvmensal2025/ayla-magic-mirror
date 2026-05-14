@@ -945,13 +945,15 @@ Deno.serve(async (req) => {
       args.media_ids = filtered;
     }
 
-    // ---- OVERRIDE 2: bloqueia ask_for_name se foto da conta foi pedida/recebida ----
-    if (tool === "ask_for_name" && (customer.electricity_bill_photo_url || billRequestedRecently)) {
+    // ---- OVERRIDE 2: ask_for_name é PROIBIDO. O áudio de boas-vindas já pede o nome. ----
+    if (tool === "ask_for_name") {
       tool = "send_text";
       args = {
-        message: "Pode me mandar a foto da conta de luz quando puder? Por ela eu já confirmo todos os dados.",
+        message: customer.electricity_bill_photo_url || billRequestedRecently
+          ? "Pode me mandar a foto da conta de luz quando puder? Por ela eu já confirmo todos os dados."
+          : (args.message || "Me conta, sua conta de luz costuma vir em qual valor mais ou menos?"),
         next_phase: phase,
-        reasoning: "ask_for_name bloqueado: foto da conta já solicitada/recebida — nome virá pelo OCR",
+        reasoning: "ask_for_name bloqueado: nome é capturado pelo áudio de boas-vindas",
       };
     }
 
