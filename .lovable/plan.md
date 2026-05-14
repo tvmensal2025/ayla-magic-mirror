@@ -1,80 +1,93 @@
-## Diagnóstico
+## O que muda com sua decisão
 
-Olhei os logs reais (últimos 30 min) + as conversas do lead `5511989000650`. Existem 3 problemas distintos que se misturam e produzem a sensação de "linguagem feia" + "errou no cadastro":
+Você quer **CTWA oficial via WABA** (Click-to-WhatsApp nativo da Meta), não mais o `wa.me`. Isso muda 3 coisas importantes a melhor:
 
-### 1. Mensagens "feias" não vêm da IA — vêm do `bot-stuck-recovery`
-A IA (`ai-sales-agent`) está respondendo bem e adulta: *"Certo. E você fala de qual cidade?"*, *"Saquei! Deixa eu te ajudar então..."* — tudo dentro do persona.
+1. **Otimização real por `CONVERSATIONS`** (e não `LINK_CLICKS`) → Meta entrega o anúncio para quem efetivamente abre conversa, CPL cai 10–25%.
+2. **Atribuição nativa** do clique até a primeira mensagem, sem depender de `fbclid` na URL → o algoritmo aprende muito mais rápido.
+3. **Pixel + CAPI casados** com `promoted_object` apontando para `page_id + whatsapp_phone_number` → eventos `Lead`/`Purchase` voltam para o anúncio correto e alimentam Lookalike.
 
-Mas o cron antigo `bot-stuck-recovery` está rodando a cada 5 min em paralelo e dispara textos **hardcoded com emoji** que violam o próprio prompt da IA (que proíbe emoji e diminutivo):
-- `👋 Oi! Ainda está aí? Vamos continuar de onde paramos: [texto-script]`
-- `⏰ Olá! Para finalizarmos seu cadastro com a iGreen, preciso só desta informação: [texto-script]\n_Caso não queira mais continuar, é só ignorar esta mensagem._`
-
-Resultado: o lead recebe uma mensagem polida da Camila e, minutos depois, uma mensagem robótica com emoji e tom de cobrança ("ignorar esta mensagem"). Parece outra pessoa, mal-educada e desorganizada.
-
-### 2. "Errou ao enviar a parte do cadastro"
-Nos logs do `bot-stuck-recovery` (00:10 e 00:05), **4 de 4 envios falharam** com:
-```
-evolution_send_text_failed_final  status:500
-{"message":"Connection Closed"}  instance: igreen-0c2711ad4836
-```
-A instância Evolution caiu/desautenticou. O cron continua tentando reenviar a mesma mensagem de cadastro toda hora, gerando 8s de erro por execução e zero entrega. Nenhum alerta ao operador, nenhum backoff.
-
-### 3. Dois rescues concorrentes
-- `bot-stuck-recovery` (a cada 5 min, scripted, com emoji)
-- `ai-closer-cron` (a cada 10 min, IA, recém-criado)
-
-Ambos podem mirar o mesmo lead em fases finais e duplicar mensagens.
+Pré-requisito: o número precisa estar **oficialmente em uma WABA conectada à Página** no Meta Business Suite (com WhatsApp Business API, não o app pessoal nem o app Business). O `facebook-validate-account` já checa isso e retorna a mensagem `WHATSAPP_BUSINESS_REQUIRED` quando falta — só vou reativar esse caminho como **bloqueante** em vez de fallback para `wa.me`.
 
 ---
 
-## Plano de correção
+## Plano final (4 frentes)
 
-### A. Resgate único, 100% via IA (mata a "linguagem feia")
-1. Aposentar todo o texto hardcoded de `bot-stuck-recovery`. Em vez de `getReplyForStep + 👋/⏰`, ele passa a chamar `ai-sales-agent` com `mode: "rescue"` e contexto do step (`stuck_step: "ask_email"`, `idle_minutes: 7`).
-2. O `ai-sales-agent` já tem persona Camila sem emoji e com regra "não cumprimente de novo se já houve abertura" → o resgate sai natural, varia frase e respeita histórico.
-3. Mesclar `ai-closer-cron` dentro do `bot-stuck-recovery` renomeado para `ai-rescue-cron` (única fonte da verdade), com 1 cron a cada 5 min e seleção interna por fase (coleta vs. fechamento vs. portal).
+### Frente 1 — Migrar publicação para CTWA oficial (WABA)
 
-### B. Anti-spam e proteção da instância Evolution
-1. Health-check da instância antes de iterar leads daquele consultor. Se `connectionStatus !== "open"`, pular todos os leads do consultor e gravar `error_message: "instance_offline"` no consultor (não no lead) + 1 alerta diário no painel admin.
-2. Backoff exponencial por lead em caso de erro Evolution: 5min → 30min → 2h → desistir e marcar `stuck_evolution`.
-3. Só conta `rescue_attempts++` quando o `sendText` retorna `true`. Hoje incrementa mesmo em falha em alguns caminhos, esgotando as 3 tentativas sem nunca ter saído mensagem.
+Arquivo: `supabase/functions/facebook-create-campaign/index.ts`
 
-### C. Dedup entre crons + cooldown coerente com a IA
-1. Lock por lead: tabela leve `rescue_locks(customer_id, locked_until)` ou simples coluna `next_rescue_allowed_at` em `customers`. Qualquer cron respeita.
-2. Cooldown mínimo de 30 min entre rescues E pelo menos 10 min após `last_bot_reply_at` da IA (evita pisar em conversa ativa).
-3. Não resgatar leads cuja última mensagem do bot foi um botão interativo aguardando clique há <15 min (caso atual do `5511989000650` em `menu_inicial`).
+- **Objective**: `OUTCOME_ENGAGEMENT` (atual e correto pra CTWA WABA) ou `OUTCOME_SALES` quando o pixel tem histórico de `Purchase`. Hoje está `OUTCOME_TRAFFIC` — vamos trocar.
+- **Optimization goal**: `CONVERSATIONS` (em vez de `LINK_CLICKS`).
+- **Destination type**: `WHATSAPP` no AdSet.
+- **`promoted_object`**: `{ page_id, whatsapp_phone_number, custom_event_type: "OTHER" }` — é o que liga anúncio ↔ número WABA.
+- **`tracking_specs`**: `[{action.type:["onsite_conversion.messaging_first_reply"]}, {action.type:["offsite_conversion"], fb_pixel:[pixel_id]}]` quando há pixel — Meta reporta "Conversas iniciadas" + `Lead` da CAPI atribuído ao mesmo ad.
+- **Creative**: `object_story_spec.link_data.call_to_action = { type: "WHATSAPP_MESSAGE", value: { app_destination: "WHATSAPP", page: page_id, link: "https://api.whatsapp.com/send?phone=<numero>" } }` — esse é o formato oficial CTWA, sem link `wa.me` solto.
+- **Mensagem inicial**: passa para `payload.welcome_message` do `link_data` (Meta abre o WhatsApp já com o texto pronto e atrelado ao ad_id).
+- **Bloqueio**: se o `facebook-validate-account` retornar `WHATSAPP_BUSINESS_REQUIRED`, o front (`SmartPublishButton`) mostra modal explicando como conectar WABA, com link direto para `business.facebook.com/wa/manage/phone-numbers/`. **Sem fallback `wa.me`.**
 
-### D. Caminho do cadastro (handoff) com falha visível
-1. Quando `ai-sales-agent` chama `request_handoff` ou quando o operador clica "Cadastrar no portal", se o envio Evolution falhar:
-   - Não engolir o erro. Retornar `{ ok:false, reason:"instance_closed" }` para o front.
-   - Mostrar toast vermelho no painel: "Instância WhatsApp desconectada — reconecte para enviar cadastro".
-   - Botão "Reconectar instância" direto no toast.
-2. Persistir tentativa em `handoff_attempts` para auditoria.
+### Frente 2 — Concorrentes com imagem real
 
-### E. Painel /admin de IA (já pedido antes — entra junto)
-- Custo R$, latência p50/p95, erros por função, taxa de sucesso de rescue, status de cada instância Evolution em tempo real (verde/amarelo/vermelho).
+Arquivo: `supabase/functions/ad-competitor-scraper/index.ts` (reescrita)
+
+- Trocar Gemini-text-only por **Meta Ad Library Graph API** (`/ads_archive` com token de System User da plataforma).  
+  Campos: `ad_snapshot_url, ad_creative_bodies, ad_creative_link_titles, ad_creative_link_captions, page_name, ad_delivery_start_time, ad_creative_link_descriptions`.
+- Para cada anúncio, fazer `GET ad_snapshot_url`, extrair `og:image` + thumbnail de vídeo, baixar e salvar em **MinIO** (`competitors/<advertiser>/<archive_id>.jpg`), gravar `image_url`/`thumbnail_url`/`video_url` em `ad_competitor_creatives`.
+- Manter Gemini só como **enriquecimento** do `angle` (classificação `economia_concreta | quebra_objecao | ...`) a partir do texto real do anúncio.
+- Backfill manual dos 38 registros existentes após o deploy.
+
+### Frente 3 — Painel "IA Aprendendo" no SuperAdmin
+
+Arquivo novo: `src/components/admin/super/AILearningHealthPanel.tsx` + nova aba em `src/pages/SuperAdmin.tsx`.
+
+- **4 cards de status verde/amarelo/vermelho** com base na idade da última execução de cada cron (consulta `ai_usage_log` + `ad_creative_insights.updated_at` + `ad_competitor_creatives.ingested_at`):
+  - 🕵️ Scraper concorrentes (≤8 dias = verde)
+  - 🧠 Learner de criativos (≤26 h = verde)
+  - 🔄 Rotator (≤14 h = verde)
+  - 📊 Sync de métricas (≤45 min = verde)
+- **Timeline unificada** dos últimos 30 eventos (scraper, learner, rotator, auto-pause, CAPI events).
+- **"Top 5 padrões vencedores agora"** — agregação de `ad_creative_insights.winning_patterns` por contagem global.
+- **"Top 5 padrões a evitar"** — idem `losing_patterns`.
+- **Atribuição CAPI saudável?** — taxa últimos 7 dias de `customers` com `lead_source.fbclid` preenchido / total de `Lead` em `facebook_capi_events`.
+- **Botão "Forçar agora"** em cada cron via `supabase.functions.invoke`.
+- **Auto-refresh 60 s.**
+
+### Frente 4 — Auto-aprendizado fechando o ciclo
+
+Garantias de que cada execução **realmente melhora a próxima publicação** (auditei e vou reforçar onde está fraco):
+
+| Cron | Já funciona | O que vou reforçar |
+|---|---|---|
+| `ad-creative-learner` (diário 07:00) | Gera `ad_creative_insights` por consultor | Passar a também gravar **insights globais** (`consultant_id IS NULL`) que o `ad-creative-builder` lê como prior. |
+| `ad-creative-builder` | Já consome insights do consultor | Passar a também consumir o insight global + **top concorrentes ativos com imagem** como referência visual no prompt. |
+| `facebook-creative-rotator` (12 h) | Pausa losers | Adicionar **promoção automática** (subir budget +20 % do winner do mês até teto). |
+| `facebook-auto-pause` (06:00) | Pausa campanhas estouradas | Marca causa em `ad_recommendations` p/ aparecer no painel novo. |
+| `ad-competitor-scraper` (semanal) | Coleta texto | (Frente 2) Coleta imagem real + alimenta o builder. |
 
 ---
 
 ## Arquivos afetados
 
 ```
-supabase/functions/bot-stuck-recovery/index.ts   → reescrito como ai-rescue-cron (chama ai-sales-agent)
-supabase/functions/ai-closer-cron/index.ts       → removido (mesclado)
-supabase/functions/_shared/evolution-api.ts      → adiciona healthCheck() + backoff
-supabase/functions/_shared/conversation-helpers.ts → remove textos de rescue hardcoded
-supabase/functions/ai-sales-agent/index.ts       → reforça mode:"rescue" para usar contexto do step
-src/pages/Admin.tsx (novo) ou src/pages/admin/AIHealth.tsx → painel
-supabase/migrations/...                          → next_rescue_allowed_at + handoff_attempts + cron único
+supabase/functions/facebook-create-campaign/index.ts   → CTWA oficial WABA
+supabase/functions/facebook-validate-account/index.ts  → bloqueio firme se sem WABA
+supabase/functions/ad-competitor-scraper/index.ts      → /ads_archive + snapshot + MinIO
+supabase/functions/_shared/meta-ads-library.ts         → novo helper
+supabase/functions/ad-creative-learner/index.ts        → +insight global
+supabase/functions/ad-creative-builder/index.ts        → consome insight global + concorrentes c/ imagem
+supabase/functions/facebook-creative-rotator/index.ts  → promoção automática do winner
+src/components/admin/super/AILearningHealthPanel.tsx   → novo
+src/pages/SuperAdmin.tsx                               → nova aba "IA & Aprendizado"
+src/components/admin/ads/SmartPublishButton.tsx        → modal "conectar WABA" sem fallback
 ```
 
-## Validação
+## Validação após deploy
 
-1. Curl em `ai-rescue-cron` com instância offline → deve pular tudo e logar `instance_offline`, zero `Connection Closed`.
-2. Curl com instância online + lead idle 10min em `ask_email` → deve gerar 1 mensagem via Camila, sem emoji, sem repetir cumprimento, registrada em `conversations` e `ai_usage_log`.
-3. Forçar handoff com instância offline → painel mostra toast vermelho com botão reconectar.
-4. Verificar em `ai_usage_log` que só `ai-rescue-cron` aparece (não mais 2 crons).
+1. `facebook-validate-account` com número não-WABA → retorna `WHATSAPP_BUSINESS_REQUIRED` e o front mostra modal claro.
+2. Publicar campanha de teste → conferir no Gerenciador que o anúncio aparece como **"Cliques no WhatsApp"** com `optimization_goal=CONVERSATIONS` e `destination_type=WHATSAPP`.
+3. `ad-competitor-scraper` manual → 38 registros passam de 0 → ≥30 com `image_url`.
+4. SuperAdmin → nova aba "IA & Aprendizado" mostra 4 cards verdes e timeline com últimos 30 eventos.
+5. Disparar `Lead` de teste via formulário → `facebook_capi_events` registra com `event_id` único e `fb_response.events_received=1`.
 
 ## Pergunta antes de implementar
 
-O painel `/admin` deve ser visível só para super-admin (Rafael) ou também para cada consultor ver as métricas da própria instância?
+Confirma que o número que vai ser usado nos anúncios **já está em uma WABA oficial conectada à Página do Facebook** (Meta Business Suite → WhatsApp Manager → número aparece como "Conectado" e não "Pessoal")? Se ainda não está, eu sigo com o código pronto e te entrego o passo-a-passo de conexão WABA junto — mas o anúncio só publica depois que isso estiver feito.

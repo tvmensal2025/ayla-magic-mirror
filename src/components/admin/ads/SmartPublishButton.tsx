@@ -35,10 +35,21 @@ export function SmartPublishButton({ template, consultantId, onPublished, onFall
       );
       onPublished?.();
     } catch (e: any) {
-      toast.error("Não consegui publicar automaticamente", {
-        id: toastId,
-        description: `${e?.message || "Tente o modo personalizado."}`,
-      });
+      const msg = String(e?.message || "");
+      const isWaba = msg.includes("WHATSAPP_BUSINESS_REQUIRED") || msg.includes("conta pessoal") || msg.includes("2446885");
+      if (isWaba) {
+        toast.error("WhatsApp Business (WABA) obrigatório", {
+          id: toastId,
+          duration: 12000,
+          description:
+            "O número precisa estar oficialmente conectado à sua Página no Meta Business Suite → WhatsApp Manager. Sem WABA, o anúncio CTWA oficial não publica. Acesse business.facebook.com/wa/manage/phone-numbers/ para conectar.",
+        });
+      } else {
+        toast.error("Não consegui publicar automaticamente", {
+          id: toastId,
+          description: `${msg || "Tente o modo personalizado."}`,
+        });
+      }
       onFallback?.(template);
     } finally {
       setLoading(false);

@@ -251,6 +251,40 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Insight global: consolida padrões vencedores/perdedores entre TODOS consultores
+    // e grava em ad_playbooks (scope='global') — consumido pelo ad-creative-builder
+    // como "prior" do que está funcionando na rede agora.
+    try {
+      const { data: allInsights } = await supabase
+        .from("ad_creative_insights")
+        .select("winning_patterns, losing_patterns, best_image_traits, sample_size, summary")
+        .gte("updated_at", new Date(Date.now() - 7 * 86400_000).toISOString());
+      const tally = (key: "winning_patterns" | "losing_patterns" | "best_image_traits") => {
+        const m = new Map<string, number>();
+        for (const r of allInsights || []) {
+          for (const p of (r as any)[key] || []) {
+            const k = String(p).trim();
+            if (k) m.set(k, (m.get(k) || 0) + ((r as any).sample_size || 1));
+          }
+        }
+        return Array.from(m.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([pattern, weight]) => ({ pattern, weight }));
+      };
+      const payload = {
+        winning_patterns: tally("winning_patterns"),
+        losing_patterns: tally("losing_patterns"),
+        best_image_traits: tally("best_image_traits"),
+        consultants_in_sample: (allInsights || []).length,
+      };
+      await supabase.from("ad_playbooks").insert({
+        scope: "global",
+        consultant_id: null,
+        source_metric: "learner_daily_aggregate",
+        payload,
+      });
+    } catch (e) {
+      console.warn("global playbook falhou:", (e as Error).message);
+    }
+
     return new Response(JSON.stringify({ ok: true, consultants: ids.length, ads_evaluated: totalUpdated }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

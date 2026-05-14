@@ -257,14 +257,16 @@ Deno.serve(async (req) => {
     }
     const adlabelsParam = consultantLabelId ? JSON.stringify([{ id: consultantLabelId }]) : null;
 
-    // Click-to-WhatsApp via link wa.me — funciona com QUALQUER número de WhatsApp
-    // (pessoal ou Business app), sem precisar vincular WABA no Meta Business Manager.
-    // Trade-off: Meta otimiza por LINK_CLICKS em vez de CONVERSATIONS (~10-20% mais caro),
-    // mas evita o erro 1487246 e elimina configuração manual pelo consultor.
+    // CTWA OFICIAL via WABA — número precisa estar conectado à Página no Meta Business
+    // Suite (WhatsApp Business API). Otimiza por CONVERSATIONS (mais barato que LINK_CLICKS),
+    // atribuição nativa anúncio ↔ primeira mensagem, casa com pixel + CAPI via promoted_object.
     const hasPixel = !!conn.pixel_id;
-    const objective = "OUTCOME_TRAFFIC";
-    const optimizationGoal = "LINK_CLICKS";
+    const objective = "OUTCOME_ENGAGEMENT";
+    const optimizationGoal = "CONVERSATIONS";
     const pixelEvent = hasPixel ? "LEAD" : null;
+    if (!conn.whatsapp_destination_number) {
+      throw new Error("WHATSAPP_BUSINESS_REQUIRED: número WhatsApp Business (WABA) não configurado para esta Página.");
+    }
 
     // 1) Campaign
     console.log("[fb-create] step=campaign_create");
@@ -331,13 +333,27 @@ Deno.serve(async (req) => {
     if (platformCustomAudId) {
       (targeting as any).excluded_custom_audiences = [{ id: platformCustomAudId }];
     }
-    // Sem promoted_object/destination_type=WHATSAPP: o link wa.me no creative é
-    // que leva o lead pra conversa. Assim QUALQUER número funciona, sem WABA.
+    // CTWA WABA: destination=WHATSAPP + promoted_object liga anúncio ↔ número WABA.
+    // Tracking specs: messaging_first_reply (Meta nativo) + offsite_conversion via pixel/CAPI.
+    const waNumberClean = String(conn.whatsapp_destination_number).replace(/\D/g, "");
+    const promotedObject: Record<string, string> = {
+      page_id: conn.page_id,
+      whatsapp_phone_number: waNumberClean,
+    };
+    const trackingSpecs: any[] = [
+      { "action.type": ["onsite_conversion.messaging_first_reply"] },
+    ];
+    if (hasPixel) {
+      trackingSpecs.push({ "action.type": ["offsite_conversion"], fb_pixel: [conn.pixel_id] });
+    }
     const adsetParams: Record<string, string> = {
       name: `[${consultantTag}] ${distribTag} · Conjunto Principal · ${cityPrincipal}`,
       campaign_id: campaignId,
       billing_event: "IMPRESSIONS",
       optimization_goal: optimizationGoal,
+      destination_type: "WHATSAPP",
+      promoted_object: JSON.stringify(promotedObject),
+      tracking_specs: JSON.stringify(trackingSpecs),
       targeting: JSON.stringify(targeting),
       status: "PAUSED",
       start_time: new Date(Date.now() + 60_000).toISOString(),
@@ -408,32 +424,25 @@ Deno.serve(async (req) => {
     const storyHashes = uploaded.filter((u) => u.format === "story").map((u) => u.hash);
     const allHashes = uploaded.map((u) => u.hash);
 
-    // 4) Creative — Click to WhatsApp via page_welcome_message
-    const waNumber = conn.whatsapp_destination_number;
+    // 4) Creative — Click-to-WhatsApp NATIVO (WABA). Meta abre conversa direto
+    // no número da WABA conectado à Página, sem link wa.me intermediário.
     const originTag = body.distribuidora || cityNames || "iGreen";
     const initialMessage = `Olá! Vi o anúncio iGreen sobre energia mais barata em ${originTag}. Quero saber como economizar na conta de luz.`;
-    // UTMs no link de WhatsApp para tracking server-side (consultor + cidade)
-    const utmParams = new URLSearchParams({
-      utm_source: "facebook",
-      utm_medium: "cpc",
-      utm_campaign: distribTag.toLowerCase().replace(/\s+/g, "_"),
-      utm_content: `consultor_${consultantLicense}`,
-      utm_term: cityPrincipal.toLowerCase().replace(/\s+/g, "_"),
-    });
-    const waLink = `https://wa.me/${waNumber}?text=${encodeURIComponent(initialMessage)}&${utmParams.toString()}`;
+    // CTWA oficial usa api.whatsapp.com/send com phone WABA (mesmo número do promoted_object).
+    const waLink = `https://api.whatsapp.com/send?phone=${waNumberClean}&text=${encodeURIComponent(initialMessage)}`;
     // url_tags: macros do Meta substituem {{campaign.id}} / {{adset.id}} no clique.
     const urlTags = `utm_source=facebook&utm_medium=cpc&utm_campaign={{campaign.id}}&utm_content=consultor_${consultantLicense}&utm_term={{adset.id}}`;
     const description = body.description || "Economia média de até 20%. Sujeito a análise.";
 
-    // Helper: monta link_data padrão (sem `link` no topo — fica só no CTA pra
-    // não confundir Meta entre link externo e click-to-WhatsApp).
+    // Helper: monta link_data com CTA WHATSAPP_MESSAGE apontando para a Page+WABA.
     const baseLinkData = (image_hash: string): Record<string, unknown> => ({
       message: body.primary_text,
       name: body.headline,
       description,
+      link: waLink,
       call_to_action: {
         type: "WHATSAPP_MESSAGE",
-        value: { app_destination: "WHATSAPP", link: waLink },
+        value: { app_destination: "WHATSAPP", page: conn.page_id, link: waLink },
       },
       image_hash,
     });
