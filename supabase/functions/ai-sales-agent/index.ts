@@ -866,7 +866,7 @@ Deno.serve(async (req) => {
     if (tool === "update_lead_field") {
       const f = String(args.field || "");
       const v = args.value;
-      if (["name", "distribuidora", "address_city", "pain_point"].includes(f) && typeof v === "string" && v.length > 1) {
+      if (["name", "distribuidora", "pain_point"].includes(f) && typeof v === "string" && v.length > 1) {
         updates[f] = v.trim();
         if (f === "name") updates.name_source = "self_introduced";
       }
