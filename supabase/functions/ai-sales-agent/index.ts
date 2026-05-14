@@ -730,6 +730,20 @@ Deno.serve(async (req) => {
       ? `\n[RESUMO DA CONVERSA ATÉ AGORA]\n${customer.conversation_summary}\n(Use o resumo para contexto; as últimas mensagens cruas vêm depois.)\n`
       : "";
 
+    // ---- Memória longa: fatos persistentes que sobrevivem entre sessões ----
+    let memoryLine = "";
+    if (memoryFacts && memoryFacts.length > 0) {
+      const grouped: Record<string, string[]> = {};
+      for (const f of memoryFacts) {
+        const conf = f.confidence >= 0.8 ? "" : f.confidence >= 0.5 ? " (?)" : " (?? baixa confiança)";
+        (grouped[f.category] ||= []).push(`${f.key}: ${f.value}${conf}`);
+      }
+      const blocks = Object.entries(grouped)
+        .map(([cat, items]) => `• ${cat}: ${items.join("; ")}`)
+        .join("\n");
+      memoryLine = `\n[MEMÓRIA LONGA — fatos confirmados sobre este lead, NUNCA repergunte o que está aqui]\n${blocks}\n`;
+    }
+
     // ---- Padrões aprendidos do feedback do consultor (👍/👎) ----
     let learnedLine = "";
     try {
@@ -754,7 +768,7 @@ Deno.serve(async (req) => {
     } catch (_) { /* best-effort */ }
 
     // ---- Construir contents no formato Gemini ----
-    const sys = systemPrompt(persona, tone, customPrompt) + summaryLine + learnedLine + fewShotLine + negShotLine + "\n\n" + contextLine;
+    const sys = systemPrompt(persona, tone, customPrompt) + summaryLine + memoryLine + learnedLine + fewShotLine + negShotLine + "\n\n" + contextLine;
 
     const contents: any[] = history.map((m: any) => ({
       role: m.message_direction === "inbound" ? "user" : "model",
