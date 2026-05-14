@@ -548,7 +548,7 @@ Deno.serve(async (req) => {
     // Load candidate media for this phase + profile (consultant own + public)
     const { data: candidates } = await supabase
       .from("ai_media_library")
-      .select("id, kind, label, url, step_tags, intent_tags, priority, duration_sec")
+      .select("id, kind, label, url, step_tags, intent_tags, priority, duration_sec, is_primary_explainer")
       .eq("active", true)
       .or(`consultant_id.eq.${customer.consultant_id},is_public.eq.true`)
       .overlaps("step_tags", [phase, "any"])
@@ -600,7 +600,7 @@ Deno.serve(async (req) => {
         freshMedia
           .map(
             (m: any, i: number) =>
-              `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""}`,
+              `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""}${m.is_primary_explainer ? " [PRINCIPAL — use este vídeo SEMPRE que o lead pedir 'como funciona' ou tiver dúvida geral; outros vídeos só se ele disser que ainda não entendeu]" : ""}`,
           )
           .join("\n") +
         `\nUse send_media APENAS com um desses media_id. ${
@@ -889,9 +889,13 @@ Deno.serve(async (req) => {
       /\b(golpe|fraude|seguro|confi[aá]vel|enganaç[aã]o|verdade|mesmo|s[eé]rio)\b/i.test(uiLow) ||
       /\b(custo|caro|gratuito|de gra[çc]a|paga|pagar|mensalidade|taxa|tem que pagar)\b/i.test(uiLow)
     );
-    const introVideo = freshMedia.find((m: any) =>
-      /conex[aã]o green.*apresenta/i.test(String(m.label || "")) && m.kind === "video"
-    );
+    // Vídeo principal: prioriza o que o consultor marcou como is_primary_explainer.
+    // Fallback: regex no nome (Conexão Green - Apresentação) por compatibilidade.
+    const introVideo =
+      freshMedia.find((m: any) => m.kind === "video" && m.is_primary_explainer === true) ||
+      freshMedia.find((m: any) =>
+        /conex[aã]o green.*apresenta/i.test(String(m.label || "")) && m.kind === "video"
+      );
     // Gating do auto-intro: só se NÃO está no início (precisa lead ter falado pelo menos 2x),
     // não houve vídeo nas últimas 6h, e a IA não escolheu send_media manualmente.
     const inboundCount = history.filter((h: any) => h.message_direction === "inbound").length;
