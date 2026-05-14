@@ -33,6 +33,18 @@ interface Body {
   placement_mode?: "auto" | "manual";
   // Lista de placements no formato "fb:feed", "fb:reels", "ig:reels", etc.
   placements?: string[];
+  // Primeira mensagem que abre no WhatsApp ao clicar no anúncio (CTWA).
+  // Texto curto, em 1ª pessoa, do ponto de vista do lead. Max 160 chars.
+  initial_message?: string;
+}
+
+function buildInitialMessage(raw: string | undefined, distribuidora?: string): string {
+  const clean = (raw || "").replace(/[\r\n]+/g, " ").trim();
+  if (clean) return clean.slice(0, 160);
+  const d = (distribuidora || "").trim();
+  return d
+    ? `Olá! Quero saber mais sobre a redução na conta de luz ${d}.`.slice(0, 160)
+    : "Olá! Quero saber mais sobre a redução na minha conta de luz.";
 }
 
 const WA_BUSINESS_REQUIRED_SUBCODE = "2446885";
@@ -426,19 +438,19 @@ Deno.serve(async (req) => {
 
     // 4) Creative — Click-to-WhatsApp NATIVO (WABA). Meta abre conversa direto
     // no número da WABA conectado à Página, sem link wa.me intermediário.
-    const originTag = body.distribuidora || cityNames || "iGreen";
-    const initialMessage = `Olá! Vi o anúncio iGreen sobre energia mais barata em ${originTag}. Quero saber como economizar na conta de luz.`;
+    const initialMessage = buildInitialMessage(body.initial_message, body.distribuidora);
+    console.log("[fb-create] initial WA message:", initialMessage);
     // CTWA oficial usa api.whatsapp.com/send com phone WABA (mesmo número do promoted_object).
     const waLink = `https://api.whatsapp.com/send?phone=${waNumberClean}&text=${encodeURIComponent(initialMessage)}`;
     // url_tags: macros do Meta substituem {{campaign.id}} / {{adset.id}} no clique.
     const urlTags = `utm_source=facebook&utm_medium=cpc&utm_campaign={{campaign.id}}&utm_content=consultor_${consultantLicense}&utm_term={{adset.id}}`;
-    const description = body.description || "Economia média de até 20%. Sujeito a análise.";
 
     // Helper: monta link_data com CTA WHATSAPP_MESSAGE apontando para a Page+WABA.
+    // OBS: removemos `description` no link_data — em CTWA a Meta às vezes mostra
+    // preview feio do domínio do api.whatsapp.com. Headline + body já bastam.
     const baseLinkData = (image_hash: string): Record<string, unknown> => ({
       message: body.primary_text,
       name: body.headline,
-      description,
       link: waLink,
       call_to_action: {
         type: "WHATSAPP_MESSAGE",
@@ -585,6 +597,7 @@ Deno.serve(async (req) => {
       started_at: new Date().toISOString(),
       distribuidora: body.distribuidora ?? null,
       pixel_event_optimized: pixelEvent,
+      initial_message: initialMessage,
     });
 
     // Telemetria de uso do template (gallery → consultor → campanha).
