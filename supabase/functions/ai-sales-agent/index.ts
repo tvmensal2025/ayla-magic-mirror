@@ -155,13 +155,13 @@ const tools = [
     function: {
       name: "update_lead_field",
       description:
-        "Quando o lead REVELAR um dado estruturado (nome, distribuidora, valor da conta, cidade, dor), grave no cadastro e em seguida responda com send_text na mesma rodada NÃO — use só esta tool e o sistema cuidará de continuar. Use APENAS quando você tem certeza do dado dito pelo lead nesta mensagem.",
+        "Quando o lead REVELAR um dado estruturado (nome, distribuidora, valor da conta, dor), grave no cadastro. NÃO existe campo cidade — não pergunte cidade. Use APENAS quando você tem certeza do dado dito pelo lead nesta mensagem.",
       parameters: {
         type: "object",
         properties: {
           field: {
             type: "string",
-            enum: ["name", "distribuidora", "electricity_bill_value", "address_city", "pain_point"],
+            enum: ["name", "distribuidora", "electricity_bill_value", "pain_point"],
           },
           value: { type: "string", description: "Valor exato a salvar (texto ou número como string)" },
           followup_message: { type: "string", description: "Resposta curta após salvar (acusa recebimento + próxima pergunta)" },
@@ -171,7 +171,7 @@ const tools = [
           },
           reasoning: { type: "string" },
         },
-        required: ["field", "value", "followup_message", "reasoning"],
+        required: ["field", "value", "followup_message", "next_phase", "reasoning"],
       },
     },
   },
