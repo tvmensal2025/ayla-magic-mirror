@@ -181,7 +181,9 @@ Deno.serve(async (req) => {
     // 6b) Slots de áudio (Camila)
     const { data: slotsRaw } = await supabase
       .from("ai_agent_slots")
-      .select("slot_key, label, trigger_hint, fallback_text, min_interval_minutes, is_testing")
+      .select("slot_key, label, trigger_hint, fallback_text, min_interval_minutes, is_testing, video_url, video_label")
+      .eq("active", true)
+      .order("position");
       .eq("active", true)
       .order("position");
     const slots = slotsRaw || [];
