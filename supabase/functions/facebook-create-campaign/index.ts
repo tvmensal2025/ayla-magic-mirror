@@ -424,32 +424,25 @@ Deno.serve(async (req) => {
     const storyHashes = uploaded.filter((u) => u.format === "story").map((u) => u.hash);
     const allHashes = uploaded.map((u) => u.hash);
 
-    // 4) Creative — Click to WhatsApp via page_welcome_message
-    const waNumber = conn.whatsapp_destination_number;
+    // 4) Creative — Click-to-WhatsApp NATIVO (WABA). Meta abre conversa direto
+    // no número da WABA conectado à Página, sem link wa.me intermediário.
     const originTag = body.distribuidora || cityNames || "iGreen";
     const initialMessage = `Olá! Vi o anúncio iGreen sobre energia mais barata em ${originTag}. Quero saber como economizar na conta de luz.`;
-    // UTMs no link de WhatsApp para tracking server-side (consultor + cidade)
-    const utmParams = new URLSearchParams({
-      utm_source: "facebook",
-      utm_medium: "cpc",
-      utm_campaign: distribTag.toLowerCase().replace(/\s+/g, "_"),
-      utm_content: `consultor_${consultantLicense}`,
-      utm_term: cityPrincipal.toLowerCase().replace(/\s+/g, "_"),
-    });
-    const waLink = `https://wa.me/${waNumber}?text=${encodeURIComponent(initialMessage)}&${utmParams.toString()}`;
+    // CTWA oficial usa api.whatsapp.com/send com phone WABA (mesmo número do promoted_object).
+    const waLink = `https://api.whatsapp.com/send?phone=${waNumberClean}&text=${encodeURIComponent(initialMessage)}`;
     // url_tags: macros do Meta substituem {{campaign.id}} / {{adset.id}} no clique.
     const urlTags = `utm_source=facebook&utm_medium=cpc&utm_campaign={{campaign.id}}&utm_content=consultor_${consultantLicense}&utm_term={{adset.id}}`;
     const description = body.description || "Economia média de até 20%. Sujeito a análise.";
 
-    // Helper: monta link_data padrão (sem `link` no topo — fica só no CTA pra
-    // não confundir Meta entre link externo e click-to-WhatsApp).
+    // Helper: monta link_data com CTA WHATSAPP_MESSAGE apontando para a Page+WABA.
     const baseLinkData = (image_hash: string): Record<string, unknown> => ({
       message: body.primary_text,
       name: body.headline,
       description,
+      link: waLink,
       call_to_action: {
         type: "WHATSAPP_MESSAGE",
-        value: { app_destination: "WHATSAPP", link: waLink },
+        value: { app_destination: "WHATSAPP", page: conn.page_id, link: waLink },
       },
       image_hash,
     });
