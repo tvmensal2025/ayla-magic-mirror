@@ -996,6 +996,46 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       break;
     }
 
+    // ─── 1b. CHECK-IN PÓS ÁUDIO/VÍDEO ────────────
+    // Pergunta "deu pra entender?" depois do opening. Se afirmativo, vai pra qualificacao.
+    // Se for dúvida/negativa, deixa a IA responder (mesma rota do qualificacao).
+    case "checkin_pos_video": {
+      const txt = String(messageText || "").trim().toLowerCase();
+      const first = ((customer as any).name || "").split(/\s+/)[0];
+      const v = first ? `${first}, ` : "";
+      const RE_AFFIRM = /^(sim|ss+|s|deu|entendi|entendido|claro|ok|okay|beleza|blz|certo|positivo|isso|🆗|👌|👍|✅|com\s*certeza|perfeito|bacana|massa|legal|joia|tranquilo)\b/i;
+      const RE_NEG = /^(n[aã]o|nn|n|nada|n[aã]o\s*entendi|n[aã]o\s*muito|mais\s*ou\s*menos|m[ãa]is\s*menos|confuso)\b/i;
+      if (RE_AFFIRM.test(txt)) {
+        reply = `Boa! ${v}me conta uma coisa: quanto vem em média na sua conta de luz? Assim eu já te calculo quanto dá pra economizar 💡`;
+        updates.conversation_step = "qualificacao";
+        break;
+      }
+      if (RE_NEG.test(txt) || /\?/.test(txt)) {
+        // Tenta Q&A configurado primeiro
+        const qaResult = await trySendConfiguredQa();
+        if (qaResult) return qaResult;
+        // Caso contrário, resposta padrão e empurra pra qualificação
+        reply = `Sem problema! Em resumo: a iGreen reduz o valor da sua conta de luz aplicando descontos da energia limpa, sem trocar nada na sua casa 💚\n\nMe diz: quanto vem em média na sua conta hoje?`;
+        updates.conversation_step = "qualificacao";
+        break;
+      }
+      // Não deu pra classificar → trata como começo de qualificação
+      const valueMatch = txt.match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
+      if (valueMatch) {
+        const billValue = Number(valueMatch[1].replace(".", "").replace(",", "."));
+        if (Number.isFinite(billValue) && billValue >= 30) {
+          updates.electricity_bill_value = billValue;
+          updates.sales_phase = "fechamento";
+          reply = `Show! Com R$ ${billValue.toFixed(0)} dá pra calcular sua economia. Me envia uma *foto* (ou PDF) da sua conta de luz pra eu confirmar os dados 📸`;
+          updates.conversation_step = "aguardando_conta";
+          break;
+        }
+      }
+      reply = `${v}deu pra ouvir o áudio? Se quiser, me conta já o valor médio da sua conta de luz que eu adianto a economia pra você 💡`;
+      updates.conversation_step = "qualificacao";
+      break;
+    }
+
     case "menu_inicial":
     case "pos_video": {
       // Legado: leads existentes presos no menu de botões. Migra direto pra IA conversacional.
