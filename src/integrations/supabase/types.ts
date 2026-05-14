@@ -1310,6 +1310,57 @@ export type Database = {
         }
         Relationships: []
       }
+      customer_memory: {
+        Row: {
+          active: boolean
+          category: string
+          confidence: number
+          consultant_id: string
+          created_at: string
+          customer_id: string
+          expires_at: string | null
+          id: string
+          key: string
+          last_confirmed_at: string
+          metadata: Json | null
+          source: string
+          updated_at: string
+          value: string
+        }
+        Insert: {
+          active?: boolean
+          category: string
+          confidence?: number
+          consultant_id: string
+          created_at?: string
+          customer_id: string
+          expires_at?: string | null
+          id?: string
+          key: string
+          last_confirmed_at?: string
+          metadata?: Json | null
+          source?: string
+          updated_at?: string
+          value: string
+        }
+        Update: {
+          active?: boolean
+          category?: string
+          confidence?: number
+          consultant_id?: string
+          created_at?: string
+          customer_id?: string
+          expires_at?: string | null
+          id?: string
+          key?: string
+          last_confirmed_at?: string
+          metadata?: Json | null
+          source?: string
+          updated_at?: string
+          value?: string
+        }
+        Relationships: []
+      }
       customer_tags: {
         Row: {
           consultant_id: string
@@ -2807,6 +2858,57 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      customer_memory_active: {
+        Row: {
+          active: boolean | null
+          category: string | null
+          confidence: number | null
+          consultant_id: string | null
+          created_at: string | null
+          customer_id: string | null
+          expires_at: string | null
+          id: string | null
+          key: string | null
+          last_confirmed_at: string | null
+          metadata: Json | null
+          source: string | null
+          updated_at: string | null
+          value: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          category?: string | null
+          confidence?: number | null
+          consultant_id?: string | null
+          created_at?: string | null
+          customer_id?: string | null
+          expires_at?: string | null
+          id?: string | null
+          key?: string | null
+          last_confirmed_at?: string | null
+          metadata?: Json | null
+          source?: string | null
+          updated_at?: string | null
+          value?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          category?: string | null
+          confidence?: number | null
+          consultant_id?: string | null
+          created_at?: string | null
+          customer_id?: string | null
+          expires_at?: string | null
+          id?: string | null
+          key?: string | null
+          last_confirmed_at?: string | null
+          metadata?: Json | null
+          source?: string | null
+          updated_at?: string | null
+          value?: string | null
+        }
+        Relationships: []
       }
       v_ai_agent_health: {
         Row: {
