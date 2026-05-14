@@ -1147,6 +1147,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         decision: { tool, args },
         media: resolvedMedia,
+        medias: resolvedMedias,
         phase,
         latency_ms: latencyMs,
       }),
