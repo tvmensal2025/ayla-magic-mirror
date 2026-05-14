@@ -109,6 +109,144 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   const updates: Record<string, any> = {};
 
   // ═══════════════════════════════════════════════════════════════════
+  // 🎙️  OPENING DO BOT_FLOW — envia o áudio de abertura (slot) configurado
+  // pelo consultor no Flow Builder ANTES de qualquer texto/IA.
+  // Dispara apenas no PRIMEIRO contato (zero outbound prévio para este lead).
+  // ═══════════════════════════════════════════════════════════════════
+  try {
+    if (!isFile && !isButton && customer.consultant_id && !customer.bot_paused) {
+      const { count: outboundCount } = await supabase
+        .from("conversations")
+        .select("id", { count: "exact", head: true })
+        .eq("customer_id", customer.id)
+        .eq("message_direction", "outbound");
+      const isFirstContact = (outboundCount || 0) === 0;
+
+      if (isFirstContact) {
+        const { data: activeFlow } = await supabase
+          .from("bot_flows")
+          .select("id")
+          .eq("consultant_id", customer.consultant_id)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (activeFlow) {
+          const { data: openingQa } = await supabase
+            .from("bot_flow_qa")
+            .select("id, text_response")
+            .eq("flow_id", (activeFlow as any).id)
+            .eq("is_opening", true)
+            .maybeSingle();
+
+          if (openingQa) {
+            const { data: medias } = await supabase
+              .from("bot_flow_qa_media")
+              .select("media_kind, slot_key, media_id, position")
+              .eq("qa_id", (openingQa as any).id)
+              .order("position");
+
+            const orderedMedia = (medias as any[]) || [];
+            let sentSomething = false;
+
+            for (const m of orderedMedia) {
+              let url: string | null = null;
+              let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
+
+              // 1) Resolve por media_id direto
+              if (m.media_id) {
+                const { data: mediaRow } = await supabase
+                  .from("ai_media_library")
+                  .select("url, kind")
+                  .eq("id", m.media_id)
+                  .maybeSingle();
+                if (mediaRow?.url) {
+                  url = mediaRow.url;
+                  if (mediaRow.kind) kind = mediaRow.kind;
+                }
+              }
+
+              // 2) Resolve por slot_key (personal ativo → público)
+              if (!url && m.slot_key) {
+                const { data: personal } = await supabase
+                  .from("ai_media_library")
+                  .select("url")
+                  .eq("consultant_id", customer.consultant_id)
+                  .eq("slot_key", m.slot_key)
+                  .eq("active", true)
+                  .eq("is_draft", false)
+                  .maybeSingle();
+                if (personal?.url) {
+                  url = personal.url;
+                } else {
+                  const { data: pub } = await supabase
+                    .from("ai_media_library")
+                    .select("url")
+                    .eq("is_public", true)
+                    .eq("slot_key", m.slot_key)
+                    .eq("active", true)
+                    .maybeSingle();
+                  if (pub?.url) url = pub.url;
+                }
+              }
+
+              if (!url) continue;
+
+              try {
+                const ok = await sendMedia(remoteJid, url, "", kind);
+                if (ok !== false) {
+                  sentSomething = true;
+                  await supabase.from("conversations").insert({
+                    customer_id: customer.id,
+                    message_direction: "outbound",
+                    message_text: `[${kind}:${m.slot_key || "media"}]`,
+                    message_type: kind,
+                    conversation_step: step,
+                  });
+                  // Pequena pausa entre mídias (mais natural)
+                  if (orderedMedia.length > 1) await new Promise((r) => setTimeout(r, 1500));
+                }
+              } catch (e) {
+                console.warn("[bot-flow] opening media send failed:", (e as any)?.message);
+              }
+            }
+
+            // Texto de abertura opcional, se configurado
+            const openingText = (openingQa as any).text_response;
+            if (openingText) {
+              try {
+                await sendText(remoteJid, String(openingText)
+                  .replaceAll("{nome}", customer.name || "")
+                  .replaceAll("{representante}", nomeRepresentante || ""));
+                await supabase.from("conversations").insert({
+                  customer_id: customer.id,
+                  message_direction: "outbound",
+                  message_text: openingText,
+                  message_type: "text",
+                  conversation_step: step,
+                });
+                sentSomething = true;
+              } catch (e) {
+                console.warn("[bot-flow] opening text send failed:", (e as any)?.message);
+              }
+            }
+
+            if (sentSomething) {
+              console.log(`🎙️ [opening-flow] Áudio/mídia de abertura enviado para customer ${customer.id}`);
+              // Avança o step para qualificação para que o próximo input siga o fluxo
+              return {
+                reply: "",
+                updates: { conversation_step: "qualificacao", __inline_sent: true } as any,
+              };
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[bot-flow] opening-flow check failed:", (e as any)?.message);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // 🤖 SALES AI — delegação opcional para LLM com tool-calling.
   // Ativa quando: ai_agent_config.handoff_rules.use_sales_ai = true
   // E o step está em fase conversacional (antes da coleta de docs).
