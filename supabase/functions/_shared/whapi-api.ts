@@ -218,7 +218,14 @@ export function parseWhapiMessage(body: any) {
   const hasDocument = msg.type === "document";
   const documentMessage = hasDocument ? { mimetype: msg.document?.mime_type || "application/pdf", url: msg.document?.link } : null;
 
-  const isFile = hasImage || hasDocument;
+  // Áudio / Voice note (PTT)
+  const hasAudio = msg.type === "voice" || msg.type === "audio" || !!msg.voice || !!msg.audio;
+  const audioPayload = msg.voice || msg.audio || null;
+  const audioMessage = hasAudio
+    ? { mimetype: audioPayload?.mime_type || "audio/ogg", url: audioPayload?.link, ptt: msg.type === "voice" }
+    : null;
+
+  const isFile = hasImage || hasDocument || hasAudio;
   const isButton = !!buttonId;
 
   // Extrair base64 se disponível (Whapi pode enviar inline)
@@ -232,6 +239,10 @@ export function parseWhapiMessage(body: any) {
     fileBase64 = msg.document.data || null;
     fileUrl = msg.document.link || null;
   }
+  if (hasAudio && audioPayload) {
+    fileBase64 = audioPayload.data || null;
+    fileUrl = audioPayload.link || null;
+  }
 
   return {
     remoteJid,
@@ -239,13 +250,13 @@ export function parseWhapiMessage(body: any) {
     buttonId,
     hasImage,
     hasDocument,
-    hasAudio: false,
+    hasAudio,
     hasVideo: false,
     isFile,
     isButton,
     imageMessage,
     documentMessage,
-    audioMessage: null,
+    audioMessage,
     videoMessage: null,
     key: { remoteJid, fromMe: false, id: msg.id || "" },
     message: msg,
