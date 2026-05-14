@@ -529,7 +529,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { customer, history, persona, tone, customPrompt, summaryFresh, memoryFacts } = ctx;
+    const { customer, history, persona, tone, customPrompt, summaryFresh, memoryFacts, knowledgeBlock } = ctx;
     const phase = customer.sales_phase || "abertura";
 
     // ---------- INTENT-FIRST short-circuit (sem LLM) ----------
