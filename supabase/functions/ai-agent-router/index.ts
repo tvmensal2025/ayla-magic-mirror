@@ -379,7 +379,7 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
       decision.reply_text = "";
     }
 
-    // 🎯 MODO ESTRITO: se há fluxo ativo com strict_mode, segue o passo a passo do fluxo.
+    // 🎯 FLUXO Q&A: casa pergunta do cliente com respostas pré-cadastradas em bot_flow_qa.
     try {
       const { data: activeFlow } = await supabase
         .from("bot_flows")
@@ -387,36 +387,72 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
         .eq("consultant_id", consultantId)
         .eq("is_active", true)
         .maybeSingle();
-      if (activeFlow && (activeFlow as any).strict_mode) {
-        const { data: flowSteps } = await supabase
-          .from("bot_flow_steps")
-          .select("position, step_type, slot_key, message_text")
+      if (activeFlow) {
+        const { data: qas } = await supabase
+          .from("bot_flow_qa")
+          .select("id, intent_name, is_opening, is_closing, text_response")
           .eq("flow_id", (activeFlow as any).id)
           .order("position");
-        // Conta passos já executados via dispatch log do customer
-        const { count: dispatchedCount } = await supabase
-          .from("ai_slot_dispatch_log")
-          .select("id", { count: "exact", head: true })
-          .eq("customer_id", customer_id)
-          .eq("dispatch_status", "sent");
-        const idx = Math.min((dispatchedCount || 0), (flowSteps || []).length - 1);
-        const currentStep: any = (flowSteps || [])[idx];
-        if (currentStep) {
-          if (currentStep.step_type === "audio_slot" && currentStep.slot_key && validSlotKeys.has(currentStep.slot_key)) {
-            slotKey = currentStep.slot_key;
-            decision.reply_text = "";
-          } else if (currentStep.message_text) {
-            slotKey = ""; // não dispara áudio
-            // Substitui variáveis básicas
-            const txt = String(currentStep.message_text)
-              .replaceAll("{nome}", customer.name || "")
-              .replaceAll("{link_cadastro}", `https://igreenenergybrasil.site/${(customer as any).consultant_license || ""}/cadastro`);
-            decision.reply_text = txt;
+        const qaList = (qas as any[]) || [];
+
+        const norm = (s: string) =>
+          (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const inputN = norm(user_input || "");
+
+        let matched: any = null;
+        // 1) Abertura no primeiro contato
+        if (!hadOutboundBefore) {
+          matched = qaList.find((q) => q.is_opening);
+        }
+        // 2) Match por trigger phrase
+        if (!matched && inputN) {
+          const ids = qaList.filter((q) => !q.is_opening).map((q) => q.id);
+          if (ids.length) {
+            const { data: trigs } = await supabase
+              .from("bot_flow_qa_triggers")
+              .select("qa_id, phrase")
+              .in("qa_id", ids);
+            for (const t of (trigs as any[]) || []) {
+              if (inputN.includes(norm(t.phrase))) {
+                matched = qaList.find((q) => q.id === t.qa_id);
+                if (matched) break;
+              }
+            }
+          }
+        }
+
+        if (matched) {
+          const { data: meds } = await supabase
+            .from("bot_flow_qa_media")
+            .select("media_kind, slot_key")
+            .eq("qa_id", matched.id)
+            .order("position");
+          const firstSlot = (meds as any[] || []).find((m) => m.slot_key && validSlotKeys.has(m.slot_key));
+          if ((activeFlow as any).strict_mode || !hadOutboundBefore) {
+            if (firstSlot) {
+              slotKey = firstSlot.slot_key;
+              decision.reply_text = "";
+            }
+            if (matched.text_response) {
+              const link = `https://igreenenergybrasil.site/${(customer as any).consultant_license || ""}/cadastro`;
+              decision.reply_text = String(matched.text_response)
+                .replaceAll("{nome}", customer.name || "")
+                .replaceAll("{link_cadastro}", link);
+              if (firstSlot) decision.reply_text = ""; // não duplica abertura quando há áudio
+              else if (matched.is_closing) {
+                decision.reply_text = String(matched.text_response)
+                  .replaceAll("{nome}", customer.name || "")
+                  .replaceAll("{link_cadastro}", link);
+              }
+            }
+          } else if (firstSlot) {
+            // Modo sugestão: usa slot quando bate intenção, mas mantém reply do LLM
+            slotKey = firstSlot.slot_key;
           }
         }
       }
     } catch (e) {
-      console.warn("strict flow resolve failed:", (e as any)?.message);
+      console.warn("Q&A flow resolve failed:", (e as any)?.message);
     }
 
 

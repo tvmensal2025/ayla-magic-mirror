@@ -982,6 +982,117 @@ export type Database = {
         }
         Relationships: []
       }
+      bot_flow_qa: {
+        Row: {
+          created_at: string
+          flow_id: string
+          id: string
+          intent_name: string
+          is_closing: boolean
+          is_opening: boolean
+          position: number
+          text_response: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          flow_id: string
+          id?: string
+          intent_name?: string
+          is_closing?: boolean
+          is_opening?: boolean
+          position?: number
+          text_response?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          flow_id?: string
+          id?: string
+          intent_name?: string
+          is_closing?: boolean
+          is_opening?: boolean
+          position?: number
+          text_response?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bot_flow_qa_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "bot_flows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bot_flow_qa_media: {
+        Row: {
+          created_at: string
+          id: string
+          media_id: string | null
+          media_kind: string
+          position: number
+          qa_id: string
+          slot_key: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          media_id?: string | null
+          media_kind: string
+          position?: number
+          qa_id: string
+          slot_key?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          media_id?: string | null
+          media_kind?: string
+          position?: number
+          qa_id?: string
+          slot_key?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bot_flow_qa_media_qa_id_fkey"
+            columns: ["qa_id"]
+            isOneToOne: false
+            referencedRelation: "bot_flow_qa"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bot_flow_qa_triggers: {
+        Row: {
+          created_at: string
+          id: string
+          phrase: string
+          qa_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          phrase: string
+          qa_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          phrase?: string
+          qa_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bot_flow_qa_triggers_qa_id_fkey"
+            columns: ["qa_id"]
+            isOneToOne: false
+            referencedRelation: "bot_flow_qa"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bot_flow_steps: {
         Row: {
           condition_text: string | null
