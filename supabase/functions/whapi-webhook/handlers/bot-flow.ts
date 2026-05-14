@@ -514,6 +514,44 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       break;
     }
 
+    case "qualificacao": {
+      const capturedName = normalizeLeadName(messageText);
+      if (capturedName) {
+        updates.name = capturedName;
+        updates.name_source = "self_introduced";
+        (customer as any).name = capturedName;
+        (customer as any).name_source = "self_introduced";
+        reply = `${capturedName.split(/\s+/)[0]}, qual a média da sua conta de luz?`;
+        updates.conversation_step = "qualificacao";
+        break;
+      }
+
+      if (isBogusCapturedName((customer as any).name)) {
+        updates.name = null;
+        updates.name_source = "unknown";
+        (customer as any).name = null;
+        (customer as any).name_source = "unknown";
+      }
+
+      const valueMatch = String(messageText || "").match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
+      if (valueMatch) {
+        const billValue = Number(valueMatch[1].replace(".", "").replace(",", "."));
+        if (Number.isFinite(billValue) && billValue >= 30) {
+          updates.electricity_bill_value = billValue;
+          updates.sales_phase = "fechamento";
+          reply = `Com essa média, já dá para calcular sua economia. Me envie uma FOTO ou PDF da sua conta de energia para eu confirmar os dados.`;
+          updates.conversation_step = "aguardando_conta";
+          break;
+        }
+      }
+
+      reply = (customer as any).name && !isBogusCapturedName((customer as any).name)
+        ? `Certo, ${(customer as any).name.split(/\s+/)[0]}. Qual a média da sua conta de luz?`
+        : "Qual é o seu nome?";
+      updates.conversation_step = "qualificacao";
+      break;
+    }
+
     case "menu_inicial": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
       if (resp === "entender_desconto" || resp === "1" || resp?.includes("funciona") || resp?.includes("entender") || resp?.includes("desconto")) {
