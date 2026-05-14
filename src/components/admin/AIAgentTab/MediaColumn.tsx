@@ -439,7 +439,26 @@ export function MediaColumn({ userId }: { userId: string }) {
                 key={m.id}
                 className="group flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-muted/40 transition-colors"
               >
-                {iconFor(m.kind)}
+                {m.url && (m.kind === "image" || m.kind === "video") ? (
+                  <button
+                    onClick={() => setPreviewMedia(m)}
+                    className="relative w-10 h-10 rounded-md overflow-hidden bg-muted/40 border border-border/60 shrink-0 group/thumb"
+                    title="Pré-visualizar"
+                  >
+                    {m.kind === "image" ? (
+                      <img src={m.url} alt={m.label} className="w-full h-full object-cover" />
+                    ) : (
+                      <video src={m.url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                    )}
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity">
+                      <Play className="w-4 h-4 text-white fill-white" />
+                    </div>
+                  </button>
+                ) : (
+                  <span className="w-10 h-10 rounded-md bg-muted/40 border border-border/60 shrink-0 flex items-center justify-center">
+                    {iconFor(m.kind)}
+                  </span>
+                )}
                 <div className="flex-1 min-w-0">
                   {isMine ? (
                     <EditableLabel value={m.label} onSave={(v) => updateLabel(m, v)} />
@@ -448,6 +467,16 @@ export function MediaColumn({ userId }: { userId: string }) {
                   )}
                   <p className="text-[10px] text-muted-foreground uppercase">{m.kind} · prio {m.priority}</p>
                 </div>
+                {m.url && (
+                  <button
+                    onClick={() => setPreviewMedia(m)}
+                    className="text-muted-foreground hover:text-primary p-1 transition-colors"
+                    aria-label="Pré-visualizar"
+                    title="Ver mídia"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                )}
                 {view === "mine" ? (
                   <>
                     <Input
