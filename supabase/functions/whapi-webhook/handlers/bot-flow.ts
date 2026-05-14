@@ -370,35 +370,39 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       .order("position");
     let sentSomething = false;
 
-    for (const m of ((mediaRows as any[]) || [])) {
+    const qaMediaList = ((mediaRows as any[]) || []);
+    for (let mi = 0; mi < qaMediaList.length; mi++) {
+      const m = qaMediaList[mi];
       let url: string | null = null;
       let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
+      let durationSec: number | null = null;
       if (m.media_id) {
-        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind").eq("id", m.media_id).maybeSingle();
+        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind, duration_seconds").eq("id", m.media_id).maybeSingle();
         if (mediaRow?.url) {
           url = mediaRow.url;
           if (mediaRow.kind) kind = mediaRow.kind;
+          if ((mediaRow as any).duration_seconds) durationSec = Number((mediaRow as any).duration_seconds);
         }
       }
       if (!url && m.slot_key) {
         const { data: personal } = await supabase
           .from("ai_media_library")
-          .select("url")
+          .select("url, duration_seconds")
           .eq("consultant_id", customer.consultant_id)
           .eq("slot_key", m.slot_key)
           .eq("active", true)
           .eq("is_draft", false)
           .maybeSingle();
-        if (personal?.url) url = personal.url;
+        if (personal?.url) { url = personal.url; durationSec = Number((personal as any).duration_seconds || 0) || null; }
         else {
           const { data: pub } = await supabase
             .from("ai_media_library")
-            .select("url")
+            .select("url, duration_seconds")
             .eq("is_public", true)
             .eq("slot_key", m.slot_key)
             .eq("active", true)
             .maybeSingle();
-          if (pub?.url) url = pub.url;
+          if (pub?.url) { url = pub.url; durationSec = Number((pub as any).duration_seconds || 0) || null; }
         }
       }
       if (!url) continue;
@@ -411,7 +415,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         message_type: kind,
         conversation_step: step,
       });
-      await new Promise((r) => setTimeout(r, 1200));
+      // Espera proporcional à duração (áudio longo → não atropela com vídeo)
+      const isLast = mi === qaMediaList.length - 1;
+      if (!isLast) await sleepForMedia(kind, durationSec);
     }
 
     const baseText = qa.text_response
