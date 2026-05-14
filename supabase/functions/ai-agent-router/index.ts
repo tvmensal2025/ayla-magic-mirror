@@ -424,11 +424,16 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
         if (matched) {
           const { data: meds } = await supabase
             .from("bot_flow_qa_media")
-            .select("media_kind, slot_key")
+            .select("media_kind, slot_key, media_id")
             .eq("qa_id", matched.id)
             .order("position");
-          const firstSlot = (meds as any[] || []).find((m) => m.slot_key && validSlotKeys.has(m.slot_key));
+          const orderedMedia = (meds as any[] || []);
+          const firstSlot = orderedMedia.find((m) => m.media_kind === "audio" && m.slot_key && validSlotKeys.has(m.slot_key));
+          const selectedMediaIds = orderedMedia
+            .filter((m) => m.media_id)
+            .map((m) => String(m.media_id));
           if ((activeFlow as any).strict_mode || !hadOutboundBefore) {
+            if (selectedMediaIds.length) decision.media_to_send_ids = selectedMediaIds;
             if (firstSlot) {
               slotKey = firstSlot.slot_key;
               decision.reply_text = "";
@@ -448,6 +453,7 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
           } else if (firstSlot) {
             // Modo sugestão: usa slot quando bate intenção, mas mantém reply do LLM
             slotKey = firstSlot.slot_key;
+            if (selectedMediaIds.length) decision.media_to_send_ids = selectedMediaIds;
           }
         }
       }
