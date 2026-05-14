@@ -431,6 +431,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         },
       };
     }
+
+    const configuredQaResult = await trySendConfiguredQa();
+    if (configuredQaResult) return configuredQaResult;
   }
 
   // ═══════════════════════════════════════════════════════════════════
