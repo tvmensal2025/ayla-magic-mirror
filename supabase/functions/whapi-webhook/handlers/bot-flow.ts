@@ -151,9 +151,31 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     return sendButtons(jid, msg, options);
   }
 
+  // CTA por etapa do funil — sempre puxa o lead pro próximo passo após responder.
+  function buildStepNudge(currentStep: string, leadName: string | null): string {
+    const first = (leadName || "").split(/\s+/)[0] || "";
+    const v = first ? `${first}, ` : "";
+    switch (currentStep) {
+      case "welcome":
+      case "menu_inicial":
+      case "qualificacao":
+        return `\n\n${v}me conta: quanto vem em média a sua conta de luz? Assim eu já te calculo a economia. 💡`;
+      case "aguardando_conta":
+        return `\n\n${v}pra eu confirmar tudo certinho, me manda agora a *foto* (ou PDF) da sua conta de luz. 📸`;
+      case "coleta_doc":
+      case "ask_email":
+      case "ask_cep":
+        return `\n\nBora finalizar seu cadastro? Continua respondendo aqui que eu te guio. ✅`;
+      default:
+        return "";
+    }
+  }
+
   async function trySendConfiguredQa(): Promise<BotResult | null> {
     if (!messageText || isFile || isButton || !customer.consultant_id) return null;
     const normalizedText = messageText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    if (normalizedText.length < 2) return null;
+
     const { data: activeFlow } = await supabase
       .from("bot_flows")
       .select("id")
@@ -174,13 +196,81 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       .from("bot_flow_qa_triggers")
       .select("qa_id, phrase")
       .in("qa_id", qaIds);
-    const matchedTrigger = ((triggers as any[]) || []).find((t) => {
-      const phrase = String(t.phrase || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-      return phrase && (normalizedText === phrase || normalizedText.includes(phrase));
-    });
-    if (!matchedTrigger) return null;
+    const triggerList = ((triggers as any[]) || []);
 
-    const qa = ((qaRows as any[]) || []).find((q) => q.id === matchedTrigger.qa_id);
+    // 1) Match rápido por substring/normalização
+    let matchedQaId: string | null = null;
+    const directHit = triggerList.find((t) => {
+      const phrase = String(t.phrase || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      if (!phrase) return false;
+      if (normalizedText === phrase || normalizedText.includes(phrase)) return true;
+      // similaridade trigrama alta (typos curtos)
+      return trigramSim(normalizedText, phrase) >= 0.72;
+    });
+    if (directHit) matchedQaId = directHit.qa_id;
+
+    // 2) Fallback semântico via IA (só se temos triggers cadastradas e nenhuma bateu)
+    if (!matchedQaId && triggerList.length > 0 && geminiApiKey) {
+      try {
+        // Agrupa triggers por qa_id pra dar contexto melhor pro LLM
+        const byQa = new Map<string, string[]>();
+        for (const t of triggerList) {
+          const arr = byQa.get(t.qa_id) || [];
+          arr.push(String(t.phrase || ""));
+          byQa.set(t.qa_id, arr);
+        }
+        const optionsList = Array.from(byQa.entries()).map(([id, phrases], i) =>
+          `${i + 1}. id=${id} | exemplos: ${phrases.slice(0, 6).join(" / ")}`
+        ).join("\n");
+
+        const prompt =
+          `Você é um classificador de intenção em PT-BR para um bot de vendas de energia (iGreen).\n` +
+          `Dado a MENSAGEM do lead, escolha a OPÇÃO cuja intenção semanticamente melhor responde.\n` +
+          `Se NENHUMA opção responder claramente a mensagem, devolva qa_id="" e confidence=0.\n\n` +
+          `MENSAGEM: """${messageText.slice(0, 400)}"""\n\nOPÇÕES:\n${optionsList}\n\n` +
+          `Responda APENAS JSON: {"qa_id":"<id ou vazio>","confidence":0..1}`;
+
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${geminiApiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              generationConfig: {
+                temperature: 0,
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: "object",
+                  properties: {
+                    qa_id: { type: "string" },
+                    confidence: { type: "number" },
+                  },
+                  required: ["qa_id", "confidence"],
+                },
+                thinkingConfig: { thinkingBudget: 0 },
+              },
+            }),
+          },
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const txt = data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+          const parsed = JSON.parse(txt);
+          const candidateId = String(parsed?.qa_id || "").trim();
+          const conf = Number(parsed?.confidence || 0);
+          if (candidateId && conf >= 0.6 && qaIds.includes(candidateId)) {
+            matchedQaId = candidateId;
+            console.log(`[qa-semantic] match qa=${candidateId} conf=${conf} msg="${messageText.slice(0, 60)}"`);
+          }
+        }
+      } catch (e) {
+        console.warn("[qa-semantic] falhou:", (e as any)?.message);
+      }
+    }
+
+    if (!matchedQaId) return null;
+    const qa = ((qaRows as any[]) || []).find((q) => q.id === matchedQaId);
     if (!qa) return null;
 
     const { data: mediaRows } = await supabase
