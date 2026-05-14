@@ -134,14 +134,19 @@ Deno.test("fetchUrlToBase64: 404 → null", async () => {
   );
 });
 
-Deno.test("fetchUrlToBase64: throw → null", async () => {
-  await withMockedFetch(
-    () => Promise.reject(new Error("boom")),
-    async () => {
-      const res = await fetchUrlToBase64("https://x/err");
-      assertEquals(res, null);
-    },
-  );
+Deno.test({
+  name: "fetchUrlToBase64: throw → null",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    await withMockedFetch(
+      () => Promise.reject(new Error("boom")),
+      async () => {
+        const res = await fetchUrlToBase64("https://x/err");
+        assertEquals(res, null);
+      },
+    );
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────
