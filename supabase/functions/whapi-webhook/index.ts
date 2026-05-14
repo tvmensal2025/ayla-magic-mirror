@@ -55,10 +55,11 @@ Deno.serve(async (req) => {
     }
 
     const {
-      remoteJid, messageText, buttonId, hasImage, hasDocument, isFile, isButton,
-      imageMessage, documentMessage, key, message, messageId,
+      remoteJid, buttonId, hasImage, hasDocument, hasAudio, isButton,
+      imageMessage, documentMessage, audioMessage, key, message, messageId,
       fileBase64: whapiFileBase64, fileUrl: whapiFileUrl,
     } = parsed;
+    let { messageText, isFile } = parsed;
 
     if (!messageText && !isFile && !isButton) {
       console.log("⏭️ Mensagem vazia");
@@ -180,14 +181,16 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── Log inbound ───────────────────────────────────────────────────
-    await supabase.from("conversations").insert({
+    // ─── Log inbound (audio: marcamos como [áudio] e atualizamos depois com a transcrição) ──
+    const inboundLogText = hasAudio ? "[áudio]" : (isFile ? "[arquivo]" : messageText);
+    const inboundLogType = hasAudio ? "audio" : (isFile ? "image" : "text");
+    const { data: inboundLog } = await supabase.from("conversations").insert({
       customer_id: customer.id,
       message_direction: "inbound",
-      message_text: isFile ? "[arquivo]" : messageText,
-      message_type: isFile ? "image" : "text",
+      message_text: inboundLogText,
+      message_type: inboundLogType,
       conversation_step: customer.conversation_step,
-    });
+    }).select("id").maybeSingle();
 
     // ─── Download media ────────────────────────────────────────────────
     let fileUrl: string | null = whapiFileUrl || null;
@@ -203,16 +206,58 @@ Deno.serve(async (req) => {
         if (mediaRes.ok) {
           const buf = await mediaRes.arrayBuffer();
           const bytes = new Uint8Array(buf);
-          // Convert to base64
           let binary = "";
           for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
           fileBase64 = btoa(binary);
-          const mime = imageMessage?.mimetype || documentMessage?.mimetype || "application/octet-stream";
+          const mime = audioMessage?.mimetype || imageMessage?.mimetype || documentMessage?.mimetype || "application/octet-stream";
           fileUrl = `data:${mime};base64,${fileBase64}`;
           console.log(`✅ Mídia Whapi baixada (${mime}, b64 len: ${fileBase64.length})`);
         }
       } catch (e: any) {
         console.warn(`⚠️ Erro ao baixar mídia Whapi: ${e?.message}`);
+      }
+    }
+
+    // ─── Áudio do cliente → transcreve com Gemini e trata como texto ──────
+    if (hasAudio && fileBase64) {
+      try {
+        const mt = audioMessage?.mimetype || "audio/ogg";
+        console.log(`🎙️ [whapi] Transcrevendo áudio do cliente (${mt}, ${fileBase64.length} b64 chars)...`);
+        const transRes = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-transcribe-media`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+            apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "",
+          },
+          body: JSON.stringify({ base64: fileBase64, mimeType: mt, kind: "audio", language: "pt-BR" }),
+        });
+        const tj = await transRes.json().catch(() => ({}));
+        const transcript = (tj?.transcript || "").trim();
+        if (transcript) {
+          console.log(`✅ [whapi] Transcrição (${transcript.length} chars): "${transcript.substring(0, 120)}"`);
+          messageText = transcript;
+          isFile = false; // tratar como texto pra IA conversar normalmente
+          // Atualiza o log inbound com a transcrição (mantém marca [áudio])
+          if (inboundLog?.id) {
+            await supabase.from("conversations").update({
+              message_text: `[áudio] ${transcript}`,
+              message_type: "audio",
+            }).eq("id", inboundLog.id);
+          }
+        } else {
+          console.warn("⚠️ [whapi] Transcrição vazia — pedindo pro lead repetir por texto");
+          try { await sender.sendText(remoteJid, "Não consegui ouvir direito seu áudio 🙏 Pode me mandar por texto, por favor?"); } catch {}
+          return new Response(JSON.stringify({ ok: true, msg: "audio_empty_transcript" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } catch (e: any) {
+        console.error(`❌ [whapi] Erro ao transcrever áudio:`, e?.message);
+        try { await sender.sendText(remoteJid, "Não consegui ouvir seu áudio agora 🙏 Pode me mandar por texto?"); } catch {}
+        return new Response(JSON.stringify({ ok: true, msg: "audio_transcribe_failed" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
     }
 
