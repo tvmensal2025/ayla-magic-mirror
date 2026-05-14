@@ -365,18 +365,16 @@ function sanitizeHumanMessage(
     if (phase === "objecao") return "Faz sentido. O que especificamente está pesando na decisão?";
     return "Vamos seguir com seu cadastro. Me confirma se podemos avançar?";
   }
-  out = stripEmojis(out);
+  // NÃO removemos emojis nem "kkk/rs" — o tom humano permite (com moderação).
   out = stripUntrustedVocative(out, trustedFirstName);
   out = stripRepeatedGreeting(out, hasPriorOutbound);
   out = stripDuplicateOpener(out, lastAssistantMsg);
-  // Remove gírias infantis residuais
+  // Limpa apenas abreviações severas que destoam (não toca em "kkk"/"rs"/emojis)
   out = out
-    .replace(/\b(oii+e?|oiee+|oie)\b/gi, "Olá")
+    .replace(/\boii+e?\b/gi, "Oi")
     .replace(/\bvc\b/gi, "você")
-    .replace(/\bblz\b/gi, "tudo bem")
-    .replace(/\brapidinho\b/gi, "rapidamente")
-    .replace(/\b(rs+|kk+|haha+|hehe+)\b/gi, "")
-    .replace(/\b(amor|fofo|fofa|querido|querida|lindo|linda)\b/gi, "")
+    .replace(/\bblz\b/gi, "beleza")
+    .replace(/\b(amorzinho|fofinho|fofinha|queridinho|queridinha)\b/gi, "")
     .replace(/\s{2,}/g, " ")
     .trim();
   // Capitaliza primeira letra se ficou minúscula após cortes
