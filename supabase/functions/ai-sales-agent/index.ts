@@ -480,8 +480,45 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { customer, history, persona, tone, customPrompt } = ctx;
+    const { customer, history, persona, tone, customPrompt, summaryFresh } = ctx;
     const phase = customer.sales_phase || "abertura";
+
+    // ---------- INTENT-FIRST short-circuit (sem LLM) ----------
+    // "humano" → handoff direto. "desistir" → mark_lost. Latência ~50ms, custo zero.
+    const earlyIntent = mode === "reply" ? detectIntent(user_input || "") : null;
+    if (earlyIntent === "humano") {
+      await supabase.from("customers").update({
+        bot_paused: true,
+        bot_paused_reason: "intent_humano: lead pediu atendimento humano",
+        bot_paused_at: new Date().toISOString(),
+      }).eq("id", customer_id);
+      await supabase.from("ai_decisions").insert({
+        customer_id, consultant_id: customer.consultant_id, phase,
+        tool_called: "request_handoff", reasoning: "early_intent_humano",
+        user_input, ai_output: { reason: "lead pediu humano", urgency: "alta" },
+        latency_ms: Date.now() - t0, intent_detected: "humano",
+      });
+      return new Response(JSON.stringify({
+        decision: { tool: "request_handoff", args: { reason: "lead pediu humano", urgency: "alta" } },
+        phase, latency_ms: Date.now() - t0,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (earlyIntent === "desistir") {
+      await supabase.from("customers").update({
+        sales_phase: "perdido", bot_paused: true,
+        bot_paused_reason: "intent_desistir: lead disse que não quer",
+      }).eq("id", customer_id);
+      await supabase.from("ai_decisions").insert({
+        customer_id, consultant_id: customer.consultant_id, phase,
+        tool_called: "mark_lost", reasoning: "early_intent_desistir",
+        user_input, ai_output: { reason: "lead recusou explicitamente" },
+        latency_ms: Date.now() - t0, intent_detected: "desistir",
+      });
+      return new Response(JSON.stringify({
+        decision: { tool: "mark_lost", args: { reason: "lead recusou explicitamente" } },
+        phase, latency_ms: Date.now() - t0,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // Profile inference for media filtering
     const bill = Number(customer.electricity_bill_value || 0);
