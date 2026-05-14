@@ -171,6 +171,58 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
     toast({ title: "Vídeo removido — clique Salvar para confirmar" });
   }
 
+  async function addNewSlot() {
+    const rawKey = window.prompt(
+      "Identificador da nova pergunta (sem espaços, ex: garantia_contrato):"
+    );
+    if (!rawKey) return;
+    const slot_key = rawKey
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9_]/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "");
+    if (!slot_key) {
+      toast({ title: "Identificador inválido", variant: "destructive" });
+      return;
+    }
+    if (slots.some((x) => x.slot_key === slot_key)) {
+      toast({ title: "Já existe um slot com esse identificador", variant: "destructive" });
+      return;
+    }
+    const label = window.prompt("Nome da pergunta (ex: Garantia do contrato):", slot_key) || slot_key;
+    const nextPosition = (slots.reduce((m, s) => Math.max(m, s.position || 0), 0) || 0) + 1;
+    const { error } = await supabase.from("ai_agent_slots").insert({
+      slot_key,
+      label,
+      description: "",
+      trigger_hint: "",
+      fallback_text: "",
+      min_interval_minutes: 60,
+      position: nextPosition,
+      active: true,
+      version: 1,
+    });
+    if (error) {
+      toast({ title: "Erro ao criar", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "✓ Nova pergunta criada — grave o áudio/vídeo abaixo" });
+    load();
+  }
+
+  async function deleteSlot(slotKey: string) {
+    if (!window.confirm(`Excluir a pergunta "${slotKey}"? Essa ação não pode ser desfeita.`)) return;
+    const { error } = await supabase.from("ai_agent_slots").delete().eq("slot_key", slotKey);
+    if (error) {
+      toast({ title: "Erro ao excluir", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Pergunta excluída" });
+    load();
+  }
+
   async function uploadDefault(slotKey: string, blob: Blob, durationSec: number) {
     const path = `public/slots/${slotKey}.webm`;
     const { error: upErr } = await supabase.storage
@@ -206,7 +258,12 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
           <h2 className="font-heading font-bold text-lg text-foreground flex items-center gap-2">
             <Settings className="w-5 h-5 text-primary" /> Slots padrão (Super Admin)
           </h2>
-          <Button size="icon" variant="ghost" onClick={onClose}><X className="w-4 h-4" /></Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={addNewSlot}>
+              <Plus className="w-4 h-4 mr-1" /> Nova pergunta
+            </Button>
+            <Button size="icon" variant="ghost" onClick={onClose}><X className="w-4 h-4" /></Button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {loading ? (
@@ -300,11 +357,14 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
                     </div>
                   )}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
                   <AudioRecorderInline onRecorded={(b, d) => uploadDefault(s.slot_key, b, d)} />
                   <Button size="sm" onClick={() => saveSlot(s)} disabled={saving === s.slot_key}>
                     {saving === s.slot_key ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Save className="w-4 h-4 mr-1" />}
                     Salvar
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-destructive ml-auto" onClick={() => deleteSlot(s.slot_key)}>
+                    Excluir
                   </Button>
                 </div>
               </div>
