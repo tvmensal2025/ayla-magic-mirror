@@ -1,69 +1,61 @@
-## Memória Longa para a IA de Vendas
+## 1. UI de Mídias no mobile (MediaColumn)
 
-Hoje a IA tem **memória curta** (últimas ~20 mensagens) + **resumo rolante** (`conversation_summary` que sobrescreve a cada 10 msgs). Isso é bom pra economizar tokens, mas **esquece histórico antigo**: se o lead voltou depois de 30 dias, a IA não lembra que ele já recusou por preço, já recebeu o vídeo X, ou que o nome do filho é Pedro.
+Hoje a lista cabe em ~80 px de altura visível por causa do dropzone enorme + barra de armazenamento + abas, e o usuário precisa rolar dentro de uma área pequena. Vou:
 
-### O que vou adicionar
+- Tornar o dropzone **colapsável no mobile** (`< md`): quando recolhido vira um botão compacto "+ Enviar mídia" no topo. Expande só ao tocar.
+- Mover **Armazenamento** para uma linha fina única (texto + barra de 4 px) dentro do header, eliminando o bloco grande.
+- Aumentar a thumb dos itens para `w-14 h-14` no mobile (com `Play` overlay maior, melhor para tocar) e dar `min-h-[64px]` por linha.
+- Tornar o painel **`flex-1` com `max-h-[calc(100dvh-...)]`** e `overflow-y-auto` só na lista, garantindo que a lista cresça e a rolagem fique dentro dela (não da página).
+- Sticky no topo: abas Minhas/Públicas + busca opcional, para o usuário sempre ver onde está.
 
-**1. Tabela `customer_memory` (fatos persistentes por lead)**
-Cada fato é uma linha curta, categorizada, com timestamp e fonte. Nunca é sobrescrita — só adicionada/desativada.
+Resultado: no celular a maior parte da tela passa a ser a lista de vídeos, com thumbs grandes e botão de Pré-visualizar (`Eye`) bem alcançável.
 
-| campo | exemplo |
-|---|---|
-| `customer_id` | uuid |
-| `category` | `preferencia`, `objecao`, `dado_pessoal`, `historico_compra`, `contexto_familiar`, `dor`, `midia_enviada` |
-| `key` | `melhor_horario`, `motivo_recusa_anterior`, `nome_conjuge` |
-| `value` | `"manhã"`, `"achou caro em 2024"`, `"Maria"` |
-| `confidence` | 0.0–1.0 |
-| `source` | `lead_disse`, `ocr`, `consultor`, `inferido` |
-| `last_confirmed_at`, `expires_at` (opcional), `active` |
+## 2. Vídeo principal de explicação
 
-Index em `(customer_id, active, category)` pra busca rápida.
+Hoje em `ai-sales-agent/index.ts` (linha 892) o "intro video" é selecionado por regex `conex[aã]o green.*apresenta`, e o prompt do Gemini não tem hierarquia clara entre vídeos. Vou:
 
-**2. Extração automática de fatos (`ai-extract-memory`)**
-Edge function nova. Roda em background junto com o `ai-summarize-conversation` (a cada 10 msgs OU quando o lead manda info nova). Usa Gemini Flash-Lite com schema JSON estruturado pra extrair fatos novos da conversa recente e fazer upsert na `customer_memory`. Deduplica por `(customer_id, category, key)`.
+- Adicionar uma **flag** `is_primary_explainer` (boolean) na coluna `ai_media_library` (nova migration), com 1 vídeo primário por consultor (constraint parcial unique).
+- Na UI de Mídias, adicionar um ícone ⭐ ao lado do Switch para marcar/desmarcar "Vídeo principal de explicação" (apenas para `kind=video`). Tooltip: "Este será o vídeo enviado quando o lead pedir explicação."
+- No backend:
+  - `introVideo` passa a ser `freshMedia.find(m => m.is_primary_explainer && m.kind==='video')`, com fallback para o regex atual.
+  - No system prompt do Gemini, listar mídias com etiqueta `[PRINCIPAL]` no vídeo marcado e instruir: **"Use o vídeo [PRINCIPAL] como primeira opção sempre que o lead pedir 'como funciona' ou tiver dúvida geral. Os outros vídeos só se o lead disser que não entendeu ou pedir mais detalhes."**
+  - Manter cooldown de 6h e bloqueio de vídeo consecutivo já existentes.
 
-**3. Injeção no prompt do `ai-sales-agent`**
-No `loadContext`, além do `conversation_summary` atual, carrego os top 15 fatos ativos do lead (priorizando `objecao` e `preferencia` recentes) e injeto num bloco `[MEMÓRIA LONGA — fatos confirmados sobre este lead]`. Custo: ~200-400 tokens extras, vale muito.
+## 3. Indicador "digitando…" real (humanização Whapi)
 
-**4. Memória cruzada (opcional, fase 2)**
-Tabela `consultant_memory` com padrões aprendidos por consultor: "leads de Goiás respondem melhor ao vídeo X", "objeção 'já tenho solar' resolve com o áudio Y". Alimentada pelo `ai-learn-feedback` que já existe. Já temos `ai_learned_patterns` — só preciso ampliar o que a IA registra.
+A Whapi tem o endpoint `PUT /presences/{ChatID}` com body `{ presence: "typing" | "recording" | "paused", delay: <segundos> }` — a Whapi mantém o status "digitando" no WhatsApp do lead pelo tempo do `delay` e depois para sozinha. (Já existe lógica equivalente no caminho Evolution via `sender.n(...)`.)
 
-**5. Decay e privacidade**
-- Fatos com `category=dado_pessoal` nunca expiram.
-- Fatos com `category=preferencia` ou `objecao` decay de confidence em 90 dias.
-- View `customer_memory_active` filtra `active=true AND (expires_at IS NULL OR expires_at > now())`.
-- RLS: consultor lê só seus leads (igual `customers`).
+Vou:
 
-### Arquivos
+- Adicionar `case "send_presence"` no `whapi-proxy/index.ts`:
+  ```
+  PUT /presences/{to}  body: { presence, delay }
+  ```
+  Aceita `presence: "typing" | "recording" | "paused"` e `delay` em segundos (cap 25s, mínimo 1s).
+- Adicionar `whapiSendPresence(to, presence, delay)` em `src/services/whapiApi.ts`.
+- Adicionar helper `presence()` no `_shared/human-pace.ts` que chama a Evolution OU Whapi conforme flag `isWhapi`, calcula o delay em função do tamanho do texto (mesmo cálculo do `humanPace`) e dispara o presence ANTES do `humanPace` aguardar.
+- No fluxo de envio de bot (`whapi-webhook` e `evolution-webhook` bot-flow):
+  - Texto: presence `typing` por `min(humanDelay, 15s)` antes do `send_text`.
+  - Áudio: presence `recording` antes do `send_audio`.
+  - Mídia (vídeo/imagem): presence `typing` curto (3-5s) antes de enviar como cue de "estou mandando algo".
+  - Após enviar, presence `paused` (delay 1s) para apagar o indicador imediatamente.
 
-**Migration:**
-- `customer_memory` (tabela + RLS + indexes + trigger updated_at)
-- View `customer_memory_active`
-- (Já temos `ai_learned_patterns` — sem mudanças)
+Assim o lead vê "digitando…" / "gravando áudio…" de verdade durante a pausa humana, eliminando a sensação robótica.
 
-**Edge functions novas:**
-- `supabase/functions/ai-extract-memory/index.ts` — extrator JSON estruturado
+## Detalhes técnicos
 
-**Edge functions editadas:**
-- `supabase/functions/ai-sales-agent/index.ts` — `loadContext` carrega memória e injeta no prompt; após resposta, dispara `ai-extract-memory` em background a cada 10 msgs
-- `supabase/functions/ai-summarize-conversation/index.ts` — passa a chamar também o extrator (1 trigger só)
+**Arquivos a alterar:**
+- `src/components/admin/AIAgentTab/MediaColumn.tsx` — layout mobile, colapso do dropzone, marcação ⭐ vídeo principal.
+- `supabase/migrations/<new>.sql` — `alter table ai_media_library add column is_primary_explainer boolean default false;` + índice parcial único `(consultant_id) where is_primary_explainer`.
+- `src/integrations/supabase/types.ts` — regenerado.
+- `supabase/functions/whapi-proxy/index.ts` — novo `case "send_presence"`.
+- `src/services/whapiApi.ts` — `whapiSendPresence`.
+- `supabase/functions/_shared/human-pace.ts` — helper `presence(sender, jid, kind, ms)` agnóstico a Evolution/Whapi.
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (ou equivalente) e `evolution-webhook` — chamar presence antes de `humanPace`/envio.
+- `supabase/functions/ai-sales-agent/index.ts` — usar `is_primary_explainer` para escolher `introVideo` e marcar `[PRINCIPAL]` no prompt.
 
-**UI (opcional, posso fazer depois):**
-- Aba "Memória" no modal do lead no CRM mostrando os fatos pra consultor revisar/editar/apagar
+**Sem mudanças** em: schemas de chat, RLS, lógica de extração de memória, cooldown.
 
-### Não toco em
+## Pergunta antes de implementar
 
-- Botões do operador (`src/components/whatsapp/**`)
-- `services/messageSender.ts`
-- Tabelas existentes de credenciais
-- `customers.conversation_summary` continua funcionando (resumo curto + memória estruturada = combo)
-
-### Ordem
-
-1. Migration (`customer_memory` + view + RLS)
-2. Edge function `ai-extract-memory`
-3. Editar `ai-sales-agent` pra ler e injetar
-4. Trigger de extração junto do summarize
-5. Teste com 2-3 conversas reais
-
-Posso começar pela migration agora?
+Confirma os 3 itens? Algum em especial você quer começar primeiro (ex.: só o "digitando…" real) ou faço todos juntos?
