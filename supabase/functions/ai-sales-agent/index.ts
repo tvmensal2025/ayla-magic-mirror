@@ -716,9 +716,38 @@ Deno.serve(async (req) => {
       );
     }
 
-    const tool = toolCallG.name;
+    let tool = toolCallG.name;
     let args: any = toolCallG.args || {};
 
+    // ---- OVERRIDE 1: dúvida/objeção → forçar vídeo de 1min se ainda não foi enviado ----
+    const uiLow = (user_input || "").toLowerCase();
+    const isDoubtIntent = !billAlreadyReceivedEarly && (
+      /\b(como funciona|me explica|n[aã]o entendi|o que [eé]|funciona como|explica|explicar)\b/i.test(uiLow) ||
+      /\b(golpe|fraude|seguro|confi[aá]vel|enganaç[aã]o|verdade|mesmo|s[eé]rio)\b/i.test(uiLow) ||
+      /\b(custo|caro|gratuito|de gra[çc]a|paga|pagar|mensalidade|taxa|tem que pagar)\b/i.test(uiLow)
+    );
+    const introVideo = freshMedia.find((m: any) =>
+      /conex[aã]o green.*apresenta/i.test(String(m.label || "")) && m.kind === "video"
+    );
+    if (isDoubtIntent && introVideo && tool !== "send_media" && tool !== "request_handoff" && recentMediaCount < 1) {
+      tool = "send_media";
+      args = {
+        media_id: introVideo.id,
+        caption: "Vou te mandar um vídeo curto de 1 minuto que explica direitinho — depois te respondo qualquer dúvida.",
+        next_phase: phase === "abertura" ? "descoberta" : phase,
+        reasoning: "auto_intro_video: dúvida/objeção detectada e vídeo de 1min ainda não enviado",
+      };
+    }
+
+    // ---- OVERRIDE 2: bloqueia ask_for_name se foto da conta foi pedida/recebida ----
+    if (tool === "ask_for_name" && (customer.electricity_bill_photo_url || billRequestedRecently)) {
+      tool = "send_text";
+      args = {
+        message: "Pode me mandar a foto da conta de luz quando puder? Por ela eu já confirmo todos os dados.",
+        next_phase: phase,
+        reasoning: "ask_for_name bloqueado: foto da conta já solicitada/recebida — nome virá pelo OCR",
+      };
+    }
 
     const priorOutbound = history.filter((h: any) => h.message_direction !== "inbound");
     const hasPriorOutbound = priorOutbound.length > 0;
