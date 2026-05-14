@@ -71,6 +71,29 @@ async function urlExists(url: string): Promise<boolean> {
   }
 }
 
+const NON_NAME_RESPONSES = /^(oi|ola|olá|hey|opa|bom dia|boa tarde|boa noite|sim|nao|não|ok|tudo bem|pode|quero|cadastrar|humano|atendente|menu|reset|recomecar|recomeçar|nao sou eu|não sou eu|como funciona|me explica|o que é|que é isso|quanto custa|é caro|preço|valor|tem taxa|minha distribuidora|qual distribuidora|atende aqui|cidade)$/i;
+
+function normalizeLeadName(rawText: string | null | undefined): string | null {
+  const raw = String(rawText || "").trim().replace(/[.!?,;:"']/g, "").replace(/\s+/g, " ");
+  const looksLikeName =
+    raw.length >= 2 &&
+    raw.length <= 60 &&
+    /^[A-Za-zÀ-ÖØ-öø-ÿ' ]+$/.test(raw) &&
+    raw.split(/\s+/).length <= 4 &&
+    !NON_NAME_RESPONSES.test(raw);
+  if (!looksLikeName) return null;
+  return raw
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => (w.length > 2 ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+function isBogusCapturedName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  return NON_NAME_RESPONSES.test(String(name).trim());
+}
+
 export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   const {
     supabase,
