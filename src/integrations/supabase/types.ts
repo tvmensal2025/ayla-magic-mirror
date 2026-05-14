@@ -1282,6 +1282,8 @@ export type Database = {
           address_number: string | null
           address_state: string | null
           address_street: string | null
+          ai_last_rescue_at: string | null
+          ai_rescue_count: number
           andamento_igreen: string | null
           assigned_human_id: string | null
           assinatura_cliente: string | null
@@ -1370,6 +1372,8 @@ export type Database = {
           address_number?: string | null
           address_state?: string | null
           address_street?: string | null
+          ai_last_rescue_at?: string | null
+          ai_rescue_count?: number
           andamento_igreen?: string | null
           assigned_human_id?: string | null
           assinatura_cliente?: string | null
@@ -1458,6 +1462,8 @@ export type Database = {
           address_number?: string | null
           address_state?: string | null
           address_street?: string | null
+          ai_last_rescue_at?: string | null
+          ai_rescue_count?: number
           andamento_igreen?: string | null
           assigned_human_id?: string | null
           assinatura_cliente?: string | null
