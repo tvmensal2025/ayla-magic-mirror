@@ -152,6 +152,14 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
   const [primaryText, setPrimaryText] = useState("");
   const [description, setDescription] = useState("");
   const [copyLoading, setCopyLoading] = useState(false);
+  // Primeira mensagem que abre no WhatsApp ao clicar no anúncio (CTWA).
+  const INITIAL_MSG_LIMIT = 160;
+  const buildDefaultInitialMessage = (distrib: string | null) =>
+    distrib
+      ? `Olá! Quero saber mais sobre a redução na conta de luz ${distrib}.`
+      : "Olá! Quero saber mais sobre a redução na minha conta de luz.";
+  const [initialMessage, setInitialMessage] = useState<string>(() => buildDefaultInitialMessage(null));
+  const [initialMessageTouched, setInitialMessageTouched] = useState(false);
 
   // Step 4: orçamento
   const [budget, setBudget] = useState(30); // R$/dia
@@ -263,6 +271,13 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
     }, 350);
     return () => clearTimeout(t);
   }, [search, toast]);
+
+  // Mantém a primeira mensagem do WhatsApp em sincronia com a distribuidora
+  // enquanto o usuário não editar manualmente.
+  useEffect(() => {
+    if (initialMessageTouched) return;
+    setInitialMessage(buildDefaultInitialMessage(distribuidoraPrimary));
+  }, [distribuidoraPrimary, initialMessageTouched]);
 
   function addCity(c: CityHit) {
     if (cities.find(x => x.key === c.key)) return;
@@ -496,6 +511,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
         distribuidora: distribuidoraPrimary || undefined,
         placement_mode: placementMode,
         placements: placementMode === "manual" ? placements : undefined,
+        initial_message: initialMessage.trim() || undefined,
       };
       try {
         await createCampaign(payload);
@@ -1046,6 +1062,43 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
                     <div>
                       <Label className="flex justify-between"><span>Descrição curta</span><span className={`text-[10px] ${description.length > COPY_LIMITS.description ? "text-destructive" : "text-muted-foreground"}`}>{description.length}/{COPY_LIMITS.description}</span></Label>
                       <Input maxLength={COPY_LIMITS.description} value={description} onChange={e => setDescription(e.target.value)} placeholder="Sem obra. Sem taxa." />
+                    </div>
+                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-2">
+                      <Label className="flex justify-between items-center">
+                        <span className="flex items-center gap-1.5">
+                          <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                          Primeira mensagem no WhatsApp
+                        </span>
+                        <span className={`text-[10px] ${initialMessage.length > INITIAL_MSG_LIMIT ? "text-destructive" : "text-muted-foreground"}`}>
+                          {initialMessage.length}/{INITIAL_MSG_LIMIT}
+                        </span>
+                      </Label>
+                      <p className="text-[11px] text-muted-foreground leading-snug">
+                        É o que vai aparecer escrito quando o lead clicar no anúncio. Escreva curto, em 1ª pessoa, como se fosse o cliente falando.
+                      </p>
+                      <Textarea
+                        rows={2}
+                        maxLength={INITIAL_MSG_LIMIT}
+                        value={initialMessage}
+                        onChange={(e) => { setInitialMessage(e.target.value); setInitialMessageTouched(true); }}
+                        placeholder="Olá! Quero saber mais sobre a redução na conta de luz."
+                        className="bg-background/50"
+                      />
+                      <div className="flex items-start gap-2 mt-1">
+                        <div className="shrink-0 w-7 h-7 rounded-full bg-emerald-500/20 flex items-center justify-center text-[10px] font-bold text-emerald-300">EU</div>
+                        <div className="bg-emerald-500 text-white text-xs px-3 py-2 rounded-2xl rounded-tl-sm max-w-[85%] shadow">
+                          {initialMessage || <span className="opacity-60 italic">sua mensagem aparece aqui</span>}
+                        </div>
+                      </div>
+                      {initialMessageTouched && (
+                        <button
+                          type="button"
+                          onClick={() => { setInitialMessage(buildDefaultInitialMessage(distribuidoraPrimary)); setInitialMessageTouched(false); }}
+                          className="text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2"
+                        >
+                          voltar para a sugestão automática
+                        </button>
+                      )}
                     </div>
                   </>
                 )}

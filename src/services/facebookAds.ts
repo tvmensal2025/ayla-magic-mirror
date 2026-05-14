@@ -140,6 +140,8 @@ export interface CreateCampaignBody {
   placement_mode?: "auto" | "manual";
   // Quando manual: lista no formato "fb:feed", "fb:reels", "ig:story"...
   placements?: string[];
+  // Primeira mensagem que abre no WhatsApp ao clicar no anúncio. Max 160 chars.
+  initial_message?: string;
 }
 export async function createCampaign(body: CreateCampaignBody) {
   const { data, error } = await supabase.functions.invoke("facebook-create-campaign", { body });
