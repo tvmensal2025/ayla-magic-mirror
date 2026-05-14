@@ -114,7 +114,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   // Dispara apenas no PRIMEIRO contato (zero outbound prévio para este lead).
   // ═══════════════════════════════════════════════════════════════════
   try {
-    if (!isFile && !isButton && customer.consultant_id && !customer.bot_paused) {
+    const currentStep = customer.conversation_step;
+    const stepIsInitial = !currentStep || currentStep === "welcome";
+    if (!isFile && !isButton && customer.consultant_id && !customer.bot_paused && stepIsInitial) {
       const { count: outboundCount } = await supabase
         .from("conversations")
         .select("id", { count: "exact", head: true })
