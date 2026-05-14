@@ -1,101 +1,119 @@
-## Objetivo
+## Mudança de filosofia
 
-Manter 100% do fluxo determinístico que já funciona (boas-vindas com áudio/vídeo, captura de nome, valor da conta, OCR, cadastro com botão, OTP) e dar ao bot um **cérebro inteligente** que responde QUALQUER pergunta fora do script usando o FAQ + biblioteca de áudios/vídeos, sem nunca quebrar a jornada de cadastro.
+O bot vira um **vendedor humano de verdade**. Sem botões no meio da conversa — eles existem **apenas em 3 momentos críticos** onde precisa de confirmação clara:
+1. Confirmar dados da conta de energia (após OCR)
+2. Confirmar dados do RG/CNH (após OCR)
+3. Escolher tipo de documento (RG Novo / RG Antigo / CNH)
 
-## Como vai ficar (na prática)
+Em todo o resto, é conversa pura. O lead nunca deve perceber que é uma IA.
 
-**Cliente entra primeira vez** → áudio de boas-vindas + botões (Quero saber mais / Cadastrar / Humano). Igual hoje.
+---
 
-**Cliente segue o caminho feliz** → vídeo Green_Energy → cadastro → conta → docs → portal + OTP. Igual hoje.
+## Como vai soar
 
-**Cliente sai do script** ("e em apartamento funciona?", "vou pagar duas contas?", "tem fidelidade?", "minha conta cai?") → o cérebro entra e:
-1. Tenta achar a pergunta no Q&A configurado no Construtor de Fluxos (áudio gravado tem prioridade).
-2. Se não achou, consulta o FAQ (~60 perguntas) e responde curto e humano usando exatamente as respostas oficiais.
-3. Se houver áudio/vídeo na biblioteca pra esse tema, manda a mídia em vez do texto.
-4. **Sempre devolve o cliente pro próximo passo do script** ("...mas voltando, me manda a foto da conta 📸").
+**Hoje (robô com botões):**
+> 💡 Quer ativar o iGreen Club?
+> [✅ QUERO] [❓ MAIS INFOS] [⏰ DEPOIS]
 
-**Quando o cliente está pronto** → manda a foto da conta → OCR + docs → o sistema dispara o **botão de cadastro** automático (já existe).
+**Depois (humano de verdade):**
+> Boa, Larissa! Com R$ 380 de conta dá pra economizar uns R$ 76 todo mês 💚
+> 
+> E ó, além da economia, você ainda entra no nosso clube — desconto em farmácia, mercado, posto… minha mãe usa direto kkk
+> 
+> Bora seguir? É rapidinho, só preciso de uma foto do seu RG ou CNH 📄
 
-**Anti-erro**:
-- Anti-loop: se a IA quiser repetir a mesma frase do último outbound (≥80% similar), o sistema apaga e volta pro determinístico.
-- 3x "confuso" seguidos → handoff humano.
-- Pediu humano em qualquer momento → handoff humano.
-- LLM caiu/timeout → cai pro fallback determinístico (nunca silêncio quebrado).
-- Toda decisão da IA é logada em `ai_decisions` e `ai_agent_logs`.
+---
+
+## Plano
+
+### 1) Corrigir o nome trocado (bug do "Pedro" / "Larissa")
+- `bot-flow.ts`: detectar reapresentação em qualquer mensagem (`/me chamo|meu nome é|sou (o|a)|aqui é (o|a)\s+\w+/i`) e **sobrescrever** `customer.name` mesmo se já houver nome salvo.
+- Marcar `name_source = 'self_introduced'` (fonte mais confiável que `whatsapp_push`).
+- No prompt do `ai-sales-agent`: "Se o lead disser outro nome na última mensagem, use o novo nome a partir de agora — não insista no anterior."
+
+### 2) Tirar os botões do meio da conversa
+**Manter botões apenas em:**
+- `confirmando_dados_conta` (SIM / NÃO / EDITAR)
+- `confirmando_dados_doc` (SIM / NÃO / EDITAR)
+- `ask_tipo_documento` (RG Novo / RG Antigo / CNH)
+
+**Remover botões de:**
+- Boas-vindas / menu inicial → vira texto conversacional ("oi! tudo bem? eu sou a [nome do consultor]…")
+- Pedido de foto da conta → texto natural ("me manda uma foto da sua conta de luz aí…")
+- Qualquer "intermediário" do funil
+
+### 3) IA conduz a venda 100% conversacional
+Reescrever o `system_prompt` no `ai-sales-agent` para vendedor consultivo iGreen:
+
+**Tom:**
+- 100% humano, brasileiro, descontraído mas profissional
+- Usa o primeiro nome do lead naturalmente (1x a cada 2-3 mensagens, não martela)
+- Emojis com moderação (1 por mensagem, no máximo)
+- Frases curtas (WhatsApp), no máximo 3 linhas
+- Pode usar "kkk", "rs", gírias leves quando o lead for informal
+- **Nunca** diz "sou um assistente", "sou IA", "como modelo de linguagem", etc.
+
+**Estratégia de venda (progressiva, sem pressa):**
+1. **Aquece** — pergunta o nome, depois quanto vem na conta, demonstra interesse genuíno
+2. **Quantifica o ganho** — calcula economia (12% sobre o valor) e entrega o número de cara
+3. **Empilha valor** — quando sentir abertura, menciona iGreen Club (farmácia, mercado, cashback) como bônus, **não como pitch**
+4. **Pede a conta** quando o lead estiver curioso ("pra eu confirmar tua distribuidora e travar a economia exata, me manda uma foto da última conta")
+5. **Só depois** pede RG/CNH ("agora pra fechar o cadastro, preciso de uma foto do teu documento")
+6. **Quebra objeção** com empatia, nunca com script
+
+**Regras anti-erro:**
+- Nunca menciona valor/preço/comissão fora do que está no FAQ
+- Se não sabe, fala "deixa eu confirmar isso com a equipe e te volto" + flag handoff
+- Se o lead recusar a foto da conta → aceita só o valor digitado e segue
+- Se o lead disser "vou pensar" → respeita ("tranquilo! qualquer coisa me chama") e despausa automaticamente quando ele voltar a falar
+
+### 4) Despausa automática
+Hoje quando `bot_paused = true` ele só sai por humano. Adicionar:
+- Se `bot_paused_reason in ('lead_nao_pronto','lead_quer_pensar')` E o lead mandar nova mensagem → **despausa automaticamente** e a IA retoma a conversa do ponto onde parou (lendo o histórico).
+
+### 5) Aceitar lead que não manda foto
+- Se o lead recusar mandar a conta E já tiver dito o valor → segue para a fase de RG/CNH normalmente, salvando só o valor.
+- A IA decide na hora se insiste 1x ("a foto me ajuda a travar o valor exato, mas se preferir seguimos só com a média") ou aceita.
+
+### 6) Progressão de dados (sem etapa explícita)
+Não cria step novo. A IA naturalmente, durante a conversa, já vai colhendo:
+- Nome (qualificação)
+- Valor da conta (qualificação ou OCR)
+- Cidade/distribuidora (OCR ou pergunta casual)
+- Telefone (já temos do WhatsApp)
+
+Quando o lead aceitar seguir, **o único botão que aparece** é o de tipo de documento (RG/CNH) — porque ali precisa de input estruturado pro OCR.
+
+---
 
 ## Detalhes técnicos
 
-### 1. `ai-sales-agent` ganha o FAQ no system prompt
+**Arquivos a editar:**
 
-Hoje o `ai-sales-agent/index.ts` (linha ~431) carrega `persona_name`, `tone`, `system_prompt` mas **NÃO** carrega `ai_knowledge_sections`. Vou adicionar:
+1. `supabase/functions/ai-sales-agent/index.ts`
+   - Reescrever `system_prompt` base (vendedor humano, sem revelar IA, regras de tom)
+   - Reforço sobre nome do lead (usar último nome dito)
+   - Tool `pause_bot` aceita razão `lead_quer_pensar` mas a despausa é automática
 
-```ts
-const { data: knowledge } = await supabase
-  .from("ai_knowledge_sections")
-  .select("title, content")
-  .eq("is_active", true)
-  .order("position");
+2. `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
+   - Adicionar `RE_SELF_INTRO` e sobrescrita de nome em qualquer step
+   - Adicionar `RE_REFUSE_BILL` em `aguardando_conta` → vai para coleta de doc se já tiver valor; senão pede valor
+   - Bloco de despausa automática no início do handler (se `bot_paused_reason in (...)` e lead mandou msg, seta `bot_paused = false` e segue)
+   - **Remover envio de botões** dos steps `welcome`, `menu_inicial`, `pos_video` — substituir por mensagem texto que a IA pega o controle
+   - **Manter** botões em `confirmando_dados_conta`, `confirmando_dados_doc`, `ask_tipo_documento`
+   - Expandir `conversationalSteps` para incluir `aguardando_conta` quando a mensagem **não for** foto/PDF (perguntas livres no meio da espera ainda vão pra IA)
 
-const knowledgeBlock = (knowledge || [])
-  .map((k) => `## ${k.title}\n${k.content}`)
-  .join("\n\n")
-  .slice(0, 6000);
-```
+3. `supabase/functions/_shared/ai-sales-prompts.ts` (novo, opcional)
+   - Centralizar o prompt do vendedor pra facilitar ajustes futuros sem mexer na função
 
-Injetado na seção `CONHECIMENTO OFICIAL iGREEN` do prompt, com regra explícita: *"Use APENAS o que está aqui pra responder dúvidas factuais. Não invente preço, prazo, comissão, lei, link. Se a pergunta não está no FAQ, use a tool `request_handoff`."*
+**Sem mudanças de schema.**
 
-### 2. Q&A configurado tem prioridade absoluta
+**Deploy:** redeploy de `whapi-webhook` e `ai-sales-agent`.
 
-Em `bot-flow.ts` o `trySendConfiguredQa` já roda antes do switch (linha 435). Vou fortalecer para também rodar dentro dos steps de coleta (`aguardando_conta`, `coleta_doc`) — assim, se o cliente fizer uma pergunta no meio do upload, a Q&A responde primeiro e depois o bot pede a foto/doc novamente.
-
-### 3. Cérebro (sales-AI) ativo em mais steps
-
-Hoje (`bot-flow.ts` linha 489): `conversationalSteps = {welcome, menu_inicial, pos_video, aguardando_humano}`. Vou expandir para incluir `qualificacao` e tornar o sales-AI o "responder de dúvidas" mesmo durante coleta — mas só se a mensagem for claramente uma pergunta (heurística: tem `?`, ou começa com "como/quanto/quando/onde/quem/posso/preciso/funciona/é"). Caso contrário, segue determinístico para captura de nome/valor.
-
-### 4. Após o AI responder, devolve pro fluxo
-
-No `ai-sales-agent`, quando a tool é `send_text` ou `send_media` em resposta a uma pergunta off-script, o `args` ganha um campo `return_to_step` opcional. O `bot-flow.ts` lê esse campo e, se preenchido, anexa um lembrete curto no fim ("...então, voltando: me manda a foto da sua conta 📸").
-
-### 5. Anti-loop e safety nets (portados do `ai-agent-router`)
-
-Adiciona em `bot-flow.ts` antes de `await sendText(reply)`:
-```ts
-// trigrama similarity vs último outbound
-if (reply && lastOutbound && similarity(reply, lastOutbound) >= 0.8) {
-  reply = ""; // não repetir
-  // se a AI já mandou mídia/áudio inline, não precisa texto mesmo
-}
-```
-Helper `similarity()` copiado de `ai-agent-router/index.ts`.
-
-### 6. Logging unificado
-
-`ai-sales-agent` já loga em `ai_decisions`. Vou garantir que TODA decisão (inclusive fallback / Q&A configurado / opening flow) também grave em `ai_agent_logs` com `step_before`, `step_after`, `media_sent_id` para o painel SuperAdmin enxergar tudo.
-
-### 7. Sem mudanças destrutivas
-
-- Schema do banco: zero alteração.
-- Áudios, vídeos, slots: ficam como estão (a IA escolhe da biblioteca, não cria nada novo).
-- Cadastro com botão (`aguardando_conta` → `cadastro_portal` → portal-worker): rota intocada.
-- `ai_agent_config.handoff_rules.use_sales_ai = true` já está ativo (verificado).
-
-## Arquivos editados
-
-1. `supabase/functions/ai-sales-agent/index.ts` — injeta FAQ no prompt; adiciona `return_to_step` opcional na tool `send_text`/`send_media`.
-2. `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — expande `conversationalSteps`; roda `trySendConfiguredQa` em mais steps; aplica anti-loop e lembrete `return_to_step`.
-3. `supabase/functions/_shared/conversation-helpers.ts` — exporta helper `similarity()` (mover de `ai-agent-router`).
+---
 
 ## Fora de escopo
-
-- Mudanças visuais no painel.
-- Embeddings/RAG (FAQ direto no prompt já cabe — ~6 KB).
-- Reescrita do `bot-flow.ts` (foco cirúrgico, sem refatoração).
-- Treinar modelo próprio.
-
-## Resultado esperado
-
-- Cliente segue o fluxo perfeito quando cooperar.
-- Qualquer pergunta da lista do FAQ tem resposta correta, curta, humana.
-- Áudios gravados (quando você gravar) tomam o lugar do texto automaticamente.
-- Bot nunca repete frase, nunca trava, nunca inventa.
-- Tudo auditável em `ai_decisions` + `ai_agent_logs`.
+- Não muda OCR, portal-worker, OTP, MinIO
+- Não muda o painel SuperAdmin
+- Não cria embeddings/RAG (FAQ continua direto no prompt)
+- Não treina modelo próprio

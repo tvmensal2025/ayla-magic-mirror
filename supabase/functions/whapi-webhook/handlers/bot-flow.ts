@@ -91,7 +91,10 @@ async function urlExists(url: string): Promise<boolean> {
 
 const NON_NAME_RESPONSES = /^(oi|ola|olá|hey|opa|bom dia|boa tarde|boa noite|sim|nao|não|ok|tudo bem|pode|quero|cadastrar|humano|atendente|menu|reset|recomecar|recomeçar|nao sou eu|não sou eu|como funciona|me explica|o que é|que é isso|quanto custa|é caro|preço|valor|tem taxa|minha distribuidora|qual distribuidora|atende aqui|cidade)$/i;
 const RE_GREETING_ONLY = /^(oi|ol[aá]|opa|bom dia|boa tarde|boa noite|hey)$/i;
-const RE_NOT_READY = /\b(vou pensar|pensar melhor|depois|mais tarde|agora n[aã]o|n[aã]o quero ainda|n[aã]o quero (cadastrar|prosseguir|seguir)|sem interesse|n[aã]o tenho interesse)\b/i;
+// Reapresentação: "me chamo X", "meu nome é X", "sou (a|o) X", "aqui (é|eh) (a|o) X", "(eu )?sou X" — captura o primeiro nome.
+const RE_SELF_INTRO = /(?:me\s+chamo|meu\s+nome\s+(?:é|eh|e)|aqui\s+(?:é|eh|e)\s+(?:o|a)|(?:eu\s+)?sou\s+(?:o|a))\s+([A-Za-zÀ-ÖØ-öø-ÿ]{2,30})/i;
+// Lead recusa mandar foto da conta — aceita seguir sem.
+const RE_REFUSE_BILL = /\b(n[aã]o\s+(?:tenho|quero|posso|vou)\s+(?:mandar|enviar|tirar|mostrar)|sem\s+(?:foto|conta|comprovante)|n[aã]o\s+(?:tenho|achei)\s+a\s+conta|conta\s+(?:n[aã]o|nao)\s+est[aá]\s+aqui|s[oó]\s+(?:o\s+)?valor)\b/i;
 
 function normalizeLeadName(rawText: string | null | undefined): string | null {
   const raw = String(rawText || "").trim().replace(/[.!?,;:"']/g, "").replace(/\s+/g, " ");
@@ -141,6 +144,59 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     fileBase64,
     geminiApiKey,
   } = ctx;
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 🔁 AUTO-RESUME: se o bot foi pausado por "lead_nao_pronto" / "lead_quer_pensar"
+  // e o lead voltou a falar, despausa automaticamente. Vendedor humano não fica mudo.
+  // ═══════════════════════════════════════════════════════════════════
+  if (
+    (customer as any).bot_paused &&
+    ["lead_nao_pronto", "lead_quer_pensar"].includes(String((customer as any).bot_paused_reason || ""))
+  ) {
+    console.log(`[auto-resume] Despausando bot — lead voltou a falar (motivo: ${(customer as any).bot_paused_reason})`);
+    try {
+      await supabase
+        .from("customers")
+        .update({ bot_paused: false, bot_paused_reason: null, bot_paused_at: null })
+        .eq("id", customer.id);
+    } catch (e) {
+      console.warn("[auto-resume] update falhou:", (e as any)?.message);
+    }
+    (customer as any).bot_paused = false;
+    (customer as any).bot_paused_reason = null;
+    (customer as any).bot_paused_at = null;
+    if ((customer as any).conversation_step === "aguardando_humano") {
+      (customer as any).conversation_step = "qualificacao";
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 🪪 NOME — sobrescreve se o lead se reapresentou ("me chamo X", "sou a X", etc.)
+  // Resolve o bug do "Olá, Pedro" quando o lead na verdade é Larissa.
+  // ═══════════════════════════════════════════════════════════════════
+  if (messageText && !isFile && !isButton) {
+    const intro = String(messageText).match(RE_SELF_INTRO);
+    if (intro && intro[1]) {
+      const candidate = normalizeLeadName(intro[1]);
+      if (candidate) {
+        const currentFirst = String((customer as any).name || "").trim().split(/\s+/)[0]?.toLowerCase();
+        if (currentFirst !== candidate.toLowerCase()) {
+          console.log(`[name-overwrite] "${(customer as any).name || "—"}" → "${candidate}" (auto-introdução)`);
+          try {
+            await supabase
+              .from("customers")
+              .update({ name: candidate, name_source: "self_introduced" })
+              .eq("id", customer.id);
+          } catch (e) {
+            console.warn("[name-overwrite] update falhou:", (e as any)?.message);
+          }
+          (customer as any).name = candidate;
+          (customer as any).name_source = "self_introduced";
+        }
+      }
+    }
+  }
+
 
   // ═══════════════════════════════════════════════════════════════════
   // HELPER: Envia opções como TEXTO (botões não funcionam na Evolution API atual)
@@ -548,19 +604,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       };
     }
 
-    // 2.5) Recusa/adiamento explícito → não insistir pedindo conta.
-    if (RE_NOT_READY.test(txt)) {
-      console.log(`[intent-override] NOT_READY detectado: "${txt.slice(0, 60)}"`);
-      return {
-        reply: buildNotReadyReply(nomeRepresentante),
-        updates: {
-          conversation_step: "aguardando_humano",
-          bot_paused: true,
-          bot_paused_reason: "lead_nao_pronto",
-          bot_paused_at: new Date().toISOString(),
-        },
-      };
-    }
+    // 2.5) Recusa/adiamento explícito → IA cuida do tom acolhedor (sem pausar bot).
+    //      Se quiser pausar, ela vai chamar pause_bot via tool. Por padrão deixamos o
+    //      diálogo seguir natural — vendedor humano não desliga só porque o lead disse "depois".
 
     // 3) "humano / atendente" → handoff explícito.
     if (RE_INTENT_HUMANO.test(txt)) {
@@ -839,18 +885,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   switch (step) {
     // ─── 1. BOAS-VINDAS ────────────────────
     case "welcome": {
-      const welcomeMsg =
-        `Oi! 👋 Aqui é o assistente digital de *${nomeRepresentante}*.\n\n` +
-        `Já pensou em pagar menos na sua conta de luz todo mês? 💚\n` +
-        `Com a *iGreen Energy* dá pra economizar de *8% a 20%*, de forma simples e sem complicação. ☀️\n\n` +
-        `Posso te explicar rapidinho como funciona?`;
-      await sendOptions(remoteJid, welcomeMsg, [
-        { id: "entender_desconto", title: "💡 Quero saber mais" },
-        { id: "cadastrar_agora", title: "📋 Já quero participar" },
-        { id: "falar_humano", title: "🧑 Falar com humano" },
-      ]);
-      updates.conversation_step = "menu_inicial";
-      reply = "";
+      // Vendedor humano: saudação curta sem botões. O áudio de abertura (slot)
+      // já tocou. A partir daqui a IA assume a conversa em "qualificacao".
+      const first = ((customer as any).name || "").split(/\s+/)[0];
+      const saud = first ? `Oi, ${first}! ` : "Oi! ";
+      reply = `${saud}Tudo bem? Aqui é da equipe da *${nomeRepresentante}* 💚\n\nMe conta rapidinho: você paga em torno de quanto na sua conta de luz hoje?`;
+      updates.conversation_step = "qualificacao";
       break;
     }
 
@@ -892,60 +932,25 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       break;
     }
 
-    case "menu_inicial": {
-      const resp = isButton ? buttonId : messageText.toLowerCase().trim();
-      if (resp === "entender_desconto" || resp === "1" || resp?.includes("funciona") || resp?.includes("entender") || resp?.includes("desconto")) {
-        const videoUrl = "https://zlzasfhcxcznaprrragl.supabase.co/storage/v1/object/public/video%20igreen/Green_Energy.mp4";
-        await sendText(remoteJid, "🎬 Assista este vídeo rápido e entenda como funciona o desconto na sua conta de luz:");
-        if (await urlExists(videoUrl)) {
-          const sent = await sendMedia(remoteJid, videoUrl, "☀️ Conexão Green — Energia limpa com até 20% de desconto!", "video");
-          if (!sent) {
-            console.warn("[bot-flow] sendMedia retornou false para Green_Energy.mp4 — seguindo sem mensagem de erro ao cliente.");
-          }
-        } else {
-          console.warn("[bot-flow] vídeo Green_Energy.mp4 indisponível (HEAD != 200) — pulando envio.");
-        }
-        await new Promise((r) => setTimeout(r, 1500));
-        const posVideoMsg = "📺 Assistiu o vídeo? Agora escolha como deseja prosseguir:";
-        await sendOptions(remoteJid, posVideoMsg, [
-          { id: "cadastrar_agora", title: "📋 Cadastrar agora" },
-          { id: "falar_humano", title: "🧑 Falar com humano" },
-        ]);
-        updates.conversation_step = "pos_video";
-        reply = "";
-      } else if (resp === "cadastrar_agora" || resp === "2" || resp?.includes("cadastr")) {
-        reply = "📋 Ótimo! Vamos iniciar seu cadastro.\n\n📸 *Envie uma FOTO ou PDF da sua conta de energia* para começarmos!\n\nFormatos aceitos: JPG, PNG ou PDF";
-        updates.conversation_step = "aguardando_conta";
-      } else if (resp === "falar_humano" || resp === "3" || resp?.includes("humano") || resp?.includes("atendente") || resp?.includes("pessoa")) {
-        reply = `🧑 Entendido! Um consultor da equipe *${nomeRepresentante}* entrará em contato com você em breve.\n\n⏰ Nosso horário de atendimento é de segunda a sexta, das 8h às 18h.\n\nEnquanto isso, se mudar de ideia, é só digitar *cadastrar* para iniciar!`;
-        updates.conversation_step = "aguardando_humano";
-      } else {
-        const retryMsg = "Sem problemas 😊 Me conta: como prefere seguir?";
-        await sendOptions(remoteJid, retryMsg, [
-          { id: "entender_desconto", title: "💡 Quero saber mais" },
-          { id: "cadastrar_agora", title: "📋 Já quero participar" },
-          { id: "falar_humano", title: "🧑 Falar com humano" },
-        ]);
-        reply = "";
-      }
-      break;
-    }
-
+    case "menu_inicial":
     case "pos_video": {
-      const resp = isButton ? buttonId : messageText.toLowerCase().trim();
-      if (resp === "cadastrar_agora" || resp === "1" || resp?.includes("cadastr")) {
-        reply = "📋 Ótimo! Vamos iniciar seu cadastro.\n\n📸 *Envie uma FOTO ou PDF da sua conta de energia* para começarmos!\n\nFormatos aceitos: JPG, PNG ou PDF";
+      // Legado: leads existentes presos no menu de botões. Migra direto pra IA conversacional.
+      const resp = isButton ? buttonId : (messageText || "").toLowerCase().trim();
+      if (resp === "cadastrar_agora" || resp?.includes("cadastr") || resp?.includes("participar")) {
+        const first = ((customer as any).name || "").split(/\s+/)[0];
+        const v = first ? `${first}, ` : "";
+        reply = `Boa! ${v}pra eu travar a sua economia exata, me manda uma *foto* (ou PDF) da sua última conta de luz aqui no chat 📸`;
         updates.conversation_step = "aguardando_conta";
-      } else if (resp === "falar_humano" || resp === "2" || resp?.includes("humano") || resp?.includes("atendente") || resp?.includes("pessoa")) {
-        reply = `🧑 Entendido! Um consultor da equipe *${nomeRepresentante}* entrará em contato com você em breve.\n\n⏰ Nosso horário de atendimento é de segunda a sexta, das 8h às 18h.\n\nEnquanto isso, se mudar de ideia, é só digitar *cadastrar* para iniciar!`;
+        updates.sales_phase = "fechamento";
+      } else if (resp === "falar_humano" || resp?.includes("humano") || resp?.includes("atendente")) {
+        reply = `Tranquilo! Já te encaminhei pra *${nomeRepresentante}*, ela te chama aqui mesmo, ok?`;
         updates.conversation_step = "aguardando_humano";
       } else {
-        const retryMsg = "🤔 Não entendi. Escolha uma opção:";
-        await sendOptions(remoteJid, retryMsg, [
-          { id: "cadastrar_agora", title: "📋 Cadastrar agora" },
-          { id: "falar_humano", title: "🧑 Falar com humano" },
-        ]);
-        reply = "";
+        // Qualquer outra coisa → vira conversa livre, IA assume.
+        const first = ((customer as any).name || "").split(/\s+/)[0];
+        const v = first ? `${first}, ` : "";
+        reply = `${v}me conta: quanto vem em média na sua conta de luz? Assim eu já te calculo quanto dá pra economizar 💡`;
+        updates.conversation_step = "qualificacao";
       }
       break;
     }
@@ -964,7 +969,36 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     // ─── 2. AGUARDANDO CONTA ──────────────
     case "aguardando_conta": {
       if (!isFile) {
-        reply = "📸 Por favor, envie a *FOTO ou PDF da sua conta de energia*.\n\nFormatos aceitos: JPG, PNG ou PDF";
+        const txt = String(messageText || "").trim();
+        const first = ((customer as any).name || "").split(/\s+/)[0];
+        const v = first ? `${first}, ` : "";
+
+        // Lead recusa mandar a foto → aceita seguir só com o valor.
+        if (txt && RE_REFUSE_BILL.test(txt)) {
+          const billVal = Number((customer as any).electricity_bill_value || 0);
+          if (billVal >= 30) {
+            reply = `Tranquilo, ${first || "vamos"}! Já tenho o valor que você passou (R$ ${billVal.toFixed(0)}), seguimos sem a foto então 👍\n\nPra fechar o cadastro eu vou precisar só de uma foto do seu *RG ou CNH*. Pode mandar?`;
+            updates.conversation_step = "ask_tipo_documento";
+            break;
+          }
+          // Sem valor ainda → pede só o valor, sem cobrar foto.
+          reply = `Sem problema! Então me passa só o valor médio que vem na sua conta de luz (uns R$?). Com isso eu já consigo te dar a economia 💡`;
+          updates.conversation_step = "qualificacao";
+          break;
+        }
+
+        // Captura valor digitado no meio do aguardando_conta (lead já mandando dado útil)
+        const valueMatch = txt.match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
+        if (valueMatch && !((customer as any).electricity_bill_value)) {
+          const billValue = Number(valueMatch[1].replace(".", "").replace(",", "."));
+          if (Number.isFinite(billValue) && billValue >= 30) {
+            updates.electricity_bill_value = billValue;
+            reply = `Boa, ${first || "anotado"}! Anotei R$ ${billValue.toFixed(0)} 💚\n\nSe puder mandar a *foto* (ou PDF) da sua conta também, eu trava o cálculo exato. Mas se preferir, dá pra seguir só com a média mesmo.`;
+            break;
+          }
+        }
+
+        reply = `${v}me manda uma *foto* (ou PDF) da sua conta de luz, por favor 📸\n\nSe estiver sem a conta agora, é só me dizer o valor médio que você paga que eu já te calculo a economia.`;
         break;
       }
       if (fileBase64) {
