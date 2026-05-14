@@ -155,7 +155,7 @@ const tools = [
     function: {
       name: "update_lead_field",
       description:
-        "Quando o lead REVELAR um dado estruturado (nome, distribuidora, valor da conta, dor), grave no cadastro. NÃO existe campo cidade — não pergunte cidade. Use APENAS quando você tem certeza do dado dito pelo lead nesta mensagem.",
+        "Quando o lead REVELAR um dado estruturado (nome, valor da conta, dor), grave no cadastro. NÃO existe campo cidade nem distribuidora — esses dados vêm AUTOMATICAMENTE do OCR da conta de luz. Use APENAS quando você tem certeza do dado dito pelo lead nesta mensagem.",
       parameters: {
         type: "object",
         properties: {
