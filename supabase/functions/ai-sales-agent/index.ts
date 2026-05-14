@@ -410,6 +410,15 @@ async function loadContext(supabase: any, customerId: string) {
     .limit(1)
     .maybeSingle();
 
+  // Memória longa — fatos persistentes do lead (top 15 por confiança/recência)
+  const { data: memoryFacts } = await supabase
+    .from("customer_memory_active")
+    .select("category, key, value, confidence, last_confirmed_at, source")
+    .eq("customer_id", customerId)
+    .order("confidence", { ascending: false })
+    .order("last_confirmed_at", { ascending: false })
+    .limit(15);
+
   return {
     customer,
     history: (history || []).reverse(),
@@ -417,6 +426,7 @@ async function loadContext(supabase: any, customerId: string) {
     tone: agentCfg?.tone || "humano, breve, cordial",
     customPrompt: agentCfg?.system_prompt || "",
     summaryFresh,
+    memoryFacts: memoryFacts || [],
   };
 }
 
@@ -480,7 +490,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { customer, history, persona, tone, customPrompt, summaryFresh } = ctx;
+    const { customer, history, persona, tone, customPrompt, summaryFresh, memoryFacts } = ctx;
     const phase = customer.sales_phase || "abertura";
 
     // ---------- INTENT-FIRST short-circuit (sem LLM) ----------
@@ -720,6 +730,20 @@ Deno.serve(async (req) => {
       ? `\n[RESUMO DA CONVERSA ATÉ AGORA]\n${customer.conversation_summary}\n(Use o resumo para contexto; as últimas mensagens cruas vêm depois.)\n`
       : "";
 
+    // ---- Memória longa: fatos persistentes que sobrevivem entre sessões ----
+    let memoryLine = "";
+    if (memoryFacts && memoryFacts.length > 0) {
+      const grouped: Record<string, string[]> = {};
+      for (const f of memoryFacts) {
+        const conf = f.confidence >= 0.8 ? "" : f.confidence >= 0.5 ? " (?)" : " (?? baixa confiança)";
+        (grouped[f.category] ||= []).push(`${f.key}: ${f.value}${conf}`);
+      }
+      const blocks = Object.entries(grouped)
+        .map(([cat, items]) => `• ${cat}: ${items.join("; ")}`)
+        .join("\n");
+      memoryLine = `\n[MEMÓRIA LONGA — fatos confirmados sobre este lead, NUNCA repergunte o que está aqui]\n${blocks}\n`;
+    }
+
     // ---- Padrões aprendidos do feedback do consultor (👍/👎) ----
     let learnedLine = "";
     try {
@@ -744,7 +768,7 @@ Deno.serve(async (req) => {
     } catch (_) { /* best-effort */ }
 
     // ---- Construir contents no formato Gemini ----
-    const sys = systemPrompt(persona, tone, customPrompt) + summaryLine + learnedLine + fewShotLine + negShotLine + "\n\n" + contextLine;
+    const sys = systemPrompt(persona, tone, customPrompt) + summaryLine + memoryLine + learnedLine + fewShotLine + negShotLine + "\n\n" + contextLine;
 
     const contents: any[] = history.map((m: any) => ({
       role: m.message_direction === "inbound" ? "user" : "model",
@@ -876,19 +900,23 @@ Deno.serve(async (req) => {
       args.caption = sanitizeNumbers(args.caption, billNum);
     }
 
-    // ---- Dispara summarize em background a cada 10 mensagens ou se resumo > 24h ----
+    // ---- Dispara summarize + extract-memory em background a cada 10 msgs ou se resumo > 24h ----
     const totalMsgs = history.length;
     const needSummary = (totalMsgs >= 10 && totalMsgs % 10 === 0) || (!summaryFresh && totalMsgs >= 12);
+    const needMemory = totalMsgs >= 6 && totalMsgs % 6 === 0;
+    const bgHeaders = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+    };
     if (needSummary) {
-      // Fire-and-forget — não bloqueia a resposta
       fetch(`${SUPABASE_URL}/functions/v1/ai-summarize-conversation`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          apikey: SUPABASE_SERVICE_ROLE_KEY,
-        },
-        body: JSON.stringify({ customer_id }),
+        method: "POST", headers: bgHeaders, body: JSON.stringify({ customer_id }),
+      }).catch(() => {});
+    }
+    if (needMemory) {
+      fetch(`${SUPABASE_URL}/functions/v1/ai-extract-memory`, {
+        method: "POST", headers: bgHeaders, body: JSON.stringify({ customer_id }),
       }).catch(() => {});
     }
 
