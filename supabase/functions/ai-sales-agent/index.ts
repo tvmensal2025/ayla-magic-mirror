@@ -900,19 +900,23 @@ Deno.serve(async (req) => {
       args.caption = sanitizeNumbers(args.caption, billNum);
     }
 
-    // ---- Dispara summarize em background a cada 10 mensagens ou se resumo > 24h ----
+    // ---- Dispara summarize + extract-memory em background a cada 10 msgs ou se resumo > 24h ----
     const totalMsgs = history.length;
     const needSummary = (totalMsgs >= 10 && totalMsgs % 10 === 0) || (!summaryFresh && totalMsgs >= 12);
+    const needMemory = totalMsgs >= 6 && totalMsgs % 6 === 0;
+    const bgHeaders = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+    };
     if (needSummary) {
-      // Fire-and-forget — não bloqueia a resposta
       fetch(`${SUPABASE_URL}/functions/v1/ai-summarize-conversation`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          apikey: SUPABASE_SERVICE_ROLE_KEY,
-        },
-        body: JSON.stringify({ customer_id }),
+        method: "POST", headers: bgHeaders, body: JSON.stringify({ customer_id }),
+      }).catch(() => {});
+    }
+    if (needMemory) {
+      fetch(`${SUPABASE_URL}/functions/v1/ai-extract-memory`, {
+        method: "POST", headers: bgHeaders, body: JSON.stringify({ customer_id }),
       }).catch(() => {});
     }
 
