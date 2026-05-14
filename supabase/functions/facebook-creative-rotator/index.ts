@@ -1,6 +1,9 @@
-// Cron 12h: pausa criativos perdedores no Facebook e gera recomendação.
-// Modo Equilibrado: pausa automática só de criativos individuais (não pausa campanha).
+// Cron 12h: pausa criativos perdedores, promove vencedores (+20% budget) e
+// dispara builder pra gerar variações inspiradas nos winners. Loop de auto-otimização.
 import { adminClient, corsHeaders, FB_GRAPH, loadConnection } from "../_shared/fb-graph.ts";
+
+const PROMOTE_PCT = 20;
+const MAX_DAILY_BUDGET_CENTS = 20_000; // R$ 200/dia teto de segurança
 
 async function pauseAd(token: string, fbAdId: string): Promise<boolean> {
   try {
@@ -12,6 +15,42 @@ async function pauseAd(token: string, fbAdId: string): Promise<boolean> {
     return r.ok;
   } catch {
     return false;
+  }
+}
+
+async function bumpAdSetBudget(token: string, fbAdsetId: string, currentCents: number): Promise<{ ok: boolean; newCents: number }> {
+  const target = Math.min(MAX_DAILY_BUDGET_CENTS, Math.round(currentCents * (1 + PROMOTE_PCT / 100)));
+  if (target <= currentCents) return { ok: false, newCents: currentCents };
+  try {
+    const r = await fetch(`${FB_GRAPH}/${fbAdsetId}?access_token=${token}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ daily_budget: target }),
+    });
+    return { ok: r.ok, newCents: target };
+  } catch {
+    return { ok: false, newCents: currentCents };
+  }
+}
+
+async function invokeBuilder(consultantId: string, winnerId: string) {
+  try {
+    const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ad-creative-builder`;
+    await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+      },
+      body: JSON.stringify({
+        consultant_id: consultantId,
+        inspired_by_performance_id: winnerId,
+        auto: true,
+        count: 2,
+      }),
+    });
+  } catch (e) {
+    console.error("builder invoke failed", e);
   }
 }
 
