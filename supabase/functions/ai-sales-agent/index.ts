@@ -579,11 +579,9 @@ Deno.serve(async (req) => {
       .order("priority", { ascending: false })
       .limit(15);
 
-    const eligibleMedia = (candidates || []).filter((m: any) => {
-      const intents = m.intent_tags || [];
-      if (!intents.length) return true;
-      return intents.some((t: string) => profileTags.includes(t));
-    });
+    // intent_tags agora descrevem a DÚVIDA que a mídia responde (ex.: "e_golpe", "tem_custo").
+    // O matching com a dúvida do lead é feito pela própria IA via prompt — não filtramos aqui.
+    const eligibleMedia = candidates || [];
 
     // Conta só conta como "recebida" se OCR concluído E nome veio de fonte confiável.
     // Sem isso, o LLM ficava preso confirmando dados de um lead anterior reaproveitado.
