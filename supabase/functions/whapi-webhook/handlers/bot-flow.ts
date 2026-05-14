@@ -71,6 +71,29 @@ async function urlExists(url: string): Promise<boolean> {
   }
 }
 
+const NON_NAME_RESPONSES = /^(oi|ola|olá|hey|opa|bom dia|boa tarde|boa noite|sim|nao|não|ok|tudo bem|pode|quero|cadastrar|humano|atendente|menu|reset|recomecar|recomeçar|nao sou eu|não sou eu|como funciona|me explica|o que é|que é isso|quanto custa|é caro|preço|valor|tem taxa|minha distribuidora|qual distribuidora|atende aqui|cidade)$/i;
+
+function normalizeLeadName(rawText: string | null | undefined): string | null {
+  const raw = String(rawText || "").trim().replace(/[.!?,;:"']/g, "").replace(/\s+/g, " ");
+  const looksLikeName =
+    raw.length >= 2 &&
+    raw.length <= 60 &&
+    /^[A-Za-zÀ-ÖØ-öø-ÿ' ]+$/.test(raw) &&
+    raw.split(/\s+/).length <= 4 &&
+    !NON_NAME_RESPONSES.test(raw);
+  if (!looksLikeName) return null;
+  return raw
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => (w.length > 2 ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
+function isBogusCapturedName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  return NON_NAME_RESPONSES.test(String(name).trim());
+}
+
 export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   const {
     supabase,
@@ -102,6 +125,108 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   async function sendOptions(jid: string, msg: string, options: { id: string; title: string }[]): Promise<boolean> {
     // Tenta enviar como botões reais (funciona no Whapi, fallback texto no Evolution)
     return sendButtons(jid, msg, options);
+  }
+
+  async function trySendConfiguredQa(): Promise<BotResult | null> {
+    if (!messageText || isFile || isButton || !customer.consultant_id) return null;
+    const normalizedText = messageText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const { data: activeFlow } = await supabase
+      .from("bot_flows")
+      .select("id")
+      .eq("consultant_id", customer.consultant_id)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (!activeFlow) return null;
+
+    const { data: qaRows } = await supabase
+      .from("bot_flow_qa")
+      .select("id, text_response, is_closing")
+      .eq("flow_id", (activeFlow as any).id)
+      .eq("is_opening", false);
+    const qaIds = ((qaRows as any[]) || []).map((q) => q.id);
+    if (!qaIds.length) return null;
+
+    const { data: triggers } = await supabase
+      .from("bot_flow_qa_triggers")
+      .select("qa_id, phrase")
+      .in("qa_id", qaIds);
+    const matchedTrigger = ((triggers as any[]) || []).find((t) => {
+      const phrase = String(t.phrase || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      return phrase && (normalizedText === phrase || normalizedText.includes(phrase));
+    });
+    if (!matchedTrigger) return null;
+
+    const qa = ((qaRows as any[]) || []).find((q) => q.id === matchedTrigger.qa_id);
+    if (!qa) return null;
+
+    const { data: mediaRows } = await supabase
+      .from("bot_flow_qa_media")
+      .select("media_kind, slot_key, media_id, position")
+      .eq("qa_id", qa.id)
+      .order("position");
+    let sentSomething = false;
+
+    for (const m of ((mediaRows as any[]) || [])) {
+      let url: string | null = null;
+      let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
+      if (m.media_id) {
+        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind").eq("id", m.media_id).maybeSingle();
+        if (mediaRow?.url) {
+          url = mediaRow.url;
+          if (mediaRow.kind) kind = mediaRow.kind;
+        }
+      }
+      if (!url && m.slot_key) {
+        const { data: personal } = await supabase
+          .from("ai_media_library")
+          .select("url")
+          .eq("consultant_id", customer.consultant_id)
+          .eq("slot_key", m.slot_key)
+          .eq("active", true)
+          .eq("is_draft", false)
+          .maybeSingle();
+        if (personal?.url) url = personal.url;
+        else {
+          const { data: pub } = await supabase
+            .from("ai_media_library")
+            .select("url")
+            .eq("is_public", true)
+            .eq("slot_key", m.slot_key)
+            .eq("active", true)
+            .maybeSingle();
+          if (pub?.url) url = pub.url;
+        }
+      }
+      if (!url) continue;
+      await sendMedia(remoteJid, url, "", kind);
+      sentSomething = true;
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "outbound",
+        message_text: `[flow-qa:${qa.id}:${kind}]`,
+        message_type: kind,
+        conversation_step: step,
+      });
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+
+    const responseText = qa.text_response
+      ? String(qa.text_response).replaceAll("{nome}", customer.name || "").replaceAll("{representante}", nomeRepresentante || "")
+      : "";
+    if (responseText) {
+      await sendText(remoteJid, responseText);
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "outbound",
+        message_text: responseText,
+        message_type: "text",
+        conversation_step: step,
+      });
+      sentSomething = true;
+    }
+
+    if (!sentSomething) return null;
+    return { reply: "", updates: { conversation_step: qa.is_closing ? "aguardando_conta" : "qualificacao", __inline_sent: true } as any };
   }
 
   const step = customer.conversation_step || "welcome";
@@ -306,6 +431,30 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         },
       };
     }
+
+    const configuredQaResult = await trySendConfiguredQa();
+    if (configuredQaResult) return configuredQaResult;
+  }
+
+  if (
+    step === "aguardando_conta" &&
+    messageText &&
+    !isFile &&
+    !isButton &&
+    !customer.electricity_bill_photo_url &&
+    isBogusCapturedName((customer as any).name)
+  ) {
+    const recoveredName = normalizeLeadName(messageText);
+    if (recoveredName) {
+      return {
+        reply: `${recoveredName.split(/\s+/)[0]}, qual a média da sua conta de luz?`,
+        updates: { name: recoveredName, name_source: "self_introduced", conversation_step: "qualificacao" },
+      };
+    }
+    return {
+      reply: "Qual é o seu nome?",
+      updates: { name: null, name_source: "unknown", conversation_step: "qualificacao" },
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -321,19 +470,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     !customer.name &&
     !customer.electricity_bill_photo_url
   ) {
-    const raw = messageText.trim().replace(/[.!?,;:"']/g, "");
-    const looksLikeName =
-      raw.length >= 2 &&
-      raw.length <= 60 &&
-      /^[A-Za-zÀ-ÖØ-öø-ÿ' ]+$/.test(raw) &&
-      raw.split(/\s+/).length <= 4 &&
-      !/^(oi|ola|olá|hey|opa|bom dia|boa tarde|boa noite|sim|nao|não|ok|tudo bem|pode|quero|cadastrar|humano|atendente|menu|reset|recomecar|recomeçar|nao sou eu|não sou eu)$/i.test(raw);
-    if (looksLikeName) {
-      const formatted = raw
-        .toLowerCase()
-        .split(/\s+/)
-        .map((w) => (w.length > 2 ? w[0].toUpperCase() + w.slice(1) : w))
-        .join(" ");
+    const formatted = normalizeLeadName(messageText);
+    if (formatted) {
       updates.name = formatted;
       updates.name_source = "self_introduced";
       (customer as any).name = formatted;
@@ -499,6 +637,44 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       ]);
       updates.conversation_step = "menu_inicial";
       reply = "";
+      break;
+    }
+
+    case "qualificacao": {
+      const capturedName = normalizeLeadName(messageText);
+      if (capturedName) {
+        updates.name = capturedName;
+        updates.name_source = "self_introduced";
+        (customer as any).name = capturedName;
+        (customer as any).name_source = "self_introduced";
+        reply = `${capturedName.split(/\s+/)[0]}, qual a média da sua conta de luz?`;
+        updates.conversation_step = "qualificacao";
+        break;
+      }
+
+      if (isBogusCapturedName((customer as any).name)) {
+        updates.name = null;
+        updates.name_source = "unknown";
+        (customer as any).name = null;
+        (customer as any).name_source = "unknown";
+      }
+
+      const valueMatch = String(messageText || "").match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
+      if (valueMatch) {
+        const billValue = Number(valueMatch[1].replace(".", "").replace(",", "."));
+        if (Number.isFinite(billValue) && billValue >= 30) {
+          updates.electricity_bill_value = billValue;
+          updates.sales_phase = "fechamento";
+          reply = `Com essa média, já dá para calcular sua economia. Me envie uma FOTO ou PDF da sua conta de energia para eu confirmar os dados.`;
+          updates.conversation_step = "aguardando_conta";
+          break;
+        }
+      }
+
+      reply = (customer as any).name && !isBogusCapturedName((customer as any).name)
+        ? `Certo, ${(customer as any).name.split(/\s+/)[0]}. Qual a média da sua conta de luz?`
+        : "Qual é o seu nome?";
+      updates.conversation_step = "qualificacao";
       break;
     }
 
