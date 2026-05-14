@@ -257,14 +257,16 @@ Deno.serve(async (req) => {
     }
     const adlabelsParam = consultantLabelId ? JSON.stringify([{ id: consultantLabelId }]) : null;
 
-    // Click-to-WhatsApp via link wa.me — funciona com QUALQUER número de WhatsApp
-    // (pessoal ou Business app), sem precisar vincular WABA no Meta Business Manager.
-    // Trade-off: Meta otimiza por LINK_CLICKS em vez de CONVERSATIONS (~10-20% mais caro),
-    // mas evita o erro 1487246 e elimina configuração manual pelo consultor.
+    // CTWA OFICIAL via WABA — número precisa estar conectado à Página no Meta Business
+    // Suite (WhatsApp Business API). Otimiza por CONVERSATIONS (mais barato que LINK_CLICKS),
+    // atribuição nativa anúncio ↔ primeira mensagem, casa com pixel + CAPI via promoted_object.
     const hasPixel = !!conn.pixel_id;
-    const objective = "OUTCOME_TRAFFIC";
-    const optimizationGoal = "LINK_CLICKS";
+    const objective = "OUTCOME_ENGAGEMENT";
+    const optimizationGoal = "CONVERSATIONS";
     const pixelEvent = hasPixel ? "LEAD" : null;
+    if (!conn.whatsapp_destination_number) {
+      throw new Error("WHATSAPP_BUSINESS_REQUIRED: número WhatsApp Business (WABA) não configurado para esta Página.");
+    }
 
     // 1) Campaign
     console.log("[fb-create] step=campaign_create");
