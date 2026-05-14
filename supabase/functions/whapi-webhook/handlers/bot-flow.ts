@@ -264,6 +264,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             reply = "Tranquilo! Se mudar de ideia é só me chamar 💚";
             return { reply, updates };
           }
+          if (tool === "update_lead_field") {
+            reply = args.followup_message || "";
+            return { reply, updates };
+          }
+          if (tool === "confirm_and_handoff") {
+            reply = args.message || `Vou conectar você com ${nomeRepresentante} para finalizar.`;
+            updates.conversation_step = "aguardando_humano";
+            return { reply, updates };
+          }
+          if (tool === "ask_for_name") {
+            reply = args.message || "Como posso te chamar?";
+            return { reply, updates };
+          }
         } else {
           console.warn("[bot-flow] ai-sales-agent falhou, caindo no fluxo determinístico", aiResp.status);
         }
