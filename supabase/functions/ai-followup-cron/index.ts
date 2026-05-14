@@ -28,9 +28,25 @@ Deno.serve(async (req) => {
 
     if (error) throw error;
 
-    const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+    const results: Array<{ id: string; ok: boolean; error?: string; reason?: string }> = [];
 
     for (const lead of leads ?? []) {
+      // ⚠️ REGRA: IA só atende clientes que escreveram primeiro no WhatsApp.
+      // Nunca iniciamos conversa proativa. Se não houver nenhuma mensagem
+      // inbound desse cliente, limpamos o slot e pulamos.
+      const { count: inboundCount } = await supabase
+        .from("conversations")
+        .select("id", { count: "exact", head: true })
+        .eq("customer_id", lead.id)
+        .eq("message_direction", "inbound")
+        .limit(1);
+
+      if (!inboundCount || inboundCount === 0) {
+        await supabase.from("customers").update({ next_followup_at: null }).eq("id", lead.id);
+        results.push({ id: lead.id, ok: true, reason: "skipped_no_inbound" });
+        continue;
+      }
+
       try {
         // Limpa o slot ANTES para evitar reprocessamento em caso de falha do agent.
         await supabase
