@@ -135,10 +135,18 @@ ANÚNCIOS DE CONCORRENTES NO AR HÁ MAIS TEMPO (sinal claro de que convertem —
 ${competitors.map((c, i) => `${i + 1}. [${c.advertiser} • ${c.active_days}d • ${c.creative_format || "?"} • ${c.angle || "?"}] "${(c.headline || "").slice(0, 60)}" — ${(c.primary_text || "").slice(0, 100)}`).join("\n")}
 ` : "";
 
+  const globalBlock = globalPlaybook ? `
+
+PADRÕES DA REDE iGREEN (últimos 7 dias, ${globalPlaybook.consultants_in_sample || 0} consultores — use como reforço):
+- TOP vencedores globais: ${(globalPlaybook.winning_patterns || []).slice(0, 5).map((p: any) => p.pattern).join(" | ") || "(coletando)"}
+- A EVITAR globalmente: ${(globalPlaybook.losing_patterns || []).slice(0, 5).map((p: any) => p.pattern).join(" | ") || "(coletando)"}
+- Imagens que mais funcionaram: ${(globalPlaybook.best_image_traits || []).slice(0, 3).map((p: any) => p.pattern).join(" | ") || "(coletando)"}
+` : "";
+
   const prompt = `Você é o melhor copywriter de Facebook Ads do Brasil. Gere copy em pt-BR para iGreen Energy (energia por assinatura — desconto na conta de luz).
 
 Contexto-alvo: ${ctx}.
-${isDistribuidora ? "IMPORTANTE: o 1º item é a distribuidora do cliente — use o NOME dela em pelo menos 3 dos 6 títulos.\n" : ""}${learnedBlock}${competitorBlock}
+${isDistribuidora ? "IMPORTANTE: o 1º item é a distribuidora do cliente — use o NOME dela em pelo menos 3 dos 6 títulos.\n" : ""}${learnedBlock}${globalBlock}${competitorBlock}
 
 Retorne JSON ESTRITO. Cada headline DEVE ter um ângulo distinto da lista [${REQUIRED_ANGLES.join(", ")}] — exatamente 1 de cada:
 
