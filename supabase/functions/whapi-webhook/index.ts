@@ -55,10 +55,11 @@ Deno.serve(async (req) => {
     }
 
     const {
-      remoteJid, messageText, buttonId, hasImage, hasDocument, isFile, isButton,
-      imageMessage, documentMessage, key, message, messageId,
+      remoteJid, buttonId, hasImage, hasDocument, hasAudio, isButton,
+      imageMessage, documentMessage, audioMessage, key, message, messageId,
       fileBase64: whapiFileBase64, fileUrl: whapiFileUrl,
     } = parsed;
+    let { messageText, isFile } = parsed;
 
     if (!messageText && !isFile && !isButton) {
       console.log("⏭️ Mensagem vazia");
