@@ -1327,19 +1327,20 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           } catch (e) { console.warn("[pitch] envio do vídeo conexao_club falhou:", (e as any)?.message); }
         }
 
-        // CTA final + botões do tipo de documento
-        const ctaMsg = `Bora finalizar seu cadastro? Pra travar tudo eu preciso só de uma foto do seu *RG ou CNH* 📄`;
-        await sendOptions(remoteJid, ctaMsg, [
-          { id: "tipo_rg_novo", title: "📄 RG Novo" },
-          { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
-          { id: "tipo_cnh", title: "🪪 CNH" },
-        ]);
+        // Pergunta se ficou alguma dúvida ANTES de pedir o documento.
+        // A IA responde dúvidas livremente; quando o lead confirmar (sim/pode seguir/não tenho dúvida),
+        // o step duvidas_pos_club dispara os botões de RG/CNH.
+        const firstNm = ((customer as any).name || "").split(/\s+/)[0];
+        const duvidaMsg = firstNm
+          ? `${firstNm}, ficou alguma dúvida sobre o Conexão Club ou sobre como funciona? Pode mandar aqui que eu te explico 😊\n\nSe estiver tudo certo, é só me dizer *"pode seguir"* que a gente já avança pro cadastro.`
+          : `Ficou alguma dúvida sobre o Conexão Club ou sobre como funciona? Pode mandar aqui que eu te explico 😊\n\nSe estiver tudo certo, é só me dizer *"pode seguir"* que a gente já avança pro cadastro.`;
+        await sendText(remoteJid, duvidaMsg);
         await supabase.from("conversations").insert({
           customer_id: customer.id, message_direction: "outbound",
-          message_text: ctaMsg, message_type: "text",
-          conversation_step: "ask_tipo_documento",
+          message_text: duvidaMsg, message_type: "text",
+          conversation_step: "duvidas_pos_club",
         });
-        updates.conversation_step = "ask_tipo_documento";
+        updates.conversation_step = "duvidas_pos_club";
         (updates as any).__inline_sent = true;
         reply = "";
       } else if (resp === "nao_conta" || resp === "nao" || resp === "não" || resp === "n" || resp === "2" || resp === "errado" || resp === "❌") {
