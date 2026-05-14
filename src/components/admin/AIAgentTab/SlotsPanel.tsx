@@ -9,6 +9,7 @@ import { AudioRecorderInline } from "./AudioRecorderInline";
 type Props = { userId: string };
 
 type MediaIndexEntry = { default: SlotMedia | null; personal: SlotMedia | null };
+type VideoOption = { id: string; label: string; url: string | null; is_public: boolean; consultant_id: string | null };
 
 export function SlotsPanel({ userId }: Props) {
   const { toast } = useToast();
@@ -103,19 +104,29 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
   const [slots, setSlots] = useState<any[]>([]);
   const [defaultMedia, setDefaultMedia] = useState<Record<string, { url: string | null; id: string | null }>>({});
+  const [availableVideos, setAvailableVideos] = useState<VideoOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
-    const [{ data: s }, { data: m }] = await Promise.all([
+    const [{ data: s }, { data: m }, { data: videos }] = await Promise.all([
       supabase.from("ai_agent_slots").select("*").order("position"),
       supabase.from("ai_media_library").select("id, slot_key, url").eq("is_public", true).not("slot_key", "is", null),
+      supabase
+        .from("ai_media_library")
+        .select("id, label, url, is_public, consultant_id")
+        .eq("kind", "video")
+        .eq("active", true)
+        .not("url", "is", null)
+        .order("priority", { ascending: false })
+        .order("created_at", { ascending: false }),
     ]);
     const map: Record<string, { url: string | null; id: string | null }> = {};
     (m || []).forEach((x: any) => (map[x.slot_key] = { url: x.url, id: x.id }));
     setSlots(s || []);
     setDefaultMedia(map);
+    setAvailableVideos(((videos || []) as VideoOption[]).filter((video) => !!video.url));
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -169,6 +180,15 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
       ? { ...x, video_url: null, video_storage_path: null, video_label: null }
       : x));
     toast({ title: "Vídeo removido — clique Salvar para confirmar" });
+  }
+
+  function selectExistingVideo(slotKey: string, videoId: string) {
+    const video = availableVideos.find((item) => item.id === videoId);
+    if (!video?.url) return;
+    setSlots((p) => p.map((x) => x.slot_key === slotKey
+      ? { ...x, video_url: video.url, video_storage_path: null, video_label: video.label }
+      : x));
+    toast({ title: "Vídeo selecionado — clique Salvar para confirmar" });
   }
 
   async function addNewSlot() {
@@ -312,50 +332,40 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
                 )}
                 <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-1">
                   <div className="text-xs font-medium text-primary">🎬 Vídeo enviado logo após o áudio (opcional)</div>
-                  {s.video_url ? (
+                  {s.video_url && (
                     <>
                       <video src={s.video_url} controls className="w-full max-h-40 rounded" />
                       <input type="text" placeholder="Legenda do vídeo (opcional)"
                         value={s.video_label || ""}
                         onChange={(e) => setSlots((p) => p.map((x) => x.slot_key === s.slot_key ? { ...x, video_label: e.target.value } : x))}
                         className="w-full px-2 py-1 text-xs rounded border border-border bg-background" />
+                    </>
+                  )}
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <select
+                      className="text-xs px-2 py-1 rounded border border-border bg-background min-w-[220px]"
+                      value=""
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        selectExistingVideo(s.slot_key, e.target.value);
+                      }}
+                    >
+                      <option value="">🎬 Selecionar vídeo já enviado…</option>
+                      {availableVideos.map((video) => (
+                        <option key={video.id} value={video.id}>{video.label}</option>
+                      ))}
+                    </select>
+                    <label className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-border bg-background hover:bg-muted cursor-pointer">
+                      📤 Enviar vídeo novo
+                      <input type="file" accept="video/*" className="hidden"
+                        onChange={(e) => e.target.files?.[0] && uploadSlotVideo(s.slot_key, e.target.files[0])} />
+                    </label>
+                    {s.video_url && (
                       <Button size="sm" variant="ghost" onClick={() => removeSlotVideo(s.slot_key)} className="text-destructive h-7 text-xs">
                         Remover vídeo
                       </Button>
-                    </>
-                  ) : (
-                    <div className="flex flex-wrap gap-2 items-center">
-                      <label className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-border bg-background hover:bg-muted cursor-pointer">
-                        📤 Enviar vídeo novo
-                        <input type="file" accept="video/*" className="hidden"
-                          onChange={(e) => e.target.files?.[0] && uploadSlotVideo(s.slot_key, e.target.files[0])} />
-                      </label>
-                      {(() => {
-                        const reusable = slots.filter((x) => x.video_url && x.slot_key !== s.slot_key);
-                        if (reusable.length === 0) return null;
-                        return (
-                          <select
-                            className="text-xs px-2 py-1 rounded border border-border bg-background"
-                            defaultValue=""
-                            onChange={(e) => {
-                              const src = reusable.find((x) => x.slot_key === e.target.value);
-                              if (!src) return;
-                              setSlots((p) => p.map((x) => x.slot_key === s.slot_key
-                                ? { ...x, video_url: src.video_url, video_storage_path: src.video_storage_path, video_label: src.video_label }
-                                : x));
-                              toast({ title: "Vídeo reutilizado — clique Salvar para confirmar" });
-                              e.target.value = "";
-                            }}
-                          >
-                            <option value="">♻️ Reutilizar vídeo de outro slot…</option>
-                            {reusable.map((x) => (
-                              <option key={x.slot_key} value={x.slot_key}>{x.label} ({x.slot_key})</option>
-                            ))}
-                          </select>
-                        );
-                      })()}
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
                 <div className="flex gap-2 items-center">
                   <AudioRecorderInline onRecorded={(b, d) => uploadDefault(s.slot_key, b, d)} />
