@@ -377,32 +377,32 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
       let durationSec: number | null = null;
       if (m.media_id) {
-        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind, duration_seconds").eq("id", m.media_id).maybeSingle();
+        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind, duration_sec").eq("id", m.media_id).maybeSingle();
         if (mediaRow?.url) {
           url = mediaRow.url;
           if (mediaRow.kind) kind = mediaRow.kind;
-          if ((mediaRow as any).duration_seconds) durationSec = Number((mediaRow as any).duration_seconds);
+          if ((mediaRow as any).duration_sec) durationSec = Number((mediaRow as any).duration_sec);
         }
       }
       if (!url && m.slot_key) {
         const { data: personal } = await supabase
           .from("ai_media_library")
-          .select("url, duration_seconds")
+          .select("url, duration_sec")
           .eq("consultant_id", customer.consultant_id)
           .eq("slot_key", m.slot_key)
           .eq("active", true)
           .eq("is_draft", false)
           .maybeSingle();
-        if (personal?.url) { url = personal.url; durationSec = Number((personal as any).duration_seconds || 0) || null; }
+        if (personal?.url) { url = personal.url; durationSec = Number((personal as any).duration_sec || 0) || null; }
         else {
           const { data: pub } = await supabase
             .from("ai_media_library")
-            .select("url, duration_seconds")
+            .select("url, duration_sec")
             .eq("is_public", true)
             .eq("slot_key", m.slot_key)
             .eq("active", true)
             .maybeSingle();
-          if (pub?.url) { url = pub.url; durationSec = Number((pub as any).duration_seconds || 0) || null; }
+          if (pub?.url) { url = pub.url; durationSec = Number((pub as any).duration_sec || 0) || null; }
         }
       }
       if (!url) continue;
@@ -513,13 +513,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (m.media_id) {
                 const { data: mediaRow } = await supabase
                   .from("ai_media_library")
-                  .select("url, kind, duration_seconds")
+                  .select("url, kind, duration_sec")
                   .eq("id", m.media_id)
                   .maybeSingle();
                 if (mediaRow?.url) {
                   url = mediaRow.url;
                   if (mediaRow.kind) kind = mediaRow.kind;
-                  if ((mediaRow as any).duration_seconds) durationSec = Number((mediaRow as any).duration_seconds);
+                  if ((mediaRow as any).duration_sec) durationSec = Number((mediaRow as any).duration_sec);
                 }
               }
 
@@ -527,7 +527,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (!url && m.slot_key) {
                 const { data: personal } = await supabase
                   .from("ai_media_library")
-                  .select("url, duration_seconds")
+                  .select("url, duration_sec")
                   .eq("consultant_id", customer.consultant_id)
                   .eq("slot_key", m.slot_key)
                   .eq("active", true)
@@ -535,18 +535,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   .maybeSingle();
                 if (personal?.url) {
                   url = personal.url;
-                  durationSec = Number((personal as any).duration_seconds || 0) || null;
+                  durationSec = Number((personal as any).duration_sec || 0) || null;
                 } else {
                   const { data: pub } = await supabase
                     .from("ai_media_library")
-                    .select("url, duration_seconds")
+                    .select("url, duration_sec")
                     .eq("is_public", true)
                     .eq("slot_key", m.slot_key)
                     .eq("active", true)
                     .maybeSingle();
                   if (pub?.url) {
                     url = pub.url;
-                    durationSec = Number((pub as any).duration_seconds || 0) || null;
+                    durationSec = Number((pub as any).duration_sec || 0) || null;
                   }
                 }
               }
@@ -778,7 +778,31 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   // E o step está em fase conversacional (antes da coleta de docs).
   // Steps de coleta (aguardando_conta em diante) seguem determinísticos.
   // ═══════════════════════════════════════════════════════════════════
-  const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "checkin_pos_video", "aguardando_humano", "qualificacao"]);
+  const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "checkin_pos_video", "aguardando_humano", "qualificacao", "duvidas_pos_club"]);
+
+  // 💰 Pré-captura do valor da conta em qualquer step conversacional.
+  // Antes o "1600" do lead só era gravado dentro do case qualificacao —
+  // se o step ainda fosse "welcome", a IA respondia com cálculo R$ 0.
+  if (
+    messageText &&
+    !isFile &&
+    !isButton &&
+    !customer.electricity_bill_value &&
+    !customer.electricity_bill_photo_url
+  ) {
+    const raw = messageText.trim();
+    // Só captura se a msg parece um valor (curta e majoritariamente numérica)
+    if (raw.length <= 20 && /^[r\$\s]*\d{2,5}([\.,]\d{1,2})?[\s,reais]*$/i.test(raw)) {
+      const m = raw.match(/(\d{2,5}(?:[\.,]\d{1,2})?)/);
+      const v = m ? Number(m[1].replace(".", "").replace(",", ".")) : 0;
+      if (Number.isFinite(v) && v >= 30 && v <= 50000) {
+        updates.electricity_bill_value = v;
+        (customer as any).electricity_bill_value = v;
+        console.log(`💰 [bill-precapture] valor=${v} capturado em step=${step}`);
+      }
+    }
+  }
+
   // Steps de coleta também aceitam pergunta off-script (FAQ), mas só se a mensagem PARECE pergunta.
   const collectionSteps = new Set(["aguardando_conta", "coleta_doc", "ask_email", "ask_cep"]);
   const looksLikeQuestion = !!messageText && (
@@ -1295,22 +1319,22 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         try {
           const { data: personal } = await supabase
             .from("ai_media_library")
-            .select("url, duration_seconds")
+            .select("url, duration_sec")
             .eq("consultant_id", customer.consultant_id)
             .eq("slot_key", "conexao_club")
             .eq("active", true)
             .eq("is_draft", false)
             .maybeSingle();
-          if (personal?.url) { clubUrl = personal.url; clubDur = Number((personal as any).duration_seconds || 0) || null; }
+          if (personal?.url) { clubUrl = personal.url; clubDur = Number((personal as any).duration_sec || 0) || null; }
           if (!clubUrl) {
             const { data: pub } = await supabase
               .from("ai_media_library")
-              .select("url, duration_seconds")
+              .select("url, duration_sec")
               .eq("is_public", true)
               .eq("slot_key", "conexao_club")
               .eq("active", true)
               .maybeSingle();
-            if (pub?.url) { clubUrl = pub.url; clubDur = Number((pub as any).duration_seconds || 0) || null; }
+            if (pub?.url) { clubUrl = pub.url; clubDur = Number((pub as any).duration_sec || 0) || null; }
           }
         } catch (e) { console.warn("[pitch] busca slot conexao_club falhou:", (e as any)?.message); }
 
@@ -1327,19 +1351,20 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           } catch (e) { console.warn("[pitch] envio do vídeo conexao_club falhou:", (e as any)?.message); }
         }
 
-        // CTA final + botões do tipo de documento
-        const ctaMsg = `Bora finalizar seu cadastro? Pra travar tudo eu preciso só de uma foto do seu *RG ou CNH* 📄`;
-        await sendOptions(remoteJid, ctaMsg, [
-          { id: "tipo_rg_novo", title: "📄 RG Novo" },
-          { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
-          { id: "tipo_cnh", title: "🪪 CNH" },
-        ]);
+        // Pergunta se ficou alguma dúvida ANTES de pedir o documento.
+        // A IA responde dúvidas livremente; quando o lead confirmar (sim/pode seguir/não tenho dúvida),
+        // o step duvidas_pos_club dispara os botões de RG/CNH.
+        const firstNm = ((customer as any).name || "").split(/\s+/)[0];
+        const duvidaMsg = firstNm
+          ? `${firstNm}, ficou alguma dúvida sobre o Conexão Club ou sobre como funciona? Pode mandar aqui que eu te explico 😊\n\nSe estiver tudo certo, é só me dizer *"pode seguir"* que a gente já avança pro cadastro.`
+          : `Ficou alguma dúvida sobre o Conexão Club ou sobre como funciona? Pode mandar aqui que eu te explico 😊\n\nSe estiver tudo certo, é só me dizer *"pode seguir"* que a gente já avança pro cadastro.`;
+        await sendText(remoteJid, duvidaMsg);
         await supabase.from("conversations").insert({
           customer_id: customer.id, message_direction: "outbound",
-          message_text: ctaMsg, message_type: "text",
-          conversation_step: "ask_tipo_documento",
+          message_text: duvidaMsg, message_type: "text",
+          conversation_step: "duvidas_pos_club",
         });
-        updates.conversation_step = "ask_tipo_documento";
+        updates.conversation_step = "duvidas_pos_club";
         (updates as any).__inline_sent = true;
         reply = "";
       } else if (resp === "nao_conta" || resp === "nao" || resp === "não" || resp === "n" || resp === "2" || resp === "errado" || resp === "❌") {
@@ -1371,6 +1396,40 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       updates.conversation_step = "ask_tipo_documento";
       (updates as any).__inline_sent = true;
       reply = "";
+      break;
+    }
+
+    // ─── 3a-bis. DÚVIDAS PÓS-CLUB ─────────
+    // O lead recebeu o vídeo + pitch e foi convidado a tirar dúvidas.
+    // - Afirmativo / "pode seguir" / "sem dúvida" → dispara botões do doc.
+    // - Negativo OU pergunta livre → não fecha aqui; deixa a IA responder
+    //   (esse case nem chega a executar nesse caminho, pois conversationalSteps
+    //   inclui "duvidas_pos_club" e o ramo da IA roda antes do switch).
+    case "duvidas_pos_club": {
+      const txt = (messageText || "").trim().toLowerCase();
+      const segueAgora =
+        isButton ||
+        /^(sim|s|ok|pode|pode seguir|bora|vamos|partiu|segue|seguir|tudo certo|sem d[uú]vida|nenhuma|nao tenho|n[ãa]o tenho|n[ãa]o|t[ãa]|fechou|beleza|blz)\b/.test(txt) ||
+        /(quero|vamos|bora).*(cadastr|seguir|finaliz)/i.test(messageText || "");
+      if (segueAgora) {
+        const ctaMsg = `Show! Pra finalizar seu cadastro me manda só a foto do seu *RG ou CNH* 📄`;
+        await sendOptions(remoteJid, ctaMsg, [
+          { id: "tipo_rg_novo", title: "📄 RG Novo" },
+          { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
+          { id: "tipo_cnh", title: "🪪 CNH" },
+        ]);
+        await supabase.from("conversations").insert({
+          customer_id: customer.id, message_direction: "outbound",
+          message_text: ctaMsg, message_type: "text",
+          conversation_step: "ask_tipo_documento",
+        });
+        updates.conversation_step = "ask_tipo_documento";
+        (updates as any).__inline_sent = true;
+        reply = "";
+      } else {
+        // Resposta de fallback se a IA não tiver pegado a dúvida acima.
+        reply = "Pode mandar sua dúvida que eu te explico 😊 ou diga *pode seguir* pra avançar pro cadastro.";
+      }
       break;
     }
 
