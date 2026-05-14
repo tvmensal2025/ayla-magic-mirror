@@ -643,12 +643,16 @@ Deno.serve(async (req) => {
     // Garante que começa em 'user' (Gemini exige)
     while (contents.length && contents[0].role !== "user") contents.shift();
 
-    if (mode === "rescue") {
+    // Closer só dispara se temos OCR + nome confiável; senão cai no fluxo reply normal
+    const closerReady = mode === "closer" && nameSourceTrusted && ocrDone;
+    const effectiveMode = (mode === "closer" && !closerReady) ? "reply" : mode;
+
+    if (effectiveMode === "rescue") {
       contents.push({
         role: "user",
         parts: [{ text: "[SISTEMA] Lead silenciou. Gere mensagem de resgate breve, sem cobrar, com gancho diferente do que já foi enviado." }],
       });
-    } else if (mode === "closer") {
+    } else if (effectiveMode === "closer") {
       contents.push({
         role: "user",
         parts: [{ text: `[SISTEMA] Conta recebida e OCR ok. Use IMEDIATAMENTE confirm_and_handoff confirmando ${customer.name || "titular"} / ${customer.distribuidora || "?"} / R$ ${billNum.toFixed(0)}.` }],
@@ -670,12 +674,11 @@ Deno.serve(async (req) => {
     // Decide qual modelo usar — Pro só quando vale a latência extra
     const score = Number(customer.qualification_score ?? 0);
     const useProModel =
-      mode === "closer" ||
-      phase === "objecao" ||
+      effectiveMode === "closer" ||
       phase === "fechamento" ||
       score >= 70 ||
       billAlreadyReceivedEarly;
-    const modelToUse = mode === "rescue"
+    const modelToUse = effectiveMode === "rescue"
       ? MODEL_RESCUE
       : (useProModel ? MODEL_DECISION : MODEL_DEFAULT);
 
