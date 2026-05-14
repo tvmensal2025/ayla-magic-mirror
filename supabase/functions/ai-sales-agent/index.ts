@@ -752,25 +752,83 @@ Deno.serve(async (req) => {
       resolvedMedia = { id: picked.id, url: picked.url, kind: picked.kind, label: picked.label };
     }
 
+    // ---- Self-check barato (flash-lite) — bloqueia tools absurdas ----
+    let selfCheckRisk: string | null = null;
+    try {
+      const lastIn = mode === "rescue" ? "[rescue]" : (user_input || "").slice(0, 200);
+      const checkPrompt = `Lead disse: "${lastIn}"\nIA escolheu: ${tool} ${JSON.stringify(args).slice(0, 250)}\nFase: ${phase}. Conta_recebida: ${billAlreadyReceivedEarly}.\nResponda apenas: OK ou RISCO_<motivo curto>.`;
+      const sc = await geminiGenerate({
+        model: MODEL_SELFCHECK,
+        contents: [{ role: "user", parts: [{ text: checkPrompt }] }],
+        temperature: 0,
+        maxOutputTokens: 30,
+        functionName: "ai-sales-agent-selfcheck",
+        consultantId: customer.consultant_id,
+        customerId: customer_id,
+      });
+      const verdict = (sc.text || "").trim().toUpperCase();
+      if (verdict.startsWith("RISCO")) selfCheckRisk = verdict.slice(0, 80);
+    } catch (_) { /* self-check é best-effort */ }
+
+    // Detecção de intenção determinística (para auditoria)
+    const ui = (user_input || "").toLowerCase();
+    const intentDetected =
+      /\b(cadastr|quero entrar|fazer adesao|fazer cadastro|me cadastra)/i.test(ui) ? "cadastrar" :
+      /\b(humano|atendente|pessoa|operador|consultor real)\b/i.test(ui) ? "humano" :
+      /\b(parar|cancelar|nao quero|sem interesse|desisto|me deixa)\b/i.test(ui) ? "desistir" :
+      /\b(quanto|valor|economia|preco|preço)\b/i.test(ui) ? "interesse_valor" :
+      null;
+
     // Audit (best-effort)
     await supabase.from("ai_decisions").insert({
       customer_id,
       consultant_id: customer.consultant_id,
       phase,
       tool_called: tool,
-      reasoning: args.reasoning || args.reason || null,
+      reasoning: (args.reasoning || args.reason || "") + (selfCheckRisk ? ` | ${selfCheckRisk}` : ""),
       user_input: mode === "rescue" ? "[rescue]" : user_input,
       ai_output: args,
       latency_ms: latencyMs,
-      model: MODEL,
+      model: aiResult.modelUsed,
       media_sent_id: resolvedMedia?.id || null,
+      intent_detected: intentDetected,
     });
+
+    // Se self-check sinalizou RISCO em tool sensível, força fallback texto neutro
+    if (selfCheckRisk && (tool === "send_media" || tool === "advance_to_closing")) {
+      const safeMsg = "Me ajuda com mais um detalhe rápido para eu te dar a resposta certa: qual a sua cidade e qual a média da sua conta de luz?";
+      return new Response(JSON.stringify({
+        decision: { tool: "send_text", args: { message: safeMsg, next_phase: phase, reasoning: `selfcheck_blocked:${selfCheckRisk}` } },
+        phase,
+        latency_ms: Date.now() - t0,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // Apply side-effects (DB updates only — sending message stays in webhook)
     const updates: Record<string, any> = {};
     if (tool === "send_text" && args.next_phase) updates.sales_phase = args.next_phase;
     if (tool === "send_media" && args.next_phase) updates.sales_phase = args.next_phase;
     if (tool === "advance_to_closing") updates.sales_phase = "fechamento";
+    if (tool === "confirm_and_handoff") {
+      updates.sales_phase = "fechamento";
+      updates.bot_paused = true;
+      updates.bot_paused_reason = "confirm_and_handoff: lead pronto para cadastro";
+      updates.bot_paused_at = new Date().toISOString();
+      updates.qualification_score = 100;
+    }
+    if (tool === "update_lead_field") {
+      const f = String(args.field || "");
+      const v = args.value;
+      if (["name", "distribuidora", "address_city", "pain_point"].includes(f) && typeof v === "string" && v.length > 1) {
+        updates[f] = v.trim();
+        if (f === "name") updates.name_source = "self_introduced";
+      }
+      if (f === "electricity_bill_value") {
+        const n = Number(String(v).replace(/[^\d.,]/g, "").replace(",", "."));
+        if (Number.isFinite(n) && n > 0) updates.electricity_bill_value = n;
+      }
+      if (args.next_phase) updates.sales_phase = args.next_phase;
+    }
     if (tool === "request_handoff") {
       updates.bot_paused = true;
       updates.bot_paused_reason = args.reason;
