@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
   // Candidatos: customers em fase final, bot ativo, atualizado entre maxAgo e minAgo
   const { data: candidates, error } = await supa
     .from("customers")
-    .select("id, consultant_id, conversation_step, sales_phase, updated_at, bot_paused, ai_rescue_count, instance_name, phone_whatsapp")
+    .select("id, consultant_id, conversation_step, sales_phase, updated_at, bot_paused, ai_rescue_count, phone_whatsapp")
     .in("sales_phase", STALE_PHASES)
     .eq("bot_paused", false)
     .gte("updated_at", maxAgo)
@@ -44,7 +44,15 @@ Deno.serve(async (req) => {
   let triggered = 0, skipped = 0;
   for (const c of candidates || []) {
     if ((c.ai_rescue_count || 0) >= MAX_RESCUES_PER_LEAD) { skipped++; continue; }
-    if (!c.instance_name || !c.phone_whatsapp) { skipped++; continue; }
+    if (!c.phone_whatsapp || !c.consultant_id) { skipped++; continue; }
+
+    // Resolve instance via whatsapp_instances
+    const { data: inst } = await supa
+      .from("whatsapp_instances")
+      .select("instance_name")
+      .eq("consultant_id", c.consultant_id)
+      .maybeSingle();
+    if (!inst?.instance_name) { skipped++; continue; }
 
     try {
       const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-sales-agent`, {
@@ -57,7 +65,7 @@ Deno.serve(async (req) => {
           customer_id: c.id,
           mode: "rescue",
           remote_jid: c.phone_whatsapp.replace(/\D/g, "") + "@s.whatsapp.net",
-          instance_name: c.instance_name,
+          instance_name: inst.instance_name,
           source: "closer_cron",
         }),
       });
