@@ -551,19 +551,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       };
     }
 
-    // 2.5) Recusa/adiamento explícito → não insistir pedindo conta.
-    if (RE_NOT_READY.test(txt)) {
-      console.log(`[intent-override] NOT_READY detectado: "${txt.slice(0, 60)}"`);
-      return {
-        reply: buildNotReadyReply(nomeRepresentante),
-        updates: {
-          conversation_step: "aguardando_humano",
-          bot_paused: true,
-          bot_paused_reason: "lead_nao_pronto",
-          bot_paused_at: new Date().toISOString(),
-        },
-      };
-    }
+    // 2.5) Recusa/adiamento explícito → IA cuida do tom acolhedor (sem pausar bot).
+    //      Se quiser pausar, ela vai chamar pause_bot via tool. Por padrão deixamos o
+    //      diálogo seguir natural — vendedor humano não desliga só porque o lead disse "depois".
 
     // 3) "humano / atendente" → handoff explícito.
     if (RE_INTENT_HUMANO.test(txt)) {
