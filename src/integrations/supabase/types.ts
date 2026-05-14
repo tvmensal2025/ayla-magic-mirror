@@ -3256,6 +3256,14 @@ export type Database = {
         }
         Returns: number
       }
+      reset_lead_conversation: {
+        Args: {
+          _consultant_id: string
+          _customer_id?: string
+          _remote_jid?: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       app_role: "admin" | "user" | "super_admin"
