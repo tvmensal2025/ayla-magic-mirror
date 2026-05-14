@@ -357,7 +357,7 @@ export function MediaColumn({ userId }: { userId: string }) {
             </div>
           </div>
           <div className="border-t border-border pt-3">
-            <p className="text-xs font-semibold mb-2 text-foreground">Para qual perfil?</p>
+            <p className="text-xs font-semibold mb-2 text-foreground">Qual dúvida essa mídia resolve?</p>
             <div className="space-y-1.5">
               {INTENT_OPTIONS.map((opt) => {
                 const checked = intentTags.includes(opt.value);
