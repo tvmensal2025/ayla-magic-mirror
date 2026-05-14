@@ -146,18 +146,83 @@ export function SystemHealthPanel() {
       )}
 
       {evolutionDown && (
-        <div className="flex items-center gap-2 p-3 mt-2 rounded-lg bg-red-500/10 border border-red-500/30 text-sm">
-          <WifiOff className="w-4 h-4 text-red-400" />
-          <span>{data.instancesNeedReconnect} instância(s) Evolution caída(s). Reabrir QR no painel Evolution.</span>
+        <div className="p-3 mt-2 rounded-lg bg-red-500/10 border border-red-500/30 text-sm space-y-2">
+          <div className="flex items-center gap-2 font-medium text-red-300">
+            <WifiOff className="w-4 h-4 text-red-400" />
+            <span>
+              {data.instancesNeedReconnect} instância(s) Evolution caída(s) — reabrir QR no painel Evolution:
+            </span>
+          </div>
+          <ul className="space-y-1.5 pl-1">
+            {data.downInstances.slice(0, 8).map((inst) => {
+              const copyText = [inst.consultantName, inst.license, inst.phone, inst.instanceName]
+                .filter(Boolean)
+                .join(" · ");
+              return (
+                <li
+                  key={inst.id}
+                  className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-2 rounded-md bg-red-500/5 border border-red-500/20"
+                >
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                    <span className="font-semibold text-foreground">{inst.consultantName}</span>
+                    {inst.license && (
+                      <Badge variant="outline" className="h-4 px-1.5 text-[10px] border-red-400/40 text-red-300">
+                        {inst.license}
+                      </Badge>
+                    )}
+                    {inst.phone && <span className="text-muted-foreground">📱 {inst.phone}</span>}
+                    <span className="text-muted-foreground/70">·</span>
+                    <code className="text-[10px] text-muted-foreground bg-background/40 px-1 py-0.5 rounded">
+                      {inst.instanceName}
+                    </code>
+                    <span className="text-muted-foreground/70">·</span>
+                    <span className="text-amber-300/90">{timeAgo(inst.lastSeen)}</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[11px] gap-1"
+                    onClick={() => {
+                      navigator.clipboard.writeText(copyText);
+                      toast.success("Dados copiados");
+                    }}
+                  >
+                    <Copy className="w-3 h-3" />
+                    Copiar
+                  </Button>
+                </li>
+              );
+            })}
+            {data.downInstances.length > 8 && (
+              <li className="text-[11px] text-muted-foreground pl-2">
+                + {data.downInstances.length - 8} outra(s) instância(s) caída(s)
+              </li>
+            )}
+          </ul>
         </div>
       )}
     </Card>
   );
 }
 
-function Metric({ label, value, good, icon }: { label: string; value: number; good: boolean; icon?: React.ReactNode }) {
+function Metric({
+  label,
+  value,
+  good,
+  icon,
+  tooltip,
+}: {
+  label: string;
+  value: number;
+  good: boolean;
+  icon?: React.ReactNode;
+  tooltip?: string;
+}) {
   return (
-    <div className={`p-3 rounded-lg border ${good ? "bg-green-500/5 border-green-500/20" : "bg-red-500/5 border-red-500/20"}`}>
+    <div
+      className={`p-3 rounded-lg border ${good ? "bg-green-500/5 border-green-500/20" : "bg-red-500/5 border-red-500/20"}`}
+      title={tooltip}
+    >
       <div className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase tracking-wider">
         {icon}
         {label}
