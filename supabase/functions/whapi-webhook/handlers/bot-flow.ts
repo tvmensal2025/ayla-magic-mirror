@@ -262,6 +262,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               }
             }
             reply = "";
+            (updates as any).__inline_sent = true;
             return { reply, updates };
           }
           if (tool === "mark_lost") {
