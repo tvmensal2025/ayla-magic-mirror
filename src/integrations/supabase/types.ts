@@ -743,6 +743,36 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_learning_digest: {
+        Row: {
+          created_at: string
+          digest_date: string
+          id: string
+          metrics: Json
+          sent_at: string | null
+          sent_to: string | null
+          summary_text: string | null
+        }
+        Insert: {
+          created_at?: string
+          digest_date: string
+          id?: string
+          metrics?: Json
+          sent_at?: string | null
+          sent_to?: string | null
+          summary_text?: string | null
+        }
+        Update: {
+          created_at?: string
+          digest_date?: string
+          id?: string
+          metrics?: Json
+          sent_at?: string | null
+          sent_to?: string | null
+          summary_text?: string | null
+        }
+        Relationships: []
+      }
       ai_media_library: {
         Row: {
           active: boolean
