@@ -584,74 +584,98 @@ Deno.serve(async (req) => {
           .join("\n")
       : "";
 
-    const messages: any[] = [
-      { role: "system", content: systemPrompt(persona, tone, customPrompt) + fewShotLine },
-      { role: "system", content: contextLine },
-      ...history.map((m: any) => ({
-        role: m.message_direction === "inbound" ? "user" : "assistant",
-        content: m.message_text || "",
-      })),
-    ];
+    // ---- Few-shot negativo (NÃO fazer) ----
+    const { data: negative } = await supabase
+      .from("ai_decisions")
+      .select("user_input, ai_output, tool_called")
+      .eq("consultant_id", customer.consultant_id)
+      .contains("feedback", { rating: "down" })
+      .order("created_at", { ascending: false })
+      .limit(3);
+    const negShotLine = (negative || []).length
+      ? `\n[NÃO FAZER ASSIM — exemplos reprovados pelo consultor]\n` +
+        (negative || [])
+          .map(
+            (p: any) =>
+              `Lead: "${(p.user_input || "").slice(0, 80)}" → ${p.tool_called}: "${(p.ai_output?.message || p.ai_output?.caption || "").slice(0, 80)}"`,
+          )
+          .join("\n")
+      : "";
+
+    // ---- Construir contents no formato Gemini ----
+    const sys = systemPrompt(persona, tone, customPrompt) + fewShotLine + negShotLine + "\n\n" + contextLine;
+
+    const contents: any[] = history.map((m: any) => ({
+      role: m.message_direction === "inbound" ? "user" : "model",
+      parts: [{ text: m.message_text || "(sem texto)" }],
+    }));
+    // Garante que começa em 'user' (Gemini exige)
+    while (contents.length && contents[0].role !== "user") contents.shift();
 
     if (mode === "rescue") {
-      messages.push({
+      contents.push({
         role: "user",
-        content:
-          "[SISTEMA] Lead silenciou. Gere mensagem de resgate breve, sem cobrar, com gancho diferente do que já foi enviado.",
+        parts: [{ text: "[SISTEMA] Lead silenciou. Gere mensagem de resgate breve, sem cobrar, com gancho diferente do que já foi enviado." }],
+      });
+    } else if (mode === "closer") {
+      contents.push({
+        role: "user",
+        parts: [{ text: `[SISTEMA] Conta recebida e OCR ok. Use IMEDIATAMENTE confirm_and_handoff confirmando ${customer.name || "titular"} / ${customer.distribuidora || "?"} / R$ ${billNum.toFixed(0)}.` }],
       });
     } else {
-      messages.push({ role: "user", content: user_input });
+      contents.push({ role: "user", parts: [{ text: user_input }] });
     }
+    if (!contents.length) contents.push({ role: "user", parts: [{ text: user_input || "Olá" }] });
 
-    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages,
-        tools,
-        tool_choice: "required",
-      }),
-    });
+    // Converte tools OpenAI -> Gemini functionDeclarations
+    const geminiTools: GeminiTool[] = [{
+      functionDeclarations: tools.map((t) => ({
+        name: t.function.name,
+        description: t.function.description,
+        parameters: t.function.parameters,
+      })),
+    }];
 
-    if (!aiResp.ok) {
-      const txt = await aiResp.text();
-      console.error("AI gateway error:", aiResp.status, txt);
-      if (aiResp.status === 429 || aiResp.status === 402) {
-        return new Response(JSON.stringify({ error: txt }), {
-          status: aiResp.status,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "ai gateway failed" }), {
+    // Decide qual modelo usar
+    const modelToUse = mode === "rescue" ? MODEL_RESCUE : MODEL_DECISION;
+
+    let aiResult;
+    try {
+      aiResult = await geminiGenerate({
+        model: modelToUse,
+        system: sys,
+        contents,
+        tools: geminiTools,
+        toolChoice: { mode: "ANY" },
+        temperature: 0.5,
+        thinkingBudget: modelToUse === MODEL_DECISION ? 2048 : 0,
+        maxOutputTokens: 1500,
+        fallbackModel: MODEL_FALLBACK,
+        functionName: "ai-sales-agent",
+        consultantId: customer.consultant_id,
+        customerId: customer_id,
+      });
+    } catch (e) {
+      console.error("[ai-sales-agent] gemini error:", e);
+      return new Response(JSON.stringify({ error: String((e as Error).message) }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const aiJson = await aiResp.json();
-    const choice = aiJson.choices?.[0];
-    const toolCall = choice?.message?.tool_calls?.[0];
-
-    if (!toolCall) {
+    const toolCallG = aiResult.toolCall;
+    if (!toolCallG) {
       return new Response(
         JSON.stringify({
-          decision: { tool: "send_text", args: { message: sanitizeHumanMessage(choice?.message?.content || "", phase, "", firstName), next_phase: phase, reasoning: "fallback" } },
+          decision: { tool: "send_text", args: { message: sanitizeHumanMessage(aiResult.text || "", phase, "", firstName), next_phase: phase, reasoning: "fallback_no_toolcall" } },
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    const tool = toolCall.function.name;
-    let args: any = {};
-    try {
-      args = JSON.parse(toolCall.function.arguments || "{}");
-    } catch (_) {
-      args = {};
-    }
+    const tool = toolCallG.name;
+    let args: any = toolCallG.args || {};
+
 
     const priorOutbound = history.filter((h: any) => h.message_direction !== "inbound");
     const hasPriorOutbound = priorOutbound.length > 0;
