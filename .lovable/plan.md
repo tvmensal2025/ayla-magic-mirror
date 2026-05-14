@@ -1,93 +1,114 @@
-## O que muda com sua decisão
+## O que vamos entregar
 
-Você quer **CTWA oficial via WABA** (Click-to-WhatsApp nativo da Meta), não mais o `wa.me`. Isso muda 3 coisas importantes a melhor:
-
-1. **Otimização real por `CONVERSATIONS`** (e não `LINK_CLICKS`) → Meta entrega o anúncio para quem efetivamente abre conversa, CPL cai 10–25%.
-2. **Atribuição nativa** do clique até a primeira mensagem, sem depender de `fbclid` na URL → o algoritmo aprende muito mais rápido.
-3. **Pixel + CAPI casados** com `promoted_object` apontando para `page_id + whatsapp_phone_number` → eventos `Lead`/`Purchase` voltam para o anúncio correto e alimentam Lookalike.
-
-Pré-requisito: o número precisa estar **oficialmente em uma WABA conectada à Página** no Meta Business Suite (com WhatsApp Business API, não o app pessoal nem o app Business). O `facebook-validate-account` já checa isso e retorna a mensagem `WHATSAPP_BUSINESS_REQUIRED` quando falta — só vou reativar esse caminho como **bloqueante** em vez de fallback para `wa.me`.
+Você não quer abrir nada. Quer **uma IA que aprende sozinha, baixa o CPL todo dia, e te avisa quando algo importa**. Para isso, fechamos 4 frentes pequenas e específicas — sem mexer em nada que já funciona.
 
 ---
 
-## Plano final (4 frentes)
+## Frente 1 — Plugar o painel (2 linhas faltando)
 
-### Frente 1 — Migrar publicação para CTWA oficial (WABA)
+Arquivo: `src/pages/SuperAdmin.tsx`
 
-Arquivo: `supabase/functions/facebook-create-campaign/index.ts`
+- Linha 244: adicionar `{ id: "ia_aprendendo" as const, label: "IA Aprendendo", icon: Brain }` no array `tabs`.
+- Linha 506: adicionar `{activeTab === "ia_aprendendo" && <AILearningHealthPanel />}`.
+- Importar `AILearningHealthPanel` no topo.
 
-- **Objective**: `OUTCOME_ENGAGEMENT` (atual e correto pra CTWA WABA) ou `OUTCOME_SALES` quando o pixel tem histórico de `Purchase`. Hoje está `OUTCOME_TRAFFIC` — vamos trocar.
-- **Optimization goal**: `CONVERSATIONS` (em vez de `LINK_CLICKS`).
-- **Destination type**: `WHATSAPP` no AdSet.
-- **`promoted_object`**: `{ page_id, whatsapp_phone_number, custom_event_type: "OTHER" }` — é o que liga anúncio ↔ número WABA.
-- **`tracking_specs`**: `[{action.type:["onsite_conversion.messaging_first_reply"]}, {action.type:["offsite_conversion"], fb_pixel:[pixel_id]}]` quando há pixel — Meta reporta "Conversas iniciadas" + `Lead` da CAPI atribuído ao mesmo ad.
-- **Creative**: `object_story_spec.link_data.call_to_action = { type: "WHATSAPP_MESSAGE", value: { app_destination: "WHATSAPP", page: page_id, link: "https://api.whatsapp.com/send?phone=<numero>" } }` — esse é o formato oficial CTWA, sem link `wa.me` solto.
-- **Mensagem inicial**: passa para `payload.welcome_message` do `link_data` (Meta abre o WhatsApp já com o texto pronto e atrelado ao ad_id).
-- **Bloqueio**: se o `facebook-validate-account` retornar `WHATSAPP_BUSINESS_REQUIRED`, o front (`SmartPublishButton`) mostra modal explicando como conectar WABA, com link direto para `business.facebook.com/wa/manage/phone-numbers/`. **Sem fallback `wa.me`.**
-
-### Frente 2 — Concorrentes com imagem real
-
-Arquivo: `supabase/functions/ad-competitor-scraper/index.ts` (reescrita)
-
-- Trocar Gemini-text-only por **Meta Ad Library Graph API** (`/ads_archive` com token de System User da plataforma).  
-  Campos: `ad_snapshot_url, ad_creative_bodies, ad_creative_link_titles, ad_creative_link_captions, page_name, ad_delivery_start_time, ad_creative_link_descriptions`.
-- Para cada anúncio, fazer `GET ad_snapshot_url`, extrair `og:image` + thumbnail de vídeo, baixar e salvar em **MinIO** (`competitors/<advertiser>/<archive_id>.jpg`), gravar `image_url`/`thumbnail_url`/`video_url` em `ad_competitor_creatives`.
-- Manter Gemini só como **enriquecimento** do `angle` (classificação `economia_concreta | quebra_objecao | ...`) a partir do texto real do anúncio.
-- Backfill manual dos 38 registros existentes após o deploy.
-
-### Frente 3 — Painel "IA Aprendendo" no SuperAdmin
-
-Arquivo novo: `src/components/admin/super/AILearningHealthPanel.tsx` + nova aba em `src/pages/SuperAdmin.tsx`.
-
-- **4 cards de status verde/amarelo/vermelho** com base na idade da última execução de cada cron (consulta `ai_usage_log` + `ad_creative_insights.updated_at` + `ad_competitor_creatives.ingested_at`):
-  - 🕵️ Scraper concorrentes (≤8 dias = verde)
-  - 🧠 Learner de criativos (≤26 h = verde)
-  - 🔄 Rotator (≤14 h = verde)
-  - 📊 Sync de métricas (≤45 min = verde)
-- **Timeline unificada** dos últimos 30 eventos (scraper, learner, rotator, auto-pause, CAPI events).
-- **"Top 5 padrões vencedores agora"** — agregação de `ad_creative_insights.winning_patterns` por contagem global.
-- **"Top 5 padrões a evitar"** — idem `losing_patterns`.
-- **Atribuição CAPI saudável?** — taxa últimos 7 dias de `customers` com `lead_source.fbclid` preenchido / total de `Lead` em `facebook_capi_events`.
-- **Botão "Forçar agora"** em cada cron via `supabase.functions.invoke`.
-- **Auto-refresh 60 s.**
-
-### Frente 4 — Auto-aprendizado fechando o ciclo
-
-Garantias de que cada execução **realmente melhora a próxima publicação** (auditei e vou reforçar onde está fraco):
-
-| Cron | Já funciona | O que vou reforçar |
-|---|---|---|
-| `ad-creative-learner` (diário 07:00) | Gera `ad_creative_insights` por consultor | Passar a também gravar **insights globais** (`consultant_id IS NULL`) que o `ad-creative-builder` lê como prior. |
-| `ad-creative-builder` | Já consome insights do consultor | Passar a também consumir o insight global + **top concorrentes ativos com imagem** como referência visual no prompt. |
-| `facebook-creative-rotator` (12 h) | Pausa losers | Adicionar **promoção automática** (subir budget +20 % do winner do mês até teto). |
-| `facebook-auto-pause` (06:00) | Pausa campanhas estouradas | Marca causa em `ad_recommendations` p/ aparecer no painel novo. |
-| `ad-competitor-scraper` (semanal) | Coleta texto | (Frente 2) Coleta imagem real + alimenta o builder. |
+Resultado: aba "IA Aprendendo" no SuperAdmin mostra os 4 cards verde/amarelo/vermelho, top vencedores/perdedores, timeline e botão "Forçar agora".
 
 ---
 
-## Arquivos afetados
+## Frente 2 — Resumo diário no WhatsApp (você não precisa abrir o painel)
+
+Nova edge function: `ai-daily-digest` + cron 09:00 BRT.
+
+Toda manhã envia para o seu WhatsApp super-admin **um único resumo curto**:
 
 ```
-supabase/functions/facebook-create-campaign/index.ts   → CTWA oficial WABA
-supabase/functions/facebook-validate-account/index.ts  → bloqueio firme se sem WABA
-supabase/functions/ad-competitor-scraper/index.ts      → /ads_archive + snapshot + MinIO
-supabase/functions/_shared/meta-ads-library.ts         → novo helper
-supabase/functions/ad-creative-learner/index.ts        → +insight global
-supabase/functions/ad-creative-builder/index.ts        → consome insight global + concorrentes c/ imagem
-supabase/functions/facebook-creative-rotator/index.ts  → promoção automática do winner
-src/components/admin/super/AILearningHealthPanel.tsx   → novo
-src/pages/SuperAdmin.tsx                               → nova aba "IA & Aprendizado"
-src/components/admin/ads/SmartPublishButton.tsx        → modal "conectar WABA" sem fallback
+🤖 IA aprendeu hoje
+• CPL médio: R$ 6,42 (-12% vs ontem) ✅
+• 3 anúncios pausados (ROAS < 1.5)
+• 2 vencedores promovidos (+20% budget)
+• Padrão novo descoberto: "economia em R$" converte 2.3x
+• 38 concorrentes monitorados (32 com imagem)
+
+⚠️ 1 ação sua: consultor X sem WABA conectada
+```
+
+Tudo que importa cabe em 6 linhas. Se está tudo verde, você sabe. Se tem ação, você sabe qual.
+
+Tabela nova `ai_learning_digest` (data, métricas, enviado_em) para histórico e idempotência.
+
+---
+
+## Frente 3 — Loop de auto-otimização que de fato baixa CPL
+
+Hoje o `ad-creative-learner` roda diariamente mas o ciclo não fecha sozinho. Vamos fechar:
+
+1. **`ad-creative-learner` (07:00)** — já agrega insights por consultor + global. Adicionar:
+   - cálculo de **CPL médio rolling 7d vs 14d** por consultor → grava em `ad_learning_digest`.
+   - identificar **top 3 padrões vencedores da rede inteira** (network-wide) e gravar em `ad_playbooks` com `scope='global'`.
+
+2. **`ad-creative-builder`** — já existe. Adicionar consumo automático:
+   - quando rotator pausa um loser, **chama o builder automaticamente** para gerar 2 variações inspiradas no winner do mesmo consultor + playbook global. Sem você apertar nada.
+
+3. **`facebook-creative-rotator` (12h)** — já pausa losers. Adicionar:
+   - **promoção automática** do winner do mês: budget +20% até teto configurável (`max_daily_budget_cents` em `consultants`).
+   - dispara a chamada acima do builder.
+
+4. **Novo cron `ai-cpl-watchdog` (de 4h em 4h)** — se CPL de uma campanha sobe >40% em 48h, pausa automática + recomendação no painel + linha no digest do dia seguinte.
+
+Ciclo final:
+
+```
+scraper (semanal) ─┐
+                   ├──> learner (diário) ──> playbook global
+performance ───────┘                              │
+                                                  ▼
+rotator (12h) ─pausa loser─> builder auto ─cria variações─> publica
+                │
+                └─promove winner ─> mais budget no que funciona
+
+watchdog (4h) ─> detecta CPL subindo ─> pausa ─> avisa no digest
+```
+
+Cada execução grava em `ai_usage_log` com `category='auto_learning'` para o painel e o digest puxarem.
+
+---
+
+## Frente 4 — Concorrentes com imagem (backfill)
+
+`ad-competitor-scraper` já foi reescrito para usar `/ads_archive` + `og:image` + MinIO. Falta:
+
+1. Confirmar que o secret `FACEBOOK_APP_SECRET` + `FACEBOOK_APP_ID` permitem token do Ad Library (sim, já permitem — testamos).
+2. Rodar `?backfill=1` uma vez nos 38 registros existentes.
+3. Schedule já existe (segunda 06:00).
+
+---
+
+## Arquivos que vão mudar
+
+```
+src/pages/SuperAdmin.tsx                                  → 3 linhas (import + tab + render)
+supabase/functions/ai-daily-digest/index.ts               → NOVA (resumo WhatsApp diário)
+supabase/functions/ai-cpl-watchdog/index.ts               → NOVA (alerta CPL alto)
+supabase/functions/ad-creative-learner/index.ts           → +CPL rolling + playbook global
+supabase/functions/facebook-creative-rotator/index.ts     → +promove winner + dispara builder
+supabase/migrations/<ts>_ai_learning_digest.sql           → tabela + 2 cron jobs novos
 ```
 
 ## Validação após deploy
 
-1. `facebook-validate-account` com número não-WABA → retorna `WHATSAPP_BUSINESS_REQUIRED` e o front mostra modal claro.
-2. Publicar campanha de teste → conferir no Gerenciador que o anúncio aparece como **"Cliques no WhatsApp"** com `optimization_goal=CONVERSATIONS` e `destination_type=WHATSAPP`.
-3. `ad-competitor-scraper` manual → 38 registros passam de 0 → ≥30 com `image_url`.
-4. SuperAdmin → nova aba "IA & Aprendizado" mostra 4 cards verdes e timeline com últimos 30 eventos.
-5. Disparar `Lead` de teste via formulário → `facebook_capi_events` registra com `event_id` único e `fb_response.events_received=1`.
+1. Aba "IA Aprendendo" no `/admin/super` carrega com 4 cards verdes.
+2. Forçar `ad-competitor-scraper?backfill=1` → 38 registros passam de 0 imagem para ≥30 com imagem.
+3. Disparar `ai-daily-digest` manual → chega WhatsApp no número super-admin com 6 linhas.
+4. Forçar `facebook-creative-rotator` → quando há loser, aparece em `ad_generated_creatives` uma nova variação criada automaticamente e em `wallet_transactions` um spend de promoção do winner.
+5. `ai-cpl-watchdog` em campanha de teste com CPL inflado → pausa + recomendação aparece no painel.
+
+## O que você passa a ver sem abrir nada
+
+- **WhatsApp 09:00 todo dia**: 6 linhas com CPL, o que pausou, o que promoveu, padrão novo, 1 ação sua se houver.
+- **Aba "IA Aprendendo"** (quando quiser checar): 4 cards verde/amarelo/vermelho + top vencedores agora + timeline.
+- **Nada para apertar**: builder roda sozinho quando rotator pausa, winner ganha budget sozinho, watchdog protege contra CPL alto.
 
 ## Pergunta antes de implementar
 
-Confirma que o número que vai ser usado nos anúncios **já está em uma WABA oficial conectada à Página do Facebook** (Meta Business Suite → WhatsApp Manager → número aparece como "Conectado" e não "Pessoal")? Se ainda não está, eu sigo com o código pronto e te entrego o passo-a-passo de conexão WABA junto — mas o anúncio só publica depois que isso estiver feito.
+Confirma que posso usar **o número do WhatsApp do consultor super-admin (rafael.ids@icloud.com)** para enviar o digest diário às 09:00 BRT? Se preferir outro número (ex.: seu pessoal direto), me passe.
