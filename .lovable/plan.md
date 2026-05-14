@@ -1,61 +1,82 @@
-## 1. UI de Mídias no mobile (MediaColumn)
+# Regras de envio de vídeo e áudio para a IA
 
-Hoje a lista cabe em ~80 px de altura visível por causa do dropzone enorme + barra de armazenamento + abas, e o usuário precisa rolar dentro de uma área pequena. Vou:
+## Problema
 
-- Tornar o dropzone **colapsável no mobile** (`< md`): quando recolhido vira um botão compacto "+ Enviar mídia" no topo. Expande só ao tocar.
-- Mover **Armazenamento** para uma linha fina única (texto + barra de 4 px) dentro do header, eliminando o bloco grande.
-- Aumentar a thumb dos itens para `w-14 h-14` no mobile (com `Play` overlay maior, melhor para tocar) e dar `min-h-[64px]` por linha.
-- Tornar o painel **`flex-1` com `max-h-[calc(100dvh-...)]`** e `overflow-y-auto` só na lista, garantindo que a lista cresça e a rolagem fique dentro dela (não da página).
-- Sticky no topo: abas Minhas/Públicas + busca opcional, para o usuário sempre ver onde está.
+A IA mandou vídeo de "benefícios" sem o lead pedir e nunca manda áudio. O prompt atual só tem regra forte para vídeo (item 4 do funil) e o ⭐ (`is_primary_explainer`) só vale para vídeo. Não existe gatilho claro de áudio nem matriz de "quando usar cada tipo".
 
-Resultado: no celular a maior parte da tela passa a ser a lista de vídeos, com thumbs grandes e botão de Pré-visualizar (`Eye`) bem alcançável.
+## Solução: 3 camadas de regra
 
-## 2. Vídeo principal de explicação
+### 1. Marcar a mídia "principal" também para áudio (DB + UI)
 
-Hoje em `ai-sales-agent/index.ts` (linha 892) o "intro video" é selecionado por regex `conex[aã]o green.*apresenta`, e o prompt do Gemini não tem hierarquia clara entre vídeos. Vou:
+Hoje `is_primary_explainer` só faz sentido para vídeo. Vou:
 
-- Adicionar uma **flag** `is_primary_explainer` (boolean) na coluna `ai_media_library` (nova migration), com 1 vídeo primário por consultor (constraint parcial unique).
-- Na UI de Mídias, adicionar um ícone ⭐ ao lado do Switch para marcar/desmarcar "Vídeo principal de explicação" (apenas para `kind=video`). Tooltip: "Este será o vídeo enviado quando o lead pedir explicação."
-- No backend:
-  - `introVideo` passa a ser `freshMedia.find(m => m.is_primary_explainer && m.kind==='video')`, com fallback para o regex atual.
-  - No system prompt do Gemini, listar mídias com etiqueta `[PRINCIPAL]` no vídeo marcado e instruir: **"Use o vídeo [PRINCIPAL] como primeira opção sempre que o lead pedir 'como funciona' ou tiver dúvida geral. Os outros vídeos só se o lead disser que não entendeu ou pedir mais detalhes."**
-  - Manter cooldown de 6h e bloqueio de vídeo consecutivo já existentes.
+- Reaproveitar a mesma coluna `is_primary_explainer` em `ai_media_library`, mas trocar o índice único para `(consultant_id, kind) WHERE is_primary_explainer = true` — assim cada consultor pode marcar 1 vídeo principal **e** 1 áudio principal (e opcionalmente 1 imagem).
+- `MediaColumn.tsx`: o ⭐ aparece para qualquer `kind`, com tooltip "Mídia principal deste tipo (vídeo/áudio/imagem)".
 
-## 3. Indicador "digitando…" real (humanização Whapi)
+### 2. Matriz de gatilhos no system prompt (`ai-sales-agent/index.ts`)
 
-A Whapi tem o endpoint `PUT /presences/{ChatID}` com body `{ presence: "typing" | "recording" | "paused", delay: <segundos> }` — a Whapi mantém o status "digitando" no WhatsApp do lead pelo tempo do `delay` e depois para sozinha. (Já existe lógica equivalente no caminho Evolution via `sender.n(...)`.)
+Substituir o item 4 do funil por uma seção dedicada **QUANDO ENVIAR MÍDIA** com regras determinísticas que a IA aplica em toda decisão:
 
-Vou:
+```text
+═══ MATRIZ DE MÍDIA — quando enviar cada tipo ═══
 
-- Adicionar `case "send_presence"` no `whapi-proxy/index.ts`:
-  ```
-  PUT /presences/{to}  body: { presence, delay }
-  ```
-  Aceita `presence: "typing" | "recording" | "paused"` e `delay` em segundos (cap 25s, mínimo 1s).
-- Adicionar `whapiSendPresence(to, presence, delay)` em `src/services/whapiApi.ts`.
-- Adicionar helper `presence()` no `_shared/human-pace.ts` que chama a Evolution OU Whapi conforme flag `isWhapi`, calcula o delay em função do tamanho do texto (mesmo cálculo do `humanPace`) e dispara o presence ANTES do `humanPace` aguardar.
-- No fluxo de envio de bot (`whapi-webhook` e `evolution-webhook` bot-flow):
-  - Texto: presence `typing` por `min(humanDelay, 15s)` antes do `send_text`.
-  - Áudio: presence `recording` antes do `send_audio`.
-  - Mídia (vídeo/imagem): presence `typing` curto (3-5s) antes de enviar como cue de "estou mandando algo".
-  - Após enviar, presence `paused` (delay 1s) para apagar o indicador imediatamente.
+VÍDEO (send_media kind=video) — APENAS se TODAS verdadeiras:
+  a) lead fez pergunta de DÚVIDA GERAL: "como funciona", "é golpe",
+     "é seguro", "é confiável", "tem custo", "explica melhor", OU
+     pediu explicitamente "manda um vídeo".
+  b) ainda não enviamos vídeo nas últimas 6h (CADÊNCIA confirma).
+  c) existe vídeo [PRINCIPAL] em [MÍDIAS DISPONÍVEIS].
+  → use o vídeo PRINCIPAL. Outros vídeos só se ele disser que
+     "ainda não entendeu" depois do principal.
+  PROIBIDO mandar vídeo de "benefícios", "club", "depoimento" sem
+  o lead ter pedido explicitamente OU sem ter visto o principal antes.
 
-Assim o lead vê "digitando…" / "gravando áudio…" de verdade durante a pausa humana, eliminando a sensação robótica.
+ÁUDIO (send_media kind=audio) — envie quando:
+  a) lead mandou ÁUDIO na última mensagem (espelho — CADÊNCIA mostra
+     "Última msg do lead: audio"), OU
+  b) lead pediu "manda áudio", "prefiro áudio", "explica por voz", OU
+  c) é a 1ª resposta a uma objeção emocional ("tô com medo", "já me
+     enganaram", "não confio") E existe áudio [PRINCIPAL].
+  Use SEMPRE o áudio [PRINCIPAL] da lista. Nunca prometa áudio sem
+  send_media. Nunca mande áudio depois que a conta já foi recebida.
 
-## Detalhes técnicos
+IMAGEM — só se o lead pedir comprovação visual (print, tabela, etc).
 
-**Arquivos a alterar:**
-- `src/components/admin/AIAgentTab/MediaColumn.tsx` — layout mobile, colapso do dropzone, marcação ⭐ vídeo principal.
-- `supabase/migrations/<new>.sql` — `alter table ai_media_library add column is_primary_explainer boolean default false;` + índice parcial único `(consultant_id) where is_primary_explainer`.
-- `src/integrations/supabase/types.ts` — regenerado.
-- `supabase/functions/whapi-proxy/index.ts` — novo `case "send_presence"`.
-- `src/services/whapiApi.ts` — `whapiSendPresence`.
-- `supabase/functions/_shared/human-pace.ts` — helper `presence(sender, jid, kind, ms)` agnóstico a Evolution/Whapi.
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (ou equivalente) e `evolution-webhook` — chamar presence antes de `humanPace`/envio.
-- `supabase/functions/ai-sales-agent/index.ts` — usar `is_primary_explainer` para escolher `introVideo` e marcar `[PRINCIPAL]` no prompt.
+TEXTO (send_text) — DEFAULT. Use sempre que nenhuma regra acima
+disparar. Em dúvida, texto.
 
-**Sem mudanças** em: schemas de chat, RLS, lógica de extração de memória, cooldown.
+REGRAS DURAS:
+  - Nunca 2 mídias seguidas (CADÊNCIA bloqueia).
+  - Nunca mídia depois de "CONTA JÁ RECEBIDA".
+  - Nunca cite mídia que não está em [MÍDIAS DISPONÍVEIS].
+  - Se a mídia [PRINCIPAL] já foi enviada (sumiu da lista), responda
+    por texto curto — NÃO substitua por outra do mesmo tipo.
+```
 
-## Pergunta antes de implementar
+A label de cada item da lista de mídias passa a mostrar:
+`[PRINCIPAL-VÍDEO]`, `[PRINCIPAL-ÁUDIO]`, `[PRINCIPAL-IMAGEM]` em vez do genérico `[PRINCIPAL]`.
 
-Confirma os 3 itens? Algum em especial você quer começar primeiro (ex.: só o "digitando…" real) ou faço todos juntos?
+### 3. Reforço determinístico no código (não só no prompt)
+
+Já existe `auto-send` do vídeo principal quando `isDoubtIntent`. Adiciono espelho equivalente:
+
+- **Auto-áudio quando o lead mandou áudio**: se `lastInboundKind === "audio"`, `recentMediaCount === 0`, há áudio `is_primary_explainer` em `freshMedia`, e a IA escolheu `send_text`, faço override para `send_media` com o áudio principal.
+- **Bloqueio anti-vídeo-de-benefícios**: se a IA escolher `send_media` com um vídeo que NÃO é o principal E o vídeo principal ainda não foi enviado a este lead, faço fallback para o principal (ou para `send_text` se cooldown ativo).
+
+## Arquivos a tocar
+
+- `supabase/migrations/<novo>.sql` — drop do índice único atual de `is_primary_explainer`, recria como `(consultant_id, kind) WHERE is_primary_explainer`.
+- `src/components/admin/AIAgentTab/MediaColumn.tsx` — ⭐ disponível para qualquer `kind`; tooltip ajustada.
+- `supabase/functions/ai-sales-agent/index.ts`:
+  - novo bloco "MATRIZ DE MÍDIA" no system prompt (substitui o item 4).
+  - label da lista mostra `[PRINCIPAL-{KIND}]`.
+  - lógica de auto-áudio + bloqueio de vídeo-fora-do-principal.
+
+## Fora do escopo
+
+- Sem mudança em RLS, schema de mensagens, cooldown atual (6h vídeo) ou handoff.
+- Sem mudar UI mobile de mídias (já feito na rodada anterior).
+
+## Próximo passo
+
+Se aprovar, implemento os 3 itens juntos. Depois você marca no painel de Mídias: 1 ⭐ no vídeo de apresentação **e** 1 ⭐ no áudio principal — pronto, a IA passa a respeitar.
