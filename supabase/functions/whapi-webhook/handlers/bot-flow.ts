@@ -842,6 +842,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
       const useSalesAi = cfg?.enabled !== false && cfg?.handoff_rules?.use_sales_ai === true;
       if (useSalesAi) {
+        // 🔄 Persiste updates pendentes ANTES de chamar a IA, senão o
+        // ai-sales-agent re-busca o customer do banco e lê valores stale
+        // (ex: electricity_bill_value=null mesmo após preCapture do "1600").
+        if (Object.keys(updates).length > 0) {
+          try {
+            await supabase.from("customers").update(updates).eq("id", customer.id);
+            console.log(`💾 [pre-ai-flush] persistiu ${Object.keys(updates).length} campos antes da IA:`, Object.keys(updates));
+          } catch (e) {
+            console.error("[pre-ai-flush] falha ao persistir updates antes da IA:", e);
+          }
+        }
         const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
         const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const aiResp = await fetch(`${supabaseUrl}/functions/v1/ai-sales-agent`, {
