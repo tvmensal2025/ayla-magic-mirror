@@ -1051,20 +1051,36 @@ Deno.serve(async (req) => {
       /\b(como funciona|me explica|n[aã]o entendi|o que [eé]|quem [eé])\b/i.test(ui) ? "informacao" :
       null;
 
-    // Audit (best-effort)
-    await supabase.from("ai_decisions").insert({
-      customer_id,
-      consultant_id: customer.consultant_id,
-      phase,
-      tool_called: tool,
-      reasoning: (args.reasoning || args.reason || "") + (selfCheckRisk ? ` | ${selfCheckRisk}` : ""),
-      user_input: mode === "rescue" ? "[rescue]" : user_input,
-      ai_output: args,
-      latency_ms: latencyMs,
-      model: aiResult.modelUsed,
-      media_sent_id: resolvedMedia?.id || null,
-      intent_detected: intentDetected,
-    });
+    // Audit (best-effort) — uma linha por mídia enviada (para cooldown 1× por lead pegar todas).
+    const auditRows =
+      resolvedMedias.length > 1
+        ? resolvedMedias.map((m) => ({
+            customer_id,
+            consultant_id: customer.consultant_id,
+            phase,
+            tool_called: tool,
+            reasoning: (args.reasoning || args.reason || "") + (selfCheckRisk ? ` | ${selfCheckRisk}` : "") + ` [combo:${m.kind}]`,
+            user_input: mode === "rescue" ? "[rescue]" : user_input,
+            ai_output: args,
+            latency_ms: latencyMs,
+            model: aiResult.modelUsed,
+            media_sent_id: m.id,
+            intent_detected: intentDetected,
+          }))
+        : [{
+            customer_id,
+            consultant_id: customer.consultant_id,
+            phase,
+            tool_called: tool,
+            reasoning: (args.reasoning || args.reason || "") + (selfCheckRisk ? ` | ${selfCheckRisk}` : ""),
+            user_input: mode === "rescue" ? "[rescue]" : user_input,
+            ai_output: args,
+            latency_ms: latencyMs,
+            model: aiResult.modelUsed,
+            media_sent_id: resolvedMedia?.id || null,
+            intent_detected: intentDetected,
+          }];
+    await supabase.from("ai_decisions").insert(auditRows);
 
     // Se self-check sinalizou RISCO em tool sensível, força fallback texto neutro
     if (selfCheckRisk && (tool === "send_media" || tool === "advance_to_closing")) {
