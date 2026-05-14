@@ -79,7 +79,19 @@ export function AIAgentTab({ userId }: { userId: string }) {
           <Bot className="w-5 h-5 text-primary" />
         </div>
         <div className="flex-1 min-w-[200px]">
-          <h1 className="text-lg font-bold font-heading text-foreground">Atendente IA — Camila</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-bold font-heading text-foreground">Atendente IA — </h1>
+            <input
+              type="text"
+              value={personaName}
+              onChange={(e) => setPersonaName(e.target.value)}
+              onBlur={savePersonaName}
+              onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+              className="text-lg font-bold font-heading text-foreground bg-transparent border-b border-transparent hover:border-border focus:border-primary focus:outline-none px-1 -mx-1 w-32"
+              maxLength={20}
+              title="Clique para renomear (só você vê esse nome)"
+            />
+          </div>
           <p className="text-xs text-muted-foreground">
             Atendimento humanizado 24/7. Quando você assumir, ela pausa automaticamente.
           </p>
