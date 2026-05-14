@@ -135,26 +135,31 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
     remoteJid: string,
     mediaUrl: string,
     caption: string,
-    mediatype: "video" | "image" | "document" = "video",
+    mediatype: "video" | "image" | "document" | "audio" | "voice" = "video",
   ): Promise<boolean> {
     const to = remoteJid.includes("@") ? remoteJid : `${remoteJid}@s.whatsapp.net`;
+    const isAudio = mediatype === "audio" || mediatype === "voice";
     const endpoint = mediatype === "video" ? "messages/video"
       : mediatype === "image" ? "messages/image"
+      : isAudio ? "messages/voice"
       : "messages/document";
 
-    // Mostra "digitando..." curto antes da mídia para humanizar.
-    sendPresence(remoteJid, "typing", 3).catch(() => {});
+    // Mostra presence apropriada antes da mídia para humanizar.
+    sendPresence(remoteJid, isAudio ? "recording" : "typing", 3).catch(() => {});
 
     console.log(`📤 [whapi:sendMedia] -> ${to} (${mediatype})`);
+    const body: Record<string, unknown> = isAudio
+      ? { to, media: mediaUrl, mime_type: "audio/ogg; codecs=opus", ptt: true }
+      : { to, media: mediaUrl, caption };
     const ok = await sendWithRetry("send_media", () =>
       fetchWithTimeout(`${url}/${endpoint}`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ to, media: mediaUrl, caption }),
+        body: JSON.stringify(body),
         timeout: 120_000,
       })
     );
-    console.log(`${ok ? "✅" : "❌"} [whapi:sendMedia] resultado=${ok}`);
+    console.log(`${ok ? "✅" : "❌"} [whapi:sendMedia] resultado=${ok} (${mediatype})`);
     return ok;
   }
 

@@ -235,7 +235,7 @@ Deno.serve(async (req) => {
         tags: { function: "whapi-webhook", kind: "bot_flow_crash" },
         extra: { customer_id: customer.id, step: stepBefore },
       });
-      reply = "🤖 Tive um probleminha técnico. Pode me enviar novamente, por favor?";
+      reply = "Tive um probleminha aqui. Pode me mandar de novo, por favor?";
       updates = {};
     }
 
@@ -262,24 +262,28 @@ Deno.serve(async (req) => {
     }
 
     // ─── Send reply ────────────────────────────────────────────────────
+    // Considera "inline_sent" sempre que houver QUALQUER update — inclusive só __inline_sent.
     const handlerSentInline = reply === "" && (Object.keys(updates).length > 0 || (updates as any).__inline_sent);
     delete (updates as any).__inline_sent;
     let finalReply = reply;
     if (!finalReply && !handlerSentInline) {
-      finalReply = "🤖 Estou aqui! Vamos continuar o cadastro?\n\nDigite *cadastrar* para retomar.";
+      // Sem fallback robotizado. Silêncio é melhor do que empurrar texto fantasma.
+      finalReply = "";
     }
     if (finalReply) {
       try { await sender.sendText(remoteJid, finalReply); } catch (e: any) { console.error("Erro enviar:", e); }
     }
 
-    // ─── Log outbound ──────────────────────────────────────────────────
-    await supabase.from("conversations").insert({
-      customer_id: customer.id,
-      message_direction: "outbound",
-      message_text: finalReply || "[botões enviados]",
-      message_type: "text",
-      conversation_step: updates.conversation_step || stepBefore,
-    });
+    // ─── Log outbound (apenas se houve resposta de texto enviada inline aqui) ─────
+    if (finalReply) {
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "outbound",
+        message_text: finalReply,
+        message_type: "text",
+        conversation_step: updates.conversation_step || stepBefore,
+      });
+    }
 
     return new Response(JSON.stringify({ ok: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -185,7 +185,11 @@ export function createEvolutionSender(apiUrl: string, apiKey: string, instanceNa
     }
   }
 
-  async function sendMedia(remoteJid: string, mediaUrl: string, caption: string, mediatype: "video" | "image" | "document" = "video"): Promise<boolean> {
+  async function sendMedia(remoteJid: string, mediaUrl: string, caption: string, mediatype: "video" | "image" | "document" | "audio" | "voice" = "video"): Promise<boolean> {
+    // Áudio é tratado por endpoint dedicado para virar voice note (PTT) no WhatsApp.
+    if (mediatype === "audio" || mediatype === "voice") {
+      return sendAudio(remoteJid, mediaUrl);
+    }
     // Evolution API espera apenas o número, sem sufixo JID
     const number = remoteJid.replace("@s.whatsapp.net", "").replace("@c.us", "");
     try {

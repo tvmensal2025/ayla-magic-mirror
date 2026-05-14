@@ -299,7 +299,7 @@ REGRAS CRÍTICAS
 - Se [Contexto] indicar "Bill_requested_at recente (<10 min)": NÃO repita o pedido.
 - Se o lead pedir humano explicitamente, request_handoff.
 - Se sumir/"depois eu vejo", schedule_followup (1h, 24h ou 72h).
-- Se ainda não tem nome confiável e o lead já demonstrou interesse, ask_for_name.
+- NUNCA chame ask_for_name. O áudio de boas-vindas já pergunta o nome do lead. Se [Contexto] indicar "Nome: DESCONHECIDO", siga a conversa normalmente — o nome será capturado automaticamente assim que o lead responder.
 - score_delta: +20 sinal de compra/foto • +10 valor revelado • +5 engajamento • -10 objeção forte • -20 desistência.
 
 NÃO INVENTE preços, prazos ou percentuais.
@@ -945,13 +945,15 @@ Deno.serve(async (req) => {
       args.media_ids = filtered;
     }
 
-    // ---- OVERRIDE 2: bloqueia ask_for_name se foto da conta foi pedida/recebida ----
-    if (tool === "ask_for_name" && (customer.electricity_bill_photo_url || billRequestedRecently)) {
+    // ---- OVERRIDE 2: ask_for_name é PROIBIDO. O áudio de boas-vindas já pede o nome. ----
+    if (tool === "ask_for_name") {
       tool = "send_text";
       args = {
-        message: "Pode me mandar a foto da conta de luz quando puder? Por ela eu já confirmo todos os dados.",
+        message: customer.electricity_bill_photo_url || billRequestedRecently
+          ? "Pode me mandar a foto da conta de luz quando puder? Por ela eu já confirmo todos os dados."
+          : (args.message || "Me conta, sua conta de luz costuma vir em qual valor mais ou menos?"),
         next_phase: phase,
-        reasoning: "ask_for_name bloqueado: foto da conta já solicitada/recebida — nome virá pelo OCR",
+        reasoning: "ask_for_name bloqueado: nome é capturado pelo áudio de boas-vindas",
       };
     }
 

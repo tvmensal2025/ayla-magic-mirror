@@ -160,6 +160,37 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // 🪪 CAPTURA DETERMINÍSTICA DE NOME — o áudio de boas-vindas já pede
+  // ═══════════════════════════════════════════════════════════════════
+  if (
+    messageText &&
+    !isFile &&
+    !isButton &&
+    !customer.name &&
+    !customer.electricity_bill_photo_url
+  ) {
+    const raw = messageText.trim().replace(/[.!?,;:"']/g, "");
+    const looksLikeName =
+      raw.length >= 2 &&
+      raw.length <= 60 &&
+      /^[A-Za-zÀ-ÖØ-öø-ÿ' ]+$/.test(raw) &&
+      raw.split(/\s+/).length <= 4 &&
+      !/^(oi|ola|olá|hey|opa|bom dia|boa tarde|boa noite|sim|nao|não|ok|tudo bem|pode|quero|cadastrar|humano|atendente|menu|reset|recomecar|recomeçar|nao sou eu|não sou eu)$/i.test(raw);
+    if (looksLikeName) {
+      const formatted = raw
+        .toLowerCase()
+        .split(/\s+/)
+        .map((w) => (w.length > 2 ? w[0].toUpperCase() + w.slice(1) : w))
+        .join(" ");
+      updates.name = formatted;
+      updates.name_source = "self_introduced";
+      (customer as any).name = formatted;
+      (customer as any).name_source = "self_introduced";
+      console.log(`🪪 [name-capture] Nome capturado: "${formatted}"`);
+    }
+  }
+
   const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "aguardando_humano"]);
   const billTrusted =
     !!customer.electricity_bill_photo_url &&
@@ -267,6 +298,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               }
             }
             reply = "";
+            (updates as any).__inline_sent = true;
             return { reply, updates };
           }
           if (tool === "mark_lost") {
