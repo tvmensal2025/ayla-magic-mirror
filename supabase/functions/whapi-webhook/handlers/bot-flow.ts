@@ -344,19 +344,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     !customer.name &&
     !customer.electricity_bill_photo_url
   ) {
-    const raw = messageText.trim().replace(/[.!?,;:"']/g, "");
-    const looksLikeName =
-      raw.length >= 2 &&
-      raw.length <= 60 &&
-      /^[A-Za-zÀ-ÖØ-öø-ÿ' ]+$/.test(raw) &&
-      raw.split(/\s+/).length <= 4 &&
-      !/^(oi|ola|olá|hey|opa|bom dia|boa tarde|boa noite|sim|nao|não|ok|tudo bem|pode|quero|cadastrar|humano|atendente|menu|reset|recomecar|recomeçar|nao sou eu|não sou eu)$/i.test(raw);
-    if (looksLikeName) {
-      const formatted = raw
-        .toLowerCase()
-        .split(/\s+/)
-        .map((w) => (w.length > 2 ? w[0].toUpperCase() + w.slice(1) : w))
-        .join(" ");
+    const formatted = normalizeLeadName(messageText);
+    if (formatted) {
       updates.name = formatted;
       updates.name_source = "self_introduced";
       (customer as any).name = formatted;
