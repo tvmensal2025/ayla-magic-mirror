@@ -474,12 +474,12 @@ export function MediaColumn({ userId }: { userId: string }) {
               return (
               <li
                 key={m.id}
-                className="group flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-muted/40 transition-colors"
+                className="group flex items-center gap-2 px-2 sm:px-2.5 py-2 rounded-lg hover:bg-muted/40 transition-colors"
               >
                 {m.url && (m.kind === "image" || m.kind === "video") ? (
                   <button
                     onClick={() => setPreviewMedia(m)}
-                    className="relative w-10 h-10 rounded-md overflow-hidden bg-muted/40 border border-border/60 shrink-0 group/thumb"
+                    className="relative w-14 h-14 sm:w-12 sm:h-12 rounded-md overflow-hidden bg-muted/40 border border-border/60 shrink-0 group/thumb"
                     title="Pré-visualizar"
                   >
                     {m.kind === "image" ? (
@@ -487,12 +487,17 @@ export function MediaColumn({ userId }: { userId: string }) {
                     ) : (
                       <video src={m.url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
                     )}
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity">
-                      <Play className="w-4 h-4 text-white fill-white" />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 sm:opacity-0 sm:group-hover/thumb:opacity-100 transition-opacity">
+                      <Play className="w-5 h-5 text-white fill-white" />
                     </div>
+                    {m.is_primary_explainer && (
+                      <span className="absolute top-0.5 left-0.5 bg-amber-400 text-black rounded-full p-0.5">
+                        <Star className="w-2.5 h-2.5 fill-current" />
+                      </span>
+                    )}
                   </button>
                 ) : (
-                  <span className="w-10 h-10 rounded-md bg-muted/40 border border-border/60 shrink-0 flex items-center justify-center">
+                  <span className="w-14 h-14 sm:w-12 sm:h-12 rounded-md bg-muted/40 border border-border/60 shrink-0 flex items-center justify-center">
                     {iconFor(m.kind)}
                   </span>
                 )}
@@ -502,20 +507,39 @@ export function MediaColumn({ userId }: { userId: string }) {
                   ) : (
                     <p className="text-sm text-foreground truncate">{m.label}</p>
                   )}
-                  <p className="text-[10px] text-muted-foreground uppercase">{m.kind} · prio {m.priority}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase">
+                    {m.kind} · prio {m.priority}
+                    {m.is_primary_explainer && <span className="ml-1 text-amber-400 normal-case">⭐ principal</span>}
+                  </p>
                 </div>
                 {m.url && (
                   <button
                     onClick={() => setPreviewMedia(m)}
-                    className="text-muted-foreground hover:text-primary p-1 transition-colors"
+                    className="text-muted-foreground hover:text-primary p-2 transition-colors shrink-0"
                     aria-label="Pré-visualizar"
                     title="Ver mídia"
                   >
-                    <Eye className="w-4 h-4" />
+                    <Eye className="w-5 h-5" />
                   </button>
                 )}
                 {view === "mine" ? (
                   <>
+                    {m.kind === "video" && (
+                      <button
+                        onClick={() => togglePrimary(m)}
+                        className={`p-1.5 rounded transition-colors shrink-0 ${
+                          m.is_primary_explainer
+                            ? "text-amber-400 hover:text-amber-300"
+                            : "text-muted-foreground hover:text-amber-400"
+                        }`}
+                        title={m.is_primary_explainer
+                          ? "Vídeo principal — clique para remover"
+                          : "Marcar como vídeo principal de explicação"}
+                        aria-label="Vídeo principal"
+                      >
+                        <Star className={`w-4 h-4 ${m.is_primary_explainer ? "fill-current" : ""}`} />
+                      </button>
+                    )}
                     <Input
                       type="number"
                       min={0}
@@ -524,7 +548,7 @@ export function MediaColumn({ userId }: { userId: string }) {
                       key={`${m.id}-${m.priority}`}
                       onBlur={(e) => updatePriority(m, parseInt(e.target.value, 10))}
                       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                      className="h-6 w-12 text-[10px] px-1.5 text-center"
+                      className="h-6 w-10 text-[10px] px-1 text-center hidden sm:block"
                       title="Prioridade (maior = enviado primeiro)"
                     />
                     <TagEditor m={m} />
@@ -535,10 +559,10 @@ export function MediaColumn({ userId }: { userId: string }) {
                     />
                     <button
                       onClick={() => remove(m)}
-                      className="text-muted-foreground hover:text-destructive p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="text-muted-foreground hover:text-destructive p-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0"
                       aria-label="Excluir"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </>
                 ) : (
