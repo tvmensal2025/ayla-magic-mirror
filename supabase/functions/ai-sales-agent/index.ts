@@ -865,13 +865,33 @@ Deno.serve(async (req) => {
 
     if (tool === "send_text" || tool === "advance_to_closing" || tool === "ask_for_name" || tool === "confirm_and_handoff") {
       args.message = sanitizeHumanMessage(args.message || "", phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
+      args.message = sanitizeNumbers(args.message, billNum);
     }
     if (tool === "update_lead_field") {
       args.followup_message = sanitizeHumanMessage(args.followup_message || "", phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
+      args.followup_message = sanitizeNumbers(args.followup_message, billNum);
     }
     if (tool === "send_media" && args.caption) {
       args.caption = sanitizeHumanMessage(args.caption, phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
+      args.caption = sanitizeNumbers(args.caption, billNum);
     }
+
+    // ---- Dispara summarize em background a cada 10 mensagens ou se resumo > 24h ----
+    const totalMsgs = history.length;
+    const needSummary = (totalMsgs >= 10 && totalMsgs % 10 === 0) || (!summaryFresh && totalMsgs >= 12);
+    if (needSummary) {
+      // Fire-and-forget — não bloqueia a resposta
+      fetch(`${SUPABASE_URL}/functions/v1/ai-summarize-conversation`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+        },
+        body: JSON.stringify({ customer_id }),
+      }).catch(() => {});
+    }
+
 
     const latencyMs = Date.now() - t0;
 
