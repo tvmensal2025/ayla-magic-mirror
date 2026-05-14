@@ -267,11 +267,37 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
                       </Button>
                     </>
                   ) : (
-                    <label className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-border bg-background hover:bg-muted cursor-pointer">
-                      📤 Enviar vídeo
-                      <input type="file" accept="video/*" className="hidden"
-                        onChange={(e) => e.target.files?.[0] && uploadSlotVideo(s.slot_key, e.target.files[0])} />
-                    </label>
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <label className="inline-flex items-center gap-2 text-xs px-2 py-1 rounded border border-border bg-background hover:bg-muted cursor-pointer">
+                        📤 Enviar vídeo novo
+                        <input type="file" accept="video/*" className="hidden"
+                          onChange={(e) => e.target.files?.[0] && uploadSlotVideo(s.slot_key, e.target.files[0])} />
+                      </label>
+                      {(() => {
+                        const reusable = slots.filter((x) => x.video_url && x.slot_key !== s.slot_key);
+                        if (reusable.length === 0) return null;
+                        return (
+                          <select
+                            className="text-xs px-2 py-1 rounded border border-border bg-background"
+                            defaultValue=""
+                            onChange={(e) => {
+                              const src = reusable.find((x) => x.slot_key === e.target.value);
+                              if (!src) return;
+                              setSlots((p) => p.map((x) => x.slot_key === s.slot_key
+                                ? { ...x, video_url: src.video_url, video_storage_path: src.video_storage_path, video_label: src.video_label }
+                                : x));
+                              toast({ title: "Vídeo reutilizado — clique Salvar para confirmar" });
+                              e.target.value = "";
+                            }}
+                          >
+                            <option value="">♻️ Reutilizar vídeo de outro slot…</option>
+                            {reusable.map((x) => (
+                              <option key={x.slot_key} value={x.slot_key}>{x.label} ({x.slot_key})</option>
+                            ))}
+                          </select>
+                        );
+                      })()}
+                    </div>
                   )}
                 </div>
                 <div className="flex gap-2">
