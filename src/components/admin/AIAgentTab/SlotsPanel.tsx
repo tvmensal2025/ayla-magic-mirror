@@ -171,6 +171,58 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
     toast({ title: "Vídeo removido — clique Salvar para confirmar" });
   }
 
+  async function addNewSlot() {
+    const rawKey = window.prompt(
+      "Identificador da nova pergunta (sem espaços, ex: garantia_contrato):"
+    );
+    if (!rawKey) return;
+    const slot_key = rawKey
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9_]/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "");
+    if (!slot_key) {
+      toast({ title: "Identificador inválido", variant: "destructive" });
+      return;
+    }
+    if (slots.some((x) => x.slot_key === slot_key)) {
+      toast({ title: "Já existe um slot com esse identificador", variant: "destructive" });
+      return;
+    }
+    const label = window.prompt("Nome da pergunta (ex: Garantia do contrato):", slot_key) || slot_key;
+    const nextPosition = (slots.reduce((m, s) => Math.max(m, s.position || 0), 0) || 0) + 1;
+    const { error } = await supabase.from("ai_agent_slots").insert({
+      slot_key,
+      label,
+      description: "",
+      trigger_hint: "",
+      fallback_text: "",
+      min_interval_minutes: 60,
+      position: nextPosition,
+      active: true,
+      version: 1,
+    });
+    if (error) {
+      toast({ title: "Erro ao criar", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "✓ Nova pergunta criada — grave o áudio/vídeo abaixo" });
+    load();
+  }
+
+  async function deleteSlot(slotKey: string) {
+    if (!window.confirm(`Excluir a pergunta "${slotKey}"? Essa ação não pode ser desfeita.`)) return;
+    const { error } = await supabase.from("ai_agent_slots").delete().eq("slot_key", slotKey);
+    if (error) {
+      toast({ title: "Erro ao excluir", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Pergunta excluída" });
+    load();
+  }
+
   async function uploadDefault(slotKey: string, blob: Blob, durationSec: number) {
     const path = `public/slots/${slotKey}.webm`;
     const { error: upErr } = await supabase.storage
