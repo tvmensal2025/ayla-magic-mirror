@@ -3,8 +3,18 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, Power, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, Copy, Power, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { toast } from "sonner";
+
+interface DownInstance {
+  id: string;
+  consultantName: string;
+  license: string | null;
+  phone: string | null;
+  instanceName: string;
+  status: string;
+  lastSeen: string | null;
+}
 
 interface Health {
   pausedGlobal: number;
@@ -12,6 +22,19 @@ interface Health {
   errors24h: number;
   decisions24h: number;
   transitions24h: number;
+  downInstances: DownInstance[];
+}
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "sem checagem";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  const d = Math.floor(h / 24);
+  return `há ${d}d`;
 }
 
 export function SystemHealthPanel() {
@@ -22,11 +45,13 @@ export function SystemHealthPanel() {
   async function load() {
     setLoading(true);
     const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-    const [paused, needReconnect, errors, decisions, trans] = await Promise.all([
+    const downStatuses = ["needs_reconnect", "disconnected", "close"];
+    const [paused, downRows, errors, decisions, trans] = await Promise.all([
       supabase.from("customers").select("id", { count: "exact", head: true })
         .eq("bot_paused", true).eq("bot_paused_reason", "manual_global_pause"),
-      supabase.from("whatsapp_instances" as any).select("id", { count: "exact", head: true })
-        .eq("status", "needs_reconnect"),
+      supabase.from("whatsapp_instances" as any)
+        .select("id, instance_name, connected_phone, status, last_health_check_at, consultant_id, consultants:consultant_id(name, license)")
+        .in("status", downStatuses),
       supabase.from("customers").select("id", { count: "exact", head: true })
         .not("error_message", "is", null).gte("updated_at", since),
       supabase.from("ai_decisions" as any).select("id", { count: "exact", head: true })
@@ -34,12 +59,23 @@ export function SystemHealthPanel() {
       supabase.from("bot_step_transitions" as any).select("id", { count: "exact", head: true })
         .gte("created_at", since),
     ]);
+    const rows: any[] = (downRows as any).data || [];
+    const downInstances: DownInstance[] = rows.map((r) => ({
+      id: r.id,
+      consultantName: r.consultants?.name || "Sem consultor",
+      license: r.consultants?.license ?? null,
+      phone: r.connected_phone ?? null,
+      instanceName: r.instance_name,
+      status: r.status,
+      lastSeen: r.last_health_check_at,
+    }));
     setData({
       pausedGlobal: paused.count ?? 0,
-      instancesNeedReconnect: needReconnect.count ?? 0,
+      instancesNeedReconnect: downInstances.length,
       errors24h: errors.count ?? 0,
       decisions24h: decisions.count ?? 0,
       transitions24h: trans.count ?? 0,
+      downInstances,
     });
     setLoading(false);
   }
@@ -86,7 +122,13 @@ export function SystemHealthPanel() {
         <Metric label="Decisões IA / 24h" value={data.decisions24h} good={data.decisions24h > 0} />
         <Metric label="Transições / 24h" value={data.transitions24h} good={data.transitions24h > 0} />
         <Metric label="Erros / 24h" value={data.errors24h} good={data.errors24h === 0} />
-        <Metric label="Inst. derrubadas" value={data.instancesNeedReconnect} good={data.instancesNeedReconnect === 0} icon={evolutionDown ? <WifiOff className="w-3 h-3" /> : <Wifi className="w-3 h-3" />} />
+        <Metric
+          label="Inst. derrubadas"
+          value={data.instancesNeedReconnect}
+          good={data.instancesNeedReconnect === 0}
+          icon={evolutionDown ? <WifiOff className="w-3 h-3" /> : <Wifi className="w-3 h-3" />}
+          tooltip={data.downInstances.map((i) => `${i.consultantName}${i.license ? ` (${i.license})` : ""}`).join("\n")}
+        />
         <Metric label="Pausa global" value={data.pausedGlobal} good={data.pausedGlobal === 0} />
       </div>
 
@@ -104,18 +146,83 @@ export function SystemHealthPanel() {
       )}
 
       {evolutionDown && (
-        <div className="flex items-center gap-2 p-3 mt-2 rounded-lg bg-red-500/10 border border-red-500/30 text-sm">
-          <WifiOff className="w-4 h-4 text-red-400" />
-          <span>{data.instancesNeedReconnect} instância(s) Evolution caída(s). Reabrir QR no painel Evolution.</span>
+        <div className="p-3 mt-2 rounded-lg bg-red-500/10 border border-red-500/30 text-sm space-y-2">
+          <div className="flex items-center gap-2 font-medium text-red-300">
+            <WifiOff className="w-4 h-4 text-red-400" />
+            <span>
+              {data.instancesNeedReconnect} instância(s) Evolution caída(s) — reabrir QR no painel Evolution:
+            </span>
+          </div>
+          <ul className="space-y-1.5 pl-1">
+            {data.downInstances.slice(0, 8).map((inst) => {
+              const copyText = [inst.consultantName, inst.license, inst.phone, inst.instanceName]
+                .filter(Boolean)
+                .join(" · ");
+              return (
+                <li
+                  key={inst.id}
+                  className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-2 rounded-md bg-red-500/5 border border-red-500/20"
+                >
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                    <span className="font-semibold text-foreground">{inst.consultantName}</span>
+                    {inst.license && (
+                      <Badge variant="outline" className="h-4 px-1.5 text-[10px] border-red-400/40 text-red-300">
+                        {inst.license}
+                      </Badge>
+                    )}
+                    {inst.phone && <span className="text-muted-foreground">📱 {inst.phone}</span>}
+                    <span className="text-muted-foreground/70">·</span>
+                    <code className="text-[10px] text-muted-foreground bg-background/40 px-1 py-0.5 rounded">
+                      {inst.instanceName}
+                    </code>
+                    <span className="text-muted-foreground/70">·</span>
+                    <span className="text-amber-300/90">{timeAgo(inst.lastSeen)}</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[11px] gap-1"
+                    onClick={() => {
+                      navigator.clipboard.writeText(copyText);
+                      toast.success("Dados copiados");
+                    }}
+                  >
+                    <Copy className="w-3 h-3" />
+                    Copiar
+                  </Button>
+                </li>
+              );
+            })}
+            {data.downInstances.length > 8 && (
+              <li className="text-[11px] text-muted-foreground pl-2">
+                + {data.downInstances.length - 8} outra(s) instância(s) caída(s)
+              </li>
+            )}
+          </ul>
         </div>
       )}
     </Card>
   );
 }
 
-function Metric({ label, value, good, icon }: { label: string; value: number; good: boolean; icon?: React.ReactNode }) {
+function Metric({
+  label,
+  value,
+  good,
+  icon,
+  tooltip,
+}: {
+  label: string;
+  value: number;
+  good: boolean;
+  icon?: React.ReactNode;
+  tooltip?: string;
+}) {
   return (
-    <div className={`p-3 rounded-lg border ${good ? "bg-green-500/5 border-green-500/20" : "bg-red-500/5 border-red-500/20"}`}>
+    <div
+      className={`p-3 rounded-lg border ${good ? "bg-green-500/5 border-green-500/20" : "bg-red-500/5 border-red-500/20"}`}
+      title={tooltip}
+    >
       <div className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase tracking-wider">
         {icon}
         {label}
