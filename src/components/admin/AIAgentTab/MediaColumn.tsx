@@ -527,7 +527,7 @@ export function MediaColumn({ userId }: { userId: string }) {
                 )}
                 {view === "mine" ? (
                   <>
-                    {m.kind === "video" && (
+                    {(m.kind === "video" || m.kind === "audio" || m.kind === "image") && (
                       <button
                         onClick={() => togglePrimary(m)}
                         className={`p-1.5 rounded transition-colors shrink-0 ${
@@ -536,9 +536,9 @@ export function MediaColumn({ userId }: { userId: string }) {
                             : "text-muted-foreground hover:text-amber-400"
                         }`}
                         title={m.is_primary_explainer
-                          ? "Vídeo principal — clique para remover"
-                          : "Marcar como vídeo principal de explicação"}
-                        aria-label="Vídeo principal"
+                          ? `${m.kind === "video" ? "Vídeo" : m.kind === "audio" ? "Áudio" : "Imagem"} principal — clique para remover`
+                          : `Marcar como ${m.kind === "video" ? "vídeo" : m.kind === "audio" ? "áudio" : "imagem"} principal (1 por tipo)`}
+                        aria-label="Mídia principal"
                       >
                         <Star className={`w-4 h-4 ${m.is_primary_explainer ? "fill-current" : ""}`} />
                       </button>
