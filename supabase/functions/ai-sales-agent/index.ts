@@ -617,6 +617,9 @@ Deno.serve(async (req) => {
       (recentMediaCount >= 1
         ? `- ⚠️ NÃO envie mídia agora — a última resposta JÁ foi mídia. Use send_text.\n`
         : ``) +
+      (videoCooldownActive
+        ? `- 🚫 VÍDEO BLOQUEADO: já enviamos um vídeo a este lead nas últimas 6h. Responda por TEXTO curto, sem prometer outro vídeo.\n`
+        : ``) +
       (lastInboundKind === "audio"
         ? `- Lead mandou áudio: prefira responder com áudio também (espelho).\n`
         : ``) +
