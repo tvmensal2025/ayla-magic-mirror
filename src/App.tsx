@@ -15,6 +15,7 @@ const LicenciadaPreview = lazy(() => import("./pages/LicenciadaPreview"));
 const AssistentePage = lazy(() => import("./pages/AssistentePage"));
 const Auth = lazy(() => import("./pages/Auth"));
 const Admin = lazy(() => import("./pages/Admin"));
+const FlowBuilder = lazy(() => import("./pages/FlowBuilder"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
@@ -43,6 +44,7 @@ const App = () => (
               <Route path="/auth" element={<Auth />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/admin/whatsapp-clients" element={<WhatsAppClientsPage />} />
+              <Route path="/admin/fluxos" element={<FlowBuilder />} />
               <Route path="/super-admin" element={<SuperAdmin />} />
               <Route path="/assistente" element={<AssistentePage />} />
               <Route path="/crm" element={<CRMLandingPage />} />

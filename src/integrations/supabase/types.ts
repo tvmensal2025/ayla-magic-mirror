@@ -982,6 +982,86 @@ export type Database = {
         }
         Relationships: []
       }
+      bot_flow_steps: {
+        Row: {
+          condition_text: string | null
+          created_at: string
+          flow_id: string
+          id: string
+          message_text: string | null
+          position: number
+          slot_key: string | null
+          step_type: string
+          updated_at: string
+          wait_for: string
+          wait_seconds: number
+        }
+        Insert: {
+          condition_text?: string | null
+          created_at?: string
+          flow_id: string
+          id?: string
+          message_text?: string | null
+          position?: number
+          slot_key?: string | null
+          step_type: string
+          updated_at?: string
+          wait_for?: string
+          wait_seconds?: number
+        }
+        Update: {
+          condition_text?: string | null
+          created_at?: string
+          flow_id?: string
+          id?: string
+          message_text?: string | null
+          position?: number
+          slot_key?: string | null
+          step_type?: string
+          updated_at?: string
+          wait_for?: string
+          wait_seconds?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bot_flow_steps_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "bot_flows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bot_flows: {
+        Row: {
+          consultant_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          strict_mode: boolean
+          updated_at: string
+        }
+        Insert: {
+          consultant_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          strict_mode?: boolean
+          updated_at?: string
+        }
+        Update: {
+          consultant_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          strict_mode?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bot_step_transitions: {
         Row: {
           consultant_id: string | null

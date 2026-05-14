@@ -379,6 +379,47 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
       decision.reply_text = "";
     }
 
+    // 🎯 MODO ESTRITO: se há fluxo ativo com strict_mode, segue o passo a passo do fluxo.
+    try {
+      const { data: activeFlow } = await supabase
+        .from("bot_flows")
+        .select("id, strict_mode")
+        .eq("consultant_id", consultantId)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (activeFlow && (activeFlow as any).strict_mode) {
+        const { data: flowSteps } = await supabase
+          .from("bot_flow_steps")
+          .select("position, step_type, slot_key, message_text")
+          .eq("flow_id", (activeFlow as any).id)
+          .order("position");
+        // Conta passos já executados via dispatch log do customer
+        const { count: dispatchedCount } = await supabase
+          .from("ai_slot_dispatch_log")
+          .select("id", { count: "exact", head: true })
+          .eq("customer_id", customer_id)
+          .eq("dispatch_status", "sent");
+        const idx = Math.min((dispatchedCount || 0), (flowSteps || []).length - 1);
+        const currentStep: any = (flowSteps || [])[idx];
+        if (currentStep) {
+          if (currentStep.step_type === "audio_slot" && currentStep.slot_key && validSlotKeys.has(currentStep.slot_key)) {
+            slotKey = currentStep.slot_key;
+            decision.reply_text = "";
+          } else if (currentStep.message_text) {
+            slotKey = ""; // não dispara áudio
+            // Substitui variáveis básicas
+            const txt = String(currentStep.message_text)
+              .replaceAll("{nome}", customer.name || "")
+              .replaceAll("{link_cadastro}", `https://igreenenergybrasil.site/${(customer as any).consultant_license || ""}/cadastro`);
+            decision.reply_text = txt;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("strict flow resolve failed:", (e as any)?.message);
+    }
+
+
     if (slotKey) {
       // Validação: slot_key inexistente -> log e ignora
       if (!validSlotKeys.has(slotKey)) {
