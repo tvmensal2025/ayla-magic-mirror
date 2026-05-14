@@ -159,7 +159,7 @@ export async function uploadBytesToMinio(input: MinioUploadInput): Promise<Minio
       "x-amz-date": amzDate,
       Authorization: authorizationHeader,
     },
-    body: input.bytes,
+    body: input.bytes as BodyInit,
   });
 
   if (!res.ok) {
