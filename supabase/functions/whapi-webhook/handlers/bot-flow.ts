@@ -36,6 +36,24 @@ import { uploadMediaToMinio, OCR_CONFIDENCE_THRESHOLD } from "../_helpers.ts";
 import { jsonLog } from "../../_shared/audit.ts";
 import type { BotContext, BotResult } from "./types.ts";
 
+// Trigrama similarity para anti-loop (0..1)
+function trigramSim(a: string, b: string): number {
+  const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-zà-ú0-9 ]/gi, "").replace(/\s+/g, " ").trim();
+  const A = norm(a), B = norm(b);
+  if (!A || !B) return 0;
+  if (A === B) return 1;
+  const trig = (s: string) => {
+    const set = new Set<string>();
+    const p = `  ${s}  `;
+    for (let i = 0; i < p.length - 2; i++) set.add(p.slice(i, i + 3));
+    return set;
+  };
+  const ta = trig(A), tb = trig(B);
+  let inter = 0;
+  ta.forEach((t) => { if (tb.has(t)) inter++; });
+  return inter / Math.max(ta.size, tb.size);
+}
+
 // ── Auto-resolve CEP from address data (avoid asking user) ──
 async function autoResolveCepIfNeeded(merged: any, updates: any): Promise<string> {
   let step = getNextMissingStep(merged);
