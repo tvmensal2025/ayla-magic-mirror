@@ -294,13 +294,23 @@ function stripEmojis(s: string): string {
     .trim();
 }
 
+// Palavras que NÃO são nomes próprios — não devem ser removidas como vocativo.
+const NON_NAME_WORDS = new Set([
+  "tudo", "bem", "bom", "boa", "tarde", "noite", "dia", "como", "vai", "está", "esta",
+  "olá", "ola", "oi", "opa", "obrigado", "obrigada", "certo", "claro", "então", "entao",
+  "para", "pra", "por", "que", "qual", "quem", "onde", "quando", "sim", "não", "nao",
+  "consultora", "consultor", "vendedora", "vendedor", "atendente",
+]);
+
 function stripUntrustedVocative(message: string, trustedFirstName: string | null): string {
   if (!message) return message;
-  // Remove "Olá NOME," / "Oi NOME!" / "NOME, ..." se NOME não for o confiável.
+  // Remove "Olá NOME," / "Oi NOME!" se NOME não for o confiável E parecer realmente um nome próprio.
   const re = /^(ol[aá]|oi|opa|bom dia|boa tarde|boa noite)[,!\s]+([A-ZÀ-Ý][a-zà-ÿ]{1,20})([,!.\s])/i;
   const m = message.match(re);
   if (m) {
     const used = m[2];
+    // Não remover se for palavra de gramática (Tudo, Bem, Como, etc.)
+    if (NON_NAME_WORDS.has(used.toLowerCase())) return message;
     if (!trustedFirstName || used.toLowerCase() !== trustedFirstName.toLowerCase()) {
       return message.replace(re, "$1$3");
     }
