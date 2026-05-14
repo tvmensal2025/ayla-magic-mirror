@@ -5,13 +5,18 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+import { geminiGenerate, type GeminiTool } from "../_shared/gemini.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
-const MODEL = "google/gemini-3-flash-preview";
 
-// ---------- Tools available to the LLM ----------
+// Modelos por tarefa (Google API direto)
+const MODEL_DECISION = "gemini-2.5-pro";          // decisão principal — Pro com thinking
+const MODEL_RESCUE = "gemini-2.5-flash";          // resgate / texto rápido
+const MODEL_SELFCHECK = "gemini-2.5-flash-lite";  // self-check barato
+const MODEL_FALLBACK = "gemini-2.5-flash";        // se Pro retornar 429
+
+// ---------- Tools available to the LLM (OpenAI-style; convertidas para Google abaixo) ----------
 const tools = [
   {
     type: "function",
@@ -137,6 +142,50 @@ const tools = [
         type: "object",
         properties: {
           message: { type: "string", description: "Pergunta natural pedindo o nome" },
+          reasoning: { type: "string" },
+        },
+        required: ["message", "reasoning"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_lead_field",
+      description:
+        "Quando o lead REVELAR um dado estruturado (nome, distribuidora, valor da conta, cidade, dor), grave no cadastro e em seguida responda com send_text na mesma rodada NÃO — use só esta tool e o sistema cuidará de continuar. Use APENAS quando você tem certeza do dado dito pelo lead nesta mensagem.",
+      parameters: {
+        type: "object",
+        properties: {
+          field: {
+            type: "string",
+            enum: ["name", "distribuidora", "electricity_bill_value", "address_city", "pain_point"],
+          },
+          value: { type: "string", description: "Valor exato a salvar (texto ou número como string)" },
+          followup_message: { type: "string", description: "Resposta curta após salvar (acusa recebimento + próxima pergunta)" },
+          next_phase: {
+            type: "string",
+            enum: ["abertura", "descoberta", "pitch", "objecao", "fechamento"],
+          },
+          reasoning: { type: "string" },
+        },
+        required: ["field", "value", "followup_message", "reasoning"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "confirm_and_handoff",
+      description:
+        "USE quando a conta JÁ foi recebida (OCR done) e os dados estão prontos. Confirma os dados em UMA frase e dispara handoff humano de uma vez. Substitui o fluxo confirmar+aguardar+handoff em 2 turnos.",
+      parameters: {
+        type: "object",
+        properties: {
+          message: {
+            type: "string",
+            description: "Frase única confirmando titular, distribuidora, valor e dizendo que vai conectar para finalizar.",
+          },
           reasoning: { type: "string" },
         },
         required: ["message", "reasoning"],
@@ -327,7 +376,7 @@ async function loadContext(supabase: any, customerId: string) {
     .select("message_direction, message_text, message_type, created_at")
     .eq("customer_id", customerId)
     .order("created_at", { ascending: false })
-    .limit(20);
+    .limit(60);
 
   const { data: agentCfg } = await supabase
     .from("ai_agent_config")
@@ -535,81 +584,108 @@ Deno.serve(async (req) => {
           .join("\n")
       : "";
 
-    const messages: any[] = [
-      { role: "system", content: systemPrompt(persona, tone, customPrompt) + fewShotLine },
-      { role: "system", content: contextLine },
-      ...history.map((m: any) => ({
-        role: m.message_direction === "inbound" ? "user" : "assistant",
-        content: m.message_text || "",
-      })),
-    ];
+    // ---- Few-shot negativo (NÃO fazer) ----
+    const { data: negative } = await supabase
+      .from("ai_decisions")
+      .select("user_input, ai_output, tool_called")
+      .eq("consultant_id", customer.consultant_id)
+      .contains("feedback", { rating: "down" })
+      .order("created_at", { ascending: false })
+      .limit(3);
+    const negShotLine = (negative || []).length
+      ? `\n[NÃO FAZER ASSIM — exemplos reprovados pelo consultor]\n` +
+        (negative || [])
+          .map(
+            (p: any) =>
+              `Lead: "${(p.user_input || "").slice(0, 80)}" → ${p.tool_called}: "${(p.ai_output?.message || p.ai_output?.caption || "").slice(0, 80)}"`,
+          )
+          .join("\n")
+      : "";
+
+    // ---- Construir contents no formato Gemini ----
+    const sys = systemPrompt(persona, tone, customPrompt) + fewShotLine + negShotLine + "\n\n" + contextLine;
+
+    const contents: any[] = history.map((m: any) => ({
+      role: m.message_direction === "inbound" ? "user" : "model",
+      parts: [{ text: m.message_text || "(sem texto)" }],
+    }));
+    // Garante que começa em 'user' (Gemini exige)
+    while (contents.length && contents[0].role !== "user") contents.shift();
 
     if (mode === "rescue") {
-      messages.push({
+      contents.push({
         role: "user",
-        content:
-          "[SISTEMA] Lead silenciou. Gere mensagem de resgate breve, sem cobrar, com gancho diferente do que já foi enviado.",
+        parts: [{ text: "[SISTEMA] Lead silenciou. Gere mensagem de resgate breve, sem cobrar, com gancho diferente do que já foi enviado." }],
+      });
+    } else if (mode === "closer") {
+      contents.push({
+        role: "user",
+        parts: [{ text: `[SISTEMA] Conta recebida e OCR ok. Use IMEDIATAMENTE confirm_and_handoff confirmando ${customer.name || "titular"} / ${customer.distribuidora || "?"} / R$ ${billNum.toFixed(0)}.` }],
       });
     } else {
-      messages.push({ role: "user", content: user_input });
+      contents.push({ role: "user", parts: [{ text: user_input }] });
     }
+    if (!contents.length) contents.push({ role: "user", parts: [{ text: user_input || "Olá" }] });
 
-    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages,
-        tools,
-        tool_choice: "required",
-      }),
-    });
+    // Converte tools OpenAI -> Gemini functionDeclarations
+    const geminiTools: GeminiTool[] = [{
+      functionDeclarations: tools.map((t) => ({
+        name: t.function.name,
+        description: t.function.description,
+        parameters: t.function.parameters,
+      })),
+    }];
 
-    if (!aiResp.ok) {
-      const txt = await aiResp.text();
-      console.error("AI gateway error:", aiResp.status, txt);
-      if (aiResp.status === 429 || aiResp.status === 402) {
-        return new Response(JSON.stringify({ error: txt }), {
-          status: aiResp.status,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "ai gateway failed" }), {
+    // Decide qual modelo usar
+    const modelToUse = mode === "rescue" ? MODEL_RESCUE : MODEL_DECISION;
+
+    let aiResult;
+    try {
+      aiResult = await geminiGenerate({
+        model: modelToUse,
+        system: sys,
+        contents,
+        tools: geminiTools,
+        toolChoice: { mode: "ANY" },
+        temperature: 0.5,
+        thinkingBudget: modelToUse === MODEL_DECISION ? 2048 : 0,
+        maxOutputTokens: 1500,
+        fallbackModel: MODEL_FALLBACK,
+        functionName: "ai-sales-agent",
+        consultantId: customer.consultant_id,
+        customerId: customer_id,
+      });
+    } catch (e) {
+      console.error("[ai-sales-agent] gemini error:", e);
+      return new Response(JSON.stringify({ error: String((e as Error).message) }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const aiJson = await aiResp.json();
-    const choice = aiJson.choices?.[0];
-    const toolCall = choice?.message?.tool_calls?.[0];
-
-    if (!toolCall) {
+    const toolCallG = aiResult.toolCall;
+    if (!toolCallG) {
       return new Response(
         JSON.stringify({
-          decision: { tool: "send_text", args: { message: sanitizeHumanMessage(choice?.message?.content || "", phase, "", firstName), next_phase: phase, reasoning: "fallback" } },
+          decision: { tool: "send_text", args: { message: sanitizeHumanMessage(aiResult.text || "", phase, "", firstName), next_phase: phase, reasoning: "fallback_no_toolcall" } },
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    const tool = toolCall.function.name;
-    let args: any = {};
-    try {
-      args = JSON.parse(toolCall.function.arguments || "{}");
-    } catch (_) {
-      args = {};
-    }
+    const tool = toolCallG.name;
+    let args: any = toolCallG.args || {};
+
 
     const priorOutbound = history.filter((h: any) => h.message_direction !== "inbound");
     const hasPriorOutbound = priorOutbound.length > 0;
     const lastAssistantMsg = priorOutbound.slice(-1)[0]?.message_text || null;
 
-    if (tool === "send_text" || tool === "advance_to_closing" || tool === "ask_for_name") {
+    if (tool === "send_text" || tool === "advance_to_closing" || tool === "ask_for_name" || tool === "confirm_and_handoff") {
       args.message = sanitizeHumanMessage(args.message || "", phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
+    }
+    if (tool === "update_lead_field") {
+      args.followup_message = sanitizeHumanMessage(args.followup_message || "", phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
     }
     if (tool === "send_media" && args.caption) {
       args.caption = sanitizeHumanMessage(args.caption, phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
@@ -676,25 +752,83 @@ Deno.serve(async (req) => {
       resolvedMedia = { id: picked.id, url: picked.url, kind: picked.kind, label: picked.label };
     }
 
+    // ---- Self-check barato (flash-lite) — bloqueia tools absurdas ----
+    let selfCheckRisk: string | null = null;
+    try {
+      const lastIn = mode === "rescue" ? "[rescue]" : (user_input || "").slice(0, 200);
+      const checkPrompt = `Lead disse: "${lastIn}"\nIA escolheu: ${tool} ${JSON.stringify(args).slice(0, 250)}\nFase: ${phase}. Conta_recebida: ${billAlreadyReceivedEarly}.\nResponda apenas: OK ou RISCO_<motivo curto>.`;
+      const sc = await geminiGenerate({
+        model: MODEL_SELFCHECK,
+        contents: [{ role: "user", parts: [{ text: checkPrompt }] }],
+        temperature: 0,
+        maxOutputTokens: 30,
+        functionName: "ai-sales-agent-selfcheck",
+        consultantId: customer.consultant_id,
+        customerId: customer_id,
+      });
+      const verdict = (sc.text || "").trim().toUpperCase();
+      if (verdict.startsWith("RISCO")) selfCheckRisk = verdict.slice(0, 80);
+    } catch (_) { /* self-check é best-effort */ }
+
+    // Detecção de intenção determinística (para auditoria)
+    const ui = (user_input || "").toLowerCase();
+    const intentDetected =
+      /\b(cadastr|quero entrar|fazer adesao|fazer cadastro|me cadastra)/i.test(ui) ? "cadastrar" :
+      /\b(humano|atendente|pessoa|operador|consultor real)\b/i.test(ui) ? "humano" :
+      /\b(parar|cancelar|nao quero|sem interesse|desisto|me deixa)\b/i.test(ui) ? "desistir" :
+      /\b(quanto|valor|economia|preco|preço)\b/i.test(ui) ? "interesse_valor" :
+      null;
+
     // Audit (best-effort)
     await supabase.from("ai_decisions").insert({
       customer_id,
       consultant_id: customer.consultant_id,
       phase,
       tool_called: tool,
-      reasoning: args.reasoning || args.reason || null,
+      reasoning: (args.reasoning || args.reason || "") + (selfCheckRisk ? ` | ${selfCheckRisk}` : ""),
       user_input: mode === "rescue" ? "[rescue]" : user_input,
       ai_output: args,
       latency_ms: latencyMs,
-      model: MODEL,
+      model: aiResult.modelUsed,
       media_sent_id: resolvedMedia?.id || null,
+      intent_detected: intentDetected,
     });
+
+    // Se self-check sinalizou RISCO em tool sensível, força fallback texto neutro
+    if (selfCheckRisk && (tool === "send_media" || tool === "advance_to_closing")) {
+      const safeMsg = "Me ajuda com mais um detalhe rápido para eu te dar a resposta certa: qual a sua cidade e qual a média da sua conta de luz?";
+      return new Response(JSON.stringify({
+        decision: { tool: "send_text", args: { message: safeMsg, next_phase: phase, reasoning: `selfcheck_blocked:${selfCheckRisk}` } },
+        phase,
+        latency_ms: Date.now() - t0,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // Apply side-effects (DB updates only — sending message stays in webhook)
     const updates: Record<string, any> = {};
     if (tool === "send_text" && args.next_phase) updates.sales_phase = args.next_phase;
     if (tool === "send_media" && args.next_phase) updates.sales_phase = args.next_phase;
     if (tool === "advance_to_closing") updates.sales_phase = "fechamento";
+    if (tool === "confirm_and_handoff") {
+      updates.sales_phase = "fechamento";
+      updates.bot_paused = true;
+      updates.bot_paused_reason = "confirm_and_handoff: lead pronto para cadastro";
+      updates.bot_paused_at = new Date().toISOString();
+      updates.qualification_score = 100;
+    }
+    if (tool === "update_lead_field") {
+      const f = String(args.field || "");
+      const v = args.value;
+      if (["name", "distribuidora", "address_city", "pain_point"].includes(f) && typeof v === "string" && v.length > 1) {
+        updates[f] = v.trim();
+        if (f === "name") updates.name_source = "self_introduced";
+      }
+      if (f === "electricity_bill_value") {
+        const n = Number(String(v).replace(/[^\d.,]/g, "").replace(",", "."));
+        if (Number.isFinite(n) && n > 0) updates.electricity_bill_value = n;
+      }
+      if (args.next_phase) updates.sales_phase = args.next_phase;
+    }
     if (tool === "request_handoff") {
       updates.bot_paused = true;
       updates.bot_paused_reason = args.reason;

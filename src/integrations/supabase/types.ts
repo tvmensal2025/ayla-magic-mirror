@@ -290,6 +290,36 @@ export type Database = {
         }
         Relationships: []
       }
+      ad_playbooks: {
+        Row: {
+          consultant_id: string | null
+          created_at: string
+          generated_at: string
+          id: string
+          payload: Json
+          scope: string
+          source_metric: string | null
+        }
+        Insert: {
+          consultant_id?: string | null
+          created_at?: string
+          generated_at?: string
+          id?: string
+          payload: Json
+          scope?: string
+          source_metric?: string | null
+        }
+        Update: {
+          consultant_id?: string | null
+          created_at?: string
+          generated_at?: string
+          id?: string
+          payload?: Json
+          scope?: string
+          source_metric?: string | null
+        }
+        Relationships: []
+      }
       ad_recommendations: {
         Row: {
           action_label: string | null
@@ -632,6 +662,7 @@ export type Database = {
           customer_id: string | null
           feedback: Json | null
           id: string
+          intent_detected: string | null
           latency_ms: number | null
           media_sent_id: string | null
           model: string | null
@@ -647,6 +678,7 @@ export type Database = {
           customer_id?: string | null
           feedback?: Json | null
           id?: string
+          intent_detected?: string | null
           latency_ms?: number | null
           media_sent_id?: string | null
           model?: string | null
@@ -662,6 +694,7 @@ export type Database = {
           customer_id?: string | null
           feedback?: Json | null
           id?: string
+          intent_detected?: string | null
           latency_ms?: number | null
           media_sent_id?: string | null
           model?: string | null
@@ -820,6 +853,57 @@ export type Database = {
           sent_at?: string
           slot_key?: string
           variant?: string
+        }
+        Relationships: []
+      }
+      ai_usage_log: {
+        Row: {
+          consultant_id: string | null
+          cost_estimate_cents: number | null
+          created_at: string
+          customer_id: string | null
+          degraded: boolean | null
+          function_name: string
+          id: string
+          latency_ms: number | null
+          metadata: Json | null
+          model: string
+          outcome: string | null
+          thinking_tokens: number | null
+          tokens_in: number | null
+          tokens_out: number | null
+        }
+        Insert: {
+          consultant_id?: string | null
+          cost_estimate_cents?: number | null
+          created_at?: string
+          customer_id?: string | null
+          degraded?: boolean | null
+          function_name: string
+          id?: string
+          latency_ms?: number | null
+          metadata?: Json | null
+          model: string
+          outcome?: string | null
+          thinking_tokens?: number | null
+          tokens_in?: number | null
+          tokens_out?: number | null
+        }
+        Update: {
+          consultant_id?: string | null
+          cost_estimate_cents?: number | null
+          created_at?: string
+          customer_id?: string | null
+          degraded?: boolean | null
+          function_name?: string
+          id?: string
+          latency_ms?: number | null
+          metadata?: Json | null
+          model?: string
+          outcome?: string | null
+          thinking_tokens?: number | null
+          tokens_in?: number | null
+          tokens_out?: number | null
         }
         Relationships: []
       }
