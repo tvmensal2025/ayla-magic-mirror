@@ -815,6 +815,7 @@ export type Database = {
           id: string
           intent_tags: string[]
           is_draft: boolean
+          is_primary_explainer: boolean
           is_public: boolean
           kind: string
           label: string
@@ -837,6 +838,7 @@ export type Database = {
           id?: string
           intent_tags?: string[]
           is_draft?: boolean
+          is_primary_explainer?: boolean
           is_public?: boolean
           kind: string
           label: string
@@ -859,6 +861,7 @@ export type Database = {
           id?: string
           intent_tags?: string[]
           is_draft?: boolean
+          is_primary_explainer?: boolean
           is_public?: boolean
           kind?: string
           label?: string
