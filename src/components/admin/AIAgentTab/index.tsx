@@ -17,16 +17,20 @@ export function AIAgentTab({ userId }: { userId: string }) {
   const [sub, setSub] = useState<SubTab>("atendimentos");
   const [agenteSub, setAgenteSub] = useState<AgenteSub>("audios");
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [personaName, setPersonaName] = useState<string>("Camila");
   const [savingEnabled, setSavingEnabled] = useState(false);
 
   useEffect(() => {
     (async () => {
       const { data } = await supabase
         .from("ai_agent_config")
-        .select("enabled")
+        .select("enabled, persona_name")
         .eq("consultant_id", userId)
         .maybeSingle();
       setEnabled(data ? !!(data as any).enabled : true);
+      if (data && (data as any).persona_name) {
+        setPersonaName((data as any).persona_name);
+      }
     })();
   }, [userId]);
 
@@ -36,7 +40,7 @@ export function AIAgentTab({ userId }: { userId: string }) {
     const { error } = await supabase
       .from("ai_agent_config")
       .upsert(
-        { consultant_id: userId, enabled: v, persona_name: "Camila" },
+        { consultant_id: userId, enabled: v, persona_name: personaName },
         { onConflict: "consultant_id" },
       );
     setSavingEnabled(false);
@@ -45,6 +49,20 @@ export function AIAgentTab({ userId }: { userId: string }) {
       setEnabled(!v);
     } else {
       toast({ title: v ? "🤖 IA ativada" : "⏸️ IA pausada para seus leads" });
+    }
+  }
+
+  async function savePersonaName() {
+    const { error } = await supabase
+      .from("ai_agent_config")
+      .upsert(
+        { consultant_id: userId, enabled: enabled ?? true, persona_name: personaName },
+        { onConflict: "consultant_id" },
+      );
+    if (error) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "✅ Nome atualizado" });
     }
   }
 
