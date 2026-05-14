@@ -570,14 +570,21 @@ Deno.serve(async (req) => {
     const lastInboundKind = (lastInbound?.message_type || "text").toLowerCase();
 
     // Load candidate media for this phase + profile (consultant own + public)
-    const { data: candidates } = await supabase
+    // Inclui também rows com step_tags vazias OU com slot_key (mídias-slot ex.: boas_vindas).
+    const { data: candidatesRaw } = await supabase
       .from("ai_media_library")
-      .select("id, kind, label, url, step_tags, intent_tags, priority, duration_sec, is_primary_explainer")
+      .select("id, kind, label, url, step_tags, intent_tags, priority, duration_sec, is_primary_explainer, slot_key")
       .eq("active", true)
       .or(`consultant_id.eq.${customer.consultant_id},is_public.eq.true`)
-      .overlaps("step_tags", [phase, "any"])
       .order("priority", { ascending: false })
-      .limit(15);
+      .limit(40);
+    const candidates = (candidatesRaw || []).filter((m: any) => {
+      const tags = Array.isArray(m.step_tags) ? m.step_tags : [];
+      // Aceita: tem slot_key (mídia deterministica) OU step vazio OU bate na fase/any.
+      if (m.slot_key) return true;
+      if (tags.length === 0) return true;
+      return tags.includes(phase) || tags.includes("any");
+    });
 
     // intent_tags agora descrevem a DÚVIDA que a mídia responde (ex.: "e_golpe", "tem_custo").
     // O matching com a dúvida do lead é feito pela própria IA via prompt — não filtramos aqui.
