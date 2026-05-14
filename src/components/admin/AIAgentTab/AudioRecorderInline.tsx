@@ -66,8 +66,8 @@ export function AudioRecorderInline({ onRecorded, disabled }: Props) {
       alert("Áudio muito curto (mínimo 3s).");
       return;
     }
-    if (seconds > 90) {
-      alert("Áudio muito longo (máximo 90s).");
+    if (seconds > 600) {
+      alert("Áudio muito longo (máximo 10 minutos).");
       return;
     }
     setSaving(true);
