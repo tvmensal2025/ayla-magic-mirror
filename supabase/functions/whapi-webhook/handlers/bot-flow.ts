@@ -554,6 +554,32 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 reply = "Perfeito! 📸 Para iniciar seu cadastro, me envie uma *foto ou PDF da sua conta de luz*.";
               }
             }
+            // Anti-loop: se o reply for ≥80% similar à última msg outbound, troca por lembrete do step atual.
+            try {
+              const { data: lastOut } = await supabase
+                .from("conversations")
+                .select("message_text")
+                .eq("customer_id", customer.id)
+                .eq("message_direction", "outbound")
+                .order("created_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              if (lastOut?.message_text && reply && trigramSim(reply, lastOut.message_text) >= 0.8) {
+                console.warn("[anti-loop] reply parecido com última outbound — trocando por lembrete do step");
+                if (collectionSteps.has(step)) {
+                  reply = step === "aguardando_conta"
+                    ? "Para seguir, me envie uma foto ou PDF da sua conta de luz, por favor."
+                    : "Vamos continuar de onde paramos.";
+                } else {
+                  reply = "";
+                }
+              }
+            } catch (_) { /* best-effort */ }
+            // Lembrete do step de coleta após responder dúvida off-script
+            if (reply && collectionSteps.has(step) && !updates.conversation_step) {
+              if (step === "aguardando_conta") reply += "\n\nVoltando: me manda a foto ou PDF da sua conta de luz pra eu seguir 📸";
+              else if (step === "coleta_doc") reply += "\n\nVoltando: me manda a frente do seu documento (CNH ou RG) pra eu seguir 🪪";
+            }
             return { reply, updates };
           }
           if (tool === "request_handoff") {
