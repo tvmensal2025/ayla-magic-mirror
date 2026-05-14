@@ -50,7 +50,9 @@ export function SlotCard({ userId, slot, defaultMedia, personalMedia, onChange }
       .upload(path, blob, { upsert: true, contentType: blob.type || "audio/webm" });
     if (upErr) throw upErr;
     const { data } = supabase.storage.from("ai-agent-media").getPublicUrl(path);
-    return { url: data.publicUrl, path };
+    // cache-bust: força navegador/CDN a buscar a nova versão depois de regravar
+    const url = `${data.publicUrl}?v=${Date.now()}`;
+    return { url, path };
   }
 
   async function handleRecorded(blob: Blob, durationSec: number) {
