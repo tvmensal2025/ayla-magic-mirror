@@ -161,7 +161,7 @@ const tools = [
         properties: {
           field: {
             type: "string",
-            enum: ["name", "distribuidora", "electricity_bill_value", "pain_point"],
+            enum: ["name", "electricity_bill_value", "pain_point"],
           },
           value: { type: "string", description: "Valor exato a salvar (texto ou número como string)" },
           followup_message: { type: "string", description: "Resposta curta após salvar (acusa recebimento + próxima pergunta)" },
