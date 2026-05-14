@@ -1,68 +1,46 @@
 ## Problema
 
-A mensagem que abre no WhatsApp quando o lead clica no anúncio está feia e longa demais:
-
-> "Olá! Vi o anúncio iGreen sobre energia mais barata em CPFL. Quero saber como economizar na conta de luz."
-
-É hardcoded em `supabase/functions/facebook-create-campaign/index.ts` (linha 430), não aparece em lugar nenhum no Wizard, e o usuário não consegue editar nem ver o que vai sair. Você quer algo curto, natural e do ponto de vista do lead, tipo:
-
-> "Olá, quero saber mais sobre a redução de energia"
+O alerta "1 instância(s) Evolution caída(s)" não diz QUAL instância caiu. Você precisa abrir outro painel pra descobrir qual consultor reconectar — perde tempo.
 
 ## Plano
 
-### 1. Mensagem padrão nova (curta, do lead, contextual)
+Em `src/components/superadmin/SystemHealthPanel.tsx`:
 
-Trocar o template em `facebook-create-campaign/index.ts`:
+### 1. Buscar a lista de instâncias caídas (não só o count)
+
+Trocar a query do `needReconnect` para trazer as linhas, fazendo join com `consultants` para mostrar nome/licença:
+
+```ts
+supabase.from("whatsapp_instances")
+  .select("id, instance_name, connected_phone, status, last_health_check_at, consultant_id, consultants:consultant_id(name, license_code)")
+  .in("status", ["needs_reconnect", "disconnected", "close"])
+```
+
+Guardar em `downInstances: Array<{name, license, phone, instance, lastSeen}>`.
+
+### 2. Expandir o card vermelho com lista clicável
+
+Trocar a linha única por uma lista com até 5 itens visíveis (resto em "+N mais"):
 
 ```
-Olá! Quero saber mais sobre a redução na conta de luz {distribuidora}.
+🔴 1 instância caída
+ └─ Carlos Magna · igreen-carlos-magna · 5519988185006 · há 12 min
+    [Abrir Evolution] [Ver consultor]
 ```
 
-- Se não houver distribuidora, cai para: `Olá! Quero saber mais sobre a redução na minha conta de luz.`
-- Sem "Vi o anúncio…" (Meta já mostra o card do anúncio acima da mensagem).
-- Limite rígido de 160 caracteres.
+- "Abrir Evolution" → link direto para `https://evo.igreenenergybrasil.site/manager/instance/{instance_name}` (ou variável de env já usada no projeto — vou checar `EVOLUTION_API_URL` em código)
+- "Ver consultor" → navega para `/super-admin?tab=consultores&search={license_code}`
+- Tempo desde `last_health_check_at` em formato amigável ("há 3 min").
 
-### 2. Campo editável no Wizard
+### 3. Atualizar o Metric "Inst. derrubadas"
 
-Em `src/components/admin/ads/CreateCampaignWizard.tsx`, na aba de copy (logo abaixo do "Texto principal"):
+Mostrar tooltip nativo (`title=`) com os primeiros nomes para feedback rápido sem precisar rolar.
 
-- Novo input "Primeira mensagem no WhatsApp" com:
-  - placeholder = mensagem padrão acima já preenchida com a distribuidora selecionada.
-  - contador de caracteres (max 160).
-  - preview do balão estilo WhatsApp (verde, fonte do app), mostrando exatamente o que o cliente vai ver ao clicar.
-  - botão "Sugerir com IA" usando `ad-creative-builder` (reaproveita gateway) para gerar 3 variações curtas em 1ª pessoa.
+### 4. Status considerados "caídos"
 
-State novo: `initialMessage` (string). Default recalculado quando muda a distribuidora.
-
-### 3. Enviar e persistir
-
-- Wizard envia `initial_message` no body do `facebook-create-campaign`.
-- Edge function valida (≤160, não vazio, strip de quebras de linha) e usa em `waLink` (linha 432).
-- Salva em `ad_campaigns.initial_message` para histórico/relatório (nova coluna `text` nullable, sem RLS nova — a tabela já tem).
-- O `ad-creative-learner` passa a considerar `initial_message` como variável da performance (só guarda no `ad_creative_performance.metadata`, sem novo schema).
-
-### 4. Garantir CTWA nativo (sem link quebrado)
-
-Já está usando `WHATSAPP_MESSAGE` com `app_destination: "WHATSAPP"` e `page` da WABA — isso é o correto e não quebra. Vou só:
-
-- Remover `description` do `link_data` quando o destino é WhatsApp (Meta ignora e às vezes mostra preview feio).
-- Garantir `name` (headline) ≤ 40 chars no envio (já validado no Wizard).
-- Logar no preflight a mensagem final que vai para o `text=` do `wa.me` para conferência.
-
-### 5. Auto-aprendizado da mensagem
-
-No painel "IA Aprendendo" (`AILearningHealthPanel.tsx`), adicionar bloco "Mensagens iniciais por CPL":
-- Top 3 mensagens com menor CPL nas últimas 14 dias.
-- Bottom 3 (as que pioram conversão).
-- Lê de `ad_creative_performance` agrupando por `metadata->>initial_message`.
-
-## Detalhes técnicos
-
-- Migration: `ALTER TABLE public.ad_campaigns ADD COLUMN IF NOT EXISTS initial_message text;`
-- Edge function: validação Zod do `initial_message` opcional, default server-side se vier vazio.
-- Wizard: novo state, novo bloco UI, envio no payload, derivação automática quando muda a distribuidora se o usuário ainda não editou manualmente (flag `userTouchedMessage`).
-- `ad-creative-builder`: aceitar `mode: "initial_message"` retornando array de 3 strings ≤160 chars em 1ª pessoa.
+Hoje só conta `needs_reconnect`. Vou incluir também `disconnected` e `close` (são os estados que a Evolution emite quando o QR expira ou o celular desconectou) para não esconder problemas reais.
 
 ## Fora de escopo
 
-- Não mexe em CTA, templates de WhatsApp internos, nem no fluxo do CRM depois que o lead chega.
+- Não mexe no fluxo de reconexão automática nem no painel da Evolution em si.
+- Não cria nova tabela nem migration.
