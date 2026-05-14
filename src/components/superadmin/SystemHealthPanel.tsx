@@ -3,8 +3,18 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, Power, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, Copy, Power, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { toast } from "sonner";
+
+interface DownInstance {
+  id: string;
+  consultantName: string;
+  license: string | null;
+  phone: string | null;
+  instanceName: string;
+  status: string;
+  lastSeen: string | null;
+}
 
 interface Health {
   pausedGlobal: number;
@@ -12,6 +22,19 @@ interface Health {
   errors24h: number;
   decisions24h: number;
   transitions24h: number;
+  downInstances: DownInstance[];
+}
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "sem checagem";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  const d = Math.floor(h / 24);
+  return `há ${d}d`;
 }
 
 export function SystemHealthPanel() {
