@@ -134,6 +134,7 @@ export function MediaColumn({ userId }: { userId: string }) {
   const [uploading, setUploading] = useState(false);
   const [usedBytes, setUsedBytes] = useState(0);
   const [dragOver, setDragOver] = useState(false);
+  const [previewMedia, setPreviewMedia] = useState<Media | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function loadList() {
