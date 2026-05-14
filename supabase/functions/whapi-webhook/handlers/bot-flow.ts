@@ -436,6 +436,27 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     if (configuredQaResult) return configuredQaResult;
   }
 
+  if (
+    step === "aguardando_conta" &&
+    messageText &&
+    !isFile &&
+    !isButton &&
+    !customer.electricity_bill_photo_url &&
+    isBogusCapturedName((customer as any).name)
+  ) {
+    const recoveredName = normalizeLeadName(messageText);
+    if (recoveredName) {
+      return {
+        reply: `${recoveredName.split(/\s+/)[0]}, qual a média da sua conta de luz?`,
+        updates: { name: recoveredName, name_source: "self_introduced", conversation_step: "qualificacao" },
+      };
+    }
+    return {
+      reply: "Qual é o seu nome?",
+      updates: { name: null, name_source: "unknown", conversation_step: "qualificacao" },
+    };
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // 🪪 CAPTURA DETERMINÍSTICA DE NOME
   // O primeiro áudio de boas-vindas já pede o nome do lead. Se ainda
