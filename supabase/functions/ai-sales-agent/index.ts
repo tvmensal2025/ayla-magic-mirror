@@ -382,19 +382,25 @@ async function loadContext(supabase: any, customerId: string) {
   const { data: customer } = await supabase
     .from("customers")
     .select(
-      "id, consultant_id, name, name_source, phone_whatsapp, distribuidora, address_city, address_state, address_street, electricity_bill_value, electricity_bill_photo_url, ocr_done, bill_requested_at, numero_instalacao, pain_point, sales_phase, qualification_score, lead_source, customer_referred_by_name",
+      "id, consultant_id, name, name_source, phone_whatsapp, distribuidora, address_city, address_state, address_street, electricity_bill_value, electricity_bill_photo_url, ocr_done, bill_requested_at, numero_instalacao, pain_point, sales_phase, qualification_score, lead_source, customer_referred_by_name, conversation_summary, summary_updated_at",
     )
     .eq("id", customerId)
     .maybeSingle();
 
   if (!customer) return null;
 
+  // Se há resumo recente (<24h) usamos só as últimas 12 mensagens. Senão, 60.
+  const summaryFresh = customer.conversation_summary
+    && customer.summary_updated_at
+    && (Date.now() - new Date(customer.summary_updated_at).getTime()) < 24 * 3600 * 1000;
+  const histLimit = summaryFresh ? 12 : 60;
+
   const { data: history } = await supabase
     .from("conversations")
     .select("message_direction, message_text, message_type, created_at")
     .eq("customer_id", customerId)
     .order("created_at", { ascending: false })
-    .limit(60);
+    .limit(histLimit);
 
   const { data: agentCfg } = await supabase
     .from("ai_agent_config")
@@ -410,7 +416,45 @@ async function loadContext(supabase: any, customerId: string) {
     persona: agentCfg?.persona_name || "Camila",
     tone: agentCfg?.tone || "humano, breve, cordial",
     customPrompt: agentCfg?.system_prompt || "",
+    summaryFresh,
   };
+}
+
+// ---------- INTENT-FIRST: detecta intenção determinística ANTES do LLM ----------
+// Para sinais claros (cadastrar/humano/desistir) podemos pular o LLM totalmente.
+function detectIntent(text: string): string | null {
+  const ui = (text || "").toLowerCase();
+  if (/\b(cadastr|quero (entrar|participar|aderir|economizar|fazer)|fazer (adesao|adesão|cadastro)|me cadastra|vamos l[aá]|bora|aceito|topo|fechado|pode (cadastrar|prosseguir|seguir)|j[aá] quero)\b/i.test(ui)) return "cadastrar";
+  if (/\b(humano|atendente|pessoa|operador|consultor real|fala com (algu[eé]m|gente|pessoa)|chama (o|a) (consultor|atendente))\b/i.test(ui)) return "humano";
+  if (/\b(parar|cancelar|n[aã]o quero|sem interesse|desisto|me deixa|para de|tira meu|nao tenho interesse|n[aã]o me incomod|n[aã]o gostei)\b/i.test(ui)) return "desistir";
+  if (/\b(golpe|fraude|seguro\?|confi[aá]vel|enganaç[aã]o|verdade)\b/i.test(ui)) return "objecao_confianca";
+  if (/\b(fidelidade|multa|trocar|mudar de empresa|distribuidora vai)\b/i.test(ui)) return "objecao_contrato";
+  if (/\b(custo|caro|gratuito|de gra[çc]a|paga|mensalidade|taxa)\b/i.test(ui)) return "objecao_custo";
+  if (/\b(quanto|valor|economia|pre[çc]o|desconto|porcentagem)\b/i.test(ui)) return "interesse_valor";
+  if (/\b(como funciona|me explica|n[aã]o entendi|o que [eé]|quem [eé])\b/i.test(ui)) return "informacao";
+  return null;
+}
+
+// ---------- GUARDRAIL: bloqueia números inventados ----------
+// Apenas valores derivados da conta são permitidos. Tudo mais vira texto neutro.
+function sanitizeNumbers(message: string, billValue: number): string {
+  if (!message) return message;
+  const allowedExact = new Set<string>(["2017", "600", "20", "12", "70"]);
+  // Permite "R$ <valor>" se for ~ bill, bill*0.12 ou bill*0.12*12
+  const targets = billValue > 0
+    ? [Math.round(billValue), Math.round(billValue * 0.12), Math.round(billValue * 0.12 * 12)]
+    : [];
+  return message.replace(/R\$\s?(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+)/gi, (full, num) => {
+    const n = Number(String(num).replace(/\./g, "").replace(",", "."));
+    if (!Number.isFinite(n)) return full;
+    if (targets.some((t) => Math.abs(t - n) <= Math.max(2, t * 0.05))) return full;
+    return ""; // remove números fora da whitelist
+  }).replace(/\b(\d{1,3})\s?%/g, (full, num) => {
+    if (allowedExact.has(String(num))) return full;
+    const n = Number(num);
+    if (n >= 8 && n <= 22) return full; // faixa de desconto plausível
+    return "";
+  }).replace(/\s{2,}/g, " ").trim();
 }
 
 Deno.serve(async (req) => {
