@@ -580,6 +580,19 @@ Deno.serve(async (req) => {
     const sentMediaIds = new Set((recentMediaSent || []).map((r: any) => r.media_sent_id));
     const freshMedia = eligibleMedia.filter((m: any) => !sentMediaIds.has(m.id));
 
+    // Cooldown de VÍDEO em janela de 6h: se qualquer vídeo foi enviado a este lead nas
+    // últimas 6h, bloqueia novos vídeos (mas permite áudio/imagem).
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    const { data: recentVideoOutbound } = await supabase
+      .from("messages")
+      .select("id")
+      .eq("customer_id", customer_id)
+      .eq("message_direction", "outbound")
+      .eq("message_type", "video")
+      .gte("created_at", sixHoursAgo)
+      .limit(1);
+    const videoCooldownActive = !!(recentVideoOutbound && recentVideoOutbound.length > 0);
+
     const mediaListLine = billAlreadyReceivedEarly
       ? `\n[MÍDIAS DISPONÍVEIS]\nNENHUMA — a conta já foi recebida. Confirme os dados em send_text e em seguida use request_handoff. PROIBIDO send_media nesta etapa.`
       : freshMedia.length
@@ -603,6 +616,9 @@ Deno.serve(async (req) => {
       `- Última msg do lead foi do tipo: ${lastInboundKind}\n` +
       (recentMediaCount >= 1
         ? `- ⚠️ NÃO envie mídia agora — a última resposta JÁ foi mídia. Use send_text.\n`
+        : ``) +
+      (videoCooldownActive
+        ? `- 🚫 VÍDEO BLOQUEADO: já enviamos um vídeo a este lead nas últimas 6h. Responda por TEXTO curto, sem prometer outro vídeo.\n`
         : ``) +
       (lastInboundKind === "audio"
         ? `- Lead mandou áudio: prefira responder com áudio também (espelho).\n`
@@ -665,10 +681,23 @@ Deno.serve(async (req) => {
     if (customer.address_city) known.push(`Cidade: ${customer.address_city}/${customer.address_state || ""}`.trim());
     if (customer.pain_point) known.push(`Dor: ${customer.pain_point}`);
 
+    // Quantas vezes a IA já perguntou o valor da conta? Se ≥2, parar de perguntar
+    // e pedir a foto direto (evita loop irritante).
+    const billAskCount = history.filter(
+      (h: any) =>
+        h.message_direction !== "inbound" &&
+        /(valor|quanto.*paga|quanto.*vem|m[eé]dia).*(conta|luz)|conta.*(valor|m[eé]dia)/i.test(
+          String(h.message_text || ""),
+        ),
+    ).length;
+    const stopAskingBill = billNum === 0 && billAskCount >= 2;
+
     const knownBlock = known.length
       ? `\n[JÁ SABEMOS — NÃO pergunte de novo, USE livremente]\n- ${known.join("\n- ")}\n`
       : "";
-    const missingBlock = (missing.length && !billAlreadyReceived)
+    const missingBlock = stopAskingBill
+      ? `\n[FALTA DESCOBRIR]\n- O lead JÁ foi perguntado 2x sobre o valor da conta e não respondeu. PARE DE PERGUNTAR. Peça a FOTO da conta de luz: "Me manda uma foto da sua conta de luz que eu já vejo tudo por ali, fica mais fácil pra você 💚".\n`
+      : (missing.length && !billAlreadyReceived)
       ? `\n[FALTA DESCOBRIR — pergunte UM por vez nesta ordem]\n- ${missing.join("\n- ")}\n`
       : (!billAlreadyReceived
           ? `\n[FALTA DESCOBRIR]\n- Nada essencial. Faça o pitch com o cálculo OU peça a foto da conta para fechar.\n`
@@ -863,13 +892,22 @@ Deno.serve(async (req) => {
     const introVideo = freshMedia.find((m: any) =>
       /conex[aã]o green.*apresenta/i.test(String(m.label || "")) && m.kind === "video"
     );
-    if (isDoubtIntent && introVideo && tool !== "send_media" && tool !== "request_handoff" && recentMediaCount < 1) {
+    // Gating do auto-intro: só se NÃO está no início (precisa lead ter falado pelo menos 2x),
+    // não houve vídeo nas últimas 6h, e a IA não escolheu send_media manualmente.
+    const inboundCount = history.filter((h: any) => h.message_direction === "inbound").length;
+    const canAutoSendVideo =
+      !videoCooldownActive &&
+      inboundCount >= 2 &&
+      tool !== "send_media" &&
+      tool !== "request_handoff" &&
+      recentMediaCount < 1;
+    if (isDoubtIntent && introVideo && canAutoSendVideo) {
       tool = "send_media";
       args = {
         media_id: introVideo.id,
         caption: "Vou te mandar um vídeo curto de 1 minuto que explica direitinho — depois te respondo qualquer dúvida.",
         next_phase: phase === "abertura" ? "descoberta" : phase,
-        reasoning: "auto_intro_video: dúvida/objeção detectada e vídeo de 1min ainda não enviado",
+        reasoning: "auto_intro_video: dúvida/objeção detectada (passou nos gates de cooldown e turnos)",
       };
     }
 
@@ -949,10 +987,13 @@ Deno.serve(async (req) => {
       const alreadySentSameId = sentMediaIds.has(args.media_id);
       const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
       const invalidId = !picked || !picked.url;
+      const isVideoBlockedByCooldown = !!picked && picked.kind === "video" && videoCooldownActive;
 
-      if (invalidId || justSentMedia || alreadySentSameId) {
+      if (invalidId || justSentMedia || alreadySentSameId || isVideoBlockedByCooldown) {
         const tag = invalidId
           ? "[media_id inválido]"
+          : isVideoBlockedByCooldown
+          ? "[vídeo bloqueado: cooldown 6h]"
           : alreadySentSameId
           ? "[mídia repetida — bloqueada]"
           : "[mídia consecutiva — bloqueada]";

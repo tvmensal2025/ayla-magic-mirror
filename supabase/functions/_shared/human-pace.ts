@@ -5,10 +5,10 @@
 export async function humanPace(text: string, opts?: { minMs?: number; maxMs?: number }): Promise<void> {
   const len = (text || "").length;
   // Base: ~2.5s + 50ms/char (≈ 1200 chars/min digitação humana relaxada)
-  const base = 2500 + len * 50;
+  const base = 1500 + len * 35;
   const jitter = (Math.random() * 0.4 - 0.2) * base; // ±20%
-  const min = opts?.minMs ?? 3000;
-  const max = opts?.maxMs ?? 12000;
+  const min = opts?.minMs ?? 1500;
+  const max = opts?.maxMs ?? 7000;
   const ms = Math.min(max, Math.max(min, Math.round(base + jitter)));
   await new Promise((r) => setTimeout(r, ms));
 }

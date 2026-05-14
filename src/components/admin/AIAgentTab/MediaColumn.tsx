@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Loader2,
   Plus,
@@ -20,6 +21,8 @@ import {
   User,
   Tag,
   Pencil,
+  Play,
+  Eye,
 } from "lucide-react";
 
 type Kind = "audio" | "video" | "image" | "document" | "text";
@@ -131,6 +134,7 @@ export function MediaColumn({ userId }: { userId: string }) {
   const [uploading, setUploading] = useState(false);
   const [usedBytes, setUsedBytes] = useState(0);
   const [dragOver, setDragOver] = useState(false);
+  const [previewMedia, setPreviewMedia] = useState<Media | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function loadList() {
@@ -435,7 +439,26 @@ export function MediaColumn({ userId }: { userId: string }) {
                 key={m.id}
                 className="group flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-muted/40 transition-colors"
               >
-                {iconFor(m.kind)}
+                {m.url && (m.kind === "image" || m.kind === "video") ? (
+                  <button
+                    onClick={() => setPreviewMedia(m)}
+                    className="relative w-10 h-10 rounded-md overflow-hidden bg-muted/40 border border-border/60 shrink-0 group/thumb"
+                    title="Pré-visualizar"
+                  >
+                    {m.kind === "image" ? (
+                      <img src={m.url} alt={m.label} className="w-full h-full object-cover" />
+                    ) : (
+                      <video src={m.url} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                    )}
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity">
+                      <Play className="w-4 h-4 text-white fill-white" />
+                    </div>
+                  </button>
+                ) : (
+                  <span className="w-10 h-10 rounded-md bg-muted/40 border border-border/60 shrink-0 flex items-center justify-center">
+                    {iconFor(m.kind)}
+                  </span>
+                )}
                 <div className="flex-1 min-w-0">
                   {isMine ? (
                     <EditableLabel value={m.label} onSave={(v) => updateLabel(m, v)} />
@@ -444,6 +467,16 @@ export function MediaColumn({ userId }: { userId: string }) {
                   )}
                   <p className="text-[10px] text-muted-foreground uppercase">{m.kind} · prio {m.priority}</p>
                 </div>
+                {m.url && (
+                  <button
+                    onClick={() => setPreviewMedia(m)}
+                    className="text-muted-foreground hover:text-primary p-1 transition-colors"
+                    aria-label="Pré-visualizar"
+                    title="Ver mídia"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                )}
                 {view === "mine" ? (
                   <>
                     <Input
@@ -482,6 +515,45 @@ export function MediaColumn({ userId }: { userId: string }) {
           </ul>
         )}
       </div>
+
+      <Dialog open={!!previewMedia} onOpenChange={(o) => !o && setPreviewMedia(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base truncate pr-6">{previewMedia?.label}</DialogTitle>
+          </DialogHeader>
+          {previewMedia?.url && (
+            <div className="w-full rounded-lg overflow-hidden bg-black/40">
+              {previewMedia.kind === "video" && (
+                <video src={previewMedia.url} controls autoPlay playsInline className="w-full max-h-[70vh]" />
+              )}
+              {previewMedia.kind === "audio" && (
+                <audio src={previewMedia.url} controls autoPlay className="w-full p-4" />
+              )}
+              {previewMedia.kind === "image" && (
+                <img src={previewMedia.url} alt={previewMedia.label} className="w-full max-h-[70vh] object-contain" />
+              )}
+              {previewMedia.kind === "document" && (
+                <iframe src={previewMedia.url} className="w-full h-[70vh] bg-white" title={previewMedia.label} />
+              )}
+            </div>
+          )}
+          {previewMedia?.url && (
+            <div className="flex items-center justify-between gap-2 pt-2">
+              <a
+                href={previewMedia.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-muted-foreground hover:text-primary truncate"
+              >
+                Abrir em nova aba
+              </a>
+              <Button size="sm" variant="outline" onClick={() => setPreviewMedia(null)}>
+                Fechar
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
