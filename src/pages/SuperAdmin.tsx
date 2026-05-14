@@ -25,6 +25,7 @@ import { PlatformFacebookCard } from "@/components/admin/super/PlatformFacebookC
 import { PlatformPnLCard } from "@/components/admin/super/PlatformPnLCard";
 import { NetworkHealthPanel } from "@/components/admin/super/NetworkHealthPanel";
 import { AdTemplatesPanel } from "@/components/superadmin/AdTemplatesPanel";
+import { AILearningHealthPanel } from "@/components/admin/super/AILearningHealthPanel";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { logAdminAction } from "@/hooks/useAdminAudit";
 
@@ -240,6 +241,7 @@ const SuperAdmin = () => {
     { id: "worker" as const, label: "Worker Phases", icon: Activity },
     { id: "auditoria" as const, label: "Auditoria", icon: Shield },
     { id: "ia" as const, label: "IA / Conhecimento", icon: Brain },
+    { id: "ia_aprendendo" as const, label: "IA Aprendendo", icon: Sparkles },
     { id: "plataforma_fb" as const, label: "Plataforma FB", icon: Megaphone },
     { id: "templates_ads" as const, label: "Templates de Anúncio", icon: Sparkles },
     { id: "financeiro" as const, label: "Financeiro / P&L", icon: BarChart3 },
@@ -505,6 +507,7 @@ const SuperAdmin = () => {
        {activeTab === "templates_ads" && <AdTemplatesPanel />}
         {activeTab === "financeiro" && <PlatformPnLCard />}
         {activeTab === "saude_rede" && <NetworkHealthPanel />}
+        {activeTab === "ia_aprendendo" && <AILearningHealthPanel />}
       </main>
     </div>
   );
