@@ -41,6 +41,7 @@ type QA = {
   medias: Media[];
 };
 type Slot = { slot_key: string; label: string; video_url: string | null };
+type LibraryVideo = { id: string; label: string; url: string | null };
 
 export default function FlowBuilder() {
   const navigate = useNavigate();
@@ -48,6 +49,7 @@ export default function FlowBuilder() {
   const [flow, setFlow] = useState<Flow | null>(null);
   const [qas, setQas] = useState<QA[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
+  const [availableVideos, setAvailableVideos] = useState<LibraryVideo[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -56,13 +58,24 @@ export default function FlowBuilder() {
 
   const loadAll = useCallback(async (uid: string) => {
     setLoading(true);
-    // Slots disponíveis
-    const { data: slotsRow } = await supabase
-      .from("ai_agent_slots")
-      .select("slot_key, label, video_url")
-      .eq("active", true)
-      .order("position");
+    // Slots e vídeos disponíveis
+    const [{ data: slotsRow }, { data: videoRows }] = await Promise.all([
+      supabase
+        .from("ai_agent_slots")
+        .select("slot_key, label, video_url")
+        .eq("active", true)
+        .order("position"),
+      supabase
+        .from("ai_media_library")
+        .select("id, label, url")
+        .eq("kind", "video")
+        .eq("active", true)
+        .not("url", "is", null)
+        .order("priority", { ascending: false })
+        .order("created_at", { ascending: false }),
+    ]);
     setSlots((slotsRow as Slot[]) || []);
+    setAvailableVideos(((videoRows as LibraryVideo[]) || []).filter((video) => !!video.url));
 
     // Fluxo ativo (ou pega o primeiro / cria um)
     let { data: flowRows } = await supabase
@@ -265,6 +278,7 @@ export default function FlowBuilder() {
             <QACard
               qa={opening}
               slots={slots}
+                availableVideos={availableVideos}
               isFixed
               fixedLabel="Abertura (primeira mensagem)"
               onUpdate={(p) => updateQA(opening.id, p)}
@@ -293,6 +307,7 @@ export default function FlowBuilder() {
                 key={qa.id}
                 qa={qa}
                 slots={slots}
+                availableVideos={availableVideos}
                 onMoveUp={i > 0 ? () => moveQA(qa.id, -1) : undefined}
                 onMoveDown={i < middle.length - 1 ? () => moveQA(qa.id, 1) : undefined}
                 onUpdate={(p) => updateQA(qa.id, p)}
@@ -319,6 +334,7 @@ export default function FlowBuilder() {
             <QACard
               qa={closing}
               slots={slots}
+              availableVideos={availableVideos}
               isFixed
               fixedLabel="Encerramento — envia o link de cadastro"
               onUpdate={(p) => updateQA(closing.id, p)}
