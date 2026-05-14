@@ -249,13 +249,42 @@ FUNIL DE VENDAS (5 fases)
 3. PITCH — Com o valor da conta em mãos, faça o cálculo CONCRETO:
    "Uma conta de R$ X representa em torno de R$ Y de economia por mês com a iGreen, R$ Z por ano. Tudo isso sem instalar nada e mantendo a mesma [distribuidora]."
    Mencione Conexão Club como bônus se o lead demonstrar interesse.
-4. OBJEÇÃO / DÚVIDA — REGRA: se o lead pergunta "como funciona", "é golpe", "é seguro", "tem custo", "é confiável", e o vídeo "1. Conexão Green – Apresentação (1min)" ainda NÃO foi enviado a este lead, **prefira send_media com esse vídeo** (caption curta de 1 frase) em vez de explicar por texto. O vídeo de 1 min responde 80% das dúvidas. Só responda por texto se o vídeo já foi enviado ou a dúvida é muito específica. Respostas firmes:
-   • "É golpe?" → vídeo + 1 frase: "É regulamentada pela ANEEL desde 2017, mais de 600 mil clientes."
+4. OBJEÇÃO / DÚVIDA — siga a MATRIZ DE MÍDIA abaixo. Respostas firmes:
+   • "É golpe?" → vídeo PRINCIPAL + 1 frase: "É regulamentada pela ANEEL desde 2017, mais de 600 mil clientes."
    • "Tem fidelidade?" → "Não há. Pode encerrar quando quiser, sem multa."
    • "Vou trocar de empresa?" → "Não. A energia continua sendo da [distribuidora]."
-   • "Tem custo?" → vídeo + "Nenhum. Sem instalação, sem taxa, sem mensalidade."
+   • "Tem custo?" → vídeo PRINCIPAL + "Nenhum. Sem instalação, sem taxa, sem mensalidade."
    • "Vou pensar" → não pressione; pergunte o que especificamente o faz hesitar.
 5. FECHAMENTO — Sinal de compra ("quero", "como faço", "vamos lá") → use advance_to_closing pedindo a foto da conta de luz. Se a conta JÁ foi recebida (verifique [Contexto]), NÃO peça de novo — confirme os dados extraídos.
+
+═══════════════════════════════════════════
+MATRIZ DE MÍDIA — QUANDO ENVIAR CADA TIPO (LEI)
+═══════════════════════════════════════════
+Esta matriz é DETERMINÍSTICA. Aplique a TODA decisão de send_media. Em dúvida → send_text.
+
+VÍDEO (send_media kind=video) — APENAS se TODAS verdadeiras:
+  a) o lead fez DÚVIDA GERAL ("como funciona", "é golpe", "é seguro", "é confiável", "tem custo", "explica melhor") OU pediu explicitamente "manda um vídeo".
+  b) [CADÊNCIA] não indica cooldown de vídeo (sem vídeo nas últimas 6h).
+  c) existe vídeo marcado [PRINCIPAL-VÍDEO] em [MÍDIAS DISPONÍVEIS].
+  → use SEMPRE o vídeo [PRINCIPAL-VÍDEO]. Outros vídeos (benefícios, club, depoimento) APENAS se o lead disser explicitamente "ainda não entendi" DEPOIS de já ter visto o principal.
+  PROIBIDO: mandar vídeo de "benefícios"/"club"/"depoimento" sem o lead pedir, ou antes do vídeo principal.
+
+ÁUDIO (send_media kind=audio) — envie quando:
+  a) [CADÊNCIA] mostra "Última msg do lead: audio" (espelho — responda em áudio também), OU
+  b) o lead pediu "manda áudio", "prefiro áudio", "explica por voz", "fala em áudio", OU
+  c) é a 1ª resposta a uma OBJEÇÃO EMOCIONAL ("tô com medo", "já me enganaram", "não confio", "minha mãe disse", "tenho receio") E existe áudio [PRINCIPAL-ÁUDIO] disponível.
+  Use SEMPRE o áudio marcado [PRINCIPAL-ÁUDIO]. Nunca prometa áudio se não houver na lista. Nunca mande áudio depois que a conta foi recebida.
+
+IMAGEM (send_media kind=image) — apenas se o lead pedir comprovação visual (print, tabela, exemplo de fatura).
+
+TEXTO (send_text) — DEFAULT. Use sempre que NENHUMA regra de mídia acima dispare. Em qualquer dúvida, prefira texto.
+
+REGRAS DURAS (violar = falha grave):
+  - NUNCA 2 mídias seguidas. [CADÊNCIA] já bloqueia, mas não force.
+  - NUNCA mídia depois de "CONTA JÁ RECEBIDA E ANALISADA".
+  - NUNCA cite media_id que não está em [MÍDIAS DISPONÍVEIS].
+  - Se a mídia [PRINCIPAL] do tipo já foi enviada (não aparece mais), responda por TEXTO curto — NÃO substitua por outra mídia do mesmo tipo "para preencher".
+  - NUNCA prometa "vou te mandar áudio/vídeo agora" se não está acionando send_media nesta MESMA decisão com media_id válido.
 
 ═══════════════════════════════════════════
 PÓS-CONTA → HANDOFF PARA OPERADOR (CRÍTICO)
@@ -599,8 +628,13 @@ Deno.serve(async (req) => {
       ? `\n[MÍDIAS DISPONÍVEIS para fase ${phase}]\n` +
         freshMedia
           .map(
-            (m: any, i: number) =>
-              `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""}${m.is_primary_explainer ? " [PRINCIPAL — use este vídeo SEMPRE que o lead pedir 'como funciona' ou tiver dúvida geral; outros vídeos só se ele disser que ainda não entendeu]" : ""}`,
+            (m: any, i: number) => {
+              const kindUpper = String(m.kind || "").toUpperCase();
+              const primaryTag = m.is_primary_explainer
+                ? ` [PRINCIPAL-${kindUpper} — use SEMPRE este ${m.kind} quando a MATRIZ DE MÍDIA mandar enviar ${m.kind}; outros do mesmo tipo só se o lead disser que ainda não entendeu]`
+                : "";
+              return `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""}${primaryTag}`;
+            },
           )
           .join("\n") +
         `\nUse send_media APENAS com um desses media_id. ${
@@ -913,6 +947,46 @@ Deno.serve(async (req) => {
         next_phase: phase === "abertura" ? "descoberta" : phase,
         reasoning: "auto_intro_video: dúvida/objeção detectada (passou nos gates de cooldown e turnos)",
       };
+    }
+
+    // ---- OVERRIDE 1b: lead mandou ÁUDIO → espelhar com áudio principal se IA escolheu texto ----
+    const primaryAudio = freshMedia.find(
+      (m: any) => m.kind === "audio" && m.is_primary_explainer === true,
+    );
+    const canAutoSendAudio =
+      !billAlreadyReceivedEarly &&
+      lastInboundKind === "audio" &&
+      recentMediaCount < 1 &&
+      tool === "send_text" &&
+      !!primaryAudio;
+    if (canAutoSendAudio) {
+      tool = "send_media";
+      args = {
+        media_id: primaryAudio.id,
+        caption: "",
+        next_phase: phase,
+        reasoning: "auto_primary_audio: lead respondeu em áudio; espelhando com áudio principal",
+      };
+    }
+
+    // ---- OVERRIDE 1c: bloqueia vídeo NÃO-principal se o principal ainda não foi enviado ----
+    // Evita que a IA mande "vídeo de benefícios/club" antes do vídeo de apresentação.
+    if (tool === "send_media") {
+      const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
+      const primaryVideoFresh = freshMedia.find(
+        (m: any) => m.kind === "video" && m.is_primary_explainer === true,
+      );
+      if (
+        picked && picked.kind === "video" && !picked.is_primary_explainer &&
+        primaryVideoFresh && !videoCooldownActive
+      ) {
+        args = {
+          ...args,
+          media_id: primaryVideoFresh.id,
+          caption: args.caption || "Te mando primeiro o vídeo de 1 minuto que explica como funciona — depois respondo o resto.",
+          reasoning: (args.reasoning || "") + " [substituído por PRINCIPAL-VÍDEO: lead ainda não viu o de apresentação]",
+        };
+      }
     }
 
     // ---- OVERRIDE 2: bloqueia ask_for_name se foto da conta foi pedida/recebida ----

@@ -274,11 +274,13 @@ export function MediaColumn({ userId }: { userId: string }) {
   async function togglePrimary(m: Media) {
     const next = !m.is_primary_explainer;
     if (next) {
-      // Desmarca qualquer outro vídeo principal deste consultor (índice único exige isso).
+      // Desmarca apenas a mídia principal do MESMO tipo (vídeo/áudio/imagem).
+      // Cada consultor pode ter 1 principal por tipo (índice único por kind).
       await supabase
         .from("ai_media_library")
         .update({ is_primary_explainer: false } as any)
         .eq("consultant_id", userId)
+        .eq("kind", m.kind)
         .eq("is_primary_explainer", true);
     }
     const { error } = await supabase
@@ -286,14 +288,15 @@ export function MediaColumn({ userId }: { userId: string }) {
       .update({ is_primary_explainer: next } as any)
       .eq("id", m.id);
     if (error) { toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
+    const kindLabel = m.kind === "video" ? "Vídeo" : m.kind === "audio" ? "Áudio" : "Imagem";
     toast({
-      title: next ? "⭐ Vídeo principal definido" : "Vídeo principal removido",
-      description: next ? `"${m.label}" será enviado primeiro quando o lead pedir explicação.` : undefined,
+      title: next ? `⭐ ${kindLabel} principal definido` : `${kindLabel} principal removido`,
+      description: next ? `"${m.label}" será priorizado pela IA quando esse tipo for o ideal.` : undefined,
     });
     setItems((prev) =>
       prev.map((x) => {
         if (x.id === m.id) return { ...x, is_primary_explainer: next };
-        if (next && x.consultant_id === userId) return { ...x, is_primary_explainer: false };
+        if (next && x.consultant_id === userId && x.kind === m.kind) return { ...x, is_primary_explainer: false };
         return x;
       })
     );
@@ -524,7 +527,7 @@ export function MediaColumn({ userId }: { userId: string }) {
                 )}
                 {view === "mine" ? (
                   <>
-                    {m.kind === "video" && (
+                    {(m.kind === "video" || m.kind === "audio" || m.kind === "image") && (
                       <button
                         onClick={() => togglePrimary(m)}
                         className={`p-1.5 rounded transition-colors shrink-0 ${
@@ -533,9 +536,9 @@ export function MediaColumn({ userId }: { userId: string }) {
                             : "text-muted-foreground hover:text-amber-400"
                         }`}
                         title={m.is_primary_explainer
-                          ? "Vídeo principal — clique para remover"
-                          : "Marcar como vídeo principal de explicação"}
-                        aria-label="Vídeo principal"
+                          ? `${m.kind === "video" ? "Vídeo" : m.kind === "audio" ? "Áudio" : "Imagem"} principal — clique para remover`
+                          : `Marcar como ${m.kind === "video" ? "vídeo" : m.kind === "audio" ? "áudio" : "imagem"} principal (1 por tipo)`}
+                        aria-label="Mídia principal"
                       >
                         <Star className={`w-4 h-4 ${m.is_primary_explainer ? "fill-current" : ""}`} />
                       </button>
