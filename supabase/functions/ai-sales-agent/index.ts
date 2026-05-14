@@ -410,6 +410,15 @@ async function loadContext(supabase: any, customerId: string) {
     .limit(1)
     .maybeSingle();
 
+  // Memória longa — fatos persistentes do lead (top 15 por confiança/recência)
+  const { data: memoryFacts } = await supabase
+    .from("customer_memory_active")
+    .select("category, key, value, confidence, last_confirmed_at, source")
+    .eq("customer_id", customerId)
+    .order("confidence", { ascending: false })
+    .order("last_confirmed_at", { ascending: false })
+    .limit(15);
+
   return {
     customer,
     history: (history || []).reverse(),
@@ -417,6 +426,7 @@ async function loadContext(supabase: any, customerId: string) {
     tone: agentCfg?.tone || "humano, breve, cordial",
     customPrompt: agentCfg?.system_prompt || "",
     summaryFresh,
+    memoryFacts: memoryFacts || [],
   };
 }
 
