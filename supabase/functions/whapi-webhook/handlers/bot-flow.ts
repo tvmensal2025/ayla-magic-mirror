@@ -1270,13 +1270,77 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "confirmando_dados_conta": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
       if (resp === "sim_conta" || resp === "sim" || resp === "s" || resp === "1" || resp === "ok" || resp === "correto" || resp === "✅") {
-        updates.conversation_step = "ask_tipo_documento";
-        const tipoMsg = "✅ Dados da conta confirmados!\n\n📋 Qual documento de identidade você vai enviar?\n\nToque em uma opção:";
-        await sendOptions(remoteJid, tipoMsg, [
+        // Vai para o pitch do Conexão Club ANTES de pedir RG/CNH
+        updates.conversation_step = "pitch_conexao_club";
+        // O case pitch_conexao_club abaixo vai ser disparado via re-entrada,
+        // mas para já enviar a mensagem agora, executamos inline aqui:
+        const first = ((customer as any).name || "").split(/\s+/)[0];
+        const v = first ? `${first}, ` : "";
+        const valor = Number((customer as any).electricity_bill_value || 0);
+        const economiaMsg = valor >= 30
+          ? `Show, ${v.trim().replace(/,$/, "")}! Com R$ ${valor.toFixed(0)} de conta dá pra economizar até *20%* todo mês na sua luz 💚\n\nE tem mais: você ainda entra no nosso *Conexão Club* — até *70% de desconto em farmácia*, mercado, posto e várias lojas parceiras. Minha mãe usa direto kkk`
+          : `Show, ${v}dados confirmados! 💚\n\nE tem mais: você ainda entra no nosso *Conexão Club* — até *20% de desconto na luz* e até *70% de desconto em farmácia*, mercado, posto e várias lojas parceiras.`;
+        try {
+          await sendText(remoteJid, economiaMsg);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id, message_direction: "outbound",
+            message_text: economiaMsg, message_type: "text",
+            conversation_step: "pitch_conexao_club",
+          });
+        } catch (e) { console.warn("[pitch] texto inicial falhou:", (e as any)?.message); }
+
+        // Busca o vídeo do Conexão Club: personal → público
+        let clubUrl: string | null = null;
+        let clubDur: number | null = null;
+        try {
+          const { data: personal } = await supabase
+            .from("ai_media_library")
+            .select("url, duration_seconds")
+            .eq("consultant_id", customer.consultant_id)
+            .eq("slot_key", "conexao_club")
+            .eq("active", true)
+            .eq("is_draft", false)
+            .maybeSingle();
+          if (personal?.url) { clubUrl = personal.url; clubDur = Number((personal as any).duration_seconds || 0) || null; }
+          if (!clubUrl) {
+            const { data: pub } = await supabase
+              .from("ai_media_library")
+              .select("url, duration_seconds")
+              .eq("is_public", true)
+              .eq("slot_key", "conexao_club")
+              .eq("active", true)
+              .maybeSingle();
+            if (pub?.url) { clubUrl = pub.url; clubDur = Number((pub as any).duration_seconds || 0) || null; }
+          }
+        } catch (e) { console.warn("[pitch] busca slot conexao_club falhou:", (e as any)?.message); }
+
+        if (clubUrl) {
+          try {
+            await sendMedia(remoteJid, clubUrl, "", "video");
+            await supabase.from("conversations").insert({
+              customer_id: customer.id, message_direction: "outbound",
+              message_text: `[video:conexao_club]`, message_type: "video",
+              conversation_step: "pitch_conexao_club",
+            });
+            // Espera o vídeo terminar (proporcional) antes do CTA final
+            await sleepForMedia("video", clubDur);
+          } catch (e) { console.warn("[pitch] envio do vídeo conexao_club falhou:", (e as any)?.message); }
+        }
+
+        // CTA final + botões do tipo de documento
+        const ctaMsg = `Bora finalizar seu cadastro? Pra travar tudo eu preciso só de uma foto do seu *RG ou CNH* 📄`;
+        await sendOptions(remoteJid, ctaMsg, [
           { id: "tipo_rg_novo", title: "📄 RG Novo" },
           { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
           { id: "tipo_cnh", title: "🪪 CNH" },
         ]);
+        await supabase.from("conversations").insert({
+          customer_id: customer.id, message_direction: "outbound",
+          message_text: ctaMsg, message_type: "text",
+          conversation_step: "ask_tipo_documento",
+        });
+        updates.conversation_step = "ask_tipo_documento";
+        (updates as any).__inline_sent = true;
         reply = "";
       } else if (resp === "nao_conta" || resp === "nao" || resp === "não" || resp === "n" || resp === "2" || resp === "errado" || resp === "❌") {
         updates.conversation_step = "aguardando_conta";
@@ -1292,6 +1356,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         ]);
         if (!sent) reply = "Digite *SIM*, *NÃO* ou *EDITAR*:";
       }
+      break;
+    }
+
+    // ─── 3a. PITCH CONEXÃO CLUB (fallback caso lead reentre nesse step) ─────────
+    case "pitch_conexao_club": {
+      // Se o lead voltar a falar nesse estado, joga direto pros botões do doc.
+      const ctaMsg = `Pra finalizar, me manda a foto do seu *RG ou CNH* 📄`;
+      await sendOptions(remoteJid, ctaMsg, [
+        { id: "tipo_rg_novo", title: "📄 RG Novo" },
+        { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
+        { id: "tipo_cnh", title: "🪪 CNH" },
+      ]);
+      updates.conversation_step = "ask_tipo_documento";
+      (updates as any).__inline_sent = true;
+      reply = "";
       break;
     }
 
