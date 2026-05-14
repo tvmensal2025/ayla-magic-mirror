@@ -184,8 +184,6 @@ Deno.serve(async (req) => {
       .select("slot_key, label, trigger_hint, fallback_text, min_interval_minutes, is_testing, video_url, video_label")
       .eq("active", true)
       .order("position");
-      .eq("active", true)
-      .order("position");
     const slots = slotsRaw || [];
     const validSlotKeys = new Set(slots.map((s: any) => s.slot_key));
 
