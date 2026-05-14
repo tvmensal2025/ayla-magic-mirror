@@ -374,23 +374,40 @@ export function MediaColumn({ userId }: { userId: string }) {
 
   return (
     <div className="flex flex-col h-full bg-card border border-border rounded-2xl overflow-hidden">
-      <header className="flex items-center justify-between px-5 py-4 border-b border-border">
-        <div>
-          <h3 className="font-semibold text-foreground">Mídias</h3>
-          <p className="text-xs text-muted-foreground">Arquivos que o agente pode enviar nas conversas</p>
+      <header className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold text-foreground text-sm sm:text-base">Mídias</h3>
+          <div className="flex items-center gap-2 mt-0.5">
+            <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden max-w-[140px]">
+              <div
+                className={`h-full transition-all ${usagePct > 85 ? "bg-red-400" : "bg-primary"}`}
+                style={{ width: `${usagePct}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+              {fmtBytes(usedBytes)} / 100 MB
+            </span>
+          </div>
         </div>
         <Button
           size="sm"
-          onClick={() => inputRef.current?.click()}
+          onClick={() => setUploaderOpen((v) => !v)}
           disabled={uploading}
-          className="gap-1.5"
+          variant={uploaderOpen ? "secondary" : "default"}
+          className="gap-1.5 shrink-0"
         >
-          {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-          Nova
+          {uploading ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : uploaderOpen ? (
+            <ChevronUp className="w-3.5 h-3.5" />
+          ) : (
+            <Plus className="w-3.5 h-3.5" />
+          )}
+          {uploaderOpen ? "Fechar" : "Enviar"}
         </Button>
       </header>
 
-      <div className="px-5 pt-4">
+      <div className="px-4 sm:px-5 pt-3">
         <div className="inline-flex items-center gap-1 p-1 bg-muted/40 rounded-lg border border-border/60">
           <button
             onClick={() => setView("mine")}
@@ -411,50 +428,37 @@ export function MediaColumn({ userId }: { userId: string }) {
         </div>
       </div>
 
-      <div className="px-5 pt-4">
-        <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            uploadFiles(e.dataTransfer.files);
-          }}
-          onClick={() => inputRef.current?.click()}
-          className={`flex flex-col items-center justify-center gap-2 px-4 py-8 rounded-xl border-2 border-dashed cursor-pointer transition-colors ${
-            dragOver ? "border-primary bg-primary/5" : "border-border bg-muted/20 hover:border-primary/40 hover:bg-muted/30"
-          }`}
-        >
-          <UploadCloud className="w-7 h-7 text-muted-foreground" />
-          <p className="text-sm text-foreground font-medium">Arraste ou clique</p>
-          <p className="text-xs text-muted-foreground">PNG, JPG, PDF, MP3, MP4 — máx. 50 MB</p>
-        </div>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(e) => e.target.files && uploadFiles(e.target.files)}
-        />
-      </div>
-
-      <div className="px-5 pt-5">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-medium text-foreground">Armazenamento</span>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {fmtBytes(usedBytes)} / 100 MB
-          </span>
-        </div>
-        <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+      {uploaderOpen && (
+        <div className="px-4 sm:px-5 pt-3">
           <div
-            className={`h-full transition-all ${usagePct > 85 ? "bg-red-400" : "bg-primary"}`}
-            style={{ width: `${usagePct}%` }}
-          />
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              uploadFiles(e.dataTransfer.files);
+            }}
+            onClick={() => inputRef.current?.click()}
+            className={`flex flex-col items-center justify-center gap-1.5 px-4 py-5 rounded-xl border-2 border-dashed cursor-pointer transition-colors ${
+              dragOver ? "border-primary bg-primary/5" : "border-border bg-muted/20 hover:border-primary/40 hover:bg-muted/30"
+            }`}
+          >
+            <UploadCloud className="w-6 h-6 text-muted-foreground" />
+            <p className="text-sm text-foreground font-medium">Arraste ou clique</p>
+            <p className="text-[11px] text-muted-foreground">PNG, JPG, PDF, MP3, MP4 — máx. 50 MB</p>
+          </div>
         </div>
-      </div>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => e.target.files && uploadFiles(e.target.files)}
+      />
 
       <div className="flex-1 overflow-y-auto px-3 pt-5 pb-4">
         {loading ? (
