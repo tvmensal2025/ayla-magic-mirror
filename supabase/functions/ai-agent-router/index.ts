@@ -470,6 +470,21 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
                     .eq("id", chosen.id);
                 }
               }
+              // Vídeo do slot — enviado logo após o áudio
+              if (slot.video_url) {
+                try {
+                  await sleep(randInt(typingMin, typingMax));
+                  await sender.sendMedia(remote_jid, slot.video_url, slot.video_label || "", "video");
+                  await supabase.from("conversations").insert({
+                    customer_id, message_direction: "outbound",
+                    message_text: `[video:${slotKey}] ${slot.video_label || ""}`.trim(),
+                    message_type: "video",
+                    conversation_step: updates.conversation_step || stepBefore,
+                  });
+                } catch (e) {
+                  console.error("slot video send error:", e);
+                }
+              }
             } else if (slot.fallback_text) {
               await sender.sendText(remote_jid, slot.fallback_text);
               dispatchedSlot = { slot_key: slotKey, variant: "fallback_text", media_id: null };
