@@ -1,66 +1,86 @@
-## Diagnóstico
+## Objetivo
 
-Achei a causa raiz dos dois problemas que você relatou (texto "olá tudo bem" duplicado depois do áudio + cadastro que não chega ao final):
+Criar uma página dedicada (`/admin/fluxos`) para montar visualmente o fluxo de conversa do bot do início ao fim — desde o áudio de boas-vindas até o cadastro final. Hoje a configuração é fragmentada em "slots" soltos (boas_vindas, como_funciona, fazenda_solar, chamada_cadastro…) sem ordem explícita. O construtor vai amarrar tudo em uma sequência clara, fácil de editar, e permitir marcar o fluxo como "100% obrigatório" (o bot segue exatamente aquela ordem).
 
-**Bug fatal em `supabase/functions/ai-agent-router/index.ts` (linhas 182-188):** a edição anterior duplicou a query do slot, deixando código sintaticamente inválido:
+## Como está hoje
 
-```ts
-.from("ai_agent_slots")
-.select("...video_url, video_label")
-.eq("active", true)
-.order("position");
-  .eq("active", true)        // <-- linhas órfãs, quebram o parse
-  .order("position");
+- Tabela `ai_agent_slots` com 8 slots independentes (boas_vindas, confirma_recebimento, como_funciona, fazenda_solar, objecao_preco, objecao_distribuidora, prova_social, chamada_cadastro), cada um com áudio/vídeo/texto e `position` (mas sem agrupamento por fluxo).
+- O LLM em `ai-agent-router` escolhe o slot livremente conforme contexto; só `boas_vindas` é forçado no primeiro contato.
+- Cadastro acontece fora do fluxo (página `/cadastro/:licenca`), sem estar representado como passo do bot.
+
+## Como vai ficar
+
+Nova página com:
+
+1. **Lista de fluxos** (sidebar esquerda) — ex.: "Fluxo Padrão", "Fluxo Curioso", "Fluxo Direto". Botão "+ Novo fluxo".
+2. **Editor do fluxo selecionado** (centro) — sequência vertical de cards (passos), reordenável por drag-and-drop.
+3. Cada **passo** tem:
+   - Tipo: `audio_slot` (reutiliza um slot existente) | `mensagem_texto` | `pergunta` (espera resposta do lead) | `pedir_midia` (foto da conta / documento) | `cadastro` (envia link `/cadastro/:licenca`).
+   - Quando avançar: "após resposta do lead" | "após X segundos" | "após confirmação".
+   - Condição opcional (ex.: "se lead disser 'como funciona'") — para ramificações simples.
+4. **Switch "Seguir 100% este fluxo"** no topo do fluxo. Quando ligado, o bot ignora a escolha livre do LLM e segue passo a passo. Quando desligado, o LLM escolhe (comportamento atual).
+5. **Botão "Ativar fluxo"** — só um fluxo fica ativo por tenant por vez.
+6. **Visualização "Antes → Depois"** no topo da primeira vez: coluna esquerda mostra os 8 slots soltos atuais, coluna direita mostra a proposta sequencial sugerida (boas_vindas → pergunta_nome → pergunta_valor_conta → como_funciona → fazenda_solar → prova_social → pedir_conta_luz → confirma_recebimento → pedir_documento → chamada_cadastro → cadastro). Botão "Aplicar como meu fluxo".
+
+### Fluxo padrão pré-montado (sugerido)
+
+```text
+1. Áudio: boas_vindas                    (espera resposta = nome)
+2. Texto: "{nome}, qual o valor médio da sua conta de luz?"  (espera resposta)
+3. Áudio: como_funciona                  (auto-avança)
+4. Áudio: fazenda_solar                  (auto-avança)
+5. Áudio: prova_social                   (auto-avança)
+6. Pedir mídia: foto da conta de luz     (espera upload)
+7. Áudio: confirma_recebimento           (auto-avança)
+8. Pedir mídia: documento com foto       (espera upload)
+9. Áudio: chamada_cadastro               (auto-avança)
+10. Cadastro: envia link /cadastro/{licenca} + acompanha conclusão
 ```
-
-Confirmação: `ai-agent-router` **não tem nenhum log de execução** nas últimas horas (nem boot, nem shutdown). Ou seja, ele falha na primeira chamada e o webhook cai no fallback genérico. Isso explica:
-
-1. **"Olá, tudo bem?" depois do áudio** — o webhook ou outro caminho legado dispara a saudação padrão porque o router morreu antes de atualizar o `conversation_step` para fora de `welcome`.
-2. **Cadastro que não conclui** — sem o router, ninguém move o cliente entre `coleta_conta → coleta_doc → cadastro_portal`, e o handoff/finalização nunca acontece.
-
-## Plano de correção
-
-### 1. Consertar o `ai-agent-router` (1 edição mínima)
-Remover as duas linhas duplicadas (187-188) para o select compilar:
-```ts
-const { data: slotsRaw } = await supabase
-  .from("ai_agent_slots")
-  .select("slot_key, label, trigger_hint, fallback_text, min_interval_minutes, is_testing, video_url, video_label")
-  .eq("active", true)
-  .order("position");
-```
-
-### 2. Evitar o "olá tudo bem" duplicado quando o áudio do welcome dispara
-No mesmo arquivo, depois que o slot é despachado com sucesso (`dispatchedSlot` setado):
-- **Suprimir `decision.reply_text`** (zerar antes do envio do texto). O áudio da Camila já cumprimenta e pede o nome — não faz sentido o LLM mandar "oii, qual sua cidade?" logo depois.
-- **Forçar `updates.conversation_step = "qualificacao"`** quando o slot disparado for o de boas-vindas e o step atual ainda for `welcome`. Assim a próxima mensagem do lead já entra no funil certo e nunca mais cai no fallback de saudação.
-
-### 3. Garantir que o slot de welcome não toque duas vezes
-- Confirmar que o slot de welcome tem `min_interval_minutes >= 1440` (1 dia) no banco. Se estiver 0/null, o LLM pode reescolher e o áudio toca de novo.
-- Adicionar guarda extra: se já existe `ai_slot_dispatch_log` com `dispatch_status='sent'` para esse `customer_id` + `slot_key='welcome'` em qualquer tempo, bloquear novo envio do mesmo slot (idempotência por cliente).
-
-### 4. Avançar o cadastro até o fim
-Hoje o router só avança step quando o LLM devolve `next_step` diferente. Vou adicionar regras determinísticas para não depender só do LLM:
-- Se o lead enviou imagem/documento e step é `welcome`/`qualificacao`/`apresentacao` → mover para `coleta_conta` automaticamente.
-- Se já existe `customer.electricity_bill_value` + `customer.cpf` + documento → mover para `cadastro_portal` e disparar o `submit-lead` do portal worker (mesmo padrão que o `evolution-webhook` já usa no fluxo manual, conforme `IMPLEMENTACAO_COMPLETA_EVOLUTION.md`).
-- Logar cada transição em `ai_agent_logs` com motivo (`auto_progress: bill_received` etc.) pra ficar auditável.
-
-### 5. Validação
-- Rodar lint do edge function pra confirmar que compila.
-- Testar com `supabase--curl_edge_functions` mandando um payload simulado de "oi" e checar nos logs:
-  - boot OK
-  - slot welcome despachado UMA vez
-  - reply_text vazio
-  - step avança
-- Mandar uma segunda mensagem ("a conta vem uns 300 reais") e confirmar que NÃO há novo "olá tudo bem".
-- Simular envio de foto e confirmar que step move para `coleta_conta` e finalmente dispara o portal worker.
 
 ## Detalhes técnicos
 
-Arquivos tocados:
-- `supabase/functions/ai-agent-router/index.ts` — fix de sintaxe + supressão de reply após slot + auto-progresso de step + idempotência do slot welcome.
-- Migration nova (se necessário): `UPDATE ai_agent_slots SET min_interval_minutes = GREATEST(min_interval_minutes, 1440) WHERE slot_key = 'welcome';`
+### Banco
 
-Sem mudanças de UI. Sem mudanças nos handlers do `evolution-webhook` ou `whapi-webhook` — eles continuam apenas chamando o router.
+Migração nova:
 
-Quer que eu já implemente assim ou prefere ajustar algum ponto antes (ex.: outro intervalo mínimo pro slot welcome, ou desligar o auto-progresso determinístico)?
+- `bot_flows` — `id`, `tenant_id` (consultant), `name`, `is_active boolean`, `strict_mode boolean` (o "100%"), `created_at`.
+- `bot_flow_steps` — `id`, `flow_id`, `position int`, `step_type` (`audio_slot`|`message`|`question`|`media_request`|`cadastro`), `slot_key` (FK opcional para `ai_agent_slots`), `message_text`, `wait_for` (`reply`|`media`|`timer`|`none`), `wait_seconds int`, `condition_text`, `next_step_id` (opcional para ramificação), `created_at`.
+- RLS: tenant lê/escreve seus próprios fluxos; super-admin lê tudo.
+- Índice em (`tenant_id`, `is_active`).
+
+### Frontend
+
+- Nova rota `/admin/fluxos` em `App.tsx`, link no menu do `Admin.tsx`.
+- Página `src/pages/FlowBuilder.tsx` com:
+  - `FlowList` (sidebar) — lista, criar, duplicar, deletar.
+  - `FlowEditor` — header (nome editável, switch strict, botão Ativar/Salvar), `StepList` com `@dnd-kit/sortable` para reordenar.
+  - `StepCard` — editor inline por tipo (select de slot, textarea de mensagem, etc.).
+  - `BeforeAfterDiff` — modal/aba mostrando estado atual vs. fluxo sugerido, com botão "Aplicar".
+- Hook `useBotFlows(tenantId)` para CRUD + cache.
+- Reaproveita `ai_agent_slots` no select de `audio_slot`.
+
+### Backend (edge function)
+
+- `ai-agent-router/index.ts`: no início, buscar fluxo ativo do tenant. Se existir e `strict_mode=true`, calcular passo atual a partir de `customer.conversation_step` (já existe coluna), executar exatamente aquele step e avançar. Se `strict_mode=false`, manter LLM livre mas usar a ordem do fluxo como dica de prioridade.
+- Novo helper `getCurrentFlowStep(customer, flow)` que devolve `{ step, isLast }`.
+- Quando step = `cadastro`, enviar link personalizado e marcar `customer.cadastro_link_sent_at`.
+
+### Validações
+
+- Não permitir ativar dois fluxos ao mesmo tempo (constraint parcial unique em `is_active where is_active=true`).
+- Salvar com debounce; toast de confirmação.
+- Botão "Testar fluxo" que abre uma simulação textual passo a passo (sem disparar WhatsApp).
+
+## Entregáveis
+
+1. Migração com as duas tabelas + RLS.
+2. Página `/admin/fluxos` totalmente funcional (CRUD, drag-and-drop, strict toggle, ativar).
+3. Fluxo padrão pré-populado para tenants existentes (seed na migração).
+4. Atualização do `ai-agent-router` para respeitar fluxo ativo + strict_mode.
+5. Link no menu admin.
+
+## Fora de escopo (próxima iteração)
+
+- Ramificações condicionais visuais (if/else gráfico) — por ora só `condition_text` em texto livre.
+- A/B testing entre fluxos.
+- Importar/exportar fluxo em JSON.
