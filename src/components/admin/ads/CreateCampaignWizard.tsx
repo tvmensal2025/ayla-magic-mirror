@@ -1149,14 +1149,28 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
                   <div className="text-muted-foreground">📍 {cities.length} cidade(s) — {cities.slice(0, 3).map(c => c.name).join(", ")}{cities.length > 3 ? "..." : ""}</div>
                   <div className="text-muted-foreground">🖼️ {totalFiles} foto(s) — {filesByFormat.square.length} quadrada(s), {filesByFormat.vertical.length} vertical(is), {filesByFormat.story.length} story</div>
                   <div className="text-muted-foreground">💰 R$ {budget}/dia × {duration === 0 ? "contínuo" : `${duration} dias`} = <strong className="text-foreground">R$ {duration === 0 ? `${budget * 30}/mês est.` : (budget * duration)}</strong></div>
-                  <div className={consultantPhone ? "text-muted-foreground" : "text-destructive font-semibold"}>
-                    🎯 Mensagens vão para WhatsApp{" "}
+                  <div className={`rounded-md p-2 mt-1 ${consultantPhone ? "bg-primary/10 border border-primary/30" : "bg-destructive/10 border border-destructive/40"}`}>
+                    <div className={consultantPhone ? "text-foreground" : "text-destructive font-semibold"}>
+                      🎯 Click-to-WhatsApp <strong>nativo</strong> (sem link wa.me)
+                    </div>
                     {consultantPhone ? (
-                      <strong className="text-primary">{formatBrPhone(consultantPhone)}</strong>
+                      <>
+                        <div className="text-xs mt-1">
+                          Ao clicar no anúncio, o WhatsApp Business abre direto no número:
+                        </div>
+                        <div className="text-base font-bold text-primary mt-1">
+                          {formatBrPhone(consultantPhone)}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground mt-1">
+                          Esse número precisa estar vinculado à sua Página no Meta Business Suite → WhatsApp → Contas.
+                        </div>
+                      </>
                     ) : phoneLoading ? (
-                      <span>carregando...</span>
+                      <div className="text-xs mt-1">carregando número...</div>
                     ) : (
-                      <span>⚠️ não configurado — adicione seu telefone na aba <strong>Dados</strong> antes de publicar</span>
+                      <div className="text-xs mt-1">
+                        ⚠️ Número não configurado. Adicione seu WhatsApp Business na aba <strong>Dados</strong> antes de publicar.
+                      </div>
                     )}
                   </div>
                 </Card>

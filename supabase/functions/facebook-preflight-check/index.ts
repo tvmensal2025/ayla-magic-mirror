@@ -66,10 +66,24 @@ Deno.serve(async (req) => {
       warnings.push("Não foi possível validar status da conta de anúncios");
     }
 
-    // 4. Validação WABA removida: a campanha usa link wa.me (não Click-to-WhatsApp
-    // nativo), então não exige WhatsApp Business vinculado à Página.
-    // O campo `connected_whatsapp_business_account` retorna erro #100 e gerava
-    // logs falsos de erro. Qualquer número WhatsApp (pessoal ou Business) funciona.
+    // 4. WABA conectada à Página — exigida pelo CTWA NATIVO (destination_type=WHATSAPP).
+    // Não bloqueia (Meta às vezes negocia na entrega), mas avisa pra evitar rejeição.
+    if (conn.page_id && conn.whatsapp_destination_number) {
+      try {
+        const pageWaba = await fbFetch(
+          `/${conn.page_id}?fields=connected_whatsapp_business_account&access_token=${conn.token}`,
+        );
+        if (!pageWaba?.connected_whatsapp_business_account?.id) {
+          warnings.push(
+            "A Página do Facebook não tem WhatsApp Business vinculado. " +
+            "Conecte o número no Meta Business Suite → WhatsApp → Contas, " +
+            "ou o Meta pode rejeitar o anúncio.",
+          );
+        }
+      } catch (_e) {
+        // Token sem permissão pra ler campo — segue sem warning falso.
+      }
+    }
 
     // 5. Pixel vivo (recebeu evento nos últimos 7 dias)?
     if (conn.pixel_id) {
