@@ -274,14 +274,16 @@ Deno.serve(async (req) => {
       try { await sender.sendText(remoteJid, finalReply); } catch (e: any) { console.error("Erro enviar:", e); }
     }
 
-    // ─── Log outbound ──────────────────────────────────────────────────
-    await supabase.from("conversations").insert({
-      customer_id: customer.id,
-      message_direction: "outbound",
-      message_text: finalReply || "[botões enviados]",
-      message_type: "text",
-      conversation_step: updates.conversation_step || stepBefore,
-    });
+    // ─── Log outbound (apenas se houve resposta de texto enviada inline aqui) ─────
+    if (finalReply) {
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "outbound",
+        message_text: finalReply,
+        message_type: "text",
+        conversation_step: updates.conversation_step || stepBefore,
+      });
+    }
 
     return new Response(JSON.stringify({ ok: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
