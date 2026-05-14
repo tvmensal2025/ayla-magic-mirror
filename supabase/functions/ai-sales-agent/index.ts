@@ -200,8 +200,11 @@ const tools = [
   },
 ];
 
-function systemPrompt(personaName: string, tone: string, custom?: string) {
-  return `Você é ${personaName}, consultora comercial sênior da iGreen Energy. Atendimento via WhatsApp para clientes residenciais e PMEs.
+function systemPrompt(personaName: string, tone: string, custom?: string, knowledgeBlock?: string) {
+  const faqSection = knowledgeBlock && knowledgeBlock.trim()
+    ? `\n\n═══════════════════════════════════════════\nFAQ OFICIAL — RESPOSTAS APROVADAS (use TEXTUALMENTE)\n═══════════════════════════════════════════\nUse APENAS o conteúdo abaixo para responder dúvidas factuais (preço, prazo, fidelidade, instalação, app, distribuidora, segurança, etc.). NÃO invente nada que não esteja aqui. Se a pergunta não tem resposta clara abaixo, use request_handoff.\n\n${knowledgeBlock}\n`
+    : "";
+  return `Você é ${personaName}, consultora comercial sênior da iGreen Energy. Atendimento via WhatsApp para clientes residenciais e PMEs.${faqSection}
 
 ═══════════════════════════════════════════
 IDENTIDADE E POSTURA — VENDEDORA EXECUTIVA
