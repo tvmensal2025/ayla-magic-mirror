@@ -743,6 +743,39 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_learned_patterns: {
+        Row: {
+          bad_examples: Json
+          consultant_id: string
+          created_at: string
+          good_examples: Json
+          id: string
+          intent: string
+          sample_count: number
+          updated_at: string
+        }
+        Insert: {
+          bad_examples?: Json
+          consultant_id: string
+          created_at?: string
+          good_examples?: Json
+          id?: string
+          intent: string
+          sample_count?: number
+          updated_at?: string
+        }
+        Update: {
+          bad_examples?: Json
+          consultant_id?: string
+          created_at?: string
+          good_examples?: Json
+          id?: string
+          intent?: string
+          sample_count?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       ai_learning_digest: {
         Row: {
           created_at: string
@@ -1329,6 +1362,7 @@ export type Database = {
           consultant_id: string | null
           conta_pdf_protegida: boolean | null
           conversation_step: string | null
+          conversation_summary: string | null
           cpf: string | null
           created_at: string
           customer_referred_by_consultant_id: string | null
@@ -1393,6 +1427,7 @@ export type Database = {
           senha_pdf: string | null
           status: string
           status_financeiro: string | null
+          summary_updated_at: string | null
           tipo_produto: string
           updated_at: string
         }
@@ -1420,6 +1455,7 @@ export type Database = {
           consultant_id?: string | null
           conta_pdf_protegida?: boolean | null
           conversation_step?: string | null
+          conversation_summary?: string | null
           cpf?: string | null
           created_at?: string
           customer_referred_by_consultant_id?: string | null
@@ -1484,6 +1520,7 @@ export type Database = {
           senha_pdf?: string | null
           status?: string
           status_financeiro?: string | null
+          summary_updated_at?: string | null
           tipo_produto?: string
           updated_at?: string
         }
@@ -1511,6 +1548,7 @@ export type Database = {
           consultant_id?: string | null
           conta_pdf_protegida?: boolean | null
           conversation_step?: string | null
+          conversation_summary?: string | null
           cpf?: string | null
           created_at?: string
           customer_referred_by_consultant_id?: string | null
@@ -1575,6 +1613,7 @@ export type Database = {
           senha_pdf?: string | null
           status?: string
           status_financeiro?: string | null
+          summary_updated_at?: string | null
           tipo_produto?: string
           updated_at?: string
         }
@@ -2768,6 +2807,22 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      v_ai_agent_health: {
+        Row: {
+          avg_latency_ms: number | null
+          consultant_id: string | null
+          day: string | null
+          decisions: number | null
+          handoffs: number | null
+          intent_detected: string | null
+          media_sent: number | null
+          model: string | null
+          phase: string | null
+          selfcheck_blocks: number | null
+          tool_called: string | null
+        }
+        Relationships: []
       }
       whatsapp_instances_public: {
         Row: {
