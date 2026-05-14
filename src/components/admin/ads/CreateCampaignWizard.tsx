@@ -511,6 +511,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
         distribuidora: distribuidoraPrimary || undefined,
         placement_mode: placementMode,
         placements: placementMode === "manual" ? placements : undefined,
+        initial_message: initialMessage.trim() || undefined,
       };
       try {
         await createCampaign(payload);
