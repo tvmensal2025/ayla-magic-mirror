@@ -361,6 +361,7 @@ export default function FlowBuilder() {
 function QACard(props: {
   qa: QA;
   slots: Slot[];
+  availableVideos: LibraryVideo[];
   isFixed?: boolean;
   fixedLabel?: string;
   onMoveUp?: () => void;
@@ -373,7 +374,7 @@ function QACard(props: {
   onUpdateMedia: (m: Media, p: Partial<Media>) => void;
   onRemoveMedia: (m: Media) => void;
 }) {
-  const { qa, slots, isFixed, fixedLabel } = props;
+  const { qa, slots, availableVideos, isFixed, fixedLabel } = props;
   const [phraseInput, setPhraseInput] = useState("");
   const [name, setName] = useState(qa.intent_name);
   const [text, setText] = useState(qa.text_response ?? "");
@@ -436,19 +437,33 @@ function QACard(props: {
             <div key={m.id} className="flex items-center gap-2 p-2 rounded border bg-muted/30">
               <Badge>{i + 1}</Badge>
               <Badge variant="secondary">{m.media_kind === "audio" ? "🎙️ Áudio" : "🎬 Vídeo"}</Badge>
-              <Select
-                value={m.slot_key ?? ""}
-                onValueChange={(v) => props.onUpdateMedia(m, { slot_key: v })}
-              >
-                <SelectTrigger className="flex-1"><SelectValue placeholder="Escolha o slot…" /></SelectTrigger>
-                <SelectContent>
-                  {slots.map((s) => (
-                    <SelectItem key={s.slot_key} value={s.slot_key}>
-                      {s.label} {s.video_url ? "🎬" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {m.media_kind === "video" ? (
+                <Select
+                  value={m.media_id ?? ""}
+                  onValueChange={(v) => props.onUpdateMedia(m, { media_id: v, slot_key: null })}
+                >
+                  <SelectTrigger className="flex-1"><SelectValue placeholder="Escolha o vídeo já enviado…" /></SelectTrigger>
+                  <SelectContent>
+                    {availableVideos.map((video) => (
+                      <SelectItem key={video.id} value={video.id}>{video.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Select
+                  value={m.slot_key ?? ""}
+                  onValueChange={(v) => props.onUpdateMedia(m, { slot_key: v, media_id: null })}
+                >
+                  <SelectTrigger className="flex-1"><SelectValue placeholder="Escolha o áudio…" /></SelectTrigger>
+                  <SelectContent>
+                    {slots.map((s) => (
+                      <SelectItem key={s.slot_key} value={s.slot_key}>
+                        {s.label} {s.video_url ? "🎬" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               <Button size="icon" variant="ghost" onClick={() => props.onRemoveMedia(m)}>
                 <Trash2 className="w-4 h-4 text-destructive" />
               </Button>
