@@ -681,8 +681,11 @@ Deno.serve(async (req) => {
     const hasPriorOutbound = priorOutbound.length > 0;
     const lastAssistantMsg = priorOutbound.slice(-1)[0]?.message_text || null;
 
-    if (tool === "send_text" || tool === "advance_to_closing" || tool === "ask_for_name") {
+    if (tool === "send_text" || tool === "advance_to_closing" || tool === "ask_for_name" || tool === "confirm_and_handoff") {
       args.message = sanitizeHumanMessage(args.message || "", phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
+    }
+    if (tool === "update_lead_field") {
+      args.followup_message = sanitizeHumanMessage(args.followup_message || "", phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
     }
     if (tool === "send_media" && args.caption) {
       args.caption = sanitizeHumanMessage(args.caption, phase, mode === "rescue" ? "" : user_input, firstName, hasPriorOutbound, lastAssistantMsg);
