@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Loader2,
   Plus,
@@ -20,6 +21,8 @@ import {
   User,
   Tag,
   Pencil,
+  Play,
+  Eye,
 } from "lucide-react";
 
 type Kind = "audio" | "video" | "image" | "document" | "text";
