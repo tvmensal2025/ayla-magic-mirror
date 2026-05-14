@@ -299,7 +299,7 @@ REGRAS CRÍTICAS
 - Se [Contexto] indicar "Bill_requested_at recente (<10 min)": NÃO repita o pedido.
 - Se o lead pedir humano explicitamente, request_handoff.
 - Se sumir/"depois eu vejo", schedule_followup (1h, 24h ou 72h).
-- Se ainda não tem nome confiável e o lead já demonstrou interesse, ask_for_name.
+- NUNCA chame ask_for_name. O áudio de boas-vindas já pergunta o nome do lead. Se [Contexto] indicar "Nome: DESCONHECIDO", siga a conversa normalmente — o nome será capturado automaticamente assim que o lead responder.
 - score_delta: +20 sinal de compra/foto • +10 valor revelado • +5 engajamento • -10 objeção forte • -20 desistência.
 
 NÃO INVENTE preços, prazos ou percentuais.
