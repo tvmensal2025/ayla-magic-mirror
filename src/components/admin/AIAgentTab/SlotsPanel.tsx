@@ -182,6 +182,15 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
     toast({ title: "Vídeo removido — clique Salvar para confirmar" });
   }
 
+  function selectExistingVideo(slotKey: string, videoId: string) {
+    const video = availableVideos.find((item) => item.id === videoId);
+    if (!video?.url) return;
+    setSlots((p) => p.map((x) => x.slot_key === slotKey
+      ? { ...x, video_url: video.url, video_storage_path: null, video_label: video.label }
+      : x));
+    toast({ title: "Vídeo selecionado — clique Salvar para confirmar" });
+  }
+
   async function addNewSlot() {
     const rawKey = window.prompt(
       "Identificador da nova pergunta (sem espaços, ex: garantia_contrato):"
