@@ -17,16 +17,20 @@ export function AIAgentTab({ userId }: { userId: string }) {
   const [sub, setSub] = useState<SubTab>("atendimentos");
   const [agenteSub, setAgenteSub] = useState<AgenteSub>("audios");
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [personaName, setPersonaName] = useState<string>("Camila");
   const [savingEnabled, setSavingEnabled] = useState(false);
 
   useEffect(() => {
     (async () => {
       const { data } = await supabase
         .from("ai_agent_config")
-        .select("enabled")
+        .select("enabled, persona_name")
         .eq("consultant_id", userId)
         .maybeSingle();
       setEnabled(data ? !!(data as any).enabled : true);
+      if (data && (data as any).persona_name) {
+        setPersonaName((data as any).persona_name);
+      }
     })();
   }, [userId]);
 
@@ -36,7 +40,7 @@ export function AIAgentTab({ userId }: { userId: string }) {
     const { error } = await supabase
       .from("ai_agent_config")
       .upsert(
-        { consultant_id: userId, enabled: v, persona_name: "Camila" },
+        { consultant_id: userId, enabled: v, persona_name: personaName },
         { onConflict: "consultant_id" },
       );
     setSavingEnabled(false);
@@ -45,6 +49,20 @@ export function AIAgentTab({ userId }: { userId: string }) {
       setEnabled(!v);
     } else {
       toast({ title: v ? "🤖 IA ativada" : "⏸️ IA pausada para seus leads" });
+    }
+  }
+
+  async function savePersonaName() {
+    const { error } = await supabase
+      .from("ai_agent_config")
+      .upsert(
+        { consultant_id: userId, enabled: enabled ?? true, persona_name: personaName },
+        { onConflict: "consultant_id" },
+      );
+    if (error) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "✅ Nome atualizado" });
     }
   }
 
@@ -61,7 +79,19 @@ export function AIAgentTab({ userId }: { userId: string }) {
           <Bot className="w-5 h-5 text-primary" />
         </div>
         <div className="flex-1 min-w-[200px]">
-          <h1 className="text-lg font-bold font-heading text-foreground">Atendente IA — Camila</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-bold font-heading text-foreground">Atendente IA — </h1>
+            <input
+              type="text"
+              value={personaName}
+              onChange={(e) => setPersonaName(e.target.value)}
+              onBlur={savePersonaName}
+              onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+              className="text-lg font-bold font-heading text-foreground bg-transparent border-b border-transparent hover:border-border focus:border-primary focus:outline-none px-1 -mx-1 w-32"
+              maxLength={20}
+              title="Clique para renomear (só você vê esse nome)"
+            />
+          </div>
           <p className="text-xs text-muted-foreground">
             Atendimento humanizado 24/7. Quando você assumir, ela pausa automaticamente.
           </p>
@@ -106,7 +136,7 @@ export function AIAgentTab({ userId }: { userId: string }) {
           <div className="flex flex-col h-full gap-3">
             <div className="flex gap-1 flex-wrap">
               {[
-                { id: "audios" as const, label: "Áudios da Camila", icon: Mic },
+                { id: "audios" as const, label: `Áudios de ${personaName}`, icon: Mic },
                 { id: "midias" as const, label: "Mídias livres", icon: FileText },
                 { id: "roteiro" as const, label: "Roteiro", icon: BookOpen },
               ].map((t) => {
