@@ -843,7 +843,7 @@ Deno.serve(async (req) => {
 
     // Se self-check sinalizou RISCO em tool sensível, força fallback texto neutro
     if (selfCheckRisk && (tool === "send_media" || tool === "advance_to_closing")) {
-      const safeMsg = "Me ajuda com mais um detalhe rápido para eu te dar a resposta certa: qual a sua cidade e qual a média da sua conta de luz?";
+      const safeMsg = "Para eu te dar o número certo: qual a média da sua conta de luz?";
       return new Response(JSON.stringify({
         decision: { tool: "send_text", args: { message: safeMsg, next_phase: phase, reasoning: `selfcheck_blocked:${selfCheckRisk}` } },
         phase,
