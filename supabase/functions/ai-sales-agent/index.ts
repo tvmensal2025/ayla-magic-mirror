@@ -11,10 +11,12 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 // Modelos por tarefa (Google API direto)
-const MODEL_DECISION = "gemini-2.5-pro";          // decisão principal — Pro com thinking
-const MODEL_RESCUE = "gemini-2.5-flash";          // resgate / texto rápido
-const MODEL_SELFCHECK = "gemini-2.5-flash-lite";  // self-check barato
-const MODEL_FALLBACK = "gemini-2.5-flash";        // se Pro retornar 429
+// Default: flash rápido. Pro só em situações que valem a latência extra (objeção, alto score, fechamento).
+const MODEL_DEFAULT = "gemini-2.5-flash";          // resposta padrão (rápida, 1-2s)
+const MODEL_DECISION = "gemini-2.5-pro";           // decisão complexa (objeção/fechamento)
+const MODEL_RESCUE = "gemini-2.5-flash";           // resgate / texto rápido
+const MODEL_SELFCHECK = "gemini-2.5-flash-lite";   // self-check barato
+const MODEL_FALLBACK = "gemini-2.5-flash";         // se Pro retornar 429
 
 // ---------- Tools available to the LLM (OpenAI-style; convertidas para Google abaixo) ----------
 const tools = [
