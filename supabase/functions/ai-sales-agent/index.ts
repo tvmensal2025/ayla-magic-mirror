@@ -580,6 +580,19 @@ Deno.serve(async (req) => {
     const sentMediaIds = new Set((recentMediaSent || []).map((r: any) => r.media_sent_id));
     const freshMedia = eligibleMedia.filter((m: any) => !sentMediaIds.has(m.id));
 
+    // Cooldown de VÍDEO em janela de 6h: se qualquer vídeo foi enviado a este lead nas
+    // últimas 6h, bloqueia novos vídeos (mas permite áudio/imagem).
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    const { data: recentVideoOutbound } = await supabase
+      .from("messages")
+      .select("id")
+      .eq("customer_id", customer_id)
+      .eq("message_direction", "outbound")
+      .eq("message_type", "video")
+      .gte("created_at", sixHoursAgo)
+      .limit(1);
+    const videoCooldownActive = !!(recentVideoOutbound && recentVideoOutbound.length > 0);
+
     const mediaListLine = billAlreadyReceivedEarly
       ? `\n[MÍDIAS DISPONÍVEIS]\nNENHUMA — a conta já foi recebida. Confirme os dados em send_text e em seguida use request_handoff. PROIBIDO send_media nesta etapa.`
       : freshMedia.length
