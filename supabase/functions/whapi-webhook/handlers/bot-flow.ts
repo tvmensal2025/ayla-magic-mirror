@@ -534,7 +534,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     if (RE_GREETING_ONLY.test(txt)) {
       return {
-        reply: currentNameTrusted ? `Oi, ${(customer as any).name.split(/\s+/)[0]}! Qual a média da sua conta de luz?` : "Oi! Qual é o seu nome?",
+        reply: currentNameTrusted ? "Oi! Qual a média da sua conta de luz?" : "Oi! Qual é o seu nome?",
         updates: { conversation_step: "qualificacao" },
       };
     }
