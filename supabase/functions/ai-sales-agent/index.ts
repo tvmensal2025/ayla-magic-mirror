@@ -628,8 +628,13 @@ Deno.serve(async (req) => {
       ? `\n[MÍDIAS DISPONÍVEIS para fase ${phase}]\n` +
         freshMedia
           .map(
-            (m: any, i: number) =>
-              `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""}${m.is_primary_explainer ? " [PRINCIPAL — use este vídeo SEMPRE que o lead pedir 'como funciona' ou tiver dúvida geral; outros vídeos só se ele disser que ainda não entendeu]" : ""}`,
+            (m: any, i: number) => {
+              const kindUpper = String(m.kind || "").toUpperCase();
+              const primaryTag = m.is_primary_explainer
+                ? ` [PRINCIPAL-${kindUpper} — use SEMPRE este ${m.kind} quando a MATRIZ DE MÍDIA mandar enviar ${m.kind}; outros do mesmo tipo só se o lead disser que ainda não entendeu]`
+                : "";
+              return `${i + 1}. id=${m.id} | ${m.kind} | "${m.label}"${m.duration_sec ? ` (${m.duration_sec}s)` : ""}${primaryTag}`;
+            },
           )
           .join("\n") +
         `\nUse send_media APENAS com um desses media_id. ${
