@@ -90,6 +90,8 @@ async function urlExists(url: string): Promise<boolean> {
 }
 
 const NON_NAME_RESPONSES = /^(oi|ola|olá|hey|opa|bom dia|boa tarde|boa noite|sim|nao|não|ok|tudo bem|pode|quero|cadastrar|humano|atendente|menu|reset|recomecar|recomeçar|nao sou eu|não sou eu|como funciona|me explica|o que é|que é isso|quanto custa|é caro|preço|valor|tem taxa|minha distribuidora|qual distribuidora|atende aqui|cidade)$/i;
+const RE_GREETING_ONLY = /^(oi|ol[aá]|opa|bom dia|boa tarde|boa noite|hey)$/i;
+const RE_NOT_READY = /\b(vou pensar|pensar melhor|depois|mais tarde|agora n[aã]o|n[aã]o quero ainda|n[aã]o quero (cadastrar|prosseguir|seguir)|sem interesse|n[aã]o tenho interesse)\b/i;
 
 function normalizeLeadName(rawText: string | null | undefined): string | null {
   const raw = String(rawText || "").trim().replace(/[.!?,;:"']/g, "").replace(/\s+/g, " ");
@@ -110,6 +112,10 @@ function normalizeLeadName(rawText: string | null | undefined): string | null {
 function isBogusCapturedName(name: string | null | undefined): boolean {
   if (!name) return false;
   return NON_NAME_RESPONSES.test(String(name).trim());
+}
+
+function buildNotReadyReply(nomeRepresentante: string): string {
+  return `Sem problema, vou respeitar seu tempo 😊\n\nSe quiser continuar depois, é só mandar *cadastrar* ou chamar ${nomeRepresentante}.`;
 }
 
 export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
