@@ -257,11 +257,12 @@ Deno.serve(async (req) => {
     const auth = await authConsultant(req);
     if (!auth) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     const { cities, distribuidora } = await req.json().catch(() => ({ cities: [] }));
-    const [insights, competitors] = await Promise.all([
+    const [insights, competitors, globalPlaybook] = await Promise.all([
       loadInsights(auth.id, distribuidora),
       loadCompetitorWinners(8),
+      loadGlobalPlaybook(),
     ]);
-    const copy = await generate(cities || [], insights, competitors, auth.id);
+    const copy = await generate(cities || [], insights, competitors, auth.id, globalPlaybook);
     const flat = {
       headlines: copy.legacy!.headlines,
       primary_texts: copy.legacy!.primary_texts,
