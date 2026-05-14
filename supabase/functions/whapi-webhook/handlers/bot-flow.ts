@@ -223,7 +223,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         if (aiResp.ok) {
           const aiBody = await aiResp.json();
           const decision = aiBody?.decision;
-          const media = aiBody?.media; // { id, url, kind, label } | null
+          const media = aiBody?.media;
+          const medias: Array<{ id: string; url: string; kind: string; label: string }> = Array.isArray(aiBody?.medias) && aiBody.medias.length > 0 ? aiBody.medias : (media ? [media] : []);
           const tool = decision?.tool;
           const args = decision?.args || {};
 
