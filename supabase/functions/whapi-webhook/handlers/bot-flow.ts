@@ -486,7 +486,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   // E o step está em fase conversacional (antes da coleta de docs).
   // Steps de coleta (aguardando_conta em diante) seguem determinísticos.
   // ═══════════════════════════════════════════════════════════════════
-  const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "aguardando_humano"]);
+  const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "aguardando_humano", "qualificacao"]);
+  // Steps de coleta também aceitam pergunta off-script (FAQ), mas só se a mensagem PARECE pergunta.
+  const collectionSteps = new Set(["aguardando_conta", "coleta_doc", "ask_email", "ask_cep"]);
+  const looksLikeQuestion = !!messageText && (
+    /\?/.test(messageText) ||
+    /^(como|quanto|quando|onde|quem|qual|posso|preciso|funciona|é|tem|vou|vai|porqu[eê]|por que|sera|será|sera que|me explica|me conta|d[uú]vida)/i.test(messageText.trim())
+  );
   // Bypass: se já temos a conta com OCR + nome confiável, NÃO chamar a IA —
   // o switch determinístico vai cuidar de confirmar/avançar sem virar handoff loop.
   const billTrusted =
@@ -497,7 +503,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     !isFile &&
     !customer.bot_paused &&
     !billTrusted &&
-    conversationalSteps.has(step) &&
+    (conversationalSteps.has(step) || (collectionSteps.has(step) && looksLikeQuestion)) &&
     messageText &&
     messageText.trim().length > 0
   ) {
