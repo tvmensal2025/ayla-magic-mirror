@@ -800,10 +800,14 @@ Deno.serve(async (req) => {
     // Detecção de intenção determinística (para auditoria)
     const ui = (user_input || "").toLowerCase();
     const intentDetected =
-      /\b(cadastr|quero entrar|fazer adesao|fazer cadastro|me cadastra)/i.test(ui) ? "cadastrar" :
-      /\b(humano|atendente|pessoa|operador|consultor real)\b/i.test(ui) ? "humano" :
-      /\b(parar|cancelar|nao quero|sem interesse|desisto|me deixa)\b/i.test(ui) ? "desistir" :
-      /\b(quanto|valor|economia|preco|preço)\b/i.test(ui) ? "interesse_valor" :
+      /\b(cadastr|quero (entrar|participar|aderir|economizar|fazer)|fazer (adesao|adesão|cadastro)|me cadastra|vamos l[aá]|bora|bora la|aceito|topo|fechado|pode (cadastrar|prosseguir|seguir)|j[aá] quero)\b/i.test(ui) ? "cadastrar" :
+      /\b(humano|atendente|pessoa|operador|consultor real|fala com (algu[eé]m|gente|pessoa)|chama (o|a) (consultor|atendente))\b/i.test(ui) ? "humano" :
+      /\b(parar|cancelar|n[aã]o quero|sem interesse|desisto|me deixa|para de|tira meu|nao tenho interesse|n[aã]o me|n[aã]o gostei)\b/i.test(ui) ? "desistir" :
+      /\b(golpe|fraude|seguro\?|confi[aá]vel|enganaç[aã]o|verdade)\b/i.test(ui) ? "objecao_confianca" :
+      /\b(fidelidade|multa|trocar|mudar de empresa|distribuidora vai)\b/i.test(ui) ? "objecao_contrato" :
+      /\b(custo|caro|gratuito|de gra[çc]a|paga|mensalidade|taxa)\b/i.test(ui) ? "objecao_custo" :
+      /\b(quanto|valor|economia|pre[çc]o|desconto|porcentagem)\b/i.test(ui) ? "interesse_valor" :
+      /\b(como funciona|me explica|n[aã]o entendi|o que [eé]|quem [eé])\b/i.test(ui) ? "informacao" :
       null;
 
     // Audit (best-effort)
