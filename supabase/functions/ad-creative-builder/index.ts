@@ -115,7 +115,7 @@ const REQUIRED_ANGLES = [
   "dor_pas",           // PAS — começa pela dor
 ];
 
-async function generate(cities: string[], insights?: any, competitors: any[] = [], consultantId?: string): Promise<CopyPack> {
+async function generate(cities: string[], insights?: any, competitors: any[] = [], consultantId?: string, globalPlaybook?: any): Promise<CopyPack> {
   const ctx = cities.join(", ") || "Brasil";
   const isDistribuidora = ctx.toLowerCase().includes("clientes da");
 
