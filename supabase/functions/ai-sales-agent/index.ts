@@ -600,42 +600,38 @@ Deno.serve(async (req) => {
       mediaListLine +
       cadenceLine;
 
-    // Load best 👍 feedback as few-shot examples (last 5)
-    const { data: positive } = await supabase
-      .from("ai_decisions")
-      .select("user_input, ai_output, tool_called")
-      .eq("consultant_id", customer.consultant_id)
-      .contains("feedback", { rating: "up" })
-      .order("created_at", { ascending: false })
-      .limit(5);
-
-    const fewShotLine = (positive || []).length
-      ? `\n[EXEMPLOS APROVADOS PELO CONSULTOR]\n` +
-        (positive || [])
-          .map(
-            (p: any) =>
-              `Lead: "${(p.user_input || "").slice(0, 80)}" → ${p.tool_called}: "${(p.ai_output?.message || p.ai_output?.caption || "").slice(0, 80)}"`,
-          )
-          .join("\n")
-      : "";
-
-    // ---- Few-shot negativo (NÃO fazer) ----
-    const { data: negative } = await supabase
-      .from("ai_decisions")
-      .select("user_input, ai_output, tool_called")
-      .eq("consultant_id", customer.consultant_id)
-      .contains("feedback", { rating: "down" })
-      .order("created_at", { ascending: false })
-      .limit(3);
-    const negShotLine = (negative || []).length
-      ? `\n[NÃO FAZER ASSIM — exemplos reprovados pelo consultor]\n` +
-        (negative || [])
-          .map(
-            (p: any) =>
-              `Lead: "${(p.user_input || "").slice(0, 80)}" → ${p.tool_called}: "${(p.ai_output?.message || p.ai_output?.caption || "").slice(0, 80)}"`,
-          )
-          .join("\n")
-      : "";
+    // Few-shot só rola em fases que valem a pena (objeção/fechamento) — economiza 2 queries por chamada
+    const shouldLoadFewshot = phase === "objecao" || phase === "fechamento";
+    let fewShotLine = "";
+    let negShotLine = "";
+    if (shouldLoadFewshot) {
+      const { data: positive } = await supabase
+        .from("ai_decisions")
+        .select("user_input, ai_output, tool_called")
+        .eq("consultant_id", customer.consultant_id)
+        .contains("feedback", { rating: "up" })
+        .order("created_at", { ascending: false })
+        .limit(5);
+      fewShotLine = (positive || []).length
+        ? `\n[EXEMPLOS APROVADOS PELO CONSULTOR]\n` +
+          (positive || [])
+            .map((p: any) => `Lead: "${(p.user_input || "").slice(0, 80)}" → ${p.tool_called}: "${(p.ai_output?.message || p.ai_output?.caption || "").slice(0, 80)}"`)
+            .join("\n")
+        : "";
+      const { data: negative } = await supabase
+        .from("ai_decisions")
+        .select("user_input, ai_output, tool_called")
+        .eq("consultant_id", customer.consultant_id)
+        .contains("feedback", { rating: "down" })
+        .order("created_at", { ascending: false })
+        .limit(3);
+      negShotLine = (negative || []).length
+        ? `\n[NÃO FAZER ASSIM — exemplos reprovados pelo consultor]\n` +
+          (negative || [])
+            .map((p: any) => `Lead: "${(p.user_input || "").slice(0, 80)}" → ${p.tool_called}: "${(p.ai_output?.message || p.ai_output?.caption || "").slice(0, 80)}"`)
+            .join("\n")
+        : "";
+    }
 
     // ---- Construir contents no formato Gemini ----
     const sys = systemPrompt(persona, tone, customPrompt) + fewShotLine + negShotLine + "\n\n" + contextLine;
