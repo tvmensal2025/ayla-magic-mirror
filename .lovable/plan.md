@@ -1,114 +1,68 @@
-## O que vamos entregar
+## Problema
 
-Você não quer abrir nada. Quer **uma IA que aprende sozinha, baixa o CPL todo dia, e te avisa quando algo importa**. Para isso, fechamos 4 frentes pequenas e específicas — sem mexer em nada que já funciona.
+A mensagem que abre no WhatsApp quando o lead clica no anúncio está feia e longa demais:
 
----
+> "Olá! Vi o anúncio iGreen sobre energia mais barata em CPFL. Quero saber como economizar na conta de luz."
 
-## Frente 1 — Plugar o painel (2 linhas faltando)
+É hardcoded em `supabase/functions/facebook-create-campaign/index.ts` (linha 430), não aparece em lugar nenhum no Wizard, e o usuário não consegue editar nem ver o que vai sair. Você quer algo curto, natural e do ponto de vista do lead, tipo:
 
-Arquivo: `src/pages/SuperAdmin.tsx`
+> "Olá, quero saber mais sobre a redução de energia"
 
-- Linha 244: adicionar `{ id: "ia_aprendendo" as const, label: "IA Aprendendo", icon: Brain }` no array `tabs`.
-- Linha 506: adicionar `{activeTab === "ia_aprendendo" && <AILearningHealthPanel />}`.
-- Importar `AILearningHealthPanel` no topo.
+## Plano
 
-Resultado: aba "IA Aprendendo" no SuperAdmin mostra os 4 cards verde/amarelo/vermelho, top vencedores/perdedores, timeline e botão "Forçar agora".
+### 1. Mensagem padrão nova (curta, do lead, contextual)
 
----
-
-## Frente 2 — Resumo diário no WhatsApp (você não precisa abrir o painel)
-
-Nova edge function: `ai-daily-digest` + cron 09:00 BRT.
-
-Toda manhã envia para o seu WhatsApp super-admin **um único resumo curto**:
+Trocar o template em `facebook-create-campaign/index.ts`:
 
 ```
-🤖 IA aprendeu hoje
-• CPL médio: R$ 6,42 (-12% vs ontem) ✅
-• 3 anúncios pausados (ROAS < 1.5)
-• 2 vencedores promovidos (+20% budget)
-• Padrão novo descoberto: "economia em R$" converte 2.3x
-• 38 concorrentes monitorados (32 com imagem)
-
-⚠️ 1 ação sua: consultor X sem WABA conectada
+Olá! Quero saber mais sobre a redução na conta de luz {distribuidora}.
 ```
 
-Tudo que importa cabe em 6 linhas. Se está tudo verde, você sabe. Se tem ação, você sabe qual.
+- Se não houver distribuidora, cai para: `Olá! Quero saber mais sobre a redução na minha conta de luz.`
+- Sem "Vi o anúncio…" (Meta já mostra o card do anúncio acima da mensagem).
+- Limite rígido de 160 caracteres.
 
-Tabela nova `ai_learning_digest` (data, métricas, enviado_em) para histórico e idempotência.
+### 2. Campo editável no Wizard
 
----
+Em `src/components/admin/ads/CreateCampaignWizard.tsx`, na aba de copy (logo abaixo do "Texto principal"):
 
-## Frente 3 — Loop de auto-otimização que de fato baixa CPL
+- Novo input "Primeira mensagem no WhatsApp" com:
+  - placeholder = mensagem padrão acima já preenchida com a distribuidora selecionada.
+  - contador de caracteres (max 160).
+  - preview do balão estilo WhatsApp (verde, fonte do app), mostrando exatamente o que o cliente vai ver ao clicar.
+  - botão "Sugerir com IA" usando `ad-creative-builder` (reaproveita gateway) para gerar 3 variações curtas em 1ª pessoa.
 
-Hoje o `ad-creative-learner` roda diariamente mas o ciclo não fecha sozinho. Vamos fechar:
+State novo: `initialMessage` (string). Default recalculado quando muda a distribuidora.
 
-1. **`ad-creative-learner` (07:00)** — já agrega insights por consultor + global. Adicionar:
-   - cálculo de **CPL médio rolling 7d vs 14d** por consultor → grava em `ad_learning_digest`.
-   - identificar **top 3 padrões vencedores da rede inteira** (network-wide) e gravar em `ad_playbooks` com `scope='global'`.
+### 3. Enviar e persistir
 
-2. **`ad-creative-builder`** — já existe. Adicionar consumo automático:
-   - quando rotator pausa um loser, **chama o builder automaticamente** para gerar 2 variações inspiradas no winner do mesmo consultor + playbook global. Sem você apertar nada.
+- Wizard envia `initial_message` no body do `facebook-create-campaign`.
+- Edge function valida (≤160, não vazio, strip de quebras de linha) e usa em `waLink` (linha 432).
+- Salva em `ad_campaigns.initial_message` para histórico/relatório (nova coluna `text` nullable, sem RLS nova — a tabela já tem).
+- O `ad-creative-learner` passa a considerar `initial_message` como variável da performance (só guarda no `ad_creative_performance.metadata`, sem novo schema).
 
-3. **`facebook-creative-rotator` (12h)** — já pausa losers. Adicionar:
-   - **promoção automática** do winner do mês: budget +20% até teto configurável (`max_daily_budget_cents` em `consultants`).
-   - dispara a chamada acima do builder.
+### 4. Garantir CTWA nativo (sem link quebrado)
 
-4. **Novo cron `ai-cpl-watchdog` (de 4h em 4h)** — se CPL de uma campanha sobe >40% em 48h, pausa automática + recomendação no painel + linha no digest do dia seguinte.
+Já está usando `WHATSAPP_MESSAGE` com `app_destination: "WHATSAPP"` e `page` da WABA — isso é o correto e não quebra. Vou só:
 
-Ciclo final:
+- Remover `description` do `link_data` quando o destino é WhatsApp (Meta ignora e às vezes mostra preview feio).
+- Garantir `name` (headline) ≤ 40 chars no envio (já validado no Wizard).
+- Logar no preflight a mensagem final que vai para o `text=` do `wa.me` para conferência.
 
-```
-scraper (semanal) ─┐
-                   ├──> learner (diário) ──> playbook global
-performance ───────┘                              │
-                                                  ▼
-rotator (12h) ─pausa loser─> builder auto ─cria variações─> publica
-                │
-                └─promove winner ─> mais budget no que funciona
+### 5. Auto-aprendizado da mensagem
 
-watchdog (4h) ─> detecta CPL subindo ─> pausa ─> avisa no digest
-```
+No painel "IA Aprendendo" (`AILearningHealthPanel.tsx`), adicionar bloco "Mensagens iniciais por CPL":
+- Top 3 mensagens com menor CPL nas últimas 14 dias.
+- Bottom 3 (as que pioram conversão).
+- Lê de `ad_creative_performance` agrupando por `metadata->>initial_message`.
 
-Cada execução grava em `ai_usage_log` com `category='auto_learning'` para o painel e o digest puxarem.
+## Detalhes técnicos
 
----
+- Migration: `ALTER TABLE public.ad_campaigns ADD COLUMN IF NOT EXISTS initial_message text;`
+- Edge function: validação Zod do `initial_message` opcional, default server-side se vier vazio.
+- Wizard: novo state, novo bloco UI, envio no payload, derivação automática quando muda a distribuidora se o usuário ainda não editou manualmente (flag `userTouchedMessage`).
+- `ad-creative-builder`: aceitar `mode: "initial_message"` retornando array de 3 strings ≤160 chars em 1ª pessoa.
 
-## Frente 4 — Concorrentes com imagem (backfill)
+## Fora de escopo
 
-`ad-competitor-scraper` já foi reescrito para usar `/ads_archive` + `og:image` + MinIO. Falta:
-
-1. Confirmar que o secret `FACEBOOK_APP_SECRET` + `FACEBOOK_APP_ID` permitem token do Ad Library (sim, já permitem — testamos).
-2. Rodar `?backfill=1` uma vez nos 38 registros existentes.
-3. Schedule já existe (segunda 06:00).
-
----
-
-## Arquivos que vão mudar
-
-```
-src/pages/SuperAdmin.tsx                                  → 3 linhas (import + tab + render)
-supabase/functions/ai-daily-digest/index.ts               → NOVA (resumo WhatsApp diário)
-supabase/functions/ai-cpl-watchdog/index.ts               → NOVA (alerta CPL alto)
-supabase/functions/ad-creative-learner/index.ts           → +CPL rolling + playbook global
-supabase/functions/facebook-creative-rotator/index.ts     → +promove winner + dispara builder
-supabase/migrations/<ts>_ai_learning_digest.sql           → tabela + 2 cron jobs novos
-```
-
-## Validação após deploy
-
-1. Aba "IA Aprendendo" no `/admin/super` carrega com 4 cards verdes.
-2. Forçar `ad-competitor-scraper?backfill=1` → 38 registros passam de 0 imagem para ≥30 com imagem.
-3. Disparar `ai-daily-digest` manual → chega WhatsApp no número super-admin com 6 linhas.
-4. Forçar `facebook-creative-rotator` → quando há loser, aparece em `ad_generated_creatives` uma nova variação criada automaticamente e em `wallet_transactions` um spend de promoção do winner.
-5. `ai-cpl-watchdog` em campanha de teste com CPL inflado → pausa + recomendação aparece no painel.
-
-## O que você passa a ver sem abrir nada
-
-- **WhatsApp 09:00 todo dia**: 6 linhas com CPL, o que pausou, o que promoveu, padrão novo, 1 ação sua se houver.
-- **Aba "IA Aprendendo"** (quando quiser checar): 4 cards verde/amarelo/vermelho + top vencedores agora + timeline.
-- **Nada para apertar**: builder roda sozinho quando rotator pausa, winner ganha budget sozinho, watchdog protege contra CPL alto.
-
-## Pergunta antes de implementar
-
-Confirma que posso usar **o número do WhatsApp do consultor super-admin (rafael.ids@icloud.com)** para enviar o digest diário às 09:00 BRT? Se preferir outro número (ex.: seu pessoal direto), me passe.
+- Não mexe em CTA, templates de WhatsApp internos, nem no fluxo do CRM depois que o lead chega.
