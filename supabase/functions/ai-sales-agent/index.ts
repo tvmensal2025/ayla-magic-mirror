@@ -959,8 +959,9 @@ Deno.serve(async (req) => {
 
     const latencyMs = Date.now() - t0;
 
-    // Validate media_id and resolve URL/kind for downstream sender
-    let resolvedMedia: { id: string; url: string; kind: string; label: string } | null = null;
+    // Resolve média(s) selecionada(s). Suporta combo (1 áudio + 1 vídeo).
+    type ResolvedMedia = { id: string; url: string; kind: string; label: string };
+    let resolvedMedias: ResolvedMedia[] = [];
     if (tool === "send_media" && billAlreadyReceivedEarly) {
       // Hard guard: nunca enviar mídia depois da conta — sempre handoff.
       return new Response(
@@ -979,29 +980,25 @@ Deno.serve(async (req) => {
       );
     }
     if (tool === "send_media") {
-      // Server-side anti-spam: se a última saída já foi mídia OU se essa media_id já foi
-      // enviada nas últimas 5 vezes, degrada para send_text (caption como mensagem).
-      const justSentMedia = recentMediaCount >= 1;
-      const alreadySentSameId = sentMediaIds.has(args.media_id);
-      const picked = eligibleMedia.find((m: any) => m.id === args.media_id);
-      const invalidId = !picked || !picked.url;
-      const isVideoBlockedByCooldown = !!picked && picked.kind === "video" && videoCooldownActive;
+      const ids: string[] = Array.isArray(args.media_ids) ? args.media_ids : [];
+      // Filtra: deve estar em freshMedia (não enviada antes), ter URL, kind único na seleção.
+      const seenKinds = new Set<string>();
+      for (const id of ids) {
+        const m = freshMedia.find((x: any) => x.id === id);
+        if (!m || !m.url) continue;
+        if (seenKinds.has(m.kind)) continue;
+        seenKinds.add(m.kind);
+        resolvedMedias.push({ id: m.id, url: m.url, kind: m.kind, label: m.label });
+        if (resolvedMedias.length === 2) break;
+      }
 
-      if (invalidId || justSentMedia || alreadySentSameId || isVideoBlockedByCooldown) {
-        const tag = invalidId
-          ? "[media_id inválido]"
-          : isVideoBlockedByCooldown
-          ? "[vídeo bloqueado: cooldown 6h]"
-          : alreadySentSameId
-          ? "[mídia repetida — bloqueada]"
-          : "[mídia consecutiva — bloqueada]";
-        args.reasoning = (args.reasoning || "") + ` ${tag} fallback texto`;
+      if (resolvedMedias.length === 0) {
+        // Nenhum ID válido → fallback texto.
         const fallbackMsg =
           args.caption && args.caption.trim().length > 0
             ? args.caption
-            : (picked?.label
-              ? `Sobre ${picked.label.toLowerCase()}: posso te explicar em poucas linhas se preferir.`
-              : "Posso te explicar em poucas linhas se preferir.");
+            : "Posso te explicar em poucas linhas se preferir.";
+        args.reasoning = (args.reasoning || "") + " [media_ids inválidos/repetidos] fallback texto";
         return new Response(
           JSON.stringify({
             decision: {
@@ -1018,8 +1015,10 @@ Deno.serve(async (req) => {
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
-      resolvedMedia = { id: picked.id, url: picked.url, kind: picked.kind, label: picked.label };
+      // Atualiza args.media_ids com a lista validada (para auditoria).
+      args.media_ids = resolvedMedias.map((m) => m.id);
     }
+    const resolvedMedia: ResolvedMedia | null = resolvedMedias[0] || null;
 
     // ---- Self-check barato (flash-lite) — bloqueia tools absurdas ----
     let selfCheckRisk: string | null = null;
