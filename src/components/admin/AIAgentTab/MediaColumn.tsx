@@ -139,6 +139,7 @@ export function MediaColumn({ userId }: { userId: string }) {
   const [usedBytes, setUsedBytes] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const [previewMedia, setPreviewMedia] = useState<Media | null>(null);
+  const [uploaderOpen, setUploaderOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function loadList() {
@@ -268,6 +269,34 @@ export function MediaColumn({ userId }: { userId: string }) {
       const next = prev.map((x) => (x.id === m.id ? { ...x, priority: v } : x));
       return next.sort((a, b) => b.priority - a.priority);
     });
+  }
+
+  async function togglePrimary(m: Media) {
+    const next = !m.is_primary_explainer;
+    if (next) {
+      // Desmarca qualquer outro vídeo principal deste consultor (índice único exige isso).
+      await supabase
+        .from("ai_media_library")
+        .update({ is_primary_explainer: false } as any)
+        .eq("consultant_id", userId)
+        .eq("is_primary_explainer", true);
+    }
+    const { error } = await supabase
+      .from("ai_media_library")
+      .update({ is_primary_explainer: next } as any)
+      .eq("id", m.id);
+    if (error) { toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
+    toast({
+      title: next ? "⭐ Vídeo principal definido" : "Vídeo principal removido",
+      description: next ? `"${m.label}" será enviado primeiro quando o lead pedir explicação.` : undefined,
+    });
+    setItems((prev) =>
+      prev.map((x) => {
+        if (x.id === m.id) return { ...x, is_primary_explainer: next };
+        if (next && x.consultant_id === userId) return { ...x, is_primary_explainer: false };
+        return x;
+      })
+    );
   }
 
   function TagEditor({ m }: { m: Media }) {
