@@ -1063,6 +1063,43 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
                       <Label className="flex justify-between"><span>Descrição curta</span><span className={`text-[10px] ${description.length > COPY_LIMITS.description ? "text-destructive" : "text-muted-foreground"}`}>{description.length}/{COPY_LIMITS.description}</span></Label>
                       <Input maxLength={COPY_LIMITS.description} value={description} onChange={e => setDescription(e.target.value)} placeholder="Sem obra. Sem taxa." />
                     </div>
+                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-2">
+                      <Label className="flex justify-between items-center">
+                        <span className="flex items-center gap-1.5">
+                          <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                          Primeira mensagem no WhatsApp
+                        </span>
+                        <span className={`text-[10px] ${initialMessage.length > INITIAL_MSG_LIMIT ? "text-destructive" : "text-muted-foreground"}`}>
+                          {initialMessage.length}/{INITIAL_MSG_LIMIT}
+                        </span>
+                      </Label>
+                      <p className="text-[11px] text-muted-foreground leading-snug">
+                        É o que vai aparecer escrito quando o lead clicar no anúncio. Escreva curto, em 1ª pessoa, como se fosse o cliente falando.
+                      </p>
+                      <Textarea
+                        rows={2}
+                        maxLength={INITIAL_MSG_LIMIT}
+                        value={initialMessage}
+                        onChange={(e) => { setInitialMessage(e.target.value); setInitialMessageTouched(true); }}
+                        placeholder="Olá! Quero saber mais sobre a redução na conta de luz."
+                        className="bg-background/50"
+                      />
+                      <div className="flex items-start gap-2 mt-1">
+                        <div className="shrink-0 w-7 h-7 rounded-full bg-emerald-500/20 flex items-center justify-center text-[10px] font-bold text-emerald-300">EU</div>
+                        <div className="bg-emerald-500 text-white text-xs px-3 py-2 rounded-2xl rounded-tl-sm max-w-[85%] shadow">
+                          {initialMessage || <span className="opacity-60 italic">sua mensagem aparece aqui</span>}
+                        </div>
+                      </div>
+                      {initialMessageTouched && (
+                        <button
+                          type="button"
+                          onClick={() => { setInitialMessage(buildDefaultInitialMessage(distribuidoraPrimary)); setInitialMessageTouched(false); }}
+                          className="text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2"
+                        >
+                          voltar para a sugestão automática
+                        </button>
+                      )}
+                    </div>
                   </>
                 )}
                 </div>
