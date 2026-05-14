@@ -23,6 +23,9 @@ import {
   Pencil,
   Play,
   Eye,
+  Star,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 type Kind = "audio" | "video" | "image" | "document" | "text";
@@ -38,6 +41,7 @@ type Media = {
   priority: number;
   step_tags: string[];
   intent_tags: string[];
+  is_primary_explainer?: boolean | null;
 };
 
 const STEP_OPTIONS: { value: string; label: string }[] = [
