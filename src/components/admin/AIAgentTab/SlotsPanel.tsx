@@ -9,6 +9,7 @@ import { AudioRecorderInline } from "./AudioRecorderInline";
 type Props = { userId: string };
 
 type MediaIndexEntry = { default: SlotMedia | null; personal: SlotMedia | null };
+type VideoOption = { id: string; label: string; url: string | null; is_public: boolean; consultant_id: string | null };
 
 export function SlotsPanel({ userId }: Props) {
   const { toast } = useToast();
@@ -103,19 +104,29 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
   const [slots, setSlots] = useState<any[]>([]);
   const [defaultMedia, setDefaultMedia] = useState<Record<string, { url: string | null; id: string | null }>>({});
+  const [availableVideos, setAvailableVideos] = useState<VideoOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
-    const [{ data: s }, { data: m }] = await Promise.all([
+    const [{ data: s }, { data: m }, { data: videos }] = await Promise.all([
       supabase.from("ai_agent_slots").select("*").order("position"),
       supabase.from("ai_media_library").select("id, slot_key, url").eq("is_public", true).not("slot_key", "is", null),
+      supabase
+        .from("ai_media_library")
+        .select("id, label, url, is_public, consultant_id")
+        .eq("kind", "video")
+        .eq("active", true)
+        .not("url", "is", null)
+        .order("priority", { ascending: false })
+        .order("created_at", { ascending: false }),
     ]);
     const map: Record<string, { url: string | null; id: string | null }> = {};
     (m || []).forEach((x: any) => (map[x.slot_key] = { url: x.url, id: x.id }));
     setSlots(s || []);
     setDefaultMedia(map);
+    setAvailableVideos(((videos || []) as VideoOption[]).filter((video) => !!video.url));
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
