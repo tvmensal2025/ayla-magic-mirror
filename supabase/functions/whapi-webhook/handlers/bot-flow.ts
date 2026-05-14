@@ -2345,3 +2345,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
   return { reply, updates };
 }
+
+// ── Test-only re-exports (não alteram comportamento) ──
+export const __test = { sleepForMedia, fetchUrlToBase64, trigramSim };
+

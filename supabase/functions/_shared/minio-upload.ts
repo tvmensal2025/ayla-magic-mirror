@@ -159,7 +159,7 @@ export async function uploadBytesToMinio(input: MinioUploadInput): Promise<Minio
       "x-amz-date": amzDate,
       Authorization: authorizationHeader,
     },
-    body: input.bytes,
+    body: input.bytes as BodyInit,
   });
 
   if (!res.ok) {
@@ -229,7 +229,7 @@ export async function uploadToMinioPath(
       "x-amz-date": amzDate,
       Authorization: authorizationHeader,
     },
-    body: bytes,
+    body: bytes as BodyInit,
   });
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
