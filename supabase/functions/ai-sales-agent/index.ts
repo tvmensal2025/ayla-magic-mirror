@@ -155,13 +155,13 @@ const tools = [
     function: {
       name: "update_lead_field",
       description:
-        "Quando o lead REVELAR um dado estruturado (nome, distribuidora, valor da conta, cidade, dor), grave no cadastro e em seguida responda com send_text na mesma rodada NÃO — use só esta tool e o sistema cuidará de continuar. Use APENAS quando você tem certeza do dado dito pelo lead nesta mensagem.",
+        "Quando o lead REVELAR um dado estruturado (nome, distribuidora, valor da conta, dor), grave no cadastro. NÃO existe campo cidade — não pergunte cidade. Use APENAS quando você tem certeza do dado dito pelo lead nesta mensagem.",
       parameters: {
         type: "object",
         properties: {
           field: {
             type: "string",
-            enum: ["name", "distribuidora", "electricity_bill_value", "address_city", "pain_point"],
+            enum: ["name", "distribuidora", "electricity_bill_value", "pain_point"],
           },
           value: { type: "string", description: "Valor exato a salvar (texto ou número como string)" },
           followup_message: { type: "string", description: "Resposta curta após salvar (acusa recebimento + próxima pergunta)" },
@@ -171,7 +171,7 @@ const tools = [
           },
           reasoning: { type: "string" },
         },
-        required: ["field", "value", "followup_message", "reasoning"],
+        required: ["field", "value", "followup_message", "next_phase", "reasoning"],
       },
     },
   },
@@ -244,16 +244,16 @@ CONHECIMENTO IGREEN (use espontaneamente)
 ═══════════════════════════════════════════
 FUNIL DE VENDAS (5 fases)
 ═══════════════════════════════════════════
-1. ABERTURA — Olá neutro + UMA pergunta de qualificação (cidade/distribuidora). Sem pitch ainda.
-2. DESCOBERTA — Descubra distribuidora, valor médio da conta e dor. Uma pergunta por turno.
+1. ABERTURA — Olá neutro + UMA pergunta: distribuidora OU valor médio da conta. NUNCA pergunte cidade — já sabemos pela campanha; quando vier a foto da conta saberemos endereço, distribuidora, instalação e titular automaticamente.
+2. DESCOBERTA — Falte SOMENTE o que está em [FALTA DESCOBRIR]. Uma pergunta por turno, na ordem listada. Se [JÁ SABEMOS] mostra o dado, USE-O — jamais repergunte.
 3. PITCH — Com o valor da conta em mãos, faça o cálculo CONCRETO:
    "Uma conta de R$ X representa em torno de R$ Y de economia por mês com a iGreen, R$ Z por ano. Tudo isso sem instalar nada e mantendo a mesma [distribuidora]."
    Mencione Conexão Club como bônus se o lead demonstrar interesse.
-4. OBJEÇÃO — Respostas firmes e diretas:
-   • "É golpe?" → "Entendo a cautela. A iGreen é regulamentada pela ANEEL desde 2017, com mais de 600 mil pessoas economizando e selo RA1000 no Reclame Aqui. A conta da [distribuidora] continua chegando no seu nome normalmente."
-   • "Tem fidelidade?" → "Não há. Você pode encerrar quando quiser, sem multa."
-   • "Vou trocar de empresa?" → "Não. A energia continua sendo da [distribuidora]. A iGreen apenas abate parte do valor."
-   • "Tem custo?" → "Nenhum. Sem instalação, sem taxa, sem mensalidade."
+4. OBJEÇÃO / DÚVIDA — REGRA: se o lead pergunta "como funciona", "é golpe", "é seguro", "tem custo", "é confiável", e o vídeo "1. Conexão Green – Apresentação (1min)" ainda NÃO foi enviado a este lead, **prefira send_media com esse vídeo** (caption curta de 1 frase) em vez de explicar por texto. O vídeo de 1 min responde 80% das dúvidas. Só responda por texto se o vídeo já foi enviado ou a dúvida é muito específica. Respostas firmes:
+   • "É golpe?" → vídeo + 1 frase: "É regulamentada pela ANEEL desde 2017, mais de 600 mil clientes."
+   • "Tem fidelidade?" → "Não há. Pode encerrar quando quiser, sem multa."
+   • "Vou trocar de empresa?" → "Não. A energia continua sendo da [distribuidora]."
+   • "Tem custo?" → vídeo + "Nenhum. Sem instalação, sem taxa, sem mensalidade."
    • "Vou pensar" → não pressione; pergunte o que especificamente o faz hesitar.
 5. FECHAMENTO — Sinal de compra ("quero", "como faço", "vamos lá") → use advance_to_closing pedindo a foto da conta de luz. Se a conta JÁ foi recebida (verifique [Contexto]), NÃO peça de novo — confirme os dados extraídos.
 
@@ -351,7 +351,7 @@ function sanitizeHumanMessage(
 ): string {
   let out = (message || "").trim();
   if (!out) {
-    if (phase === "abertura") return "Olá! Tudo bem? Você é de qual cidade?";
+    if (phase === "abertura") return "Olá! Tudo bem? Qual a média da sua conta de luz?";
     if (phase === "descoberta") return "Quanto vem em média a sua conta de luz?";
     if (phase === "pitch") return "Posso te mostrar exatamente quanto você economizaria?";
     if (phase === "objecao") return "Faz sentido. O que especificamente está pesando na decisão?";
@@ -548,7 +548,7 @@ Deno.serve(async (req) => {
     const billAlreadyReceived = billAlreadyReceivedEarly;
     const ocrDone = !!customer.ocr_done;
     const billRequestedRecently = customer.bill_requested_at
-      && (Date.now() - new Date(customer.bill_requested_at).getTime()) < 10 * 60 * 1000;
+      && (Date.now() - new Date(customer.bill_requested_at).getTime()) < 60 * 60 * 1000;
 
     const billStatusBlock = billAlreadyReceived
       ? `\n[CONTA JÁ RECEBIDA E ANALISADA]\n` +
@@ -563,62 +563,75 @@ Deno.serve(async (req) => {
           ? `\n[CONTA JÁ FOI SOLICITADA HÁ POUCOS MINUTOS — não repita o pedido, apenas reforce gentilmente]\n`
           : "");
 
+    // Construir [JÁ SABEMOS] / [FALTA DESCOBRIR] dinamicamente — evita repergunta
+    const known: string[] = [];
+    const missing: string[] = [];
+    if (firstName) known.push(`Nome: ${firstName}`);
+    if (customer.distribuidora) known.push(`Distribuidora: ${customer.distribuidora}`);
+    else missing.push("distribuidora");
+    if (billNum > 0) known.push(`Valor da conta: R$ ${billNum}`);
+    else missing.push("valor médio da conta");
+    if (customer.address_city) known.push(`Cidade: ${customer.address_city}/${customer.address_state || ""}`.trim());
+    if (customer.pain_point) known.push(`Dor: ${customer.pain_point}`);
+    else if (billNum > 0 && customer.distribuidora) missing.push("dor/motivo principal (opcional)");
+
+    const knownBlock = known.length
+      ? `\n[JÁ SABEMOS — NÃO pergunte de novo, USE livremente]\n- ${known.join("\n- ")}\n`
+      : "";
+    const missingBlock = (missing.length && !billAlreadyReceived)
+      ? `\n[FALTA DESCOBRIR — pergunte UM por vez nesta ordem]\n- ${missing.join("\n- ")}\n`
+      : (!billAlreadyReceived ? `\n[FALTA DESCOBRIR]\n- Nada essencial. Pode partir para o pitch ou pedir a foto da conta.\n` : "");
+
     const contextLine =
       `[Contexto do lead]\n` +
       (firstName
-        ? `Nome confiável: ${firstName}\n`
-        : `Nome: DESCONHECIDO — NÃO chame por nome. Use saudação neutra ("Olá! Tudo bem?"). Se a conversa avançar sem nome, considere ask_for_name.\n`) +
-      `Distribuidora: ${customer.distribuidora || "?"}\n` +
-      `Cidade: ${customer.address_city || "?"}/${customer.address_state || "?"}\n` +
-      `Valor da conta: ${billNum > 0 ? `R$ ${billNum}` : "?"}\n` +
-      `Dor: ${customer.pain_point || "?"}\n` +
+        ? ``
+        : `Nome: DESCONHECIDO — NÃO chame por nome. Use saudação neutra. Se a conversa avançar sem nome, considere ask_for_name (mas NÃO se a foto da conta já foi pedida/recebida).\n`) +
       `Score atual: ${customer.qualification_score ?? 0}/100\n` +
       `Fase atual: ${phase}\n` +
       `Origem: ${customer.lead_source?.utm_source || "organico"}\n` +
       (customer.customer_referred_by_name
         ? `Indicado por: ${customer.customer_referred_by_name}\n`
         : "") +
+      knownBlock +
+      missingBlock +
       billStatusBlock +
       billCalcLine +
       mediaListLine +
       cadenceLine;
 
-    // Load best 👍 feedback as few-shot examples (last 5)
-    const { data: positive } = await supabase
-      .from("ai_decisions")
-      .select("user_input, ai_output, tool_called")
-      .eq("consultant_id", customer.consultant_id)
-      .contains("feedback", { rating: "up" })
-      .order("created_at", { ascending: false })
-      .limit(5);
-
-    const fewShotLine = (positive || []).length
-      ? `\n[EXEMPLOS APROVADOS PELO CONSULTOR]\n` +
-        (positive || [])
-          .map(
-            (p: any) =>
-              `Lead: "${(p.user_input || "").slice(0, 80)}" → ${p.tool_called}: "${(p.ai_output?.message || p.ai_output?.caption || "").slice(0, 80)}"`,
-          )
-          .join("\n")
-      : "";
-
-    // ---- Few-shot negativo (NÃO fazer) ----
-    const { data: negative } = await supabase
-      .from("ai_decisions")
-      .select("user_input, ai_output, tool_called")
-      .eq("consultant_id", customer.consultant_id)
-      .contains("feedback", { rating: "down" })
-      .order("created_at", { ascending: false })
-      .limit(3);
-    const negShotLine = (negative || []).length
-      ? `\n[NÃO FAZER ASSIM — exemplos reprovados pelo consultor]\n` +
-        (negative || [])
-          .map(
-            (p: any) =>
-              `Lead: "${(p.user_input || "").slice(0, 80)}" → ${p.tool_called}: "${(p.ai_output?.message || p.ai_output?.caption || "").slice(0, 80)}"`,
-          )
-          .join("\n")
-      : "";
+    // Few-shot só rola em fases que valem a pena (objeção/fechamento) — economiza 2 queries por chamada
+    const shouldLoadFewshot = phase === "objecao" || phase === "fechamento";
+    let fewShotLine = "";
+    let negShotLine = "";
+    if (shouldLoadFewshot) {
+      const { data: positive } = await supabase
+        .from("ai_decisions")
+        .select("user_input, ai_output, tool_called")
+        .eq("consultant_id", customer.consultant_id)
+        .contains("feedback", { rating: "up" })
+        .order("created_at", { ascending: false })
+        .limit(5);
+      fewShotLine = (positive || []).length
+        ? `\n[EXEMPLOS APROVADOS PELO CONSULTOR]\n` +
+          (positive || [])
+            .map((p: any) => `Lead: "${(p.user_input || "").slice(0, 80)}" → ${p.tool_called}: "${(p.ai_output?.message || p.ai_output?.caption || "").slice(0, 80)}"`)
+            .join("\n")
+        : "";
+      const { data: negative } = await supabase
+        .from("ai_decisions")
+        .select("user_input, ai_output, tool_called")
+        .eq("consultant_id", customer.consultant_id)
+        .contains("feedback", { rating: "down" })
+        .order("created_at", { ascending: false })
+        .limit(3);
+      negShotLine = (negative || []).length
+        ? `\n[NÃO FAZER ASSIM — exemplos reprovados pelo consultor]\n` +
+          (negative || [])
+            .map((p: any) => `Lead: "${(p.user_input || "").slice(0, 80)}" → ${p.tool_called}: "${(p.ai_output?.message || p.ai_output?.caption || "").slice(0, 80)}"`)
+            .join("\n")
+        : "";
+    }
 
     // ---- Construir contents no formato Gemini ----
     const sys = systemPrompt(persona, tone, customPrompt) + fewShotLine + negShotLine + "\n\n" + contextLine;
@@ -630,12 +643,16 @@ Deno.serve(async (req) => {
     // Garante que começa em 'user' (Gemini exige)
     while (contents.length && contents[0].role !== "user") contents.shift();
 
-    if (mode === "rescue") {
+    // Closer só dispara se temos OCR + nome confiável; senão cai no fluxo reply normal
+    const closerReady = mode === "closer" && nameSourceTrusted && ocrDone;
+    const effectiveMode = (mode === "closer" && !closerReady) ? "reply" : mode;
+
+    if (effectiveMode === "rescue") {
       contents.push({
         role: "user",
         parts: [{ text: "[SISTEMA] Lead silenciou. Gere mensagem de resgate breve, sem cobrar, com gancho diferente do que já foi enviado." }],
       });
-    } else if (mode === "closer") {
+    } else if (effectiveMode === "closer") {
       contents.push({
         role: "user",
         parts: [{ text: `[SISTEMA] Conta recebida e OCR ok. Use IMEDIATAMENTE confirm_and_handoff confirmando ${customer.name || "titular"} / ${customer.distribuidora || "?"} / R$ ${billNum.toFixed(0)}.` }],
@@ -657,12 +674,11 @@ Deno.serve(async (req) => {
     // Decide qual modelo usar — Pro só quando vale a latência extra
     const score = Number(customer.qualification_score ?? 0);
     const useProModel =
-      mode === "closer" ||
-      phase === "objecao" ||
+      effectiveMode === "closer" ||
       phase === "fechamento" ||
       score >= 70 ||
       billAlreadyReceivedEarly;
-    const modelToUse = mode === "rescue"
+    const modelToUse = effectiveMode === "rescue"
       ? MODEL_RESCUE
       : (useProModel ? MODEL_DECISION : MODEL_DEFAULT);
 
@@ -700,9 +716,38 @@ Deno.serve(async (req) => {
       );
     }
 
-    const tool = toolCallG.name;
+    let tool = toolCallG.name;
     let args: any = toolCallG.args || {};
 
+    // ---- OVERRIDE 1: dúvida/objeção → forçar vídeo de 1min se ainda não foi enviado ----
+    const uiLow = (user_input || "").toLowerCase();
+    const isDoubtIntent = !billAlreadyReceivedEarly && (
+      /\b(como funciona|me explica|n[aã]o entendi|o que [eé]|funciona como|explica|explicar)\b/i.test(uiLow) ||
+      /\b(golpe|fraude|seguro|confi[aá]vel|enganaç[aã]o|verdade|mesmo|s[eé]rio)\b/i.test(uiLow) ||
+      /\b(custo|caro|gratuito|de gra[çc]a|paga|pagar|mensalidade|taxa|tem que pagar)\b/i.test(uiLow)
+    );
+    const introVideo = freshMedia.find((m: any) =>
+      /conex[aã]o green.*apresenta/i.test(String(m.label || "")) && m.kind === "video"
+    );
+    if (isDoubtIntent && introVideo && tool !== "send_media" && tool !== "request_handoff" && recentMediaCount < 1) {
+      tool = "send_media";
+      args = {
+        media_id: introVideo.id,
+        caption: "Vou te mandar um vídeo curto de 1 minuto que explica direitinho — depois te respondo qualquer dúvida.",
+        next_phase: phase === "abertura" ? "descoberta" : phase,
+        reasoning: "auto_intro_video: dúvida/objeção detectada e vídeo de 1min ainda não enviado",
+      };
+    }
+
+    // ---- OVERRIDE 2: bloqueia ask_for_name se foto da conta foi pedida/recebida ----
+    if (tool === "ask_for_name" && (customer.electricity_bill_photo_url || billRequestedRecently)) {
+      tool = "send_text";
+      args = {
+        message: "Pode me mandar a foto da conta de luz quando puder? Por ela eu já confirmo todos os dados.",
+        next_phase: phase,
+        reasoning: "ask_for_name bloqueado: foto da conta já solicitada/recebida — nome virá pelo OCR",
+      };
+    }
 
     const priorOutbound = history.filter((h: any) => h.message_direction !== "inbound");
     const hasPriorOutbound = priorOutbound.length > 0;
@@ -827,7 +872,7 @@ Deno.serve(async (req) => {
 
     // Se self-check sinalizou RISCO em tool sensível, força fallback texto neutro
     if (selfCheckRisk && (tool === "send_media" || tool === "advance_to_closing")) {
-      const safeMsg = "Me ajuda com mais um detalhe rápido para eu te dar a resposta certa: qual a sua cidade e qual a média da sua conta de luz?";
+      const safeMsg = "Para eu te dar o número certo: qual a média da sua conta de luz?";
       return new Response(JSON.stringify({
         decision: { tool: "send_text", args: { message: safeMsg, next_phase: phase, reasoning: `selfcheck_blocked:${selfCheckRisk}` } },
         phase,
@@ -850,7 +895,7 @@ Deno.serve(async (req) => {
     if (tool === "update_lead_field") {
       const f = String(args.field || "");
       const v = args.value;
-      if (["name", "distribuidora", "address_city", "pain_point"].includes(f) && typeof v === "string" && v.length > 1) {
+      if (["name", "distribuidora", "pain_point"].includes(f) && typeof v === "string" && v.length > 1) {
         updates[f] = v.trim();
         if (f === "name") updates.name_source = "self_introduced";
       }
