@@ -778,7 +778,31 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   // E o step está em fase conversacional (antes da coleta de docs).
   // Steps de coleta (aguardando_conta em diante) seguem determinísticos.
   // ═══════════════════════════════════════════════════════════════════
-  const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "checkin_pos_video", "aguardando_humano", "qualificacao"]);
+  const conversationalSteps = new Set(["welcome", "menu_inicial", "pos_video", "checkin_pos_video", "aguardando_humano", "qualificacao", "duvidas_pos_club"]);
+
+  // 💰 Pré-captura do valor da conta em qualquer step conversacional.
+  // Antes o "1600" do lead só era gravado dentro do case qualificacao —
+  // se o step ainda fosse "welcome", a IA respondia com cálculo R$ 0.
+  if (
+    messageText &&
+    !isFile &&
+    !isButton &&
+    !customer.electricity_bill_value &&
+    !customer.electricity_bill_photo_url
+  ) {
+    const raw = messageText.trim();
+    // Só captura se a msg parece um valor (curta e majoritariamente numérica)
+    if (raw.length <= 20 && /^[r\$\s]*\d{2,5}([\.,]\d{1,2})?[\s,reais]*$/i.test(raw)) {
+      const m = raw.match(/(\d{2,5}(?:[\.,]\d{1,2})?)/);
+      const v = m ? Number(m[1].replace(".", "").replace(",", ".")) : 0;
+      if (Number.isFinite(v) && v >= 30 && v <= 50000) {
+        updates.electricity_bill_value = v;
+        (customer as any).electricity_bill_value = v;
+        console.log(`💰 [bill-precapture] valor=${v} capturado em step=${step}`);
+      }
+    }
+  }
+
   // Steps de coleta também aceitam pergunta off-script (FAQ), mas só se a mensagem PARECE pergunta.
   const collectionSteps = new Set(["aguardando_conta", "coleta_doc", "ask_email", "ask_cep"]);
   const looksLikeQuestion = !!messageText && (
