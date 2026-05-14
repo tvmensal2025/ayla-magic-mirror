@@ -654,8 +654,17 @@ Deno.serve(async (req) => {
       })),
     }];
 
-    // Decide qual modelo usar
-    const modelToUse = mode === "rescue" ? MODEL_RESCUE : MODEL_DECISION;
+    // Decide qual modelo usar — Pro só quando vale a latência extra
+    const score = Number(customer.qualification_score ?? 0);
+    const useProModel =
+      mode === "closer" ||
+      phase === "objecao" ||
+      phase === "fechamento" ||
+      score >= 70 ||
+      billAlreadyReceivedEarly;
+    const modelToUse = mode === "rescue"
+      ? MODEL_RESCUE
+      : (useProModel ? MODEL_DECISION : MODEL_DEFAULT);
 
     let aiResult;
     try {
@@ -666,8 +675,8 @@ Deno.serve(async (req) => {
         tools: geminiTools,
         toolChoice: { mode: "ANY" },
         temperature: 0.5,
-        thinkingBudget: modelToUse === MODEL_DECISION ? 2048 : 0,
-        maxOutputTokens: 1500,
+        thinkingBudget: modelToUse === MODEL_DECISION ? 512 : 0,
+        maxOutputTokens: 1200,
         fallbackModel: MODEL_FALLBACK,
         functionName: "ai-sales-agent",
         consultantId: customer.consultant_id,
