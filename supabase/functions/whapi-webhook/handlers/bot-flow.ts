@@ -447,8 +447,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
   }
 
-  async function trySendConfiguredQa(): Promise<BotResult | null> {
+  async function trySendConfiguredQa(opts?: { force?: boolean; keepStep?: boolean }): Promise<BotResult | null> {
     if (!messageText || isFile || isButton || !customer.consultant_id) return null;
+    // E: bypass em passos de cadastro/edição (a não ser que force=true via off-topic intercept)
+    if (!opts?.force && NO_QA_STEPS.has(step)) return null;
     const normalizedText = messageText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     if (normalizedText.length < 2) return null;
 
