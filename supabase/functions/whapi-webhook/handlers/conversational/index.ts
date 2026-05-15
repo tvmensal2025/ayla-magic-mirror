@@ -598,6 +598,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     if (nextByPosition) {
       console.log(`[conversational] auto-advance ${currentStep.step_key} → ${nextByPosition.step_key} (no transitions, intent=${cls.intent})`);
       if (nextByPosition.step_key === "cadastro" || CADASTRO_STEPS.has(nextByPosition.step_key)) {
+        const docStep = findActiveByType("capture_documento");
+        if (docStep) return goToStep(docStep);
         return {
           reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
           updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
