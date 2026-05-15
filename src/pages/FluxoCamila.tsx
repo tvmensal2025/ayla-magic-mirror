@@ -44,6 +44,7 @@ const FLUXO: Passo[] = [
     ramificacoes: [
       { quando: "Lead responde 'oi' / 'sim' / qualquer saudação", vai_para: "Passo 2 — Vídeo + qualificação" },
     ],
+    slots: ["boas_vindas"],
   },
   {
     id: "qualificacao",
@@ -59,6 +60,7 @@ const FLUXO: Passo[] = [
       { quando: "Lead diz 'já assisti'", vai_para: "Passo 3 — Check-in" },
       { quando: "Lead responde qualquer outra coisa", vai_para: "Repete a pergunta" },
     ],
+    slots: ["explainer", "como_funciona"],
   },
   {
     id: "checkin_pos_video",
@@ -75,6 +77,7 @@ const FLUXO: Passo[] = [
       { quando: "Lead diz 'tenho dúvida'", vai_para: "Passo 5 — Tirar dúvidas" },
       { quando: "Lead diz 'não / depois'", vai_para: "Repete o reforço" },
     ],
+    slots: ["checkin"],
   },
   {
     id: "pitch_conexao_club",
@@ -89,6 +92,7 @@ const FLUXO: Passo[] = [
     ramificacoes: [
       { quando: "Sempre depois do vídeo", vai_para: "Passo 5 — Tirar dúvidas" },
     ],
+    slots: ["club"],
   },
   {
     id: "duvidas_pos_club",
@@ -104,6 +108,7 @@ const FLUXO: Passo[] = [
       { quando: "Lead diz 'quero seguir'", vai_para: "FIM — entra no Cadastro" },
       { quando: "Lead diz 'não quero'", vai_para: "Mensagem de empurrão e segue ouvindo" },
     ],
+    slots: ["duvidas", "objecao_preco", "objecao_distribuidora", "prova_social", "fazenda_solar"],
   },
   {
     id: "cadastro",
@@ -113,6 +118,7 @@ const FLUXO: Passo[] = [
     icone: "file",
     templates: [],
     ramificacoes: [],
+    slots: ["cadastro_pedir_conta"],
   },
 ];
 
