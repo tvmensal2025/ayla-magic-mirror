@@ -3467,6 +3467,18 @@ export type Database = {
         Returns: undefined
       }
       is_super_admin: { Args: { _user_id: string }; Returns: boolean }
+      lint_bot_flow_consistency: {
+        Args: { _consultant_id?: string }
+        Returns: {
+          category: string
+          consultant_id: string
+          customer_id: string
+          detail: string
+          occurrences: number
+          severity: string
+          step: string
+        }[]
+      }
       log_admin_action: {
         Args: {
           _action: string
