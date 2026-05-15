@@ -382,7 +382,7 @@ Deno.serve(async (req) => {
       }
       engineUsed = engine;
 
-      const result = engine === "flow"
+      const runEngine = async () => engine === "flow"
         ? await runConversationalFlow({
             supabase, sender, customer, consultorId, nomeRepresentante,
             remoteJid, phone, messageText, buttonId, isFile, isButton,
@@ -395,6 +395,9 @@ Deno.serve(async (req) => {
             hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
           });
+      const result = testMode && testRunId
+        ? await botRequestStore.run({ testMode: true, runId: testRunId, supabase, turn: 0 }, runEngine)
+        : await runEngine();
       reply = result.reply;
       updates = result.updates;
 
