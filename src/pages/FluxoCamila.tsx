@@ -245,11 +245,19 @@ export default function FluxoCamila() {
       icon: "msg",
       message_text: "",
       slot_key: newKey,
-      transitions: [{ trigger_intent: "default", trigger_phrases: [], goto_step_id: null, goto_special: "repeat" }],
+      transitions: [],
+      captures: [],
+      fallback: { mode: "repeat" },
       is_active: true,
     }).select().maybeSingle();
     if (error || !data) { toast.error(error?.message ?? "Erro ao adicionar"); return; }
-    setSteps((prev) => [...prev, { ...(data as any), icon: (data as any).icon ?? "msg", transitions: parseTransitions((data as any).transitions) }]);
+    setSteps((prev) => [...prev, {
+      ...(data as any),
+      icon: (data as any).icon ?? "msg",
+      transitions: parseTransitions((data as any).transitions),
+      captures: parseCaptures((data as any).captures),
+      fallback: parseFallback((data as any).fallback, (data as any).transitions),
+    }]);
     toast.success("Passo adicionado");
   }
 
