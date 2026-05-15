@@ -1,66 +1,85 @@
 ## O que vai mudar (em linguagem simples)
 
-Hoje o Fluxo da Camila mostra 6 passos fixos (vêm do código). Você só edita o **texto** de cada um — não dá pra adicionar passo novo, reordenar, desativar ou mudar para qual passo cada resposta leva. O bot no WhatsApp também segue essas regras fixas.
+Hoje, no Fluxo da Camila, cada passo só consegue decidir o próximo passo se o cliente disser **sim** ou **não**. Se ele mandar o nome, o valor da conta, ou qualquer coisa diferente, a Camila trava ou repete o passo.
 
-Vou trocar isso por um **construtor de fluxo**, onde você decide tudo:
+Vou deixar cada passo com **3 blocos visuais bem separados**, fáceis de entender:
 
-- ✅ Editar/apagar texto de qualquer passo (já funciona, vai continuar)
-- ✅ **Adicionar passos novos** (ex.: Passo 7 — "Reforço de prova social")
-- ✅ **Reordenar** arrastando ou com setas pra cima/baixo
-- ✅ **Desativar** um passo sem apagar
-- ✅ **Escolher pra onde cada resposta leva** — ex.: se o lead diz "sim", você escolhe se vai pro Passo 4, 5 ou pro Cadastro
-- ✅ **Mídia (áudio/imagem/vídeo)** continua linkada por passo, da Biblioteca que você já tem
+```
+┌─ PASSO 1 ─────────────────────────────────┐
+│ 📝 Mensagem da Camila (texto que ela manda)│
+├───────────────────────────────────────────┤
+│ 🎯 REGRAS — "Se o cliente disser..."      │
+│   • SIM / quero  →  Passo 3                │
+│   • NÃO / depois →  Passo 5                │
+│   • mandar valor (R$) → Passo 3            │
+│   [+ adicionar regra]                      │
+├───────────────────────────────────────────┤
+│ 💾 CAPTURAR DADOS do que o cliente mandou │
+│   ☑ Nome do cliente   → salva em {{nome}} │
+│   ☑ Valor da conta    → salva em {{valor_conta}}│
+│   ☐ Telefone          → salva em {{telefone}}│
+│   ☐ CPF               → salva em {{cpf}}  │
+├───────────────────────────────────────────┤
+│ 🤖 PLANO B — "Se nada acima funcionar"    │
+│   ◉ Repetir o passo                        │
+│   ○ Ir para passo: [Passo 2 ▾]            │
+│   ○ Deixar a IA decidir (Gemini)          │
+│      └ Instrução: "Se parecer interessado,│
+│         vá pro Passo 3. Se confuso, repita."│
+└───────────────────────────────────────────┘
+```
 
-E o mais importante: **a Camila no WhatsApp passa a obedecer o seu fluxo** em vez do fluxo fixo do código.
+### Como cada bloco ajuda você
 
-## Como vai ficar a tela
+**🎯 REGRAS** — continua como já é, só com mais opções no menu de gatilhos:
+- `Disse SIM` / `Disse NÃO` (já existe)
+- `Mandou valor (R$)` — detecta "350", "R$ 450", "minha conta é 600"
+- `Mandou nome próprio` — detecta "Maria Silva", "sou João"
+- `Mandou telefone` / `Mandou CPF`
+- `Palavra específica` — você digita as palavras
 
-Cada passo vira um cartão com:
+**💾 CAPTURAR** — checkboxes simples. Marcando "Valor da conta", se o cliente mandar "minha conta vem 380", o sistema extrai `380`, salva no cadastro dele e passa a estar disponível como `{{valor_conta}}` em mensagens futuras. Mesma coisa pra nome, telefone, CPF.
 
-1. Cabeçalho: número, título editável, botão de ⬆️⬇️ pra reordenar, switch pra ativar/desativar, ✏️ renomear, 🗑️ apagar
-2. Mídias do passo (do StepMediaPanel que já existe)
-3. Texto da mensagem (editável, com sugestão automática como já faz hoje)
-4. **"Para onde vai depois"** — uma lista de regras tipo:
-   - `Se o lead disser "sim/quero/vamos"` → vai para `Passo X`
-   - `Se o lead disser "não/depois"` → vai para `Passo Y`
-   - `Qualquer outra coisa` → vai para `Passo Z` (ou repete)
-   
-   Cada regra tem: gatilho (palavras/intenção) + destino (dropdown com os passos existentes + "Cadastro" + "Aguardando humano").
-5. Botão grande "+ Adicionar passo" no fim da lista.
+**🤖 PLANO B** — substitui a regra "Qualquer outra coisa" de hoje. Em vez de uma única opção, você escolhe entre:
+- Repetir o passo (padrão seguro)
+- Pular pra um passo específico
+- **Deixar a IA decidir** — você escreve em português o que ela deve fazer ("se o cliente parecer interessado, vá pro Passo 3; se tiver dúvida, repita") e a Gemini lê a mensagem e decide.
 
-Os 2 atalhos globais ("quero cadastrar" e "quero falar com humano") continuam fixos no topo, como hoje.
+## Visual
+
+- Cada bloco com fundo levemente diferente e ícone na esquerda (🎯 💾 🤖) pra você bater o olho e saber o que é.
+- Tipografia clara, tudo em português, zero jargão técnico ("intent", "regex", etc.).
+- Tooltips curtos no `?` ao lado de cada bloco explicando o que faz.
+- Cores do design system (verde primário, glassmorphism dark) — mantém a identidade.
 
 ## Detalhes técnicos
 
-**Banco de dados** — já existem as tabelas `bot_flows`, `bot_flow_steps` e `bot_flow_qa` (do FlowBuilder antigo). Vou:
+**Banco** — adicionar coluna `captures jsonb default '[]'` em `bot_flow_steps`. Cada item: `{ field: 'electricity_bill_value' | 'name' | 'phone' | 'cpf', enabled: true }`.
 
-- Adicionar colunas faltantes em `bot_flow_steps`: `title`, `summary`, `icon`, `is_active`, `media_order` (jsonb), `transitions` (jsonb com `[{trigger_intent, trigger_phrases[], goto_step_id}]`).
-- Criar 1 fluxo "Camila" por consultor automaticamente (seed do fluxo atual hardcoded).
-- O texto da mensagem do passo passa a viver em `bot_flow_steps.message_text` (já existe). Mantém `bot_messages` só pra fallback global e mensagens de sistema.
+**Frontend** (`src/pages/FluxoCamila.tsx`):
+- Quebrar `TransitionRow` em 3 sub-componentes: `<RulesBlock>`, `<CaptureBlock>`, `<FallbackBlock>`.
+- Novos `INTENT_OPTIONS`: `valor_brl`, `nome_proprio`, `telefone_br`, `cpf_br`, `palavra_chave`, `ai_decide`.
+- `FallbackBlock` com radio group (repetir / pular / IA) + textarea pra prompt da IA.
 
-**Frontend** — refatorar `src/pages/FluxoCamila.tsx`:
-- Carregar passos de `bot_flow_steps` em vez do array `FLUXO` hardcoded.
-- Componentes novos: `<StepCard>`, `<TransitionRow>`, `<AddStepButton>`.
-- Reordenação otimista (UI reordena na hora, salva `position` em background).
-- StepMediaPanel continua igual (já está bom).
+**Backend** (`supabase/functions/whapi-webhook/handlers/conversational/index.ts`):
+- Nova função `extractCaptures(step, messageText)` que roda regex antes da classificação:
+  - valor: `/R?\$?\s*(\d{2,5}([.,]\d{2})?)/`
+  - telefone: `/(\d{2})\s?9?\s?\d{4}-?\d{4}/`
+  - CPF: `/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/`
+  - nome: heurística (2+ palavras capitalizadas após "sou/me chamo/nome é")
+- Salva os capturados em `customers` (`electricity_bill_value`, `name`, `phone`, `cpf`).
+- Quando o intent matcher reconhece `valor_brl`/`nome_proprio`/etc., usa a transição correspondente.
+- Quando cai no Plano B com `ai_decide`, chama Gemini com o prompt do usuário + lista de passos válidos e pega o `step_key` de retorno.
 
-**Backend (bot do WhatsApp)** — `supabase/functions/whapi-webhook/handlers/conversational/state-machine.ts`:
-- Trocar a função `decideTransition` hardcoded por uma versão que carrega o fluxo do consultor de `bot_flow_steps` + `transitions` e decide o próximo passo a partir disso.
-- Manter os 2 overrides globais (`quero_cadastrar`, `quero_humano`) e a entrada do Cadastro (que continua intacto).
-- Fallback: se o consultor ainda não tem fluxo customizado, usa o seed padrão (mesmo conteúdo de hoje) — ninguém quebra.
+**Migração** — adiciona `captures` com default `[]`. Zero impacto em fluxos existentes.
 
-**Migração de dados** — criar uma migration que, pra cada consultor existente, semeia um `bot_flows` ativo + 6 `bot_flow_steps` espelhando o fluxo atual + transitions equivalentes ao state-machine atual. Ninguém perde nada.
+## O que NÃO muda
 
-## O que **não** muda
+- Cadastro (OCR + portal) — intacto.
+- Biblioteca de mídia — intacta.
+- Atalhos globais (`quero cadastrar` / `quero humano`) — intactos.
+- Fluxos já criados continuam funcionando (Plano B vazio = repete passo, igual hoje).
 
-- Cadastro (OCR + portal iGreen) continua intocado.
-- Biblioteca de áudios/vídeos/imagens (`ai_media_library`) continua igual — só passa a ser linkada via `bot_flow_steps.id` em vez de `slot_key` fixo.
-- Atalhos globais continuam funcionando em qualquer passo.
+## Entrega
 
-## Entrega em 3 partes (pra você ir validando)
-
-1. **Migração + seed** do banco com o fluxo atual replicado (você não vê diferença, mas a base já tá pronta).
-2. **Tela nova de edição** do Fluxo da Camila (você já consegue mexer, mas o bot ainda usa o código antigo).
-3. **Bot passa a ler do banco** — aí suas mudanças passam a valer pra valer no WhatsApp.
-
-Aprovando, começo pela parte 1.
+Tudo numa parte só (UI + backend + migração). Aprovando, sigo.
