@@ -18,6 +18,7 @@ import { runConversationalFlow } from "./handlers/conversational/index.ts";
 import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
+import { botRequestStore, isTestPhone, logTestOutbound } from "../_shared/test-mode.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
