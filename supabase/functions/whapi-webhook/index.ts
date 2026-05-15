@@ -317,6 +317,12 @@ Deno.serve(async (req) => {
       (updates as any).error_message = null;
       (updates as any).rescue_attempts = 0;
     }
+    // Extrai metadados de telemetria (não persistir no customers).
+    const __intent = (updates as any).__intent ?? null;
+    const __confidence = (updates as any).__confidence ?? null;
+    delete (updates as any).__intent;
+    delete (updates as any).__confidence;
+
     if (Object.keys(updates).length > 0) {
       delete (updates as any).__inline_sent;
       const { error: updateError } = await supabase.from("customers").update(updates).eq("id", customer.id).select();
@@ -325,6 +331,7 @@ Deno.serve(async (req) => {
         await logStepTransition(supabase, {
           customer_id: customer.id, consultant_id: superAdminConsultantId,
           phone, from_step: stepBefore, to_step: updates.conversation_step,
+          intent: __intent, confidence: __confidence,
         });
       }
     }
