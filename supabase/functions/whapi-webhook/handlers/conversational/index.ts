@@ -146,36 +146,79 @@ async function aiDecideFallback(
   messageText: string,
   candidates: { id: string; step_key: string; title?: string }[],
   geminiApiKey: string | undefined,
+  cooldownKey: string,
 ): Promise<string | null> {
   if (!geminiApiKey || !prompt) return null;
-  try {
-    const sys = `Você decide o próximo passo de um fluxo de WhatsApp.
+  if (aiInCooldown(cooldownKey)) {
+    console.warn("[conversational] AI fallback skipped (cooldown active)");
+    return null;
+  }
+  const validKeys = candidates.map(c => c.step_key);
+  const enumKeys = [...validKeys, "REPEAT", "HUMANO", "CADASTRO"];
+
+  const sys = `Você decide o próximo passo de um fluxo de WhatsApp.
 Instrução do consultor: ${prompt}
 
 Mensagem do cliente: "${messageText}"
 
-Passos disponíveis (responda APENAS com o step_key exato, ou "REPEAT" pra repetir, ou "HUMANO" pra mandar pra humano, ou "CADASTRO" pra ir ao cadastro):
-${candidates.map(c => `- ${c.step_key}`).join("\n")}
+Passos válidos: ${enumKeys.join(", ")}
 
-Responda com 1 palavra (o step_key escolhido).`;
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: sys }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 30 },
-        }),
-      },
-    );
-    const json: any = await res.json();
-    const out = (json?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim().split(/\s+/)[0];
-    return out || null;
-  } catch (e) {
-    console.error("[conversational] aiDecideFallback failed", e);
-    return null;
-  }
+Responda em JSON: {"next_step_key": "<um_dos_passos_válidos>", "reason": "breve"}.`;
+
+  const callOnce = async (timeoutMs: number): Promise<string | null> => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: sys }] }],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 80,
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "OBJECT",
+                properties: {
+                  next_step_key: { type: "STRING", enum: enumKeys },
+                  reason: { type: "STRING" },
+                },
+                required: ["next_step_key"],
+              },
+            },
+          }),
+          signal: ctrl.signal,
+        },
+      );
+      if (res.status === 429) { setAiCooldown(cooldownKey); return null; }
+      if (!res.ok) return null;
+      const json: any = await res.json();
+      const txt = (json?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+      if (!txt) return null;
+      try {
+        const parsed = JSON.parse(txt);
+        const choice = String(parsed?.next_step_key || "").trim();
+        return enumKeys.includes(choice) ? choice : null;
+      } catch {
+        // fallback: extrai primeira palavra que casa com enum
+        const first = txt.split(/[\s,"]+/).find((w: string) => enumKeys.includes(w));
+        return first || null;
+      }
+    } catch (e) {
+      console.error("[conversational] aiDecideFallback failed", (e as Error).message);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  // Tentativa 1 (4s) → se falhar, retry curto (3s)
+  const first = await callOnce(4000);
+  if (first) return first;
+  return await callOnce(3000);
 }
 
 export async function runConversationalFlow(ctx: BotContext): Promise<BotResult> {
