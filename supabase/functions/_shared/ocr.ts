@@ -387,6 +387,7 @@ export async function ocrDocumentoFrenteVerso(
   frenteUrl: string | null, versoUrl: string | null, tipo: string,
   geminiApiKey: string, frenteBase64?: string, frenteMediaMsg?: any, versoBase64?: string
 ): Promise<{ sucesso: boolean; dados?: any; erro?: string }> {
+  if (isTestMode()) { console.log("🧪 [test-mode] ocrDocumentoFrenteVerso mocked"); return mockDocOcr(); }
   console.log(`🔍 ocrDocumentoFrenteVerso: frenteB64=${!!frenteBase64}, versoB64=${!!versoBase64}, frenteUrl=${frenteUrl?.substring(0,60)}, versoUrl=${versoUrl?.substring(0,60)}`);
 
   // OCR da frente — passa frenteBase64 e frenteMediaMsg
