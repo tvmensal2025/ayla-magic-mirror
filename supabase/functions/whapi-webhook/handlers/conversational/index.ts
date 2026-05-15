@@ -575,7 +575,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       return goToStep(nextStep);
     }
   }
-  if (fb.mode === "ai" && fb.ai_prompt) {
+  if (fb.mode === "ai" && fb.ai_prompt && !strictMode) {
     const candidates = dbSteps.filter(s => s.is_active && s.id !== currentStep.id).map(s => ({ id: s.id, step_key: s.step_key }));
     const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey, consultantId || "global");
     if (choice) {
@@ -586,6 +586,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       const nextStep = dbSteps.find(s => s.step_key === choice);
       if (nextStep && nextStep.is_active) return goToStep(nextStep);
     }
+  } else if (fb.mode === "ai" && strictMode) {
+    console.log(`[conversational] strict_mode=true → fallback IA ignorado, usando repeat`);
   }
 
   // Auto-advance se o passo não tem transições configuradas E intenção positiva
