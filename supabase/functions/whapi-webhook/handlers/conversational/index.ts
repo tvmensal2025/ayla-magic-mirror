@@ -352,7 +352,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   }
   if (fb.mode === "ai" && fb.ai_prompt) {
     const candidates = dbSteps.filter(s => s.is_active && s.id !== currentStep.id).map(s => ({ id: s.id, step_key: s.step_key }));
-    const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey);
+    const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey, consultantId || "global");
     if (choice) {
       const upper = choice.toUpperCase();
       if (upper === "REPEAT") return repeatCurrent();
