@@ -94,7 +94,41 @@ Deno.serve(async (req) => {
       });
     }
 
-    const sender = createWhapiSender(whapiToken);
+    // ─── Modo teste end-to-end (telefone reservado 5500000xxx) ─────────
+    const testMode = isTestPhone(phone);
+    let testRunId: string | null = null;
+    if (testMode) {
+      // Pega o run_id ativo mais recente para esse telefone
+      const { data: runRow } = await supabase
+        .from("bot_test_runs")
+        .select("id")
+        .eq("status", "running")
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      testRunId = runRow?.id || null;
+      console.log(`🧪 [test-mode] ATIVO phone=${phone} runId=${testRunId}`);
+    }
+
+    // Sender real OU mock que registra em bot_test_outbound
+    const realSender = createWhapiSender(whapiToken);
+    const sender = testMode
+      ? {
+          sendText: async (_jid: string, text: string) => {
+            await logTestOutbound("text", text); return true;
+          },
+          sendButtons: async (_jid: string, message: string, buttons: any[]) => {
+            await logTestOutbound("buttons", `${message}\n[${buttons.map((b: any) => b.title || b.id).join(" | ")}]`);
+            return true;
+          },
+          sendMedia: async (_jid: string, mediaUrl: string, caption: string, mediatype: string) => {
+            await logTestOutbound(`media:${mediatype}`, `${mediaUrl} | ${caption || ""}`);
+            return true;
+          },
+          sendPresence: async () => true,
+          downloadMedia: async () => null,
+        }
+      : realSender;
 
     // ─── Identificar consultor super admin ─────────────────────────────
     // O super admin tem consultant_id fixo na settings
