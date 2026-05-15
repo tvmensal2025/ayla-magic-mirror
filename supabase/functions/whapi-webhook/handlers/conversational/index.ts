@@ -17,6 +17,17 @@ interface DbTransition {
   goto_special?: string | null; // 'cadastro' | 'humano' | 'repeat' | null
 }
 
+interface DbCapture {
+  field: "name" | "electricity_bill_value" | "phone_whatsapp" | "cpf";
+  enabled?: boolean;
+}
+
+interface DbFallback {
+  mode?: "repeat" | "goto" | "ai";
+  goto_step_id?: string | null;
+  ai_prompt?: string | null;
+}
+
 interface DbStep {
   id: string;
   step_key: string;
@@ -25,6 +36,8 @@ interface DbStep {
   is_active: boolean;
   position: number;
   transitions: DbTransition[] | null;
+  captures: DbCapture[] | null;
+  fallback: DbFallback | null;
 }
 
 // Steps the bot must NEVER override (cadastro pipeline owns them)
