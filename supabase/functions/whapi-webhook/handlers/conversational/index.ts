@@ -44,6 +44,7 @@ interface DbFallback {
 interface DbStep {
   id: string;
   step_key: string;
+  step_type: string | null;
   message_text: string | null;
   text_delay_ms: number | null;
   slot_key: string | null;
@@ -52,12 +53,13 @@ interface DbStep {
   transitions: DbTransition[] | null;
   captures: DbCapture[] | null;
   fallback: DbFallback | null;
+  auto_detect_doc_type: boolean | null;
 }
 
 // Steps the bot must NEVER override (cadastro pipeline owns them)
 const CADASTRO_STEPS = new Set([
   "aguardando_conta", "processando_ocr_conta", "confirmando_dados_conta",
-  "ask_tipo_documento", "aguardando_doc_frente", "aguardando_doc_verso",
+  "ask_tipo_documento", "aguardando_doc_auto", "aguardando_doc_frente", "aguardando_doc_verso",
   "confirmando_dados_doc", "ask_name", "ask_cpf", "ask_rg", "ask_birth_date",
   "ask_phone_confirm", "ask_phone", "ask_email", "ask_cep", "ask_number",
   "ask_complement", "ask_installation_number", "ask_bill_value",
@@ -80,7 +82,7 @@ async function loadFlow(supabase: any, consultantId: string): Promise<DbStep[] |
 
     const { data: steps } = await supabase
       .from("bot_flow_steps")
-      .select("id, step_key, message_text, text_delay_ms, slot_key, is_active, position, transitions, captures, fallback")
+      .select("id, step_key, step_type, message_text, text_delay_ms, slot_key, is_active, position, transitions, captures, fallback, auto_detect_doc_type")
       .eq("flow_id", flow.id)
       .order("position", { ascending: true });
     return (steps || []) as DbStep[];
@@ -301,13 +303,28 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     cpf: captureUpdates.cpf || (ctx.customer as any).cpf,
   };
 
+  // Mapeia step_type especial → primeiro conversation_step do pipeline de cadastro
+  // (definido em bot-flow.ts). O lead recebe o texto/mídia configurado no passo
+  // E em seguida cai no estado correto para a Camila pedir conta/doc/finalizar.
+  const stepTypeToCadastro = (st: string | null | undefined): string | null => {
+    if (st === "capture_conta") return "aguardando_conta";
+    if (st === "capture_documento") return "aguardando_doc_auto"; // novo: detecta tipo automaticamente
+    if (st === "finalizar_cadastro") return "ask_finalizar";
+    return null;
+  };
+
   // Helper — render and return a step (respeita text_delay_ms configurado no passo)
   const goToStep = async (s: DbStep, extra: Record<string, any> = {}) => {
     const delay = Math.max(0, Math.min(60000, s.text_delay_ms ?? 1500));
     if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    const cadastroStep = stepTypeToCadastro(s.step_type);
+    // Se for um passo especial (capture_conta/documento/finalizar), o conversation_step
+    // salvo já é o do pipeline de cadastro — assim a próxima mensagem do lead cai direto
+    // no bot-flow.ts e segue o fluxo de OCR / portal / OTP.
+    const nextConversationStep = cadastroStep || s.step_key;
     return {
       reply: renderTemplate(s.message_text || "", vars),
-      updates: { conversation_step: s.step_key, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...extra },
+      updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...extra },
     };
   };
   const repeatCurrent = () => goToStep(currentStep);

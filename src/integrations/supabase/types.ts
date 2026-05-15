@@ -1101,6 +1101,7 @@ export type Database = {
       }
       bot_flow_steps: {
         Row: {
+          auto_detect_doc_type: boolean
           captures: Json
           condition_text: string | null
           created_at: string
@@ -1125,6 +1126,7 @@ export type Database = {
           wait_seconds: number
         }
         Insert: {
+          auto_detect_doc_type?: boolean
           captures?: Json
           condition_text?: string | null
           created_at?: string
@@ -1149,6 +1151,7 @@ export type Database = {
           wait_seconds?: number
         }
         Update: {
+          auto_detect_doc_type?: boolean
           captures?: Json
           condition_text?: string | null
           created_at?: string
