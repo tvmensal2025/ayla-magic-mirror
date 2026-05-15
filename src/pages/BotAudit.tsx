@@ -211,14 +211,12 @@ export default function BotAudit() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Bot className="h-5 w-5 text-emerald-500" />
-            Teste end-to-end real
+            Simulação real de conversa
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Cria um lead fictício (telefone <code className="px-1 rounded bg-muted">5500000…</code>), dispara mensagens reais
-            no <code className="px-1 rounded bg-muted">whapi-webhook</code> e percorre o fluxo do início ao fim.
-            Sem custo de WhatsApp, sem delay de mídia, OCR mockado.
+            Roda o mesmo bot do WhatsApp com um lead de teste: aprova, recusa, pergunta dúvidas, envia conta/documento e mostra se está pronto para vender.
           </p>
 
           <div className="flex gap-2 items-center">
@@ -228,9 +226,21 @@ export default function BotAudit() {
                 {SCENARIOS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Button onClick={runE2E} disabled={loading !== null} size="lg" className="gap-2">
+            <Button onClick={() => runE2E()} disabled={loading !== null} size="lg" className="gap-2">
               {loading === "e2e" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              Rodar bot do início ao fim
+              Rodar cenário
+            </Button>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Button type="button" variant="secondary" disabled={loading !== null} onClick={() => runE2E("joia_validacao")} className="gap-2">
+              <ThumbsUp className="h-4 w-4" /> Aprovar com joia
+            </Button>
+            <Button type="button" variant="secondary" disabled={loading !== null} onClick={() => runE2E("lead_indeciso")} className="gap-2">
+              <MessageSquare className="h-4 w-4" /> Testar dúvida
+            </Button>
+            <Button type="button" variant="secondary" disabled={loading !== null} onClick={() => runE2E("recusa_conta")} className="gap-2">
+              <FileX className="h-4 w-4" /> Recusar dados
             </Button>
           </div>
 
@@ -246,6 +256,9 @@ export default function BotAudit() {
                 <Badge variant={e2eResult.status === "completed" ? "default" : e2eResult.status === "stuck" || e2eResult.status === "error" ? "destructive" : "secondary"}>
                   {e2eResult.status}
                 </Badge>
+                {e2eResult.marketReadiness && (
+                  <Badge variant={e2eResult.marketReadiness === "Pronto para vender" ? "default" : "secondary"}>{e2eResult.marketReadiness}</Badge>
+                )}
                 <span><strong>{e2eResult.turns}</strong> turnos</span>
                 <span>último step: <code className="px-1 rounded bg-background">{e2eResult.lastStep || "∅"}</code></span>
                 <span>customer status: <code className="px-1 rounded bg-background">{e2eResult.finalCustomerStatus || "∅"}</code></span>
@@ -255,6 +268,10 @@ export default function BotAudit() {
                   </Button>
                 </span>
               </div>
+              {e2eResult.recommendation && <p className="text-xs text-muted-foreground">{e2eResult.recommendation}</p>}
+              {e2eResult.visitedSteps?.length ? (
+                <div className="text-[11px] font-mono text-muted-foreground break-words">{e2eResult.visitedSteps.join(" → ")}</div>
+              ) : null}
 
               {e2eResult.checks?.length > 0 && (
                 <div className="grid gap-1">
