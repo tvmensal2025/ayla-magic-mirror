@@ -248,6 +248,46 @@ Responda em JSON: {"next_step_key": "<um_dos_passos_válidos>", "reason": "breve
   return await callOnce(3000);
 }
 
+async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string): Promise<boolean> {
+  const slotKey = step.slot_key || step.step_key || step.id;
+  if (!slotKey) return false;
+
+  const { data: mediaRows } = await ctx.supabase
+    .from("ai_media_library")
+    .select("id, kind, label, url, slot_key, send_order, duration_sec, delay_before_ms")
+    .eq("consultant_id", consultantId)
+    .eq("slot_key", slotKey)
+    .eq("active", true)
+    .order("send_order", { ascending: true });
+
+  const medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+  if (medias.length === 0) return false;
+
+  const configuredOrder = Array.isArray(step.media_order) && step.media_order.length > 0
+    ? step.media_order.map((k) => String(k).toLowerCase())
+    : await getStepMediaOrder(ctx.supabase, consultantId, slotKey);
+  if (configuredOrder) medias.sort(makeKindComparator((m: any) => m.kind, configuredOrder));
+
+  let sent = false;
+  for (let i = 0; i < medias.length; i++) {
+    const m = medias[i];
+    const kind = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) : "document";
+    const ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
+    if (ok !== false) {
+      sent = true;
+      await ctx.supabase.from("conversations").insert({
+        customer_id: ctx.customer.id,
+        message_direction: "outbound",
+        message_text: `[flow-step:${step.step_key}:${kind}]`,
+        message_type: kind,
+        conversation_step: step.step_key,
+      });
+    }
+    if (i < medias.length - 1) await sleepForMedia(kind, Number(m.duration_sec || 0) || null, Number(m.delay_before_ms || 0) || null);
+  }
+  return sent;
+}
+
 export async function runConversationalFlow(ctx: BotContext): Promise<BotResult> {
   const stepKey = (ctx.customer.conversation_step || "welcome") as string;
 
