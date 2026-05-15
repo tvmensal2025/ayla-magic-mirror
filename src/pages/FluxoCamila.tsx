@@ -520,9 +520,10 @@ function TransitionRow(props: {
             <SelectItem value="special:repeat">↻ Repetir esse mesmo passo</SelectItem>
             <SelectItem value="special:cadastro">→ Cadastro (OCR + portal)</SelectItem>
             <SelectItem value="special:humano">→ Aguardando humano (silenciar bot)</SelectItem>
-            {allSteps.filter((s) => s.id !== currentStepId).map((s, i) => (
-              <SelectItem key={s.id} value={`step:${s.id}`}>Passo {i + 1 + (allSteps.findIndex(x => x.id === s.id) >= allSteps.findIndex(x => x.id === currentStepId) ? 0 : 0)} — {s.title}</SelectItem>
-            ))}
+            {allSteps.filter((s) => s.id !== currentStepId).map((s) => {
+              const num = allSteps.findIndex(x => x.id === s.id) + 1;
+              return <SelectItem key={s.id} value={`step:${s.id}`}>Passo {num} — {s.title}</SelectItem>;
+            })}
           </SelectContent>
         </Select>
       </div>
