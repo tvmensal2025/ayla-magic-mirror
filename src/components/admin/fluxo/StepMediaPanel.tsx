@@ -69,16 +69,17 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
   async function openLibrary(kind: Kind) {
     setPickerKind(kind);
     setLoadingLibrary(true);
+    // Inclui mídias do próprio consultor + públicas (Super Admin)
     const { data } = await supabase
       .from("ai_media_library")
-      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec")
-      .eq("consultant_id", consultantId)
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, consultant_id, is_public")
+      .or(`consultant_id.eq.${consultantId},and(consultant_id.is.null,is_public.eq.true)`)
       .eq("kind", kind)
       .eq("active", true)
       .order("created_at", { ascending: false })
       .limit(200);
     const existingUrls = new Set(items.filter(i => i.kind === kind).map(i => i.url));
-    setLibraryItems(((data as Media[]) ?? []).filter(m => !existingUrls.has(m.url)));
+    setLibraryItems(((data as any[]) ?? []).filter(m => !existingUrls.has(m.url)) as Media[]);
     setLoadingLibrary(false);
   }
 
