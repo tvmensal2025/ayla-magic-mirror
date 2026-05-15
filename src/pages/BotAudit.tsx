@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
-import { CheckCircle2, XCircle, Loader2, FlaskConical, Database } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, FlaskConical, Database, Bot, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
 type FakeResult = { id: number; name: string; passed: boolean; expected: unknown; got: unknown };
