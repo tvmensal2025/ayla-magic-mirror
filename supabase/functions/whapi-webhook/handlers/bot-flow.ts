@@ -1078,6 +1078,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         updates: { conversation_step: "qualificacao" },
       };
     }
+    if (/\?|seguro|taxa|pagar|custa|funciona|entendi|d[uú]vida/i.test(txt)) {
+      return {
+        reply: `Sem problema! Funciona assim: você continua recebendo energia normalmente, sem obra e sem trocar instalação. O desconto vem na conta porque a iGreen aplica créditos de energia limpa.\n\n${v}pra eu calcular se vale a pena no seu caso, quanto vem em média na sua conta de luz?`,
+        updates: { conversation_step: "qualificacao" },
+      };
+    }
   }
 
   // ✅ No pós-pitch, “pode seguir/joia/sem dúvida” precisa abrir documento imediatamente,
@@ -1098,6 +1104,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         conversation_step: "ask_tipo_documento",
       });
       return { reply: "", updates: { conversation_step: "ask_tipo_documento", __inline_sent: true } as any };
+    }
+    if (/\?|cancel|cancela|taxa|fidelidade|seguro|pagar|custa|club|clube|funciona/i.test(txt)) {
+      return {
+        reply: "Pode ficar tranquilo: não tem obra, não muda instalação e você pode pedir suporte se tiver qualquer dúvida. O Conexão Club é um benefício extra de descontos/cashback em parceiros; o principal aqui é reduzir sua conta de luz.\n\nSe estiver tudo certo, me responde *pode seguir* que eu peço seu RG ou CNH pra finalizar.",
+        updates: { conversation_step: "duvidas_pos_club" },
+      };
     }
   }
 
