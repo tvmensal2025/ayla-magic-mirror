@@ -168,7 +168,19 @@ Se não encontrar um campo, use "". NÃO invente dados.`;
     const dados = JSON.parse(match[0]);
     if (dados.cep) { const c = dados.cep.replace(/\D/g, ""); dados.cep = c.length === 8 ? c : ""; }
     if (dados.numeroInstalacao) { const n = dados.numeroInstalacao.replace(/\D/g, ""); dados.numeroInstalacao = (n.length >= 7 && n.length <= 12) ? n : ""; }
-    if (dados.valorConta) { const v = parseFloat(String(dados.valorConta).replace(/[^\d.,]/g, "").replace(",", ".")); dados.valorConta = (!isNaN(v) && v > 0) ? v.toFixed(2) : ""; }
+    if (dados.valorConta) {
+      // Parse robusto BR/US: "1.688,15" → 1688.15 ; "1688.15" → 1688.15 ; "1688" → 1688
+      let raw = String(dados.valorConta).replace(/[^\d.,]/g, "");
+      if (raw.includes(",")) {
+        // Formato BR: "." é milhar, "," é decimal
+        raw = raw.replace(/\./g, "").replace(",", ".");
+      } else if ((raw.match(/\./g) || []).length > 1) {
+        // Múltiplos pontos sem vírgula = todos são milhar (ex: "1.688.150")
+        raw = raw.replace(/\./g, "");
+      }
+      const v = parseFloat(raw);
+      dados.valorConta = (!isNaN(v) && v > 0) ? v.toFixed(2) : "";
+    }
 
     // Score de confiança: % de campos críticos preenchidos.
     const criticos = [dados.nome, dados.endereco, dados.cidade, dados.estado, dados.distribuidora, dados.valorConta];

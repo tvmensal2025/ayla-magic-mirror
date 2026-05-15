@@ -332,13 +332,19 @@ Deno.serve(async (req) => {
       // Cadastro/system states stay with runBotFlow.
       const CADASTRO_OR_SYSTEM = new Set([
         "aguardando_conta","processando_ocr_conta","confirmando_dados_conta",
-        "ask_tipo_documento","aguardando_doc_frente","aguardando_doc_verso",
+        "ask_tipo_documento","aguardando_doc_auto","aguardando_doc_frente","aguardando_doc_verso",
         "confirmando_dados_doc","ask_name","ask_cpf","ask_rg","ask_birth_date",
         "ask_phone_confirm","ask_phone","ask_email","ask_cep","ask_number",
         "ask_complement","ask_installation_number","ask_bill_value",
         "ask_doc_frente_manual","ask_doc_verso_manual","ask_finalizar",
         "finalizando","portal_submitting","aguardando_otp","validando_otp",
-        "aguardando_assinatura","complete",
+        "aguardando_assinatura","complete","aguardando_humano",
+        // Edição pós-OCR (conta de luz)
+        "editing_conta_menu","editing_conta_nome","editing_conta_endereco",
+        "editing_conta_cep","editing_conta_distribuidora","editing_conta_instalacao","editing_conta_valor",
+        // Edição pós-OCR (documento)
+        "editing_doc_menu","editing_doc_nome","editing_doc_cpf","editing_doc_rg",
+        "editing_doc_nascimento","editing_doc_pai","editing_doc_mae",
       ]);
       const useConversational =
         customerOverride !== false &&

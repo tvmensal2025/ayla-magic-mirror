@@ -1316,16 +1316,37 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               console.log(`✅ CEP auto-preenchido: ${cepBuscado}`);
             }
           }
+
+          // Helper de formatação BRL
+          const formatBRL = (n: number) =>
+            n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+          // BLINDAGEM: nome e valor são obrigatórios. Se faltar, perguntar antes da confirmação.
+          if (!updates.name || String(updates.name).trim().length < 3) {
+            updates.conversation_step = "editing_conta_nome";
+            reply = "📋 Consegui ler quase tudo da sua conta! Só preciso confirmar uma coisa:\n\n👤 Qual é o seu *nome completo* (como aparece na conta)?";
+            break;
+          }
+          if (!updates.electricity_bill_value || updates.electricity_bill_value < 30) {
+            updates.conversation_step = "editing_conta_valor";
+            reply = `📋 Já peguei seus dados, ${String(updates.name).split(" ")[0]}! Só me confirma uma coisa:\n\n💰 Qual o *valor médio* da sua conta de luz? (ex: 350,00)`;
+            break;
+          }
+
           updates.conversation_step = "confirmando_dados_conta";
+          const _val = Number(updates.electricity_bill_value);
+          const _mensal = _val * 0.20;
+          const _anual = _mensal * 12;
           reply = "📋 *Dados encontrados na conta:*\n\n" +
-            `👤 *Nome:* ${updates.name || "❌ não encontrado"}\n` +
+            `👤 *Nome:* ${updates.name}\n` +
             `📍 *Endereço:* ${updates.address_street || "❌"} ${updates.address_number || ""}\n` +
             `🏘️ *Bairro:* ${updates.address_neighborhood || "❌"}\n` +
             `🏙️ *Cidade:* ${updates.address_city || "❌"} - ${updates.address_state || ""}\n` +
             `📮 *CEP:* ${updates.cep || "❌"}\n` +
             `⚡ *Distribuidora:* ${updates.distribuidora || "❌"}\n` +
             `🔢 *Nº Instalação:* ${updates.numero_instalacao || "❌"}\n` +
-            `💰 *Valor:* R$ ${updates.electricity_bill_value || "❌"}\n\n` +
+            `💰 *Valor:* R$ ${formatBRL(_val)}\n` +
+            `💚 *Economia estimada (20%):* R$ ${formatBRL(_mensal)}/mês • R$ ${formatBRL(_anual)}/ano\n\n` +
             "Está tudo correto?";
           await sendOptions(remoteJid, reply, [
             { id: "sim_conta", title: "✅ SIM" },
@@ -1372,9 +1393,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         const first = ((customer as any).name || "").split(/\s+/)[0];
         const v = first ? `${first}, ` : "";
         const valor = Number((customer as any).electricity_bill_value || 0);
+        const _fmtBRL = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const _mensal = valor * 0.20;
+        const _anual = _mensal * 12;
         const economiaMsg = valor >= 30
-          ? `Show, ${v.trim().replace(/,$/, "")}! Com R$ ${valor.toFixed(0)} de conta dá pra economizar até *20%* todo mês na sua luz 💚\n\nE tem mais: você ainda entra no nosso *Conexão Club* — até *70% de desconto em farmácia*, mercado, posto e várias lojas parceiras. Minha mãe usa direto kkk`
-          : `Show, ${v}dados confirmados! 💚\n\nE tem mais: você ainda entra no nosso *Conexão Club* — até *20% de desconto na luz* e até *70% de desconto em farmácia*, mercado, posto e várias lojas parceiras.`;
+          ? `Show, ${v.trim().replace(/,$/, "")}! 💚\n\nSua conta de *R$ ${_fmtBRL(valor)}/mês* cabe certinho na economia:\n→ *R$ ${_fmtBRL(_mensal)}* por mês no seu bolso\n→ *R$ ${_fmtBRL(_anual)}* por ano (20% de desconto fixo)\n\nE ainda entra no *Conexão Club* — até 70% de desconto em farmácia, mercado, posto e várias parceiras. Minha mãe usa direto kkk`
+          : `Show, ${v}dados confirmados! 💚\n\nVocê garante *20% de desconto fixo* todo mês na sua luz e ainda entra no *Conexão Club* — até 70% de desconto em farmácia, mercado, posto e várias parceiras.`;
         try {
           await sendText(remoteJid, economiaMsg);
           await supabase.from("conversations").insert({
