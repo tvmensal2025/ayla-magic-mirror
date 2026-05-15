@@ -948,7 +948,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     !isFile &&
     !isButton &&
     !customer.name &&
-    !customer.electricity_bill_photo_url
+    !customer.electricity_bill_photo_url &&
+    // 🚧 Não capturar "nome" quando o lead está só confirmando que entendeu
+    // ("joia quero economizar", "pode seguir", etc).
+    step !== "checkin_pos_video" &&
+    step !== "duvidas_pos_club" &&
+    !isPositiveCheckinIntent(messageText.trim())
   ) {
     const formatted = normalizeLeadName(messageText);
     if (formatted) {
