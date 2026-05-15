@@ -1,109 +1,103 @@
-## Objetivo
+## Diagnóstico do erro atual
 
-Permitir que a admin monte, dentro do **FluxoCamila**, blocos para:
-1. **Captar a conta de luz** (OCR + botão de confirmar dados) — já salva a conta no portal-staging sem pedir documento.
-2. **Captar o documento** (RG/CNH) — IA detecta automaticamente o tipo via OCR, sem perguntar.
-3. **Finalizar** — envia ao portal VPS, trata OTP, dá os parabéns.
+O erro `bot_flow_steps_step_type_check` que você viu vem de uma CHECK constraint antiga no banco:
 
-Tudo isso **reaproveitando** o pipeline `bot-flow.ts` que já existe (`aguardando_conta → processando_ocr_conta → confirmando_dados_conta → ask_tipo_documento → aguardando_doc_frente/verso → confirmando_dados_doc → ask_finalizar → portal_submitting → aguardando_otp → complete`). Nada do fluxo conversacional atual é perdido.
-
-## Diagnóstico do que já existe
-
-- `bot-flow.ts` já implementa toda a máquina de cadastro com OCR (Gemini), validação de dados, envio ao worker do portal e OTP.
-- `conversational/index.ts` já reconhece o set `CADASTRO_STEPS` e **não interfere** quando o `conversation_step` está nesse pipeline — só o dispara via `goto_special: "cadastro"`.
-- O FluxoCamila hoje tem `step_type` apenas como `message`. A transição para cadastro existe via `→ Cadastro (OCR + portal)` no select de transições.
-- O RG/CNH hoje **é perguntado** num passo `ask_tipo_documento`. A IA já tem `document-type.ts` para normalizar, mas o tipo vem do texto do lead, não da imagem.
-
-## O que vai mudar
-
-### 1) Novos `step_type` no FluxoCamila (UI + DB)
-
-Adicionar três tipos novos de passo selecionáveis no editor, cada um amarrando o lead a um trecho do pipeline existente:
-
-- `capture_conta` — pede a conta, faz OCR, mostra dados extraídos com **um botão "Confirmar"** (lista interativa do WhatsApp). Ao confirmar, salva os dados em `customers` e **decide** o próximo passo conforme a transição configurada (pode ir direto para um próximo passo de fluxo OU encadear o `capture_documento`).
-- `capture_documento` — pede a foto do documento. **A IA classifica automaticamente** (CNH x RG novo x RG antigo) a partir da imagem, salva em `customer.document_type` e segue: pede verso só se não for CNH. Sem perguntar tipo ao lead.
-- `finalizar_cadastro` — dispara `portal_submitting`, trata OTP, e ao concluir envia a mensagem de parabéns configurável no próprio passo (campo `message_text` do passo já existe).
-
-Cada passo expõe no painel:
-- Texto inicial (mídia + delay já existem).
-- Lista de campos obrigatórios mínimos antes de avançar (ex.: `nome`, `cpf`, `endereço`).
-- Transição `on_success` (vai para qual passo) e `on_fail` (humano / repetir).
-
-### 2) Detecção automática de RG x CNH
-
-No `bot-flow.ts`, no passo equivalente a `aguardando_doc_frente` quando vier de `capture_documento`:
-
-- Chamar a função Gemini que já é usada para OCR da conta, com um prompt curto:
-  > "Esta imagem é uma CNH, RG novo (modelo policarbonato) ou RG antigo (papel)? Responda apenas: cnh | rg_novo | rg_antigo."
-- Salvar em `customer.document_type` via `normalizeDocumentType()`.
-- Se `cnh` → pular `aguardando_doc_verso`, ir direto a `confirmando_dados_doc`.
-- Se RG → pedir verso normalmente.
-- Fallback (se IA falhar): cair no `ask_tipo_documento` legado para perguntar ao lead.
-
-### 3) Confirmação por botão na captura da conta
-
-Hoje o `confirmando_dados_conta` espera o lead digitar "sim". Vamos:
-
-- Trocar a mensagem de confirmação por uma **interactive list** do WhatsApp (Evolution API já suporta) com botões `Confirmar dados` e `Corrigir`.
-- Manter o parser de "sim/ok/confirmo" como fallback caso o cliente digite ao invés de clicar.
-- Ao clicar `Confirmar`: gravar tudo em `customers` e seguir a transição configurada no passo `capture_conta` da UI.
-
-### 4) Mensagem final de parabéns configurável
-
-O passo `finalizar_cadastro` no FluxoCamila terá:
-- Campo `message_text` (já existe) — usado como mensagem de parabéns enviada após `complete`.
-- Campo `media` (já existe) — opcional, áudio/vídeo de parabéns.
-- O `bot-flow.ts` ao chegar em `complete` consulta o passo correspondente do fluxo do consultor e envia esses conteúdos no lugar da mensagem fixa atual.
-
-## Migração de banco
-
-```sql
--- Permite os novos tipos no editor
-ALTER TABLE bot_flow_steps
-  ADD COLUMN IF NOT EXISTS required_fields jsonb NOT NULL DEFAULT '[]'::jsonb,
-  ADD COLUMN IF NOT EXISTS on_success_step_id uuid,
-  ADD COLUMN IF NOT EXISTS on_fail_step_id uuid;
-
--- step_type passa a aceitar: 'message' | 'capture_conta' | 'capture_documento' | 'finalizar_cadastro'
--- (não é enum — é text. Só documentação.)
+```
+CHECK (step_type IN ('audio_slot','message','question','media_request','cadastro'))
 ```
 
-Sem destruir nada do que existe. Os passos atuais continuam como `message`.
+A migração anterior só adicionou a coluna `auto_detect_doc_type`, mas **não atualizou esta constraint**. Por isso, ao escolher "Captar documento (RG/CNH)" no editor, o Supabase rejeita o INSERT/UPDATE. Mesma coisa aconteceria com `capture_conta` e `finalizar_cadastro`.
+
+Também está faltando os tipos para **email** e **confirmar telefone do WhatsApp** — que o `bot-flow.ts` já implementa internamente (`ask_email`, `ask_phone_confirm`), mas que ainda não estão expostos como blocos no FluxoCamila.
+
+## Como o pipeline conversacional já funciona hoje (em `bot-flow.ts`)
+
+```
+aguardando_conta            → pede foto/PDF da conta
+processando_ocr_conta       → Gemini lê os dados
+confirmando_dados_conta     → "tá certo? sim/não"  ← já existe, só falta virar BOTÃO
+ask_tipo_documento          → pergunta RG/CNH (vai virar AUTO via IA)
+aguardando_doc_frente/verso → pede foto do documento
+confirmando_dados_doc       → "tá certo?"           ← idem, virar BOTÃO
+ask_email                   → pede email             ← exposto como passo
+ask_phone_confirm           → "usar este whatsapp ou trocar?" ← exposto como passo
+ask_finalizar               → "vamos enviar?"
+portal_submitting + OTP     → envia ao portal e valida código
+complete                    → mensagem de PARABÉNS configurável
+```
+
+Tudo isso já existe no backend. A tarefa é **expor cada bloco no editor visual + colocar botões de confirmação** entre cada captura.
+
+## O que vai ser feito
+
+### 1) Migração — desbloquear os novos tipos de passo
+
+```sql
+ALTER TABLE public.bot_flow_steps DROP CONSTRAINT bot_flow_steps_step_type_check;
+ALTER TABLE public.bot_flow_steps ADD CONSTRAINT bot_flow_steps_step_type_check
+  CHECK (step_type IN (
+    'audio_slot','message','question','media_request','cadastro',
+    'capture_conta','capture_documento','capture_email','confirm_phone','finalizar_cadastro'
+  ));
+```
+
+Sem isso, **nenhum dos novos tipos salva**. Esta é a causa raiz do erro que apareceu na tela.
+
+### 2) Editor visual (`FluxoCamila.tsx`)
+
+Adicionar dois novos tipos no seletor "Tipo deste passo":
+
+- **📧 Captar e-mail** (`capture_email`) — pede o e-mail e mostra "Confere o e-mail? [Confirmar] [Corrigir]".
+- **📱 Confirmar telefone do WhatsApp** (`confirm_phone`) — pergunta se usa o número que escreveu no WhatsApp ou se prefere trocar (botão "Usar este número" / "Informar outro").
+
+Os já existentes (`capture_conta`, `capture_documento`, `finalizar_cadastro`) continuam, agora salvando sem erro.
+
+### 3) Botões de confirmação interativos no webhook (`bot-flow.ts`)
+
+Trocar o "digite sim" pelos botões interativos do WhatsApp em três pontos:
+
+- **Após OCR da conta** (`confirmando_dados_conta`): lista com `[✅ Confirmar dados]` e `[✏️ Corrigir]`.
+- **Após OCR do documento** (`confirmando_dados_doc`): mesmos botões.
+- **Após digitar o e-mail** (`ask_email` → novo `confirmando_email`): `[✅ Confirmar]` / `[✏️ Corrigir]`.
+- **Confirmar telefone** (`ask_phone_confirm`, já existe): mantém os botões `[✅ Usar este número]` / `[📱 Informar outro]`.
+
+O parser de "sim/ok/confirmo" continua como fallback caso o lead digite ao invés de clicar.
+
+### 4) Encadeamento automático no `conversational/index.ts`
+
+Já está mapeando `capture_conta → aguardando_conta` etc. Adicionar:
+- `capture_email → ask_email`
+- `confirm_phone → ask_phone_confirm`
+
+Assim quando o lead chega num bloco do FluxoCamila marcado como "Captar e-mail", o sistema entra na máquina de coleta e, ao confirmar, **volta para o próximo passo configurado no fluxo visual**.
+
+### 5) Fluxo final montado no editor
+
+A admin monta visualmente:
+
+```
+Passo 1-5: vídeos / áudios / pitch  (tipo: message)
+Passo 6:   📄 Captar conta de energia          → on_success: Passo 7
+Passo 7:   📇 Captar documento (RG/CNH auto)   → on_success: Passo 8
+Passo 8:   📧 Captar e-mail                    → on_success: Passo 9
+Passo 9:   📱 Confirmar telefone do WhatsApp   → on_success: Passo 10
+Passo 10:  🎉 Finalizar cadastro (envia VPS + OTP + parabéns)
+```
+
+Cada passo continua com mídia opcional (áudio/vídeo/imagem) e delay, igual aos passos `message` de hoje.
 
 ## Arquivos afetados
 
-- `src/pages/FluxoCamila.tsx` — novo seletor de `step_type`, painéis específicos por tipo.
-- `src/components/admin/fluxo/StepMediaPanel.tsx` — habilitar mídia para os novos tipos (já funciona).
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`:
-  - Inserir detecção automática de RG/CNH via Gemini no `aguardando_doc_frente`.
-  - Trocar texto fixo do `confirmando_dados_conta` por mensagem interactive com botões.
-  - No `complete`, consultar `bot_flow_steps` do tipo `finalizar_cadastro` do consultor e enviar mídia + texto configurados.
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` — adicionar `goto_special: "capture_conta" | "capture_documento" | "finalizar"` que mapeiam direto pra `aguardando_conta`, `ask_tipo_documento` (ou novo `aguardando_doc_frente_auto`) e `ask_finalizar`.
-- Migração SQL acima.
-
-## Fluxo final (lead-side)
-
-```
-[Passo N: vídeo explicação] 
-   ↓ (intent: quer cadastrar)
-[capture_conta] → "manda a foto da conta"
-   ↓ OCR + extrai (nome, cpf, endereço, valor, instalação)
-   → "Confere se está certo? [Confirmar] [Corrigir]"
-   ↓ Confirmar
-[capture_documento] → "manda a foto do RG ou CNH"
-   ↓ IA detecta tipo da imagem
-   ↓ se RG → pede verso
-   → "Confere os dados do documento? [Confirmar]"
-   ↓
-[finalizar_cadastro] → envia ao portal VPS
-   ↓ aguarda OTP do lead
-   ↓ valida OTP
-   → mensagem + áudio/vídeo de PARABÉNS configuráveis
-   → conversation_step = complete
-```
+- **Migração SQL** — drop + recreate do CHECK constraint (corrige o erro).
+- `src/pages/FluxoCamila.tsx` — adicionar `capture_email` e `confirm_phone` no seletor de tipo.
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — botões interativos nos 3 pontos de confirmação + novo `confirmando_email`.
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` — mapear os 2 novos `step_type` para o pipeline de coleta.
+- `src/integrations/supabase/types.ts` — regenerar.
 
 ## O que não muda
 
-- Toda a lógica de OCR, worker do portal, OTP, validações em `bot-flow.ts` permanece — só ganha pontos de entrada via fluxo dinâmico e detecção automática de tipo.
-- Os passos `message` existentes seguem funcionando do mesmo jeito.
-- A UI atual de mídias por passo, delays e capturas continua igual.
+- Toda a lógica de OCR, worker do portal e OTP em `bot-flow.ts` permanece.
+- Os passos `message`, `audio_slot`, `media_request`, `question`, `cadastro` continuam exatamente iguais.
+- A UI atual de mídia/delay por passo continua funcionando.
+
+Posso aplicar?
