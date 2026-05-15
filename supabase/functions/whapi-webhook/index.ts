@@ -137,8 +137,8 @@ Deno.serve(async (req) => {
 
     const RESUMABLE_STATUSES = new Set(["abandoned", "stuck_finalizar", "stuck_contact", "email_pendente_revisao"]);
     if (customer && customer.status === "automation_failed") {
-      await supabase.from("customers").update({ conversation_step: "sys:welcome", status: "pending", error_message: null }).eq("id", customer.id);
-      customer.conversation_step = "sys:welcome";
+      await supabase.from("customers").update({ conversation_step: "welcome", status: "pending", error_message: null }).eq("id", customer.id);
+      customer.conversation_step = "welcome";
       customer.status = "pending";
     } else if (customer && RESUMABLE_STATUSES.has(customer.status)) {
       await supabase.from("customers").update({ status: "pending", error_message: null, rescue_attempts: 0 }).eq("id", customer.id);
@@ -156,7 +156,7 @@ Deno.serve(async (req) => {
           phone_whatsapp: phone,
           consultant_id: superAdminConsultantId,
           status: "pending",
-          conversation_step: "sys:welcome",
+          conversation_step: "welcome",
         })
         .select().single();
       if (error) {
@@ -170,8 +170,8 @@ Deno.serve(async (req) => {
           .maybeSingle();
         if (fallback) {
           if (stepsFinalizados.includes(stripPrefix(fallback.conversation_step || "")) || statusFinalizados.includes(fallback.status)) {
-            await supabase.from("customers").update({ conversation_step: "sys:welcome", status: "pending" }).eq("id", fallback.id);
-            fallback.conversation_step = "sys:welcome";
+            await supabase.from("customers").update({ conversation_step: "welcome", status: "pending" }).eq("id", fallback.id);
+            fallback.conversation_step = "welcome";
             fallback.status = "pending";
           }
           customer = fallback;
