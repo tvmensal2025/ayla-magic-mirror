@@ -1670,7 +1670,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         reply = "📸 Ok! Envie novamente a *FOTO da conta de energia* com melhor qualidade.";
       } else if (resp === "editar_conta" || resp === "editar" || resp === "3") {
         updates.conversation_step = "editing_conta_menu";
-        reply = "✏️ Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ Endereço\n3️⃣ CEP\n4️⃣ Distribuidora\n5️⃣ Nº Instalação\n6️⃣ Valor da conta\n\nDigite o número:";
+        reply = "✏️ Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ Endereço\n3️⃣ CEP\n4️⃣ Distribuidora\n5️⃣ Nº Instalação\n6️⃣ Valor da conta\n0️⃣ Cancelar\n\nDigite o número (ou a palavra-chave: nome, valor, cep…):";
       } else {
         const sent = await sendOptions(remoteJid, "Os dados da conta estão corretos?", [
           { id: "sim_conta", title: "✅ SIM" },
@@ -2030,7 +2030,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         reply = "📸 Ok! Envie novamente a *FRENTE do documento* com melhor qualidade.";
       } else if (resp === "editar_doc" || resp === "editar" || resp === "3") {
         updates.conversation_step = "editing_doc_menu";
-        reply = "✏️ Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ CPF\n3️⃣ RG\n4️⃣ Data de Nascimento\n\nDigite o número:";
+        reply = "✏️ Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ CPF\n3️⃣ RG\n4️⃣ Data de Nascimento\n0️⃣ Cancelar\n\nDigite o número (ou a palavra-chave: nome, cpf, rg, data):";
       } else {
         const sent = await sendOptions(remoteJid, "Os dados estão corretos?", [
           { id: "sim_doc", title: "✅ SIM" },
