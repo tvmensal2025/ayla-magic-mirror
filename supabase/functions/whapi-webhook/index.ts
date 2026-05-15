@@ -377,6 +377,9 @@ Deno.serve(async (req) => {
     // ─── Persist updates ───────────────────────────────────────────────
     if (Object.keys(updates).length > 0 || reply) {
       (updates as any).last_bot_reply_at = new Date().toISOString();
+      // Reseta follow-up state — cliente respondeu, conversa está viva
+      (updates as any).last_bot_interaction_at = new Date().toISOString();
+      if ((customer as any).followup_count > 0) (updates as any).followup_count = 0;
     }
     const STUCK_STATES = new Set(["abandoned", "stuck_finalizar", "stuck_contact", "email_pendente_revisao", "contato_incompleto", "automation_failed"]);
     if ((Object.keys(updates).length > 0 || reply) && customer?.status && STUCK_STATES.has(customer.status) && !(updates as any).status) {
@@ -384,6 +387,23 @@ Deno.serve(async (req) => {
       (updates as any).error_message = null;
       (updates as any).rescue_attempts = 0;
     }
+    // A/B: cliente respondeu (qualquer msg dentro de 1h da última outbound conta como "replied")
+    try {
+      const lastOut = (customer as any).last_bot_reply_at ? new Date((customer as any).last_bot_reply_at) : null;
+      if (lastOut && (Date.now() - lastOut.getTime()) < 60 * 60 * 1000) {
+        await supabase.rpc("increment_ab_metric", {
+          p_template_key: "any", p_step_key: stepBefore, p_variant: "default",
+          p_consultant_id: superAdminConsultantId, p_metric: "replied",
+        });
+      }
+      if (updates.conversation_step && updates.conversation_step !== stepBefore) {
+        await supabase.rpc("increment_ab_metric", {
+          p_template_key: "any", p_step_key: stepBefore, p_variant: "default",
+          p_consultant_id: superAdminConsultantId, p_metric: "advanced",
+        });
+      }
+    } catch (e) { /* tracking não bloqueia */ }
+
     // Extrai metadados de telemetria (não persistir no customers).
     const __intent = (updates as any).__intent ?? null;
     const __confidence = (updates as any).__confidence ?? null;
