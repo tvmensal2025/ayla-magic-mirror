@@ -20,6 +20,7 @@ import {
   TIMEOUT_VIA_CEP,
   logStructured,
 } from "../../_shared/utils.ts";
+import { getStepMediaOrder, makeKindComparator } from "../../_shared/step-media-order.ts";
 import {
   getReplyForStep,
   getNextMissingStep,
