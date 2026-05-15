@@ -2885,6 +2885,11 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       updates.status = "portal_submitting";
       updates.conversation_step = "portal_submitting";
 
+      if (isTestMode()) {
+        reply = "✅ *Teste concluído:* todos os dados foram coletados e o lead chegou ao ponto de envio para o portal.";
+        return { reply, updates };
+      }
+
       // ✅ Regenerar igreen_link a partir do cadastro_url do consultor dono
       // (impede o bug em que o lead é submetido com o link de outro consultor)
       if (consultantRow?.cadastro_url) {
