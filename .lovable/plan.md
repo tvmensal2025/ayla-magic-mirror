@@ -1,94 +1,69 @@
 ## Objetivo
-Trocar a página `/admin/fluxos` por uma **visão clara e linear** do novo fluxo conversacional, mostrando cada passo do início ao fim, qual é a mensagem que sai e o que o lead pode responder. Tudo editável em um clique, sem precisar entender de "máquina de estados".
 
-## Como vai parecer (página única, scroll vertical)
+Mostrar e gerenciar **TODAS as mídias** (áudio, imagem, vídeo) que a Camila envia em cada passo do fluxo, direto na página `/admin/fluxos`. Cada passo vira o "centro de comando" das mídias daquele momento da conversa, com upload, troca, exclusão e ordem de envio configurável.
 
-```
-┌──────────────────────────────────────────────────────────┐
-│  Fluxo da Camila — passo a passo                         │
-│  [● Ativo para todos]  [○ Só leads de teste]             │
-└──────────────────────────────────────────────────────────┘
+## O que muda na página Fluxo da Camila
 
-(0) ENTRADA — Lead manda 1ª mensagem
-        │
-        ▼
-┌─ Passo 1 · Boas-vindas ──────────────────────────────────┐
-│ 💬 "Oi! Aqui é a Camila…"                    [Editar]    │
-│ Se o lead disser "oi" / "sim"  → vai para Passo 2        │
-│ Se disser "quero cadastrar"    → pula para CADASTRO      │
-│ Se disser "quero humano"       → vai para Atendimento    │
-└──────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─ Passo 2 · Vídeo explicativo + qualificação ─────────────┐
-│ 🎥 Manda o vídeo "explainer"                 [Trocar]    │
-│ 💬 "Qual o valor médio da sua conta?"        [Editar]    │
-└──────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─ Passo 3 · Check-in pós-vídeo ──────────────────────────┐
-│ 💬 "Conseguiu ver? Ficou alguma dúvida?"     [Editar]    │
-│ "Sim, gostei"  → Passo 4                                 │
-│ "Tenho dúvida" → Passo 5                                 │
-│ "Não / depois" → repete reforço                          │
-└──────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─ Passo 4 · Pitch do Conexão Club ───────────────────────┐
-│ 🎥 Vídeo "club"                              [Trocar]    │
-│ 💬 "Olha o cashback…"                        [Editar]    │
-└──────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─ Passo 5 · Tirar dúvidas ───────────────────────────────┐
-│ 💬 "Pode perguntar à vontade"                [Editar]    │
-│ "Quero seguir" → CADASTRO                                │
-│ "Não quero"    → mensagem de reforço final               │
-└──────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌─ FIM · Vai para o Cadastro (fluxo antigo, intacto) ─────┐
-│ Pede a foto da conta de luz e segue normalmente.         │
-└──────────────────────────────────────────────────────────┘
+Cada cartão de passo passa a ter, abaixo das mensagens de texto, uma seção **"Mídias deste passo"** com:
 
-╔═ Atalhos sempre disponíveis ═════════════════════════════╗
-║ Em QUALQUER passo, se o lead disser:                     ║
-║  • "quero cadastrar" → pula direto pro cadastro          ║
-║  • "quero falar com humano" → marca Aguardando humano    ║
-╚══════════════════════════════════════════════════════════╝
-```
+- **Áudios** ligados ao passo — player + botão "Trocar" / "Excluir" / "Adicionar áudio"
+- **Imagens** ligadas ao passo — thumb + "Trocar" / "Excluir" / "Adicionar imagem"
+- **Vídeos** ligados ao passo — preview + "Trocar" / "Excluir" / "Adicionar vídeo"
+- **Ordem de envio** (drag-and-drop simples ou setas ↑↓) — define em que sequência Áudio/Imagem/Vídeo/Texto saem naquele passo. Mostra uma "régua" do tipo `🎙 Áudio → 🖼 Imagem → 🎬 Vídeo → 💬 Texto` que o consultor reorganiza.
 
-## O que cada cartão de passo permite fazer
+Nada de abrir outra tela: tudo acontece dentro do passo (resposta à pergunta 1).
 
-- Ver a **mensagem atual** que a Camila vai mandar (texto cru com `{{nome}}`/`{{representante}}`).
-- Botão **Editar** abre um modal simples com: textarea da mensagem, dica das variáveis, botão Salvar (grava em `bot_messages`).
-- Quando o passo dispara um vídeo, mostra o vídeo atual e botão **Trocar** (lista os vídeos da `ai_media_library` por slot).
-- Setas/legendas explicam **para onde vai cada resposta** — em linguagem humana, sem jargão.
+## Mapeamento de passo → slot_key
 
-## Cabeçalho da página (1 linha de configuração)
+A `ai_media_library` já usa `slot_key` para amarrar mídia a um momento. Faço o `de/para` direto:
 
-- Switch "Ativar para TODOS os meus leads" → liga `consultants.conversational_flow_enabled` do usuário logado.
-- Link discreto "Testar com 1 número" → abre modal pra colar o telefone e ligar só pra aquele `customers.conversational_flow_enabled`.
-- Selo "Em teste com X números" mostrando quantos overrides estão ativos.
+| Passo do fluxo | slot_key (já existe / criar) |
+|---|---|
+| Boas-vindas | `boas_vindas` (já existe) |
+| Vídeo + qualificação | `explainer` (vídeo) + `como_funciona` (áudio, já existe) |
+| Check-in pós-vídeo | `checkin` |
+| Pitch Conexão Club | `club` |
+| Tirar dúvidas | `duvidas` (+ áudios de objeção já existentes: `objecao_preco`, `objecao_distribuidora`, `prova_social`, `fazenda_solar`) |
+| Cadastro | `cadastro_pedir_conta` |
 
-## O que NÃO muda
+A constante `FLUXO` no `FluxoCamila.tsx` ganha um campo `slots: string[]` por passo, listando os slots aceitos.
 
-- O fluxo de cadastro (foto da conta, OCR, portal) continua exatamente como está.
-- O `FlowBuilder.tsx` antigo (que edita `bot_flows`/`bot_flow_qa`) sai do menu mas o arquivo fica no repo por enquanto, pra não quebrar nada que dependa dele.
-- Nenhuma mudança em edge function — tudo já está pronto pra ler de `bot_messages`.
+## Ordem de envio configurável
+
+Adiciono uma coluna `send_order` (int, default 100) em `ai_media_library` e uma coluna `media_order` (jsonb, ex.: `["audio","image","video","text"]`) por passo, salva em **`consultants.flow_step_media_order`** (jsonb com chave = step_key).
+
+Quando a Camila for enviar mensagens daquele passo, a edge function lê essa ordem e respeita. Se nada for definido, usa o padrão atual da memória (Áudio → Imagem → Vídeo → Texto).
+
+> Nota: a alteração da edge function fica fora deste PR de UI (o usuário pediu UI agora). Já deixo o esquema gravando e a página funcional. Em PR seguinte, o `whapi-webhook` lê a ordem e aplica. Posso fazer junto se preferir — diga "fazer tudo".
+
+## Uploads
+
+- Componente único `<MediaUploader slotKey="..." kind="audio|image|video" />` reutilizado nos 3 tipos.
+- Áudio: input `accept="audio/*"` + gravação inline opcional (já existe `useAudioRecorder`).
+- Imagem: `accept="image/*"`.
+- Vídeo: `accept="video/*"` (limite 50MB com aviso).
+- Upload vai pro bucket existente **`ai-agent-media`** em `consultants/{userId}/{slot_key}/{uuid}.{ext}` e cria linha em `ai_media_library`.
 
 ## Detalhes técnicos
 
-- Nova página: `src/pages/FluxoCamila.tsx` montada em `/admin/fluxos` (substitui o FlowBuilder no router).
-- Componente `<StepCard>` reutilizável para cada passo (props: título, ícone, mensagens dessa etapa, vídeo opcional, lista de "se responder X → vai para Y").
-- A lista de passos e suas regras vem de uma constante TS no front (`FLUXO_CAMILA`) que **espelha 1-para-1** o `state-machine.ts` — escrita uma vez, fácil de revisar lado a lado.
-- Modais usam `Dialog` do shadcn já existente. Toasts via `sonner` (já no projeto).
-- Queries: `select` em `bot_messages` filtrando por `step_key`, `update` por id. RLS atual já permite super-admin gerenciar.
-- Switches do header chamam `update` em `consultants` (RLS owner) e `customers` (precisa ser super-admin pra mexer em qualquer lead — usar a sessão atual).
+- **Tabelas afetadas**:
+  - `ai_media_library`: adicionar `send_order int default 100` (migração).
+  - `consultants`: adicionar `flow_step_media_order jsonb default '{}'::jsonb` (migração).
+- **Storage**: bucket `ai-agent-media` (já existe e é público).
+- **RLS**: `ai_media_library` já tem RLS por `consultant_id`; só confirmar policy de INSERT/DELETE pro próprio user.
+- **UI components novos**:
+  - `src/components/admin/fluxo/StepMediaPanel.tsx` — painel das mídias por passo
+  - `src/components/admin/fluxo/MediaUploader.tsx` — upload + lista + delete
+  - `src/components/admin/fluxo/MediaOrderEditor.tsx` — reorder drag/setas
+- **Página alterada**: `src/pages/FluxoCamila.tsx` — adiciona `slots` em cada passo da constante `FLUXO` e renderiza `<StepMediaPanel>` dentro do cartão.
+- **Hooks**: novo `useStepMedia(slotKeys: string[])` agrupando por slot+kind.
 
-## Fora do escopo (proposta separada se quiser depois)
+## Fora do escopo
 
-- Métricas por passo (taxa de avanço, drop-off) — a tabela `bot_step_transitions` já guarda os dados, então dá pra plotar depois.
-- Editor visual de novos passos (drag-and-drop). Hoje os passos são fixos em código pra garantir que o cadastro nunca quebre; só o **texto e os vídeos** são editáveis pela tela.
+- Editar a edge function `whapi-webhook` para ler `media_order` (mencionado acima — me avise se quer junto).
+- Métricas por mídia (já temos `sent_count`/`reply_count`, posso expor depois).
+- Biblioteca global de mídias — continua na página Assistente IA; aqui é a visão **por passo**.
 
-Quer que eu siga com esse plano ou prefere ajustar algo (ex.: incluir métricas já agora, ou deixar o FlowBuilder antigo acessível em outro link)?
+## Pergunta final antes de implementar
+
+Faço **só a UI** (gravando ordem no banco) ou **UI + edge function** que respeita a ordem na hora de enviar? A primeira é mais segura (não toca o bot que está rodando hoje); a segunda fecha o ciclo todo.
