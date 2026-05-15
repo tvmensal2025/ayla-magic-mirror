@@ -157,6 +157,190 @@ function buildNotReadyReply(nomeRepresentante: string): string {
   return `Sem problema, vou respeitar seu tempo 😊\n\nSe quiser continuar depois, é só mandar *cadastrar* ou chamar ${nomeRepresentante}.`;
 }
 
+// ───────────────────────────────────────────────────────────────
+// Anti-alucinação: nome OCR só sobrescreve nome confirmado se for muito similar
+// ───────────────────────────────────────────────────────────────
+const RG_HEADER_TERMS = /REP[ÚU]BLICA|FEDERATIVA|CARTEIRA|IDENTIDADE|MINIST[ÉE]RIO|NACIONAL|SECRETARIA|SEGURAN[ÇC]A|INSTITUTO|DETRAN|VALIDA EM TODO|REGISTRO GERAL/i;
+
+function _normName(s: string): string {
+  return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z ]/g, "").replace(/\s+/g, " ").trim();
+}
+function _levSim(a: string, b: string): number {
+  a = _normName(a); b = _normName(b);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const m = a.length, n = b.length;
+  const dp: number[] = Array(n + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    let prev = i - 1; dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return 1 - dp[n] / Math.max(m, n);
+}
+
+/**
+ * Decide o nome a usar dado OCR de doc.
+ * Retorna null se OCR é alucinação OU se o usuário já confirmou nome diferente.
+ */
+function safeAssignName(currentName: string | null | undefined, currentSource: string | null | undefined, ocrName: string | null | undefined): string | null {
+  if (!ocrName) return null;
+  const cleaned = String(ocrName).trim().replace(/\s+/g, " ");
+  if (cleaned.length < 5) return null;
+  if (/\d/.test(cleaned)) return null;
+  if (cleaned.split(/\s+/).length < 2) return null;
+  if (RG_HEADER_TERMS.test(cleaned)) return null;
+  // Já confirmado pelo usuário → nunca sobrescreve
+  if (currentSource === "user_confirmed" && currentName && String(currentName).trim().length >= 3) return null;
+  // Nome atual existe e é muito diferente: mantém (não confiamos no OCR)
+  if (currentName && String(currentName).trim().length >= 5) {
+    if (_levSim(currentName, cleaned) < 0.7) return null;
+  }
+  return cleaned;
+}
+
+// Heurística: a mensagem tem o formato esperado pelo step?
+function isExpectedShape(step: string, text: string): boolean {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  const digits = t.replace(/\D/g, "");
+  switch (step) {
+    case "ask_cpf":
+    case "editing_doc_cpf":
+      return digits.length >= 11;
+    case "ask_cep":
+    case "editing_conta_cep":
+      return digits.length >= 8;
+    case "ask_birth_date":
+    case "editing_doc_nascimento":
+      return /\d{2}\/\d{2}\/\d{4}/.test(t);
+    case "ask_phone":
+    case "ask_phone_confirm":
+      return digits.length >= 10;
+    case "ask_bill_value":
+    case "editing_conta_valor":
+      return /^[r\$\s]*\d{2,6}([\.,]\d{1,2})?\s*$/i.test(t);
+    case "ask_installation_number":
+    case "editing_conta_instalacao":
+      return digits.length >= 7;
+    case "ask_name":
+    case "editing_conta_nome":
+    case "editing_doc_nome":
+      return t.length >= 3 && t.split(/\s+/).length >= 1 && !/\?/.test(t);
+    case "ask_rg":
+    case "editing_doc_rg":
+      return digits.length >= 4;
+    case "editing_conta_endereco":
+    case "editing_conta_distribuidora":
+      return t.length >= 3 && !/\?/.test(t);
+    case "ask_email":
+      return /@/.test(t);
+    case "ask_number":
+      return digits.length >= 1 && t.length <= 10;
+    case "ask_complement":
+      return true; // qualquer coisa serve
+    case "editing_conta_menu":
+      return /^[0-6]$/.test(t) || /\b(nome|valor|rua|endere[çc]o|cep|distribuidora|instala[çc][ãa]o|cancelar|voltar)\b/i.test(t);
+    case "editing_doc_menu":
+      return /^[0-4]$/.test(t) || /\b(nome|cpf|rg|nascimento|data|cancelar|voltar)\b/i.test(t);
+    case "confirmando_dados_conta":
+    case "confirmando_dados_doc":
+    case "ask_tipo_documento":
+      return /^(sim|s|nao|n[aã]o|n|ok|editar|3|2|1|✅|❌|✏️)/i.test(t);
+    default:
+      return false;
+  }
+}
+
+function getReentryPromptForStep(step: string, customer: any): string {
+  const first = ((customer?.name || "") as string).split(/\s+/)[0];
+  const v = first ? `${first}, ` : "";
+  const prefix = "📋 *Voltando ao seu cadastro:* ";
+  const map: Record<string, string> = {
+    "ask_name": `${v}qual é o seu *nome completo*?`,
+    "ask_cpf": `${v}qual é o seu *CPF*? (apenas números)`,
+    "ask_rg": `${v}qual é o seu *RG*?`,
+    "ask_birth_date": `${v}qual sua *data de nascimento*? (DD/MM/AAAA)`,
+    "ask_phone": `${v}me confirma seu *telefone* (com DDD)?`,
+    "ask_phone_confirm": `${v}me confirma seu *telefone* (com DDD)?`,
+    "ask_email": `${v}qual é o seu *e-mail*?`,
+    "ask_cep": `${v}qual o *CEP* da sua casa? (8 dígitos)`,
+    "ask_number": `${v}qual o *número* da sua casa?`,
+    "ask_complement": `${v}tem *complemento*? (apto, bloco) — ou diga "não".`,
+    "ask_installation_number": `${v}qual o *número da instalação* da conta?`,
+    "ask_bill_value": `${v}qual a *média* da sua conta de luz? (ex: 350,50)`,
+    "ask_tipo_documento": `Pra seguir: qual documento vai enviar? *RG Novo*, *RG Antigo* ou *CNH*?`,
+    "aguardando_conta": `${v}me envia uma *foto ou PDF da conta de luz* pra eu seguir 📸`,
+    "aguardando_doc_frente": `${v}me envia a *frente* do seu documento 🪪`,
+    "aguardando_doc_verso": `${v}me envia o *verso* do seu documento 🪪`,
+    "aguardando_doc_auto": `${v}me envia o seu *documento* (RG ou CNH) 🪪`,
+    "editing_conta_menu": "Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ Endereço\n3️⃣ CEP\n4️⃣ Distribuidora\n5️⃣ Nº Instalação\n6️⃣ Valor da conta\n0️⃣ Cancelar",
+    "editing_doc_menu": "Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ CPF\n3️⃣ RG\n4️⃣ Data de Nascimento\n0️⃣ Cancelar",
+    "editing_conta_nome": "Digite o *nome completo* correto:",
+    "editing_conta_endereco": "Digite o *endereço completo* correto:",
+    "editing_conta_cep": "Digite o *CEP* correto (8 dígitos):",
+    "editing_conta_distribuidora": "Digite o nome da *distribuidora*:",
+    "editing_conta_instalacao": "Digite o *número da instalação*:",
+    "editing_conta_valor": "Digite o *valor da conta* (ex: 350,50):",
+    "editing_doc_nome": "Digite o *nome completo* correto:",
+    "editing_doc_cpf": "Digite o *CPF* correto (apenas números):",
+    "editing_doc_rg": "Digite o *RG* correto:",
+    "editing_doc_nascimento": "Digite a *data de nascimento* (DD/MM/AAAA):",
+    "confirmando_dados_conta": "Os dados da conta estão corretos? Responda *SIM*, *NÃO* ou *EDITAR*.",
+    "confirmando_dados_doc": "Os dados estão corretos? Responda *SIM*, *NÃO* ou *EDITAR*.",
+  };
+  const txt = map[step];
+  return txt ? prefix + txt : "";
+}
+
+// Steps onde QA semântico NUNCA deve disparar (cadastro/edição determinísticos)
+const NO_QA_STEPS = new Set([
+  "aguardando_conta", "processando_ocr_conta", "confirmando_dados_conta",
+  "aguardando_doc_auto", "aguardando_doc_frente", "aguardando_doc_verso",
+  "confirmando_dados_doc", "ask_tipo_documento",
+  "ask_name", "ask_cpf", "ask_rg", "ask_birth_date", "ask_phone", "ask_phone_confirm",
+  "ask_email", "ask_cep", "ask_number", "ask_complement",
+  "ask_installation_number", "ask_bill_value",
+  "ask_doc_frente_manual", "ask_doc_verso_manual", "ask_finalizar",
+  "finalizando", "portal_submitting", "aguardando_otp", "validando_otp",
+  "aguardando_assinatura", "complete", "aguardando_humano",
+  "editing_conta_menu", "editing_conta_nome", "editing_conta_endereco",
+  "editing_conta_cep", "editing_conta_distribuidora", "editing_conta_instalacao", "editing_conta_valor",
+  "editing_doc_menu", "editing_doc_nome", "editing_doc_cpf", "editing_doc_rg",
+  "editing_doc_nascimento",
+]);
+
+// Helpers de tela de confirmação completa (usados após editar campo)
+function _formatBRL(n: number): string {
+  return Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function buildConfirmacaoConta(merged: any): string {
+  const v = Number(merged.electricity_bill_value || 0);
+  const m = v * 0.20, a = m * 12;
+  return "📋 *Dados da conta:*\n\n" +
+    `👤 *Nome:* ${merged.name || "❌"}\n` +
+    `📍 *Endereço:* ${merged.address_street || "❌"} ${merged.address_number || ""}\n` +
+    `🏘️ *Bairro:* ${merged.address_neighborhood || "❌"}\n` +
+    `🏙️ *Cidade:* ${merged.address_city || "❌"} - ${merged.address_state || ""}\n` +
+    `📮 *CEP:* ${merged.cep || "❌"}\n` +
+    `⚡ *Distribuidora:* ${merged.distribuidora || "❌"}\n` +
+    `🔢 *Nº Instalação:* ${merged.numero_instalacao || "❌"}\n` +
+    `💰 *Valor:* R$ ${_formatBRL(v)}\n` +
+    `💚 *Economia estimada:* até R$ ${_formatBRL(m)}/mês • até R$ ${_formatBRL(a)}/ano (até 20%)\n\n` +
+    "Está tudo correto?";
+}
+function buildConfirmacaoDoc(merged: any): string {
+  return `📋 *Confirme seus dados pessoais:*\n\n` +
+    `👤 Nome: *${merged.name || "—"}*\n` +
+    `🆔 CPF: *${merged.cpf || "—"}*\n` +
+    `🪪 RG: *${merged.rg || "—"}*\n` +
+    `🎂 Nascimento: *${merged.data_nascimento || "—"}*\n\n` +
+    "Está tudo correto?";
+}
+
 export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   const {
     supabase,
