@@ -65,6 +65,7 @@ type Step = {
   captures: Capture[];
   fallback: Fallback;
   is_active: boolean;
+  auto_detect_doc_type?: boolean;
 };
 
 const INTENT_OPTIONS: { value: string; label: string }[] = [
