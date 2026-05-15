@@ -307,13 +307,16 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   const firstActive = dbSteps.find((s) => s.is_active) || dbSteps[0];
   const currentStep = dbSteps.find((s) => s.step_key === stepKey);
   if (!currentStep) {
-    // Unknown/legacy step → with a visual flow configured, always restart at
-    // the first active dynamic step instead of falling back to the old machine.
+    // Unknown/legacy step → restart at the first active dynamic step.
+    console.log(`[conversational] unknown step="${stepKey}" → restart at firstActive=${firstActive?.step_key} (steps=${dbSteps.length})`);
     const mediaSent = await sendStepMedia(ctx, firstActive, consultantId);
+    const tpl = (firstActive.message_text || "").trim();
+    const fallbackGreeting = mediaSent ? "" : `Oi${ctx.customer.name ? " " + String(ctx.customer.name).split(" ")[0] : ""}! 👋`;
+    const reply = tpl
+      ? renderTemplate(tpl, { nome: ctx.customer.name, representante: ctx.nomeRepresentante })
+      : fallbackGreeting;
     return {
-      reply: renderTemplate(firstActive.message_text || "", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
+      reply,
       updates: { conversation_step: firstActive.step_key, __inline_sent: mediaSent || undefined },
     };
   }
