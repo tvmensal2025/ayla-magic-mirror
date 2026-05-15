@@ -2177,8 +2177,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         updates.conversation_step = next;
         reply = getReplyForStep(next, merged);
       } else if (resp === "nao_doc" || resp === "nao" || resp === "não" || resp === "n" || resp === "2" || resp === "errado" || resp === "❌") {
-        updates.conversation_step = "aguardando_doc_frente";
-        reply = "📸 Ok! Envie novamente a *FRENTE do documento* com melhor qualidade.";
+        // ── ANTI-LOOP: após 2 rejeições, força avanço para coleta manual em vez de re-pedir foto ──
+        const rejectCount = (customer.ocr_doc_attempts || 0) + 1;
+        updates.ocr_doc_attempts = rejectCount;
+        if (rejectCount >= 2) {
+          console.warn(`⚠️ [ANTI-LOOP DOC] ${customer.id} rejeitou doc ${rejectCount}x — indo para coleta manual.`);
+          updates.conversation_step = "ask_cpf";
+          reply = "Sem problema! Vamos coletar os dados manualmente.\n\nQual o seu *CPF*? (apenas números)";
+        } else {
+          updates.conversation_step = "aguardando_doc_frente";
+          reply = "📸 Ok! Envie novamente a *FRENTE do documento* com melhor qualidade.";
+        }
       } else if (resp === "editar_doc" || resp === "editar" || resp === "3") {
         updates.conversation_step = "editing_doc_menu";
         reply = "✏️ Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ CPF\n3️⃣ RG\n4️⃣ Data de Nascimento\n0️⃣ Cancelar\n\nDigite o número (ou a palavra-chave: nome, cpf, rg, data):";
