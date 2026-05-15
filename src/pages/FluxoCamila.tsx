@@ -734,10 +734,11 @@ function TransitionRow(props: {
   transition: Transition;
   currentStepId: string;
   allSteps: Step[];
+  conflicts?: string[];
   onChange: (t: Transition) => void;
   onRemove: () => void;
 }) {
-  const { transition, currentStepId, allSteps, onChange, onRemove } = props;
+  const { transition, currentStepId, allSteps, conflicts = [], onChange, onRemove } = props;
   const [phrases, setPhrases] = useState(transition.trigger_phrases.join(", "));
 
   useEffect(() => { setPhrases(transition.trigger_phrases.join(", ")); }, [transition.trigger_phrases]);
@@ -747,7 +748,13 @@ function TransitionRow(props: {
     transition.goto_step_id ? `step:${transition.goto_step_id}` : "";
 
   return (
-    <div className="rounded-lg border border-border/60 p-3 bg-muted/20 space-y-2">
+    <div className={`rounded-lg border p-3 bg-muted/20 space-y-2 ${conflicts.length ? "border-amber-500/50" : "border-border/60"}`}>
+      {conflicts.length > 0 && (
+        <div className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+          <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+          <span>{conflicts.join(" · ")}</span>
+        </div>
+      )}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs text-muted-foreground">Quando</span>
         <Select value={transition.trigger_intent} onValueChange={(v) => onChange({ ...transition, trigger_intent: v })}>
