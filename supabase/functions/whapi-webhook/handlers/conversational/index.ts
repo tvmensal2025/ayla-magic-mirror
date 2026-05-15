@@ -187,6 +187,7 @@ async function matchQA(
 }
 
 async function sleepForMedia(kind: string, durationSec?: number | null, delayBeforeMs?: number | null): Promise<void> {
+  if (isTestMode()) return; // 🧪 modo teste: zero espera
   const configuredDelay = Number(delayBeforeMs || 0);
   if (configuredDelay > 0) {
     await new Promise((r) => setTimeout(r, Math.min(configuredDelay, 60_000)));
