@@ -1116,6 +1116,7 @@ export type Database = {
           step_key: string | null
           step_type: string
           summary: string | null
+          text_delay_ms: number
           title: string | null
           transitions: Json
           transitions_backup_pre_v2: Json | null
@@ -1139,6 +1140,7 @@ export type Database = {
           step_key?: string | null
           step_type: string
           summary?: string | null
+          text_delay_ms?: number
           title?: string | null
           transitions?: Json
           transitions_backup_pre_v2?: Json | null
@@ -1162,6 +1164,7 @@ export type Database = {
           step_key?: string | null
           step_type?: string
           summary?: string | null
+          text_delay_ms?: number
           title?: string | null
           transitions?: Json
           transitions_backup_pre_v2?: Json | null

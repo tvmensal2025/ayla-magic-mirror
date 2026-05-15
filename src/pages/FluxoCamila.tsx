@@ -59,6 +59,7 @@ type Step = {
   summary: string | null;
   icon: IconKey;
   message_text: string | null;
+  text_delay_ms: number | null;
   slot_key: string | null;
   transitions: Transition[];
   captures: Capture[];
@@ -518,7 +519,25 @@ function StepCard(props: {
 
       {/* Mensagem de texto */}
       <div className="mt-4">
-        <Label className="text-xs uppercase tracking-wider text-muted-foreground">Mensagem de texto</Label>
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Mensagem de texto</Label>
+          <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <span>⏱️ Aguardar antes de enviar:</span>
+            <input
+              type="number"
+              min={0}
+              max={60}
+              step={0.5}
+              defaultValue={((step.text_delay_ms ?? 1500) / 1000).toFixed(1)}
+              onBlur={(e) => {
+                const ms = Math.max(0, Math.min(60000, Math.round(parseFloat(e.target.value || "0") * 1000)));
+                if (ms !== (step.text_delay_ms ?? 1500)) onPatch({ text_delay_ms: ms } as any);
+              }}
+              className="w-14 h-6 px-1.5 text-xs rounded border border-border bg-background"
+            />
+            <span>seg</span>
+          </label>
+        </div>
         <Textarea
           value={localText}
           onChange={(e) => setLocalText(e.target.value)}

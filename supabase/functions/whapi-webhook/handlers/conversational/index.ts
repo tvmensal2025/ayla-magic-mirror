@@ -45,6 +45,7 @@ interface DbStep {
   id: string;
   step_key: string;
   message_text: string | null;
+  text_delay_ms: number | null;
   slot_key: string | null;
   is_active: boolean;
   position: number;
@@ -79,7 +80,7 @@ async function loadFlow(supabase: any, consultantId: string): Promise<DbStep[] |
 
     const { data: steps } = await supabase
       .from("bot_flow_steps")
-      .select("id, step_key, message_text, slot_key, is_active, position, transitions, captures, fallback")
+      .select("id, step_key, message_text, text_delay_ms, slot_key, is_active, position, transitions, captures, fallback")
       .eq("flow_id", flow.id)
       .order("position", { ascending: true });
     return (steps || []) as DbStep[];
@@ -300,11 +301,15 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     cpf: captureUpdates.cpf || (ctx.customer as any).cpf,
   };
 
-  // Helper — render and return a step
-  const goToStep = (s: DbStep, extra: Record<string, any> = {}) => ({
-    reply: renderTemplate(s.message_text || "", vars),
-    updates: { conversation_step: s.step_key, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...extra },
-  });
+  // Helper — render and return a step (respeita text_delay_ms configurado no passo)
+  const goToStep = async (s: DbStep, extra: Record<string, any> = {}) => {
+    const delay = Math.max(0, Math.min(60000, s.text_delay_ms ?? 1500));
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    return {
+      reply: renderTemplate(s.message_text || "", vars),
+      updates: { conversation_step: s.step_key, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...extra },
+    };
+  };
   const repeatCurrent = () => goToStep(currentStep);
 
   // Resolve a transition (special or step) to a BotResult
