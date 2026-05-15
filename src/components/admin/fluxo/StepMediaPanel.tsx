@@ -73,7 +73,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     // Inclui mídias do próprio consultor + públicas (Super Admin)
     const { data } = await supabase
       .from("ai_media_library")
-      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, consultant_id, is_public")
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, consultant_id, is_public")
       .or(`consultant_id.eq.${consultantId},and(consultant_id.is.null,is_public.eq.true)`)
       .eq("kind", kind)
       .eq("active", true)
@@ -88,14 +88,8 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     const slotKey = slotKeys[0];
     if (!slotKey) return;
     setLinking(m.id);
-    // Limpa slot_key de QUALQUER linha do consultor nesse slot (ativa ou não)
-    // O índice único é (consultant_id, slot_key) WHERE slot_key IS NOT NULL — ignora active
-    await supabase
-      .from("ai_media_library")
-      .update({ active: false, slot_key: null })
-      .eq("consultant_id", consultantId)
-      .eq("slot_key", slotKey);
-
+    // Permite múltiplas mídias por passo: NÃO desativa as existentes.
+    // Apenas anexa esta nova mídia ao slot, com send_order incremental.
     const { data: row, error } = await supabase
       .from("ai_media_library")
       .insert({
@@ -107,19 +101,19 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
         storage_path: null,
         active: true,
         is_public: false,
-        send_order: 100 + items.filter(i => i.kind === m.kind).length,
+        send_order: 100 + items.length,
         duration_sec: m.duration_sec,
+        delay_before_ms: 1500,
       })
-      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec")
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms")
       .maybeSingle();
     setLinking(null);
     if (error) { toast.error("Erro ao vincular: " + error.message); return; }
     if (row) {
-      // Remove os antigos do slot da lista local + adiciona o novo
-      setItems(prev => [...prev.filter(x => x.slot_key !== slotKey), row as Media]);
+      setItems(prev => [...prev, row as Media]);
       setLibraryItems(prev => prev.filter(x => x.id !== m.id));
     }
-    toast.success("Mídia vinculada a este passo");
+    toast.success("Mídia adicionada ao passo");
   }
 
 
