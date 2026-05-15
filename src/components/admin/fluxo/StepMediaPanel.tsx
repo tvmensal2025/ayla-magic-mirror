@@ -185,9 +185,10 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
         url: pub.publicUrl,
         storage_path: path,
         active: true,
-        send_order: 100 + items.filter(i => i.kind === kind).length,
+        send_order: 100 + items.length,
+        delay_before_ms: 1500,
       })
-      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec")
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms")
       .maybeSingle();
     setUploading(null);
     if (insErr) {
