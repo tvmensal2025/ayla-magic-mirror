@@ -186,6 +186,8 @@ export default function FluxoCamila() {
         icon: (r.icon ?? "msg") as IconKey,
         title: r.title ?? "Sem título",
         transitions: parseTransitions(r.transitions),
+        captures: parseCaptures(r.captures),
+        fallback: parseFallback(r.fallback, r.transitions),
       })));
     }
   }, []);
