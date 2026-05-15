@@ -405,7 +405,7 @@ Deno.serve(async (req) => {
           p_consultant_id: superAdminConsultantId, p_metric: "replied",
         });
       }
-      if (updates.conversation_step && updates.conversation_step !== stepBefore) {
+      if (updates.conversation_step && stripPrefix(updates.conversation_step) !== stepBefore) {
         await supabase.rpc("increment_ab_metric", {
           p_template_key: "any", p_step_key: stepBefore, p_variant: "default",
           p_consultant_id: superAdminConsultantId, p_metric: "advanced",
@@ -423,10 +423,10 @@ Deno.serve(async (req) => {
       delete (updates as any).__inline_sent;
       const { error: updateError } = await supabase.from("customers").update(updates).eq("id", customer.id).select();
       if (updateError) console.error(`❌ ERRO ao salvar updates:`, updateError);
-      if (updates.conversation_step && updates.conversation_step !== stepBefore) {
+      if (updates.conversation_step && stripPrefix(updates.conversation_step) !== stepBefore) {
         await logStepTransition(supabase, {
           customer_id: customer.id, consultant_id: superAdminConsultantId,
-          phone, from_step: stepBefore, to_step: updates.conversation_step,
+          phone, from_step: stepBefore, to_step: stripPrefix(updates.conversation_step),
           intent: __intent, confidence: __confidence,
         });
       }
