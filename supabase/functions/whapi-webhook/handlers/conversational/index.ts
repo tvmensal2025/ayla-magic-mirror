@@ -90,16 +90,8 @@ async function loadFlow(supabase: any, consultantId: string): Promise<DbStep[] |
 }
 
 // ---------------------------------------------------------------------------
-// Capture extractors — detect data in the lead's message
+// Capture phase — usa extractors compartilhados (regex + extenso + validação)
 // ---------------------------------------------------------------------------
-const CAPTURE_RX = {
-  electricity_bill_value: /(?:R?\$\s*)?(\d{1,4}(?:[.,]\d{1,2})?)\s*(?:reais|conta|de luz|R\$)?/i,
-  phone_whatsapp: /(?:\+?55\s*)?\(?\d{2}\)?\s*9?\s*\d{4}[-\s]?\d{4}/,
-  cpf: /\d{3}\.?\d{3}\.?\d{3}-?\d{2}/,
-  // nome: heurística "sou X", "me chamo X Y", "meu nome é X"
-  name: /(?:sou|me chamo|meu nome [eé]|aqui [eé]?|nome:?)\s+([A-Za-zÀ-ÿ]{2,}(?:\s+[A-Za-zÀ-ÿ]{2,}){0,3})/i,
-};
-
 interface ExtractedCaptures {
   electricity_bill_value?: number;
   phone_whatsapp?: string;
@@ -111,45 +103,23 @@ function extractCaptures(messageText: string, configured: DbCapture[]): Extracte
   const out: ExtractedCaptures = {};
   if (!messageText) return out;
   const enabled = new Set((configured || []).filter(c => c.enabled !== false).map(c => c.field));
-
   if (enabled.has("electricity_bill_value")) {
-    // Só captura se mensagem parece falar de dinheiro/conta — evita pegar idade etc.
-    if (/r\$|\bconta\b|\breais?\b|\bluz\b|\bvalor\b|^\s*\d{2,4}\s*$/i.test(messageText)) {
-      const m = messageText.match(/\d{1,4}(?:[.,]\d{1,2})?/);
-      if (m) {
-        const v = parseFloat(m[0].replace(/\./g, "").replace(",", "."));
-        if (!isNaN(v) && v >= 30 && v <= 5000) out.electricity_bill_value = v;
-      }
-    }
+    const v = extractValor(messageText);
+    if (v != null) out.electricity_bill_value = v;
   }
   if (enabled.has("phone_whatsapp")) {
-    const m = messageText.match(CAPTURE_RX.phone_whatsapp);
-    if (m) out.phone_whatsapp = m[0].replace(/\D/g, "");
+    const p = extractTelefone(messageText);
+    if (p) out.phone_whatsapp = p;
   }
   if (enabled.has("cpf")) {
-    const m = messageText.match(CAPTURE_RX.cpf);
-    if (m) out.cpf = m[0].replace(/\D/g, "");
+    const c = extractCPF(messageText);
+    if (c) out.cpf = c;
   }
   if (enabled.has("name")) {
-    const m = messageText.match(CAPTURE_RX.name);
-    if (m && m[1]) {
-      const cleaned = m[1].trim().split(/\s+/).slice(0, 3).join(" ");
-      if (cleaned.length >= 2) out.name = cleaned;
-    }
+    const n = extractNome(messageText);
+    if (n) out.name = n;
   }
   return out;
-}
-
-// Detect "regex-only" intents (não dependem do LLM) — usadas para casar com transitions.
-function detectRegexIntents(messageText: string): string[] {
-  const intents: string[] = [];
-  if (!messageText) return intents;
-  if (/r\$\s*\d|\b\d{2,4}\s*reais?\b|\bconta de \d|\bvalor\b.*\d/i.test(messageText)) intents.push("valor_brl");
-  else if (/^\s*\d{2,4}([.,]\d{1,2})?\s*$/.test(messageText)) intents.push("valor_brl");
-  if (CAPTURE_RX.phone_whatsapp.test(messageText)) intents.push("telefone_br");
-  if (CAPTURE_RX.cpf.test(messageText)) intents.push("cpf_br");
-  if (CAPTURE_RX.name.test(messageText)) intents.push("nome_proprio");
-  return intents;
 }
 
 function matchTransition(step: DbStep, intents: string[], messageText: string): DbTransition | null {
