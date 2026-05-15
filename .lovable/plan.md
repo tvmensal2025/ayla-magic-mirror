@@ -1,69 +1,66 @@
-## Objetivo
+## O que vai mudar (em linguagem simples)
 
-Mostrar e gerenciar **TODAS as mídias** (áudio, imagem, vídeo) que a Camila envia em cada passo do fluxo, direto na página `/admin/fluxos`. Cada passo vira o "centro de comando" das mídias daquele momento da conversa, com upload, troca, exclusão e ordem de envio configurável.
+Hoje o Fluxo da Camila mostra 6 passos fixos (vêm do código). Você só edita o **texto** de cada um — não dá pra adicionar passo novo, reordenar, desativar ou mudar para qual passo cada resposta leva. O bot no WhatsApp também segue essas regras fixas.
 
-## O que muda na página Fluxo da Camila
+Vou trocar isso por um **construtor de fluxo**, onde você decide tudo:
 
-Cada cartão de passo passa a ter, abaixo das mensagens de texto, uma seção **"Mídias deste passo"** com:
+- ✅ Editar/apagar texto de qualquer passo (já funciona, vai continuar)
+- ✅ **Adicionar passos novos** (ex.: Passo 7 — "Reforço de prova social")
+- ✅ **Reordenar** arrastando ou com setas pra cima/baixo
+- ✅ **Desativar** um passo sem apagar
+- ✅ **Escolher pra onde cada resposta leva** — ex.: se o lead diz "sim", você escolhe se vai pro Passo 4, 5 ou pro Cadastro
+- ✅ **Mídia (áudio/imagem/vídeo)** continua linkada por passo, da Biblioteca que você já tem
 
-- **Áudios** ligados ao passo — player + botão "Trocar" / "Excluir" / "Adicionar áudio"
-- **Imagens** ligadas ao passo — thumb + "Trocar" / "Excluir" / "Adicionar imagem"
-- **Vídeos** ligados ao passo — preview + "Trocar" / "Excluir" / "Adicionar vídeo"
-- **Ordem de envio** (drag-and-drop simples ou setas ↑↓) — define em que sequência Áudio/Imagem/Vídeo/Texto saem naquele passo. Mostra uma "régua" do tipo `🎙 Áudio → 🖼 Imagem → 🎬 Vídeo → 💬 Texto` que o consultor reorganiza.
+E o mais importante: **a Camila no WhatsApp passa a obedecer o seu fluxo** em vez do fluxo fixo do código.
 
-Nada de abrir outra tela: tudo acontece dentro do passo (resposta à pergunta 1).
+## Como vai ficar a tela
 
-## Mapeamento de passo → slot_key
+Cada passo vira um cartão com:
 
-A `ai_media_library` já usa `slot_key` para amarrar mídia a um momento. Faço o `de/para` direto:
+1. Cabeçalho: número, título editável, botão de ⬆️⬇️ pra reordenar, switch pra ativar/desativar, ✏️ renomear, 🗑️ apagar
+2. Mídias do passo (do StepMediaPanel que já existe)
+3. Texto da mensagem (editável, com sugestão automática como já faz hoje)
+4. **"Para onde vai depois"** — uma lista de regras tipo:
+   - `Se o lead disser "sim/quero/vamos"` → vai para `Passo X`
+   - `Se o lead disser "não/depois"` → vai para `Passo Y`
+   - `Qualquer outra coisa` → vai para `Passo Z` (ou repete)
+   
+   Cada regra tem: gatilho (palavras/intenção) + destino (dropdown com os passos existentes + "Cadastro" + "Aguardando humano").
+5. Botão grande "+ Adicionar passo" no fim da lista.
 
-| Passo do fluxo | slot_key (já existe / criar) |
-|---|---|
-| Boas-vindas | `boas_vindas` (já existe) |
-| Vídeo + qualificação | `explainer` (vídeo) + `como_funciona` (áudio, já existe) |
-| Check-in pós-vídeo | `checkin` |
-| Pitch Conexão Club | `club` |
-| Tirar dúvidas | `duvidas` (+ áudios de objeção já existentes: `objecao_preco`, `objecao_distribuidora`, `prova_social`, `fazenda_solar`) |
-| Cadastro | `cadastro_pedir_conta` |
-
-A constante `FLUXO` no `FluxoCamila.tsx` ganha um campo `slots: string[]` por passo, listando os slots aceitos.
-
-## Ordem de envio configurável
-
-Adiciono uma coluna `send_order` (int, default 100) em `ai_media_library` e uma coluna `media_order` (jsonb, ex.: `["audio","image","video","text"]`) por passo, salva em **`consultants.flow_step_media_order`** (jsonb com chave = step_key).
-
-Quando a Camila for enviar mensagens daquele passo, a edge function lê essa ordem e respeita. Se nada for definido, usa o padrão atual da memória (Áudio → Imagem → Vídeo → Texto).
-
-> Nota: a alteração da edge function fica fora deste PR de UI (o usuário pediu UI agora). Já deixo o esquema gravando e a página funcional. Em PR seguinte, o `whapi-webhook` lê a ordem e aplica. Posso fazer junto se preferir — diga "fazer tudo".
-
-## Uploads
-
-- Componente único `<MediaUploader slotKey="..." kind="audio|image|video" />` reutilizado nos 3 tipos.
-- Áudio: input `accept="audio/*"` + gravação inline opcional (já existe `useAudioRecorder`).
-- Imagem: `accept="image/*"`.
-- Vídeo: `accept="video/*"` (limite 50MB com aviso).
-- Upload vai pro bucket existente **`ai-agent-media`** em `consultants/{userId}/{slot_key}/{uuid}.{ext}` e cria linha em `ai_media_library`.
+Os 2 atalhos globais ("quero cadastrar" e "quero falar com humano") continuam fixos no topo, como hoje.
 
 ## Detalhes técnicos
 
-- **Tabelas afetadas**:
-  - `ai_media_library`: adicionar `send_order int default 100` (migração).
-  - `consultants`: adicionar `flow_step_media_order jsonb default '{}'::jsonb` (migração).
-- **Storage**: bucket `ai-agent-media` (já existe e é público).
-- **RLS**: `ai_media_library` já tem RLS por `consultant_id`; só confirmar policy de INSERT/DELETE pro próprio user.
-- **UI components novos**:
-  - `src/components/admin/fluxo/StepMediaPanel.tsx` — painel das mídias por passo
-  - `src/components/admin/fluxo/MediaUploader.tsx` — upload + lista + delete
-  - `src/components/admin/fluxo/MediaOrderEditor.tsx` — reorder drag/setas
-- **Página alterada**: `src/pages/FluxoCamila.tsx` — adiciona `slots` em cada passo da constante `FLUXO` e renderiza `<StepMediaPanel>` dentro do cartão.
-- **Hooks**: novo `useStepMedia(slotKeys: string[])` agrupando por slot+kind.
+**Banco de dados** — já existem as tabelas `bot_flows`, `bot_flow_steps` e `bot_flow_qa` (do FlowBuilder antigo). Vou:
 
-## Fora do escopo
+- Adicionar colunas faltantes em `bot_flow_steps`: `title`, `summary`, `icon`, `is_active`, `media_order` (jsonb), `transitions` (jsonb com `[{trigger_intent, trigger_phrases[], goto_step_id}]`).
+- Criar 1 fluxo "Camila" por consultor automaticamente (seed do fluxo atual hardcoded).
+- O texto da mensagem do passo passa a viver em `bot_flow_steps.message_text` (já existe). Mantém `bot_messages` só pra fallback global e mensagens de sistema.
 
-- Editar a edge function `whapi-webhook` para ler `media_order` (mencionado acima — me avise se quer junto).
-- Métricas por mídia (já temos `sent_count`/`reply_count`, posso expor depois).
-- Biblioteca global de mídias — continua na página Assistente IA; aqui é a visão **por passo**.
+**Frontend** — refatorar `src/pages/FluxoCamila.tsx`:
+- Carregar passos de `bot_flow_steps` em vez do array `FLUXO` hardcoded.
+- Componentes novos: `<StepCard>`, `<TransitionRow>`, `<AddStepButton>`.
+- Reordenação otimista (UI reordena na hora, salva `position` em background).
+- StepMediaPanel continua igual (já está bom).
 
-## Pergunta final antes de implementar
+**Backend (bot do WhatsApp)** — `supabase/functions/whapi-webhook/handlers/conversational/state-machine.ts`:
+- Trocar a função `decideTransition` hardcoded por uma versão que carrega o fluxo do consultor de `bot_flow_steps` + `transitions` e decide o próximo passo a partir disso.
+- Manter os 2 overrides globais (`quero_cadastrar`, `quero_humano`) e a entrada do Cadastro (que continua intacto).
+- Fallback: se o consultor ainda não tem fluxo customizado, usa o seed padrão (mesmo conteúdo de hoje) — ninguém quebra.
 
-Faço **só a UI** (gravando ordem no banco) ou **UI + edge function** que respeita a ordem na hora de enviar? A primeira é mais segura (não toca o bot que está rodando hoje); a segunda fecha o ciclo todo.
+**Migração de dados** — criar uma migration que, pra cada consultor existente, semeia um `bot_flows` ativo + 6 `bot_flow_steps` espelhando o fluxo atual + transitions equivalentes ao state-machine atual. Ninguém perde nada.
+
+## O que **não** muda
+
+- Cadastro (OCR + portal iGreen) continua intocado.
+- Biblioteca de áudios/vídeos/imagens (`ai_media_library`) continua igual — só passa a ser linkada via `bot_flow_steps.id` em vez de `slot_key` fixo.
+- Atalhos globais continuam funcionando em qualquer passo.
+
+## Entrega em 3 partes (pra você ir validando)
+
+1. **Migração + seed** do banco com o fluxo atual replicado (você não vê diferença, mas a base já tá pronta).
+2. **Tela nova de edição** do Fluxo da Camila (você já consegue mexer, mas o bot ainda usa o código antigo).
+3. **Bot passa a ler do banco** — aí suas mudanças passam a valer pra valer no WhatsApp.
+
+Aprovando, começo pela parte 1.
