@@ -556,6 +556,23 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     }
   }
 
+  // Auto-advance se o passo não tem transições configuradas E intenção positiva
+  const noTransitionsConfigured = !Array.isArray(currentStep.transitions) || currentStep.transitions.length === 0;
+  const positiveIntent = ["afirmacao", "saudacao", "quer_cadastrar", "ja_assistiu_video"].includes(cls.intent);
+  if (noTransitionsConfigured && positiveIntent) {
+    const nextByPosition = dbSteps.find((s) => s.is_active && s.position > currentStep.position);
+    if (nextByPosition) {
+      console.log(`[conversational] auto-advance ${currentStep.step_key} → ${nextByPosition.step_key} (no transitions, intent=${cls.intent})`);
+      if (nextByPosition.step_key === "cadastro" || CADASTRO_STEPS.has(nextByPosition.step_key)) {
+        return {
+          reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
+          updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
+        };
+      }
+      return goToStep(nextByPosition);
+    }
+  }
+
   // Default: repeat
   return repeatCurrent();
 }
