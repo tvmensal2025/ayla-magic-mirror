@@ -830,6 +830,7 @@ export type Database = {
           label: string
           priority: number
           reply_count: number
+          send_order: number
           sent_count: number
           slot_key: string | null
           step_tags: string[]
@@ -853,6 +854,7 @@ export type Database = {
           label: string
           priority?: number
           reply_count?: number
+          send_order?: number
           sent_count?: number
           slot_key?: string | null
           step_tags?: string[]
@@ -876,6 +878,7 @@ export type Database = {
           label?: string
           priority?: number
           reply_count?: number
+          send_order?: number
           sent_count?: number
           slot_key?: string | null
           step_tags?: string[]
@@ -1325,6 +1328,7 @@ export type Database = {
           created_at: string | null
           facebook_label_id: string | null
           facebook_pixel_id: string | null
+          flow_step_media_order: Json
           google_analytics_id: string | null
           id: string
           igreen_id: string | null
@@ -1344,6 +1348,7 @@ export type Database = {
           created_at?: string | null
           facebook_label_id?: string | null
           facebook_pixel_id?: string | null
+          flow_step_media_order?: Json
           google_analytics_id?: string | null
           id: string
           igreen_id?: string | null
@@ -1363,6 +1368,7 @@ export type Database = {
           created_at?: string | null
           facebook_label_id?: string | null
           facebook_pixel_id?: string | null
+          flow_step_media_order?: Json
           google_analytics_id?: string | null
           id?: string
           igreen_id?: string | null
