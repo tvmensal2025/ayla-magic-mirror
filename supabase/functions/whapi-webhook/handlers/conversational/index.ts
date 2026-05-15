@@ -397,10 +397,14 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   const flowId = loaded.flowId;
 
   const firstActive = dbSteps.find((s) => s.is_active) || dbSteps[0];
-  const currentStep = dbSteps.find((s) => s.step_key === stepKey);
+  // Lookup robusto: tenta por id (preferido — estável) e por step_key (compat reversa).
+  // O orchestrator passa stepKey já com prefixo strippado; pode ser UUID, "passo_xxx" ou nome canônico.
+  const currentStep =
+    dbSteps.find((s) => s.id === stepKey) ||
+    dbSteps.find((s) => s.step_key === stepKey);
   if (!currentStep) {
     // Unknown/legacy step → restart at the first active dynamic step.
-    console.log(`[conversational] unknown step="${stepKey}" → restart at firstActive=${firstActive?.step_key} (steps=${dbSteps.length})`);
+    console.log(`[conversational] unknown step="${stepKey}" → restart at firstActive=${firstActive?.id} (steps=${dbSteps.length})`);
     const mediaSent = await sendStepMedia(ctx, firstActive, consultantId);
     const tpl = (firstActive.message_text || "").trim();
     const fallbackGreeting = mediaSent ? "" : `Oi${ctx.customer.name ? " " + String(ctx.customer.name).split(" ")[0] : ""}! 👋`;
@@ -409,7 +413,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       : fallbackGreeting;
     return {
       reply,
-      updates: { conversation_step: firstActive.step_key, __inline_sent: mediaSent || undefined },
+      // Grava o id (estável) — o orchestrator prefixa "flow:" antes de persistir.
+      updates: { conversation_step: firstActive.id, __inline_sent: mediaSent || undefined },
     };
   }
 
@@ -500,7 +505,9 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     // Se for um passo especial (capture_conta/documento/finalizar), o conversation_step
     // salvo já é o do pipeline de cadastro — assim a próxima mensagem do lead cai direto
     // no bot-flow.ts e segue o fluxo de OCR / portal / OTP.
-    const nextConversationStep = cadastroStep || s.step_key;
+    // cadastroStep retorna nome canônico (ex.: "aguardando_conta") — orchestrator prefixa "sys:".
+    // Caso contrário, gravamos s.id (estável) em vez de step_key, e orchestrator prefixa "flow:".
+    const nextConversationStep = cadastroStep || s.id;
     return {
       reply: renderTemplate(s.message_text || "", vars),
       updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: mediaSent || undefined, ...extra },
