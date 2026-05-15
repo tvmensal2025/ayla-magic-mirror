@@ -198,7 +198,13 @@ Deno.serve(async (req) => {
       try {
         const res = await fetch(`${SUPABASE_URL}/functions/v1/whapi-webhook`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}`, apikey: SERVICE_ROLE },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${SERVICE_ROLE}`,
+            apikey: SERVICE_ROLE,
+            "x-bot-test-run-id": runId,
+            "x-bot-test-turn": String(turn),
+          },
           body: JSON.stringify(payload),
         });
         resStatus = res.status;
