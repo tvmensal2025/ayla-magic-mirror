@@ -842,6 +842,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }
         }
       }
+      } // fecha else hasDynamicFlow
     }
   } catch (e) {
     console.warn("[bot-flow] opening-flow check failed:", (e as any)?.message);
