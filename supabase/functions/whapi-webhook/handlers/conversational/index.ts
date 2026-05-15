@@ -505,7 +505,9 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     // Se for um passo especial (capture_conta/documento/finalizar), o conversation_step
     // salvo já é o do pipeline de cadastro — assim a próxima mensagem do lead cai direto
     // no bot-flow.ts e segue o fluxo de OCR / portal / OTP.
-    const nextConversationStep = cadastroStep || s.step_key;
+    // cadastroStep retorna nome canônico (ex.: "aguardando_conta") — orchestrator prefixa "sys:".
+    // Caso contrário, gravamos s.id (estável) em vez de step_key, e orchestrator prefixa "flow:".
+    const nextConversationStep = cadastroStep || s.id;
     return {
       reply: renderTemplate(s.message_text || "", vars),
       updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: mediaSent || undefined, ...extra },
