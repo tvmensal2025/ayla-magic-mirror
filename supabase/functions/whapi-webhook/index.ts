@@ -327,8 +327,9 @@ Deno.serve(async (req) => {
       // Só assume os passos pós-cadastro listados em CONVERSATIONAL_STEPS — cadastro segue intacto pelo runBotFlow.
       const customerOverride = (customer as any).conversational_flow_enabled;
       const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
-      // Cadastro/system states stay with runBotFlow. Anything else (incluindo step_keys
-      // novos criados pelo usuário no FluxoCamila) vai para o motor conversacional dinâmico.
+      // Override individual só DESLIGA o motor novo se for explicitamente false.
+      // Qualquer outro estado (true, null, undefined) respeita o flag do consultor.
+      // Cadastro/system states stay with runBotFlow.
       const CADASTRO_OR_SYSTEM = new Set([
         "aguardando_conta","processando_ocr_conta","confirmando_dados_conta",
         "ask_tipo_documento","aguardando_doc_frente","aguardando_doc_verso",
