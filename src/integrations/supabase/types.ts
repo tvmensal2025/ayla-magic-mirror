@@ -1101,11 +1101,18 @@ export type Database = {
           condition_text: string | null
           created_at: string
           flow_id: string
+          icon: string
           id: string
+          is_active: boolean
+          media_order: Json
           message_text: string | null
           position: number
           slot_key: string | null
+          step_key: string | null
           step_type: string
+          summary: string | null
+          title: string | null
+          transitions: Json
           updated_at: string
           wait_for: string
           wait_seconds: number
@@ -1114,11 +1121,18 @@ export type Database = {
           condition_text?: string | null
           created_at?: string
           flow_id: string
+          icon?: string
           id?: string
+          is_active?: boolean
+          media_order?: Json
           message_text?: string | null
           position?: number
           slot_key?: string | null
+          step_key?: string | null
           step_type: string
+          summary?: string | null
+          title?: string | null
+          transitions?: Json
           updated_at?: string
           wait_for?: string
           wait_seconds?: number
@@ -1127,11 +1141,18 @@ export type Database = {
           condition_text?: string | null
           created_at?: string
           flow_id?: string
+          icon?: string
           id?: string
+          is_active?: boolean
+          media_order?: Json
           message_text?: string | null
           position?: number
           slot_key?: string | null
+          step_key?: string | null
           step_type?: string
+          summary?: string | null
+          title?: string | null
+          transitions?: Json
           updated_at?: string
           wait_for?: string
           wait_seconds?: number
@@ -3314,6 +3335,10 @@ export type Database = {
           _remote_jid?: string
         }
         Returns: Json
+      }
+      seed_default_camila_flow: {
+        Args: { _consultant_id: string }
+        Returns: string
       }
     }
     Enums: {
