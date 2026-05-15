@@ -17,10 +17,10 @@ const INTENTS: Intent[] = [
 
 // Cheap deterministic regex pre-pass — handles ~70% of cases without LLM cost.
 const RX = {
-  quer_cadastrar: /\b(cadastr|quero (me )?(cadastr|participar)|vamos l[áa]|bora|simbora|inscrever|me cadastra|fechado|aceito)\b/i,
+  quer_cadastrar: /\b(cadastr\w*|quero (me )?(cadastrar|participar)|vamos l[áa]|bora|simbora|inscrever|me cadastra|fechado|aceito)\b/i,
   quer_humano: /\b(humano|atendente|pessoa real|operador|consultor de verdade|falar com algu[eé]m)\b/i,
   saudacao: /^(oi+|ol[áa]|bom dia|boa tarde|boa noite|hey|opa)\b/i,
-  ja_assistiu_video: /\b(j[áa]? ?(vi|assisti)|terminei|acabei de ver|vi sim)\b/i,
+  ja_assistiu_video: /\b(j[áa]? ?vi|assisti|terminei|acabei de ver|vi sim)\b/i,
   afirmacao: /^(sim|s|claro|pode|quero|positivo|👍|✅|1️⃣?|^1$)\b/i,
   negacao: /^(n[ãa]o|n|nao|negativo|👎|❌|2️⃣?|^2$)\b/i,
   tem_duvida: /\?|\b(d[úu]vida|como funciona|quanto|quanto custa|seguro|confi[áa]vel|golpe)\b/i,
