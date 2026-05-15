@@ -206,6 +206,7 @@ export default function FluxoCamila() {
         transitions: parseTransitions(r.transitions),
         captures: parseCaptures(r.captures),
         fallback: parseFallback(r.fallback, r.transitions),
+        auto_detect_doc_type: r.auto_detect_doc_type !== false,
       })));
     }
   }, []);
