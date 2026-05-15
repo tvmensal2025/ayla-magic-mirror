@@ -15,7 +15,7 @@ import { createWhapiSender, parseWhapiMessage } from "../_shared/whapi-api.ts";
 import { checkAndMarkProcessed, logStepTransition, jsonLog } from "../_shared/audit.ts";
 import { runBotFlow } from "./handlers/bot-flow.ts";
 import { runConversationalFlow } from "./handlers/conversational/index.ts";
-import { normalizeIncoming, normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
+import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
 
@@ -320,10 +320,10 @@ Deno.serve(async (req) => {
     }
 
     // ─── Run bot flow ──────────────────────────────────────────────────
-    // Normaliza o step lido do banco (compat reversa para valores sem prefixo).
+    // Roteamento por prefixo: "flow:<id>" → conversational; nome cru → bot-flow determinístico.
+    // Compat reversa: UUIDs/"passo_xxx" sem prefixo são tratados como flow.
     const rawStep = customer.conversation_step || null;
-    const normalizedStep = normalizeIncoming(rawStep);
-    const stepBefore = stripPrefix(normalizedStep); // valor cru consumido pelos engines
+    const stepBefore = stripPrefix(rawStep); // valor cru consumido pelos engines
 
     // Sincroniza o customer em memória com o valor cru — engines mantêm sua lógica intacta.
     (customer as any).conversation_step = stepBefore;
@@ -332,18 +332,15 @@ Deno.serve(async (req) => {
     let updates: Record<string, any> = {};
     let engineUsed: "sys" | "flow" = "sys";
     try {
-      // Roteamento explícito por namespace.
-      // - "sys:<name>"  → motor determinístico (cadastro + edição + welcome legacy)
-      // - "flow:<id>"   → motor conversacional DB-driven
-      // Override individual: customer.conversational_flow_enabled === false força sys.
       const customerOverride = (customer as any).conversational_flow_enabled;
       const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
 
-      let engine = routeEngine(normalizedStep);
+      let engine = routeEngine(rawStep);
       // Se o consultor não habilitou o motor novo, ou o cliente desligou explicitamente,
-      // qualquer step "flow:" é rebaixado para sys (que cai no welcome canônico).
+      // qualquer step "flow:" é rebaixado para sys (cai no welcome canônico).
       if (engine === "flow" && (!consultantFlag || customerOverride === false)) {
         engine = "sys";
+        (customer as any).conversation_step = "welcome";
       }
       engineUsed = engine;
 
@@ -378,7 +375,7 @@ Deno.serve(async (req) => {
       updates = {};
     }
 
-    // Normaliza o conversation_step de saída — sempre persistir com prefixo.
+    // Normaliza o conversation_step de saída — flow ganha prefixo, sys vai cru.
     if (updates.conversation_step) {
       const prefixed = normalizeOutgoing(String(updates.conversation_step), engineUsed);
       if (prefixed) updates.conversation_step = prefixed;
