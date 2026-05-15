@@ -1,60 +1,109 @@
-# 5 Recursos Enterprise para o Fluxo Camila
+## Objetivo
 
-## 1. Idempotência de webhook
-- Nova tabela `processed_whatsapp_messages(message_id PK, received_at)` com TTL de 7 dias.
-- No `whapi-webhook`: antes de processar, `INSERT ... ON CONFLICT DO NOTHING`. Se já existia, retorna 200 OK e ignora.
-- Cron diário limpa registros > 7 dias.
+Permitir que a admin monte, dentro do **FluxoCamila**, blocos para:
+1. **Captar a conta de luz** (OCR + botão de confirmar dados) — já salva a conta no portal-staging sem pedir documento.
+2. **Captar o documento** (RG/CNH) — IA detecta automaticamente o tipo via OCR, sem perguntar.
+3. **Finalizar** — envia ao portal VPS, trata OTP, dá os parabéns.
 
-## 2. Rate limit / debounce por contato
-- Nova tabela `whatsapp_message_buffer(phone, consultant_id, messages jsonb[], scheduled_at)`.
-- Quando chega mensagem: agenda processamento para 3s no futuro e acumula no buffer.
-- Se chegar outra antes dos 3s, reseta o timer e concatena texto.
-- Edge function `process-message-buffer` (cron a cada 2s) processa buffers expirados, juntando mensagens em uma única entrada para a IA.
+Tudo isso **reaproveitando** o pipeline `bot-flow.ts` que já existe (`aguardando_conta → processando_ocr_conta → confirmando_dados_conta → ask_tipo_documento → aguardando_doc_frente/verso → confirmando_dados_doc → ask_finalizar → portal_submitting → aguardando_otp → complete`). Nada do fluxo conversacional atual é perdido.
 
-## 3. Handoff humano automático
-- Adicionar coluna `bot_paused_until timestamptz` em `customers`.
-- Detectar intents de handoff: "falar com humano", "atendente", "pessoa real", "não é robô?", "consultor".
-- Ao detectar: setar `bot_paused_until = now() + 24h`, criar registro em `ai_agent_logs` com `handoff=true`, e disparar notificação (registro em `crm_auto_message_log` com tipo `handoff_alert`) para o consultor.
-- Webhook checa `bot_paused_until` antes de processar — se ativo, ignora mensagem (deixa o consultor responder).
-- UI no painel CRM: botão "Reativar bot" no card do customer.
+## Diagnóstico do que já existe
 
-## 4. Timeout de conversa (follow-up)
-- Adicionar `last_bot_interaction_at` em `customers`.
-- Cron `bot-followup-checker` (a cada 30 min) busca customers em fluxo ativo sem interação há > 6h e < 48h.
-- Envia mensagem de follow-up configurável ("Oi {{nome}}, ainda está aí? Posso te ajudar?") com `followup_count` para evitar spam (máx 1).
-- Se > 48h sem resposta após follow-up: marca deal como `frio` no CRM.
+- `bot-flow.ts` já implementa toda a máquina de cadastro com OCR (Gemini), validação de dados, envio ao worker do portal e OTP.
+- `conversational/index.ts` já reconhece o set `CADASTRO_STEPS` e **não interfere** quando o `conversation_step` está nesse pipeline — só o dispara via `goto_special: "cadastro"`.
+- O FluxoCamila hoje tem `step_type` apenas como `message`. A transição para cadastro existe via `→ Cadastro (OCR + portal)` no select de transições.
+- O RG/CNH hoje **é perguntado** num passo `ask_tipo_documento`. A IA já tem `document-type.ts` para normalizar, mas o tipo vem do texto do lead, não da imagem.
 
-## 5. A/B testing de mensagens
-- A tabela `bot_messages` já tem campo `variant`. Aproveitar.
-- Adicionar tabela `bot_message_ab_results(template_key, variant, sent_count, replied_count, advanced_count, updated_at)`.
-- No envio: escolher variant aleatoriamente (round-robin ponderado), registrar envio.
-- Quando customer responde dentro de 1h: incrementar `replied_count`.
-- Quando avança no fluxo: incrementar `advanced_count`.
-- UI nova: `/admin/ab-testing` mostrando variantes lado a lado com taxas e botão "Promover vencedora".
+## O que vai mudar
+
+### 1) Novos `step_type` no FluxoCamila (UI + DB)
+
+Adicionar três tipos novos de passo selecionáveis no editor, cada um amarrando o lead a um trecho do pipeline existente:
+
+- `capture_conta` — pede a conta, faz OCR, mostra dados extraídos com **um botão "Confirmar"** (lista interativa do WhatsApp). Ao confirmar, salva os dados em `customers` e **decide** o próximo passo conforme a transição configurada (pode ir direto para um próximo passo de fluxo OU encadear o `capture_documento`).
+- `capture_documento` — pede a foto do documento. **A IA classifica automaticamente** (CNH x RG novo x RG antigo) a partir da imagem, salva em `customer.document_type` e segue: pede verso só se não for CNH. Sem perguntar tipo ao lead.
+- `finalizar_cadastro` — dispara `portal_submitting`, trata OTP, e ao concluir envia a mensagem de parabéns configurável no próprio passo (campo `message_text` do passo já existe).
+
+Cada passo expõe no painel:
+- Texto inicial (mídia + delay já existem).
+- Lista de campos obrigatórios mínimos antes de avançar (ex.: `nome`, `cpf`, `endereço`).
+- Transição `on_success` (vai para qual passo) e `on_fail` (humano / repetir).
+
+### 2) Detecção automática de RG x CNH
+
+No `bot-flow.ts`, no passo equivalente a `aguardando_doc_frente` quando vier de `capture_documento`:
+
+- Chamar a função Gemini que já é usada para OCR da conta, com um prompt curto:
+  > "Esta imagem é uma CNH, RG novo (modelo policarbonato) ou RG antigo (papel)? Responda apenas: cnh | rg_novo | rg_antigo."
+- Salvar em `customer.document_type` via `normalizeDocumentType()`.
+- Se `cnh` → pular `aguardando_doc_verso`, ir direto a `confirmando_dados_doc`.
+- Se RG → pedir verso normalmente.
+- Fallback (se IA falhar): cair no `ask_tipo_documento` legado para perguntar ao lead.
+
+### 3) Confirmação por botão na captura da conta
+
+Hoje o `confirmando_dados_conta` espera o lead digitar "sim". Vamos:
+
+- Trocar a mensagem de confirmação por uma **interactive list** do WhatsApp (Evolution API já suporta) com botões `Confirmar dados` e `Corrigir`.
+- Manter o parser de "sim/ok/confirmo" como fallback caso o cliente digite ao invés de clicar.
+- Ao clicar `Confirmar`: gravar tudo em `customers` e seguir a transição configurada no passo `capture_conta` da UI.
+
+### 4) Mensagem final de parabéns configurável
+
+O passo `finalizar_cadastro` no FluxoCamila terá:
+- Campo `message_text` (já existe) — usado como mensagem de parabéns enviada após `complete`.
+- Campo `media` (já existe) — opcional, áudio/vídeo de parabéns.
+- O `bot-flow.ts` ao chegar em `complete` consulta o passo correspondente do fluxo do consultor e envia esses conteúdos no lugar da mensagem fixa atual.
+
+## Migração de banco
+
+```sql
+-- Permite os novos tipos no editor
+ALTER TABLE bot_flow_steps
+  ADD COLUMN IF NOT EXISTS required_fields jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS on_success_step_id uuid,
+  ADD COLUMN IF NOT EXISTS on_fail_step_id uuid;
+
+-- step_type passa a aceitar: 'message' | 'capture_conta' | 'capture_documento' | 'finalizar_cadastro'
+-- (não é enum — é text. Só documentação.)
+```
+
+Sem destruir nada do que existe. Os passos atuais continuam como `message`.
 
 ## Arquivos afetados
 
-### Backend
-- Migration: `processed_whatsapp_messages`, `whatsapp_message_buffer`, `bot_message_ab_results`, colunas em `customers`, cron jobs.
-- `supabase/functions/whapi-webhook/index.ts` — idempotência + check `bot_paused_until` + buffer.
-- Nova: `supabase/functions/process-message-buffer/index.ts` — processa buffer agrupado.
-- Nova: `supabase/functions/bot-followup-checker/index.ts` — follow-ups.
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` — detecção de handoff + tracking A/B.
+- `src/pages/FluxoCamila.tsx` — novo seletor de `step_type`, painéis específicos por tipo.
+- `src/components/admin/fluxo/StepMediaPanel.tsx` — habilitar mídia para os novos tipos (já funciona).
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`:
+  - Inserir detecção automática de RG/CNH via Gemini no `aguardando_doc_frente`.
+  - Trocar texto fixo do `confirmando_dados_conta` por mensagem interactive com botões.
+  - No `complete`, consultar `bot_flow_steps` do tipo `finalizar_cadastro` do consultor e enviar mídia + texto configurados.
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` — adicionar `goto_special: "capture_conta" | "capture_documento" | "finalizar"` que mapeiam direto pra `aguardando_conta`, `ask_tipo_documento` (ou novo `aguardando_doc_frente_auto`) e `ask_finalizar`.
+- Migração SQL acima.
 
-### Frontend
-- `src/pages/CamilaCRM.tsx` (ou similar) — botão "Reativar bot" + indicador de pausa.
-- `src/pages/AdminABTesting.tsx` — nova página.
-- `src/pages/FluxoCamila.tsx` — config de timeout/follow-up message + variantes A/B por step.
+## Fluxo final (lead-side)
 
-## Ordem de execução
-1. Migration única com todas as tabelas/colunas + cron jobs.
-2. Idempotência (mais crítico).
-3. Handoff (mais visível para o usuário).
-4. Buffer/debounce.
-5. Follow-up.
-6. A/B testing (UI + tracking).
+```
+[Passo N: vídeo explicação] 
+   ↓ (intent: quer cadastrar)
+[capture_conta] → "manda a foto da conta"
+   ↓ OCR + extrai (nome, cpf, endereço, valor, instalação)
+   → "Confere se está certo? [Confirmar] [Corrigir]"
+   ↓ Confirmar
+[capture_documento] → "manda a foto do RG ou CNH"
+   ↓ IA detecta tipo da imagem
+   ↓ se RG → pede verso
+   → "Confere os dados do documento? [Confirmar]"
+   ↓
+[finalizar_cadastro] → envia ao portal VPS
+   ↓ aguarda OTP do lead
+   ↓ valida OTP
+   → mensagem + áudio/vídeo de PARABÉNS configuráveis
+   → conversation_step = complete
+```
 
-## Notas
-- Sem rate limiting tradicional (por IP/user) — apenas debounce funcional por contato.
-- Detecção de handoff usa regex + AI fallback (mesmo padrão já implementado).
-- A/B testing começa simples: escolha aleatória 50/50 entre variantes ativas. Otimização (Thompson sampling, etc.) pode vir depois.
+## O que não muda
+
+- Toda a lógica de OCR, worker do portal, OTP, validações em `bot-flow.ts` permanece — só ganha pontos de entrada via fluxo dinâmico e detecção automática de tipo.
+- Os passos `message` existentes seguem funcionando do mesmo jeito.
+- A UI atual de mídias por passo, delays e capturas continua igual.
