@@ -526,6 +526,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Resolve a transition (special or step) to a BotResult
   const resolveTransition = async (t: DbTransition): Promise<BotResult> => {
     if (t.goto_special === "cadastro") {
+      // Preferência: se o fluxo do consultor tem um passo de captura de documento
+      // ativo, vamos para ele (segue o desenho da UI). Cai no aguardando_conta
+      // só se realmente não houver passo de cadastro configurado.
+      const docStep = findActiveByType("capture_documento");
+      if (docStep) return goToStep(docStep);
+      const contaStep = findActiveByType("capture_conta");
+      if (contaStep) return goToStep(contaStep);
       return {
         reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
         updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
@@ -541,6 +548,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const nextStep = dbSteps.find((s) => s.id === t.goto_step_id);
     if (!nextStep || !nextStep.is_active) return repeatCurrent();
     if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
+      const docStep = findActiveByType("capture_documento");
+      if (docStep) return goToStep(docStep);
       return {
         reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
         updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
