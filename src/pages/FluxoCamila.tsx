@@ -26,10 +26,25 @@ import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
 type IconKey = "msg" | "video" | "sparkle" | "user" | "file";
 
 type Transition = {
-  trigger_intent: string;            // 'afirmacao' | 'negacao' | 'tem_duvida' | 'ja_assistiu_video' | 'quer_cadastrar' | 'default' | string custom
+  trigger_intent: string;            // 'afirmacao' | 'negacao' | 'tem_duvida' | 'ja_assistiu_video' | 'quer_cadastrar' | 'valor_brl' | 'nome_proprio' | 'telefone_br' | 'cpf_br' | 'palavra_chave' | string custom
   trigger_phrases: string[];
   goto_step_id: string | null;       // id de outro passo
   goto_special: "cadastro" | "humano" | "repeat" | null;
+};
+
+type CaptureField = "name" | "electricity_bill_value" | "phone_whatsapp" | "cpf";
+
+type Capture = {
+  field: CaptureField;
+  enabled: boolean;
+};
+
+type FallbackMode = "repeat" | "goto" | "ai";
+
+type Fallback = {
+  mode: FallbackMode;
+  goto_step_id?: string | null;
+  ai_prompt?: string;
 };
 
 type Step = {
@@ -44,16 +59,29 @@ type Step = {
   message_text: string | null;
   slot_key: string | null;
   transitions: Transition[];
+  captures: Capture[];
+  fallback: Fallback;
   is_active: boolean;
 };
 
 const INTENT_OPTIONS: { value: string; label: string }[] = [
-  { value: "afirmacao", label: "Lead diz SIM / quero / vamos" },
-  { value: "negacao", label: "Lead diz NÃO / depois" },
-  { value: "tem_duvida", label: "Lead tem dúvida / pergunta" },
-  { value: "ja_assistiu_video", label: "Lead disse que já assistiu" },
-  { value: "quer_cadastrar", label: "Lead quer cadastrar agora" },
-  { value: "default", label: "Qualquer outra resposta" },
+  { value: "afirmacao", label: "Disse SIM / quero / vamos" },
+  { value: "negacao", label: "Disse NÃO / depois" },
+  { value: "tem_duvida", label: "Tem dúvida / pergunta" },
+  { value: "ja_assistiu_video", label: "Disse que já assistiu" },
+  { value: "quer_cadastrar", label: "Quer cadastrar agora" },
+  { value: "valor_brl", label: "Mandou valor da conta (R$)" },
+  { value: "nome_proprio", label: "Mandou o nome" },
+  { value: "telefone_br", label: "Mandou telefone" },
+  { value: "cpf_br", label: "Mandou CPF" },
+  { value: "palavra_chave", label: "Palavra específica (use o campo abaixo)" },
+];
+
+const CAPTURE_FIELDS: { field: CaptureField; label: string; varName: string; hint: string }[] = [
+  { field: "name", label: "Nome do cliente", varName: "{{nome}}", hint: 'Detecta "sou João", "me chamo Maria"' },
+  { field: "electricity_bill_value", label: "Valor da conta de luz", varName: "{{valor_conta}}", hint: 'Detecta "R$ 350", "minha conta vem 450"' },
+  { field: "phone_whatsapp", label: "Telefone", varName: "{{telefone}}", hint: 'Detecta "(11) 99999-8888"' },
+  { field: "cpf", label: "CPF", varName: "{{cpf}}", hint: 'Detecta "123.456.789-00"' },
 ];
 
 const ICON_OPTIONS: { value: IconKey; label: string }[] = [
