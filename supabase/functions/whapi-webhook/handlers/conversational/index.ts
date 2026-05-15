@@ -45,6 +45,7 @@ interface DbStep {
   id: string;
   step_key: string;
   message_text: string | null;
+  text_delay_ms: number | null;
   slot_key: string | null;
   is_active: boolean;
   position: number;
