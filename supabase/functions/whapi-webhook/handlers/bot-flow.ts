@@ -1233,6 +1233,53 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     console.log(`📧 [CAPTURA] Email "${updates.email}" salvo automaticamente (digitado no step "${step}")`);
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // G: INTERCEPÇÃO OFF-TOPIC durante coleta/edição.
+  // Se o lead está em ask_*/editing_*/confirmando_*/aguardando_(conta|doc)
+  // e digita uma pergunta que NÃO tem o formato esperado pelo step,
+  // responde via QA configurada (force=true bypassa NO_QA_STEPS) SEM mudar o step,
+  // e reenvia o prompt do passo atual ("Voltando ao seu cadastro: ...").
+  // ═══════════════════════════════════════════════════════════════════
+  if (messageText && !isFile && !isButton) {
+    const ASK_OR_EDIT_RX = /^(ask_|editing_|confirmando_|aguardando_(?:conta|doc))/;
+    if (ASK_OR_EDIT_RX.test(step)) {
+      const t = messageText.trim();
+      const expected = isExpectedShape(step, t);
+      const looksLikeQuestion =
+        /\?/.test(t) ||
+        /^(como|quanto|quando|onde|quem|qual|posso|preciso|funciona|porqu[eê]|por que|me explica|me conta|d[uú]vida|e\s+(se|quando|caso))/i.test(t);
+      // Mensagem longa sem formato esperado também é provavelmente off-topic
+      const probablyOffTopic = !expected && (looksLikeQuestion || t.length > 30);
+      if (probablyOffTopic) {
+        console.log(`[off-topic] step=${step} msg="${t.slice(0, 60)}" → respondendo dúvida e reenviando prompt`);
+        const qaResult = await trySendConfiguredQa({ force: true, keepStep: true });
+        if (qaResult) {
+          const reentry = getReentryPromptForStep(step, customer);
+          if (reentry) {
+            try {
+              await sendText(remoteJid, reentry);
+              await supabase.from("conversations").insert({
+                customer_id: customer.id, message_direction: "outbound",
+                message_text: reentry, message_type: "text", conversation_step: step,
+              });
+            } catch (e) { console.warn("[off-topic] reentry falhou:", (e as any)?.message); }
+          }
+          return { reply: "", updates: { ...updates, __inline_sent: true } as any };
+        }
+        // Sem QA configurada: ainda assim manda o reentry (não responde com "❌ inválido")
+        const reentry = getReentryPromptForStep(step, customer);
+        if (reentry) {
+          await sendText(remoteJid, reentry);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id, message_direction: "outbound",
+            message_text: reentry, message_type: "text", conversation_step: step,
+          });
+          return { reply: "", updates: { ...updates, __inline_sent: true } as any };
+        }
+      }
+    }
+  }
+
   switch (step) {
     // ─── 1. BOAS-VINDAS ────────────────────
     case "welcome": {
