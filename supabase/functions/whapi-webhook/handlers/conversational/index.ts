@@ -77,13 +77,13 @@ const CADASTRO_STEPS = new Set([
   "editing_doc_nascimento","editing_doc_pai","editing_doc_mae",
 ]);
 
-interface LoadedFlow { flowId: string; steps: DbStep[]; }
+interface LoadedFlow { flowId: string; steps: DbStep[]; strictMode: boolean; }
 
 async function loadFlow(supabase: any, consultantId: string): Promise<LoadedFlow | null> {
   try {
     const { data: flow } = await supabase
       .from("bot_flows")
-      .select("id")
+      .select("id, strict_mode")
       .eq("consultant_id", consultantId)
       .eq("is_active", true)
       .order("created_at", { ascending: true })
@@ -109,8 +109,8 @@ async function loadFlow(supabase: any, consultantId: string): Promise<LoadedFlow
       // para o motor dinâmico não cair no fluxo legado.
       step_key: step.step_key || step.id,
     }));
-    console.log(`[conversational] loadFlow: flow=${flow.id} steps=${normalized.length}`);
-    return { flowId: flow.id as string, steps: normalized };
+    console.log(`[conversational] loadFlow: flow=${flow.id} steps=${normalized.length} strict=${!!(flow as any).strict_mode}`);
+    return { flowId: flow.id as string, steps: normalized, strictMode: !!(flow as any).strict_mode };
   } catch (e) {
     console.error("[conversational] loadFlow failed", e);
     return null;
@@ -397,6 +397,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   }
   const dbSteps = loaded.steps;
   const flowId = loaded.flowId;
+  const strictMode = loaded.strictMode;
+
+  // Helper: encontra o primeiro step ativo de um determinado step_type
+  // (usado para resolver goto_special='cadastro' — preferimos ir para o
+  // passo configurado de captura de documento, em vez de pular pra conta).
+  const findActiveByType = (t: string) => dbSteps.find((s) => s.is_active && s.step_type === t);
 
   const firstActive = dbSteps.find((s) => s.is_active) || dbSteps[0];
   // Lookup robusto: tenta por id (preferido — estável) e por step_key (compat reversa).
@@ -411,7 +417,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const tpl = (firstActive.message_text || "").trim();
     const fallbackGreeting = mediaSent ? "" : `Oi${ctx.customer.name ? " " + String(ctx.customer.name).split(" ")[0] : ""}! 👋`;
     const reply = tpl
-      ? renderTemplate(tpl, { nome: ctx.customer.name, representante: ctx.nomeRepresentante })
+      ? renderTemplate(tpl, {
+          nome: ctx.customer.name,
+          representante: ctx.nomeRepresentante,
+          valor_conta: (ctx.customer as any).electricity_bill_value,
+          telefone: ctx.customer.phone_whatsapp,
+          cpf: (ctx.customer as any).cpf,
+        })
       : fallbackGreeting;
     return {
       reply,
@@ -431,7 +443,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       try { await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", m.kind); } catch (_) {}
     }
     return {
-      reply: renderTemplate(qaHit.text || "", { nome: ctx.customer.name, representante: ctx.nomeRepresentante }),
+      reply: renderTemplate(qaHit.text || "", {
+        nome: ctx.customer.name,
+        representante: ctx.nomeRepresentante,
+        valor_conta: (ctx.customer as any).electricity_bill_value,
+        telefone: ctx.customer.phone_whatsapp,
+        cpf: (ctx.customer as any).cpf,
+      }),
       updates: { conversation_step: stepKey, __inline_sent: qaHit.mediaUrls.length > 0 || undefined },
     };
   }
@@ -520,6 +538,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Resolve a transition (special or step) to a BotResult
   const resolveTransition = async (t: DbTransition): Promise<BotResult> => {
     if (t.goto_special === "cadastro") {
+      // Preferência: se o fluxo do consultor tem um passo de captura de documento
+      // ativo, vamos para ele (segue o desenho da UI). Cai no aguardando_conta
+      // só se realmente não houver passo de cadastro configurado.
+      const docStep = findActiveByType("capture_documento");
+      if (docStep) return goToStep(docStep);
+      const contaStep = findActiveByType("capture_conta");
+      if (contaStep) return goToStep(contaStep);
       return {
         reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
         updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
@@ -535,6 +560,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const nextStep = dbSteps.find((s) => s.id === t.goto_step_id);
     if (!nextStep || !nextStep.is_active) return repeatCurrent();
     if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
+      const docStep = findActiveByType("capture_documento");
+      if (docStep) return goToStep(docStep);
       return {
         reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
         updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
@@ -560,7 +587,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       return goToStep(nextStep);
     }
   }
-  if (fb.mode === "ai" && fb.ai_prompt) {
+  if (fb.mode === "ai" && fb.ai_prompt && !strictMode) {
     const candidates = dbSteps.filter(s => s.is_active && s.id !== currentStep.id).map(s => ({ id: s.id, step_key: s.step_key }));
     const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey, consultantId || "global");
     if (choice) {
@@ -571,6 +598,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       const nextStep = dbSteps.find(s => s.step_key === choice);
       if (nextStep && nextStep.is_active) return goToStep(nextStep);
     }
+  } else if (fb.mode === "ai" && strictMode) {
+    console.log(`[conversational] strict_mode=true → fallback IA ignorado, usando repeat`);
   }
 
   // Auto-advance se o passo não tem transições configuradas E intenção positiva
@@ -581,6 +610,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     if (nextByPosition) {
       console.log(`[conversational] auto-advance ${currentStep.step_key} → ${nextByPosition.step_key} (no transitions, intent=${cls.intent})`);
       if (nextByPosition.step_key === "cadastro" || CADASTRO_STEPS.has(nextByPosition.step_key)) {
+        const docStep = findActiveByType("capture_documento");
+        if (docStep) return goToStep(docStep);
         return {
           reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
           updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },

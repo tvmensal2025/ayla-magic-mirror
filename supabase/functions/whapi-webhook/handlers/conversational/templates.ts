@@ -17,14 +17,34 @@ const FALLBACK: Record<string, string> = {
 export interface TemplateVars {
   nome?: string | null;
   representante?: string | null;
+  valor_conta?: number | string | null;
+  telefone?: string | null;
+  cpf?: string | null;
+}
+
+function fmtValor(v: number | string | null | undefined): string {
+  if (v === null || v === undefined || v === "") return "";
+  const n = typeof v === "number" ? v : Number(String(v).replace(/[^\d.,-]/g, "").replace(",", "."));
+  if (!Number.isFinite(n)) return String(v);
+  return `R$ ${n.toFixed(2).replace(".", ",")}`;
 }
 
 export function renderTemplate(tpl: string, vars: TemplateVars): string {
   const nome = (vars.nome || "").split(" ")[0] || "amigo";
   const rep = vars.representante || "consultor";
-  return tpl
-    .replaceAll("{{nome}}", nome)
-    .replaceAll("{{representante}}", rep);
+  const valor = fmtValor(vars.valor_conta);
+  const tel = vars.telefone || "";
+  const cpf = vars.cpf || "";
+  // Substituição tolerante a espaços: {{ nome }}, {{nome}}, {{  nome  }}
+  const replaceVar = (str: string, key: string, value: string) =>
+    str.replace(new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "gi"), value);
+  let out = tpl;
+  out = replaceVar(out, "nome", nome);
+  out = replaceVar(out, "representante", rep);
+  out = replaceVar(out, "valor_conta", valor);
+  out = replaceVar(out, "telefone", tel);
+  out = replaceVar(out, "cpf", cpf);
+  return out;
 }
 
 export async function getTemplate(

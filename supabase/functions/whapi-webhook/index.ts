@@ -387,6 +387,44 @@ Deno.serve(async (req) => {
         engine = "sys";
         (customer as any).conversation_step = "welcome";
       }
+
+      // 🚀 PROMOÇÃO PARA FLOW (Fluxo da Camila como fonte única de verdade):
+      // Quando o consultor habilitou o motor novo e tem um bot_flow ativo,
+      // o primeiro contato e os steps legados conversacionais são roteados
+      // para o motor dinâmico. Ele restarta no primeiro passo ativo.
+      const LEGACY_PROMOTABLE = new Set(["", "welcome", "checkin_pos_video", "qualificacao", "menu_inicial", "pos_video"]);
+      if (
+        engine === "sys" &&
+        consultantFlag &&
+        customerOverride !== false &&
+        LEGACY_PROMOTABLE.has(stripPrefix((customer as any).conversation_step || ""))
+      ) {
+        try {
+          const { data: activeFlow } = await supabase
+            .from("bot_flows")
+            .select("id")
+            .eq("consultant_id", superAdminConsultantId)
+            .eq("is_active", true)
+            .maybeSingle();
+          if (activeFlow?.id) {
+            // Conta os steps ativos só pra evitar promover quando o flow está vazio.
+            const { count } = await supabase
+              .from("bot_flow_steps")
+              .select("id", { count: "exact", head: true })
+              .eq("flow_id", (activeFlow as any).id)
+              .eq("is_active", true);
+            if ((count || 0) > 0) {
+              engine = "flow";
+              // Limpa o step para que runConversationalFlow restarte no firstActive.
+              (customer as any).conversation_step = null;
+              console.log(`🚀 [router] promovido para flow (consultor=${superAdminConsultantId}, step legado="${stepBefore}")`);
+            }
+          }
+        } catch (e) {
+          console.warn("[router] falha ao verificar flow ativo:", (e as any)?.message);
+        }
+      }
+
       engineUsed = engine;
 
       const runEngine = async () => engine === "flow"

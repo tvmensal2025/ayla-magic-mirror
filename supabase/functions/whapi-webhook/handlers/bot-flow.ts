@@ -686,6 +686,20 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     const currentStep = customer.conversation_step;
     const stepIsInitial = !currentStep || currentStep === "welcome";
     if (!isFile && !isButton && customer.consultant_id && !customer.bot_paused && stepIsInitial) {
+      // 🛑 Se o consultor tem Fluxo da Camila ativo, NÃO usar abertura legada
+      // (bot_flow_qa.is_opening). O motor dinâmico (runConversationalFlow) é
+      // a única fonte de verdade. Esse caminho só serve para consultores que
+      // ainda não migraram para o Flow Builder.
+      const { data: hasDynamicFlow } = await supabase
+        .from("bot_flows")
+        .select("id")
+        .eq("consultant_id", customer.consultant_id)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (hasDynamicFlow?.id) {
+        console.log(`[opening-flow] pulado — consultor tem Fluxo da Camila ativo (${(hasDynamicFlow as any).id})`);
+        // segue o switch normal
+      } else {
       const { count: outboundCount } = await supabase
         .from("conversations")
         .select("id", { count: "exact", head: true })
@@ -828,6 +842,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }
         }
       }
+      } // fecha else hasDynamicFlow
     }
   } catch (e) {
     console.warn("[bot-flow] opening-flow check failed:", (e as any)?.message);
