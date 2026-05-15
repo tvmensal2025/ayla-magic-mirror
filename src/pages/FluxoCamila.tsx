@@ -70,7 +70,7 @@ const FLUXO: Passo[] = [
     resumo: "Confere se o lead viu o vídeo e o que ele achou.",
     icone: "msg",
     templates: [
-      { step_key: "checkin_pos_video", template_key: "reforco_checkin", titulo: "Reforço do check-in", ajuda: "Mensagem que tira o lead da inércia." },
+      { step_key: "checkin_pos_video", template_key: "reforco_checkin", titulo: "Resposta após o lead enviar o valor da conta", ajuda: "É AQUI que a Camila fala que dá pra reduzir 8% a 20% da conta. Edite à vontade — use {{nome}} e {{valor_conta}}." },
       { step_key: "checkin_pos_video", template_key: "pedir_conta", titulo: "Pedir conta de luz (entra no Cadastro)", ajuda: "Disparada quando o lead já quer cadastrar." },
     ],
     ramificacoes: [
