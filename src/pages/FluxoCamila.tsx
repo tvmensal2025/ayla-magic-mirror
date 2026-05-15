@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   ArrowLeft, MessageSquare, Video, ArrowDown, Sparkles, UserCheck, FileText,
   ChevronUp, ChevronDown, Plus, Trash2, FlaskConical, X, Target, Database, Bot, HelpCircle,
+  AlertTriangle, Play,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -19,6 +20,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
+import { simulateMatch, detectRuleConflicts } from "@/lib/flowSimulator";
 
 // ---------------------------------------------------------------------------
 // Tipos
