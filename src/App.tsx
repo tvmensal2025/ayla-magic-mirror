@@ -45,7 +45,8 @@ const App = () => (
               <Route path="/auth" element={<Auth />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/admin/whatsapp-clients" element={<WhatsAppClientsPage />} />
-              <Route path="/admin/fluxos" element={<FlowBuilder />} />
+              <Route path="/admin/fluxos" element={<FluxoCamila />} />
+              <Route path="/admin/fluxos-antigo" element={<FlowBuilder />} />
               <Route path="/super-admin" element={<SuperAdmin />} />
               <Route path="/assistente" element={<AssistentePage />} />
               <Route path="/crm" element={<CRMLandingPage />} />
