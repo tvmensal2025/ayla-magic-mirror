@@ -1,89 +1,139 @@
-## Diagnóstico expandido — agora 7 problemas
+## Causa raiz descoberta (não estava no plano anterior)
 
-Os 5 anteriores (20%, nome sobrescrito, menus de edição, QA semântico vazando, ordem texto→áudio→vídeo) **+ 2 novos** descobertos analisando como o bot lida com pergunta/mudança de assunto:
+Confirmei consultando o banco do consultor do PAULO (`0c2711ad-...`):
 
-### 6. (NOVO) Pergunta durante edição/coleta = "❌ Inválido"
-Hoje, em `bot-flow.ts:822`, a IA de vendas (`ai-sales-agent`) só é acionada quando o step está em `conversationalSteps` (welcome, menu_inicial, pos_video, checkin_pos_video, qualificacao, duvidas_pos_club, aguardando_humano) ou em `collectionSteps` **muito limitado** (`aguardando_conta`, `coleta_doc`, `ask_email`, `ask_cep`).
-
-Resultado: se o cliente está em `editing_conta_valor`, `ask_cpf`, `ask_rg`, `ask_phone`, `confirmando_dados_conta`, etc., e digita **"quanto vou economizar?"** ou **"isso é seguro?"** ou **"quanto tempo demora?"**, o switch trata como entrada inválida e responde "❌ CPF inválido" / "❌ Valor inválido". Isso é grosseiro e quebra confiança — exatamente o oposto de "vendedor humano".
-
-### 7. (NOVO) Mudança de assunto não tem rota de volta
-Quando a IA é chamada e responde uma dúvida off-topic, **nada lembra o lead do que estava sendo perguntado**. Se ele estava em `ask_cpf`, depois de responder a dúvida o bot fica calado esperando o CPF que nunca vem (e o `bot-stuck-recovery` só age 5–15 min depois).
-
----
-
-## Plano final (revisado, 7 itens)
-
-Tudo em **`supabase/functions/whapi-webhook/handlers/bot-flow.ts`**.
-
-### A. "até 20%" (não promessa fixa)
-- `~1352`: `💚 Economia estimada: *até* R$ {mensal}/mês • *até* R$ {anual}/ano (até 20%)`
-- `~1375`: trocar "20% de desconto fixo" → "desconto de *até* 20%", prefixar valores com "até".
-
-### B. `safeAssignName()` blinda nome contra OCR de doc
-Helper com 5 checks (≥5 chars, ≥2 palavras, sem dígitos, sem termos de cabeçalho RG, similaridade Levenshtein ≥0.7 com o nome atual). Se `name_source === 'user_confirmed'` e nome ≥3 chars: nunca sobrescreve. Aplicar nas 3 chamadas (linhas 1599, 1696, 1774). Marcar `name_source='user_confirmed'` em `editing_conta_nome`, `editing_doc_nome`, `ask_name`, e nos ramos SIM de `confirmando_dados_conta`/`confirmando_dados_doc`.
-
-### C. Anti-alucinação no OCR da conta (~1326)
-Reusar `safeAssignName` para validar `d.nome` — se inválido força `editing_conta_nome`. Validar `numero_instalacao` (≥7 dígitos) e `cep` (8 dígitos) — se inválidos abrir as edições correspondentes.
-
-### D. Menus de edição completos + Cancelar + palavras-chave
-**`editing_conta_menu`**: opções 1-6 + `0️⃣ Cancelar`. Aceitar `"0"|"cancelar"|"voltar"` → volta a `confirmando_dados_conta` reenviando a tela completa. Aceitar palavras-chave (`nome|valor|rua|endereço|instalação|cep|distribuidora`).
-
-**`editing_doc_menu`**: 1-4 + `0️⃣ Cancelar`. Idem com palavras-chave (`nome|cpf|rg|nascimento|data`).
-
-Após salvar em qualquer `editing_*`, **reenviar a tela de confirmação completa** (helper `buildConfirmacaoConta(merged)` / `buildConfirmacaoDoc(merged)`).
-
-### E. Bypassar QA semântico em passos de cadastro/edição
-No início de `runFlowQAIntercept` (e antes de `trySendConfiguredQa()`), retornar `null` se `step ∈ NO_QA_STEPS` (todos `editing_*`, `ask_*`, `confirmando_*`, `aguardando_*`, `processando_*`, `finalizando`, `portal_*`, `validando_*`, `complete`).
-
-### F. Ordem texto → áudio → vídeo no QA
-Refatorar `bot-flow.ts:380-440`: tratar texto como item ordenável (`items = [...media, {kind:'text'}]`), ordenar pela sequência configurada (default `["text","audio","image","video"]`), enviar em ordem com `sleepForMedia` entre mídias. Remover `sendText` final isolado.
-
-### G. (NOVO) Pergunta/mudança de assunto durante coleta
-Antes de cair no switch determinístico, em qualquer step `ask_*`, `editing_*`, `confirmando_*`, **detectar se a mensagem é pergunta off-topic** (`looksLikeQuestion` regex já existe + heurística "não parece com a entrada esperada"). Se sim:
-
-```ts
-const ASK_OR_EDIT_STEPS = /^(ask_|editing_|confirmando_|aguardando_(conta|doc))/;
-if (ASK_OR_EDIT_STEPS.test(step) && messageText && !isButton && !isFile) {
-  const looksLikeAnswer = isExpectedShape(step, messageText);  // CPF tem 11 dígitos, valor é número, etc.
-  if (!looksLikeAnswer && (looksLikeQuestion || messageText.length > 25)) {
-    // Responde a dúvida via SalesAI (ou QA configurada se houver)
-    const aiAnswer = await callSalesAi(customer, messageText, /*keepStep=*/true);
-    if (aiAnswer) {
-      await sendText(remoteJid, aiAnswer);
-      // 🪄 ROTA DE VOLTA: lembra o lead do que estava sendo pedido
-      const reentryPrompt = getReentryPromptForStep(step, customer);
-      // Ex.: "Voltando ao seu cadastro: qual é o seu CPF? (apenas números)"
-      await sendText(remoteJid, reentryPrompt);
-      return { reply: "", updates: { __inline_sent: true } as any };
-      // ⚠️ NÃO muda step — fica esperando o dado certo.
-    }
-  }
-}
+```
+position | step_key                                     | step_type
+1        | 6226f6f3-e655-4cc9-af20-d8c28c998160         | message      ← UUID, não "welcome"
+2        | 3e7fb4cd-33a7-4854-aec7-4570b04456e9         | message      ← UUID, não "qualificacao"
+3        | 80188e5f-...                                 | message
+4        | a71ba814-...                                 | message
+6        | 559b8f1b-...                                 | message
+11       | passo_mp70jl99                               | message      ← UI gera "passo_<ts>"
+12       | passo_mp74oztd                               | capture_documento
+13       | passo_mp74wfm5                               | capture_conta
+14       | passo_mp74xnmn                               | finalizar_cadastro
 ```
 
-Implementar:
-1. **`isExpectedShape(step, text)`** — heurísticas baratas: `ask_cpf` → ≥11 dígitos; `ask_cep` → ≥8 dígitos; `editing_conta_valor` → contém número decimal/inteiro; `ask_birth_date` → padrão DD/MM/AAAA; etc.
-2. **`getReentryPromptForStep(step, customer)`** — mapa `step → prompt` reaproveitando os textos já existentes em cada `case`. Prefixar com "📋 *Voltando ao seu cadastro:* ".
-3. **`callSalesAi(customer, text, keepStep)`** — extrair a chamada já existente para `ai-sales-agent` numa função, passando `keepStep=true` para que a IA não tente avançar fluxo (prompt do agent precisa receber instrução: "responda à dúvida, sem mudar o estado do cadastro").
-4. Fallback: se `ai-sales-agent` não estiver habilitado (`use_sales_ai !== true`), usar `trySendConfiguredQa()` e, mesmo assim, enviar o `reentryPrompt`.
+Enquanto isso, `bot-flow.ts` (cadastro determinístico) escreve nomes canônicos: `qualificacao`, `duvidas_pos_club`, `pitch_conexao_club`, `aguardando_conta`, etc.
+
+E `FluxoCamila.tsx:258` cria steps novos com `step_key = "passo_" + Date.now()`.
+
+**Resultado:** quando o cadastro termina ou volta pro loop conversacional, `customer.conversation_step = "duvidas_pos_club"` é gravado, o handler conversacional carrega o flow do DB, **não acha esse step_key**, loga `unknown step → restart at firstActive` e dispara áudio do step inicial **a cada mensagem**. O usuário fica em loop infinito mesmo dizendo "pode seguir".
+
+Isso **anula** todos os 7 itens do plano anterior — eles nem chegam a executar porque o estado está dessincronizado entre os dois motores.
 
 ---
 
-## Por que isso resolve "100%"
-- **Cadastro determinístico** segue intacto — números/datas continuam validados.
-- **Pergunta off-topic** é tratada com a IA mas **sem perder o passo** — vendedor humano faz exatamente isso.
-- **Atalhos de QA por áudio** ficam confinados aos passos conversacionais (welcome, qualificacao, duvidas).
-- **Handoff humano/cancelar/reset** continua funcionando em qualquer step (intent-override roda antes de tudo).
+## Os dois motores que precisam conversar
 
-## Validação extra (G)
-1. Em `ask_cpf`, digitar "isso é seguro?" → IA responde sobre segurança + bot reenvia "📋 Voltando: digite seu CPF (11 números)". Step continua `ask_cpf`.
-2. Em `editing_conta_valor`, digitar "quanto eu economizo?" → IA responde com cálculo + reenvia "📋 Voltando: digite o valor da conta (ex: 350,50)".
-3. Em `ask_cpf`, digitar "12345678901" → switch processa normal (CPF válido), IA não é chamada.
-4. Em `confirmando_dados_conta`, digitar "vai cair na minha conta?" → IA responde + reenvia botões SIM/NÃO/EDITAR.
-5. Em `editing_conta_valor`, digitar "390.90" → não dispara QA (E), valida e salva (F já garantiu que o switch roda).
+```text
+┌──────────────────────────┐         ┌─────────────────────────────┐
+│ runBotFlow (bot-flow.ts) │         │ runConversationalFlow       │
+│ Determinístico           │ ←────→  │ DB-driven (bot_flow_steps)  │
+│ Step keys hardcoded:     │         │ Step keys arbitrários:      │
+│  welcome, qualificacao,  │         │  6226f6f3-..., passo_xxx    │
+│  aguardando_conta,       │         │                             │
+│  ask_*, editing_*,       │         │ step_type: capture_conta,   │
+│  confirmando_dados_*     │         │  capture_documento,         │
+│                          │         │  finalizar_cadastro          │
+└──────────────────────────┘         └─────────────────────────────┘
+            ▲                                      ▲
+            └─────── customer.conversation_step ───┘
+                     (string única, sem namespace)
+```
+
+O orchestrator (`index.ts:333-352`) usa `CADASTRO_OR_SYSTEM` para decidir qual motor rodar — mas a lista é fechada e **só reconhece os nomes canônicos**. Qualquer step_key novo vinda do FlowBuilder cai no conversational handler, que por sua vez não acha quando o nome canônico volta.
+
+---
+
+## Plano da auditoria (5 fases)
+
+### Fase 1 — Mapeamento completo (read-only, ~20 min)
+Levantar tudo de uma vez para evitar surpresas:
+
+1. Listar **todos** os literais `conversation_step = "..."` em `bot-flow.ts` (já vi 50+) e classificar por categoria: `welcome|menu|cadastro|edição|sistema`.
+2. Listar todos os `step.step_type → conversation_step` mapeados em `conversational/index.ts:485-491` (`stepTypeToCadastro`).
+3. Auditar **toda** transição de `bot_flow_steps.transitions` no DB para ver `goto_special` e `goto_step_id`.
+4. Confirmar quais consultores têm `conversational_flow_enabled=true` e qual é o estado real dos step_keys de cada um.
+5. Resultado: matriz "step canônico ↔ step_key dinâmico" mostrando todos os pontos de quebra.
+
+### Fase 2 — Contrato unificado de step_key (1 migration + bot-flow)
+
+Decisão arquitetural: **`conversation_step` passa a ter um namespace explícito**.
+
+```text
+sys:welcome           ← motor determinístico (bot-flow.ts)
+sys:qualificacao
+sys:aguardando_conta
+sys:editing_conta_valor
+sys:confirmando_dados_doc
+...
+flow:6226f6f3-...     ← motor dinâmico (DB step.id, NUNCA step_key)
+flow:passo_mp70jl99
+```
+
+Isso:
+- Remove ambiguidade (toda string do tipo `flow:xxx` vai pro conversational handler; `sys:xxx` vai pro bot-flow).
+- Permite múltiplos consultores com step_keys diferentes sem colisão.
+- O `CADASTRO_OR_SYSTEM` set deixa de ser hardcoded — passa a ser "tudo que começa com `sys:`".
+
+**Migration**:
+- Backfill: `UPDATE customers SET conversation_step = 'sys:' || conversation_step WHERE conversation_step IN (<lista canônica>) AND conversation_step NOT LIKE 'sys:%' AND conversation_step NOT LIKE 'flow:%';`
+- Para os customers atualmente em loop (UUIDs/`passo_xxx`): `UPDATE customers SET conversation_step = 'flow:' || conversation_step WHERE conversation_step ~ '^[0-9a-f]{8}-' OR conversation_step LIKE 'passo_%';`
+- Sem mudança de schema (continua TEXT).
+
+### Fase 3 — Refatoração coordenada de bot-flow.ts + conversational/index.ts
+
+1. Em `bot-flow.ts` envolver toda atribuição `updates.conversation_step = "X"` numa helper `setSysStep(updates, "X")` que prefixa `sys:`.
+2. Em `conversational/index.ts:603` e `:412`: salvar como `flow:${step.id}` (não step_key), porque o id é estável; step_key pode ser editado pelo usuário.
+3. Quando `stepTypeToCadastro` mapear `capture_conta → aguardando_conta`, gravar `sys:aguardando_conta` para a próxima mensagem cair no bot-flow.
+4. Lookup do conversational handler: `if (stepKey.startsWith("flow:")) findById(stepKey.slice(5))` — não mais por step_key.
+5. Manter compatibilidade temporária (3 dias): se vier sem prefixo, deduzir e prefixar antes de processar.
+
+### Fase 4 — Validação e telemetria
+1. Função SQL nova `lint_bot_flow_consistency(consultant_id)` que retorna:
+   - Steps com `step_type ∈ (capture_conta, capture_documento, finalizar_cadastro)` mas sem transições para os nomes canônicos esperados.
+   - Customers em loop (mesmo `conversation_step` há >5 mensagens sem mudança).
+2. Painel super-admin (`/admin/super`): alerta visual quando há mismatch.
+3. Tabela `bot_step_transitions` já tem `from_step/to_step` — adicionar índice e dashboard "loops detectados".
+
+### Fase 5 — Replay do PAULO + 2 customers reais
+1. Resetar PAULO (`reset_lead_conversation`) e refazer todo o fluxo do zero.
+2. Validar a sequência **completa** dos 7 itens anteriores (até 20%, safeAssignName, NO_QA_STEPS, ordem texto→áudio→vídeo, off-topic intercept, menus de edição, anti-alucinação OCR) — agora que o estado para de embaralhar, eles vão de fato rodar.
+3. Caso de teste explícito: durante `sys:editing_conta_valor`, mandar "isso é seguro?" → IA responde + reentry prompt + step continua `sys:editing_conta_valor`.
+
+---
 
 ## Arquivos tocados
-Apenas `supabase/functions/whapi-webhook/handlers/bot-flow.ts`.
 
-Sem migration. Redeploy do `whapi-webhook` ao final.
+- **Backend** (alterações coordenadas):
+  - `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (50+ atribuições + 7 fixes do plano anterior)
+  - `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (lookup por id, escrita prefixada)
+  - `supabase/functions/whapi-webhook/index.ts` (CADASTRO_OR_SYSTEM vira `step.startsWith("sys:")`)
+- **Migration**:
+  - 1 nova migration: backfill `conversation_step` + função `lint_bot_flow_consistency`
+- **Painel** (opcional, fase 4):
+  - `src/components/superadmin/SystemHealthPanel.tsx` (adicionar widget de loops)
+
+Sem mudança em `bot_flow_steps` schema, sem mexer em `FluxoCamila.tsx` (UI continua gerando `passo_xxx` livremente — agora é seguro).
+
+---
+
+## Por que isso "cura de verdade"
+
+1. Acaba o `[conversational] unknown step → restart` que está fazendo o bot reiniciar e mandar áudio em loop.
+2. Os 7 fixes do plano anterior **passam a executar** (hoje eles estão no código mas o handler conversacional intercepta antes).
+3. Próximos consultores que customizarem o flow no FlowBuilder não quebram nada — o namespace garante isolamento.
+4. Tem telemetria pra detectar regressão antes do cliente reclamar.
+
+---
+
+## Riscos e mitigação
+
+- **Risco**: customers em meio de cadastro podem perder step durante o backfill.
+  - **Mitigação**: a migration de backfill é idempotente e cobre todos os 30+ valores possíveis. Em caso de falha, fallback para `sys:welcome` (refaz cadastro).
+- **Risco**: edge functions deployam separado da migration.
+  - **Mitigação**: a fase 3 mantém **compatibilidade reversa** por 3 dias (lê com ou sem prefixo). Migration roda primeiro, deploy do código depois.
+
+Tempo estimado total: **~2h** (Fase 1: 20min, Fase 2: 15min migration, Fase 3: 60min refactor, Fase 4: 20min telemetria, Fase 5: 15min replay).
