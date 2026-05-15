@@ -2044,126 +2044,206 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     // ─── 7. EDIÇÃO CONTA ─────────
     case "editing_conta_menu": {
-      const op = messageText.trim();
+      const op = messageText.trim().toLowerCase();
       const fieldMap: Record<string, [string, string]> = {
         "1": ["editing_conta_nome", "Digite o *nome completo* correto:"],
         "2": ["editing_conta_endereco", "Digite o *endereço completo* correto:"],
         "3": ["editing_conta_cep", "Digite o *CEP* correto (8 dígitos):"],
         "4": ["editing_conta_distribuidora", "Digite o nome da *distribuidora*:"],
         "5": ["editing_conta_instalacao", "Digite o *número da instalação*:"],
-        "6": ["editing_conta_valor", "Digite o *valor da conta* (ex: 350.50):"],
+        "6": ["editing_conta_valor", "Digite o *valor da conta* (ex: 350,50):"],
       };
-      if (fieldMap[op]) { updates.conversation_step = fieldMap[op][0]; reply = fieldMap[op][1]; }
-      else reply = "❌ Opção inválida. Digite um número de 1 a 6:";
+      // Palavras-chave (atalho amigável)
+      let target: [string, string] | null = fieldMap[op] || null;
+      if (!target) {
+        if (/\bnome\b/.test(op)) target = fieldMap["1"];
+        else if (/\b(endere[çc]o|rua)\b/.test(op)) target = fieldMap["2"];
+        else if (/\bcep\b/.test(op)) target = fieldMap["3"];
+        else if (/\bdistribuidora\b/.test(op)) target = fieldMap["4"];
+        else if (/\binstala[çc][ãa]o\b/.test(op)) target = fieldMap["5"];
+        else if (/\bvalor\b/.test(op)) target = fieldMap["6"];
+      }
+      if (op === "0" || /\b(cancelar|voltar)\b/.test(op)) {
+        // Volta pra tela completa de confirmação
+        updates.conversation_step = "confirmando_dados_conta";
+        const merged = { ...customer, ...updates };
+        await sendOptions(remoteJid, buildConfirmacaoConta(merged), [
+          { id: "sim_conta", title: "✅ SIM" },
+          { id: "nao_conta", title: "❌ NÃO" },
+          { id: "editar_conta", title: "✏️ EDITAR" },
+        ]);
+        reply = "";
+      } else if (target) {
+        updates.conversation_step = target[0];
+        reply = target[1];
+      } else {
+        reply = "❌ Opção inválida. Digite *1-6* ou *0* para cancelar:\n\n1️⃣ Nome\n2️⃣ Endereço\n3️⃣ CEP\n4️⃣ Distribuidora\n5️⃣ Nº Instalação\n6️⃣ Valor da conta\n0️⃣ Cancelar";
+      }
       break;
     }
 
-    case "editing_conta_nome":
-      updates.name = messageText.trim();
+    // Helper local: salva campo da conta e reenvia tela completa de confirmação
+    case "editing_conta_nome": {
+      const v = messageText.trim();
+      if (v.length < 3) { reply = "❌ Nome muito curto. Digite o *nome completo*:"; break; }
+      updates.name = v;
+      updates.name_source = "user_confirmed";
       updates.conversation_step = "confirmando_dados_conta";
-      reply = `✅ Nome atualizado: *${messageText.trim()}*\n\nOs dados estão corretos agora?`;
-      { await sendOptions(remoteJid, reply, [{ id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" }]); reply = ""; }
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Nome atualizado: *${v}*\n\n` + buildConfirmacaoConta(merged), [
+        { id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
+    }
 
-    case "editing_conta_endereco":
-      updates.address_street = messageText.trim();
+    case "editing_conta_endereco": {
+      const v = messageText.trim();
+      if (v.length < 3) { reply = "❌ Endereço muito curto. Digite novamente:"; break; }
+      updates.address_street = v;
       updates.conversation_step = "confirmando_dados_conta";
-      reply = `✅ Endereço atualizado.\n\nOs dados estão corretos agora?`;
-      { await sendOptions(remoteJid, reply, [{ id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" }]); reply = ""; }
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Endereço atualizado.\n\n` + buildConfirmacaoConta(merged), [
+        { id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
+    }
 
     case "editing_conta_cep": {
       const cepClean = messageText.replace(/\D/g, "");
-      if (cepClean.length === 8) {
-        updates.cep = cepClean;
-        updates.conversation_step = "confirmando_dados_conta";
-        reply = `✅ CEP atualizado: *${cepClean.replace(/(\d{5})(\d{3})/, "$1-$2")}*\n\nOs dados estão corretos agora?`;
-        await sendOptions(remoteJid, reply, [{ id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" }]);
-        reply = "";
-      } else reply = "❌ CEP inválido. Digite os 8 números:";
+      if (cepClean.length !== 8) { reply = "❌ CEP inválido. Digite os 8 números:"; break; }
+      updates.cep = cepClean;
+      updates.conversation_step = "confirmando_dados_conta";
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ CEP: *${cepClean.replace(/(\d{5})(\d{3})/, "$1-$2")}*\n\n` + buildConfirmacaoConta(merged), [
+        { id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
     }
 
-    case "editing_conta_distribuidora":
-      updates.distribuidora = messageText.trim();
+    case "editing_conta_distribuidora": {
+      const v = messageText.trim();
+      if (v.length < 2) { reply = "❌ Nome muito curto. Digite a *distribuidora*:"; break; }
+      updates.distribuidora = v;
       updates.conversation_step = "confirmando_dados_conta";
-      reply = `✅ Distribuidora atualizada: *${messageText.trim()}*\n\nOs dados estão corretos agora?`;
-      { await sendOptions(remoteJid, reply, [{ id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" }]); reply = ""; }
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Distribuidora: *${v}*\n\n` + buildConfirmacaoConta(merged), [
+        { id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
+    }
 
     case "editing_conta_instalacao": {
       const instClean = messageText.replace(/\D/g, "");
-      if (instClean.length >= 7) {
-        updates.numero_instalacao = instClean;
-        updates.conversation_step = "confirmando_dados_conta";
-        reply = `✅ Nº instalação atualizado: *${instClean}*\n\nOs dados estão corretos agora?`;
-        await sendOptions(remoteJid, reply, [{ id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" }]);
-        reply = "";
-      } else reply = "❌ Número inválido. Digite pelo menos 7 dígitos:";
+      if (instClean.length < 7) { reply = "❌ Número inválido. Digite pelo menos 7 dígitos:"; break; }
+      updates.numero_instalacao = instClean;
+      updates.conversation_step = "confirmando_dados_conta";
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Nº Instalação: *${instClean}*\n\n` + buildConfirmacaoConta(merged), [
+        { id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
     }
 
     case "editing_conta_valor": {
       const val = parseFloat(messageText.replace(/[^\d.,]/g, "").replace(",", "."));
-      if (!isNaN(val) && val > 0) {
-        updates.electricity_bill_value = val;
-        updates.conversation_step = "confirmando_dados_conta";
-        reply = `✅ Valor atualizado: *R$ ${val.toFixed(2)}*\n\nOs dados estão corretos agora?`;
-        await sendOptions(remoteJid, reply, [{ id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" }]);
-        reply = "";
-      } else reply = "❌ Valor inválido. Digite um número (ex: 350.50):";
+      if (isNaN(val) || val < 30) { reply = "❌ Valor inválido. Digite um número (ex: 350,50):"; break; }
+      updates.electricity_bill_value = val;
+      updates.conversation_step = "confirmando_dados_conta";
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Valor: *R$ ${_formatBRL(val)}*\n\n` + buildConfirmacaoConta(merged), [
+        { id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
     }
 
     // ─── 8. EDIÇÃO DOCUMENTO ─────────
     case "editing_doc_menu": {
-      const op = messageText.trim();
+      const op = messageText.trim().toLowerCase();
       const fieldMap: Record<string, [string, string]> = {
         "1": ["editing_doc_nome", "Digite o *nome completo* correto:"],
         "2": ["editing_doc_cpf", "Digite o *CPF* correto (apenas números):"],
         "3": ["editing_doc_rg", "Digite o *RG* correto:"],
         "4": ["editing_doc_nascimento", "Digite a *data de nascimento* (DD/MM/AAAA):"],
       };
-      if (fieldMap[op]) { updates.conversation_step = fieldMap[op][0]; reply = fieldMap[op][1]; }
-      else reply = "❌ Opção inválida. Digite um número de 1 a 4:";
+      let target: [string, string] | null = fieldMap[op] || null;
+      if (!target) {
+        if (/\bnome\b/.test(op)) target = fieldMap["1"];
+        else if (/\bcpf\b/.test(op)) target = fieldMap["2"];
+        else if (/\brg\b/.test(op)) target = fieldMap["3"];
+        else if (/\b(nascimento|data)\b/.test(op)) target = fieldMap["4"];
+      }
+      if (op === "0" || /\b(cancelar|voltar)\b/.test(op)) {
+        updates.conversation_step = "confirmando_dados_doc";
+        const merged = { ...customer, ...updates };
+        await sendOptions(remoteJid, buildConfirmacaoDoc(merged), [
+          { id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" },
+        ]);
+        reply = "";
+      } else if (target) {
+        updates.conversation_step = target[0];
+        reply = target[1];
+      } else {
+        reply = "❌ Opção inválida. Digite *1-4* ou *0* para cancelar:\n\n1️⃣ Nome\n2️⃣ CPF\n3️⃣ RG\n4️⃣ Data de Nascimento\n0️⃣ Cancelar";
+      }
       break;
     }
 
-    case "editing_doc_nome":
-      updates.name = messageText.trim();
+    case "editing_doc_nome": {
+      const v = messageText.trim();
+      if (v.length < 3) { reply = "❌ Nome muito curto. Digite o *nome completo*:"; break; }
+      updates.name = v;
+      updates.name_source = "user_confirmed";
       updates.conversation_step = "confirmando_dados_doc";
-      reply = `✅ Nome atualizado: *${messageText.trim()}*\n\nOs dados estão corretos agora?`;
-      { await sendOptions(remoteJid, reply, [{ id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" }]); reply = ""; }
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Nome: *${v}*\n\n` + buildConfirmacaoDoc(merged), [
+        { id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
+    }
 
     case "editing_doc_cpf": {
       const cpfClean = messageText.replace(/\D/g, "");
-      if (cpfClean.length === 11) {
-        updates.cpf = cpfClean;
-        updates.conversation_step = "confirmando_dados_doc";
-        reply = `✅ CPF atualizado: *${cpfClean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4")}*\n\nOs dados estão corretos agora?`;
-        await sendOptions(remoteJid, reply, [{ id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" }]);
-        reply = "";
-      } else reply = "❌ CPF inválido. Digite os 11 números:";
+      if (cpfClean.length !== 11) { reply = "❌ CPF inválido. Digite os 11 números:"; break; }
+      updates.cpf = cpfClean;
+      updates.conversation_step = "confirmando_dados_doc";
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ CPF: *${cpfClean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4")}*\n\n` + buildConfirmacaoDoc(merged), [
+        { id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
     }
 
-    case "editing_doc_rg":
-      updates.rg = messageText.trim();
+    case "editing_doc_rg": {
+      const v = messageText.trim();
+      if (v.replace(/\D/g, "").length < 4) { reply = "❌ RG inválido. Digite novamente:"; break; }
+      updates.rg = v;
       updates.conversation_step = "confirmando_dados_doc";
-      reply = `✅ RG atualizado: *${messageText.trim()}*\n\nOs dados estão corretos agora?`;
-      { await sendOptions(remoteJid, reply, [{ id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" }]); reply = ""; }
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ RG: *${v}*\n\n` + buildConfirmacaoDoc(merged), [
+        { id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
+    }
 
     case "editing_doc_nascimento": {
       const dateMatch = messageText.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      if (dateMatch) {
-        updates.data_nascimento = messageText.trim();
-        updates.conversation_step = "confirmando_dados_doc";
-        reply = `✅ Data atualizada: *${messageText.trim()}*\n\nOs dados estão corretos agora?`;
-        await sendOptions(remoteJid, reply, [{ id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" }]);
-        reply = "";
-      } else reply = "❌ Data inválida. Use DD/MM/AAAA (ex: 20/07/1993):";
+      if (!dateMatch) { reply = "❌ Data inválida. Use DD/MM/AAAA (ex: 20/07/1993):"; break; }
+      updates.data_nascimento = messageText.trim();
+      updates.conversation_step = "confirmando_dados_doc";
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Data: *${messageText.trim()}*\n\n` + buildConfirmacaoDoc(merged), [
+        { id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
     }
 
