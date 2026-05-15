@@ -11,6 +11,7 @@ import {
   extractValor, extractTelefone, extractCPF, extractNome, detectRegexIntents,
 } from "../../../_shared/captureExtractors.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
+import { isTestMode } from "../../../_shared/test-mode.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
