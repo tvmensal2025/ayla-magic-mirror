@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
-import { CheckCircle2, XCircle, Loader2, FlaskConical, Database, Bot, Play, Trash2, AlertTriangle } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, FlaskConical, Database, Bot, Play, Trash2, AlertTriangle, ThumbsUp, MessageSquare, FileX } from "lucide-react";
 import { toast } from "sonner";
 
 type FakeResult = { id: number; name: string; passed: boolean; expected: unknown; got: unknown };
@@ -35,20 +35,27 @@ type E2EResult = {
   phone: string;
   turns: number;
   lastStep: string | null;
+  stopReason?: string;
+  visitedSteps?: string[];
   outbound: OutboundRow[];
   checks: Check[];
   checksPassed: number;
   checksTotal: number;
   customerId: string;
   finalCustomerStatus: string | null;
+  marketReadiness?: string;
+  recommendation?: string;
 };
 
 const SCENARIOS = [
-  { value: "happy_path", label: "Happy path — lead colaborativo" },
-  { value: "lead_indeciso", label: "Lead indeciso — pergunta antes de aceitar" },
-  { value: "valor_baixo", label: "Valor baixo — conta < R$100" },
-  { value: "lead_some", label: "Lead some — para de responder" },
-  { value: "documento_cnh", label: "CNH — escolhe CNH em vez de RG" },
+  { value: "happy_path", label: "Venda completa — aceita tudo" },
+  { value: "joia_validacao", label: "Joia — aprova com 👍" },
+  { value: "lead_indeciso", label: "Dúvida real — pergunta antes de seguir" },
+  { value: "recusa_conta", label: "Recusa conta — reprova e recupera" },
+  { value: "recusa_documento", label: "Recusa documento — reprova e recupera" },
+  { value: "valor_baixo", label: "Valor baixo — não vender" },
+  { value: "lead_some", label: "Lead some — abandono" },
+  { value: "documento_cnh", label: "CNH — sem pedir verso" },
 ];
 
 export default function BotAudit() {
@@ -95,7 +102,9 @@ export default function BotAudit() {
   }
   useEffect(() => () => stopPolling(), []);
 
-  async function runE2E() {
+  async function runE2E(scenarioOverride?: string) {
+    const selectedScenario = scenarioOverride || scenario;
+    setScenario(selectedScenario);
     setLoading("e2e");
     setE2eResult(null);
     setLivePolling([]);
@@ -109,7 +118,7 @@ export default function BotAudit() {
       const { data: runs } = await supabase
         .from("bot_test_runs")
         .select("id,started_at,scenario,status")
-        .eq("scenario", scenario)
+        .eq("scenario", selectedScenario)
         .order("started_at", { ascending: false })
         .limit(1);
       const r = runs?.[0];
@@ -120,7 +129,7 @@ export default function BotAudit() {
 
     try {
       const { data, error } = await supabase.functions.invoke("bot-e2e-runner", {
-        method: "POST", body: { scenario },
+        method: "POST", body: { scenario: selectedScenario },
       });
       if (error) throw error;
       const result = data as E2EResult;
