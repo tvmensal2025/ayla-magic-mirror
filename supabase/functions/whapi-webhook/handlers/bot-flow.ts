@@ -457,7 +457,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   }
 
 
-  const step = customer.conversation_step || "welcome";
+  let step = customer.conversation_step || "welcome";
   let reply = "";
   const updates: Record<string, any> = {};
 
@@ -815,6 +815,27 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     !!customer.electricity_bill_photo_url &&
     !!customer.ocr_done &&
     TRUSTED_NAME_SOURCES.has(String(customer.name_source || ""));
+
+  // 🎯 Atalho determinístico: intenção forte de cadastro em step conversacional
+  // → pula a IA e empurra para coletar a conta de luz (próximo passo físico).
+  // Resolve o caso "Jeferson disse 'Cadastro' e a IA mandou 2 vídeos sem texto".
+  const STRONG_PURCHASE_INTENT = /^(cadastr|quero\s+(?:cadastr|fazer|come[çc]ar|entrar|me\s*cadastr)|bora|vamos|partiu|simbora|aceito|topo|t[oô]\s+dentro|pode\s+(?:fazer|cadastr)|fa[çc]a\s+(?:o\s*)?cadastr|come[çc]ar|fechado|fechou)\b/i;
+  const conversationalForShortcut = new Set(["welcome", "menu_inicial", "pos_video", "checkin_pos_video", "qualificacao"]);
+  if (
+    !isFile && !customer.bot_paused && !billTrusted &&
+    conversationalForShortcut.has(step) &&
+    messageText && STRONG_PURCHASE_INTENT.test(messageText.trim())
+  ) {
+    console.log(`🎯 [intent-shortcut] cadastro detectado em step=${step} → forçando aguardando_conta`);
+    step = "aguardando_conta";
+    (customer as any).conversation_step = "aguardando_conta";
+    updates.conversation_step = "aguardando_conta";
+    const firstNm = ((customer as any).name || "").split(/\s+/)[0];
+    const v = firstNm ? `${firstNm}, ` : "";
+    const reply = `Show, ${v.trim().replace(/,$/, "")}! 📸 Pra eu já calcular sua economia exata e iniciar o cadastro, me envia uma *foto ou PDF da sua conta de luz* (qualquer página serve).`;
+    return { reply, updates };
+  }
+
   if (
     !isFile &&
     !customer.bot_paused &&
@@ -921,6 +942,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }
           if (tool === "send_media") {
             const ordered = [...medias].sort((a, b) => (a.kind === "audio" ? -1 : b.kind === "audio" ? 1 : 0));
+            // Detecta vídeo do Conexão Club entre as mídias para forçar follow-up determinístico
+            const isClubMedia = (m: any) =>
+              m && m.kind === "video" && /club|conex[aã]o[_\s-]*club/i.test(`${m.label || ""} ${m.slot_key || ""} ${m.url || ""}`);
+            const clubMedia = ordered.find(isClubMedia);
             for (let i = 0; i < ordered.length; i++) {
               const m = ordered[i];
               const k = ["audio", "video", "image"].includes(m.kind) ? m.kind : "document";
@@ -931,6 +956,27 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               } catch (e) {
                 console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);
               }
+            }
+            // 🎬 Após vídeo do Conexão Club: pergunta determinística "ficou alguma dúvida?"
+            // e avança step pra duvidas_pos_club (regra de negócio do usuário).
+            if (clubMedia) {
+              try {
+                await sleepForMedia("video", Number((clubMedia as any).duration_sec || 0) || null);
+              } catch (_) { /* best-effort */ }
+              const firstNm = ((customer as any).name || "").split(/\s+/)[0];
+              const duvidaMsg = firstNm
+                ? `${firstNm}, ficou alguma dúvida sobre o Conexão Club ou sobre como funciona? Pode mandar aqui que eu te explico 😊\n\nSe estiver tudo certo, é só me dizer *"pode seguir"* que a gente já avança pro cadastro.`
+                : `Ficou alguma dúvida sobre o Conexão Club ou sobre como funciona? Pode mandar aqui que eu te explico 😊\n\nSe estiver tudo certo, é só me dizer *"pode seguir"* que a gente já avança pro cadastro.`;
+              try {
+                await sendText(remoteJid, duvidaMsg);
+                await supabase.from("conversations").insert({
+                  customer_id: customer.id, message_direction: "outbound",
+                  message_text: duvidaMsg, message_type: "text",
+                  conversation_step: "duvidas_pos_club",
+                });
+              } catch (e) { console.warn("[club-followup] envio falhou:", (e as any)?.message); }
+              updates.conversation_step = "duvidas_pos_club";
+              console.log("🎬 [club-followup] vídeo do Conexão Club enviado → step=duvidas_pos_club");
             }
             reply = "";
             (updates as any).__inline_sent = true;
