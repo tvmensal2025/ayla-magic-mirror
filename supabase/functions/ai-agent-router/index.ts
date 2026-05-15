@@ -524,50 +524,81 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
           });
           console.log(`slot ${slotKey} em modo teste — não enviado`);
         } else {
-          // Buscar áudio personal ativo
-          const { data: personal } = await supabase
+          // Busca TODAS as mídias personal ativas do slot, em ordem de envio.
+          // Suporta múltiplas mídias por passo (ex.: 1 áudio + 1 imagem + 1 vídeo),
+          // cada uma com seu próprio delay_before_ms.
+          const { data: personalList } = await supabase
             .from("ai_media_library")
-            .select("id, url")
+            .select("id, kind, url, label, delay_before_ms, send_order")
             .eq("consultant_id", consultantId)
             .eq("slot_key", slotKey)
             .eq("active", true)
             .eq("is_draft", false)
-            .maybeSingle();
-          let chosen: { id: string | null; url: string | null; variant: string } | null = null;
-          if (personal?.url) {
-            chosen = { id: personal.id, url: personal.url, variant: "personal" };
+            .order("send_order", { ascending: true });
+
+          let toSend: Array<{ id: string | null; kind: string; url: string; label?: string | null; delay_before_ms?: number | null; variant: string }> = [];
+          if (personalList && personalList.length) {
+            toSend = (personalList as any[]).map((p) => ({
+              id: p.id, kind: p.kind || "audio", url: p.url, label: p.label,
+              delay_before_ms: p.delay_before_ms, variant: "personal",
+            }));
           } else {
-            const { data: pub } = await supabase
+            const { data: pubList } = await supabase
               .from("ai_media_library")
-              .select("id, url")
+              .select("id, kind, url, label, delay_before_ms, send_order")
               .eq("is_public", true)
               .eq("slot_key", slotKey)
               .eq("active", true)
-              .maybeSingle();
-            if (pub?.url) chosen = { id: pub.id, url: pub.url, variant: "default" };
+              .order("send_order", { ascending: true });
+            if (pubList && pubList.length) {
+              toSend = (pubList as any[]).map((p) => ({
+                id: p.id, kind: p.kind || "audio", url: p.url, label: p.label,
+                delay_before_ms: p.delay_before_ms, variant: "default",
+              }));
+            }
           }
 
           try {
-            await sleep(randInt(typingMin, typingMax));
-            if (chosen?.url) {
-              await sender.sendAudio(remote_jid, chosen.url);
-              dispatchedSlot = { slot_key: slotKey, variant: chosen.variant, media_id: chosen.id };
-              await supabase.from("conversations").insert({
-                customer_id, message_direction: "outbound",
-                message_text: `[audio:${slotKey}]`, message_type: "audio",
-                conversation_step: updates.conversation_step || stepBefore,
-              });
-              if (chosen.id) {
-                const { data: cur } = await supabase
-                  .from("ai_media_library").select("sent_count").eq("id", chosen.id).single();
-                if (cur) {
-                  await supabase.from("ai_media_library")
-                    .update({ sent_count: (cur.sent_count || 0) + 1 })
-                    .eq("id", chosen.id);
+            if (toSend.length) {
+              for (let i = 0; i < toSend.length; i++) {
+                const m = toSend[i];
+                // Atraso configurado pelo consultor antes de cada mídia (default 1.5s).
+                // Se 0, ainda respeita o typing min para não atropelar.
+                const delayMs = (m.delay_before_ms ?? 1500);
+                if (i === 0) {
+                  await sleep(Math.max(delayMs, randInt(typingMin, typingMax)));
+                } else {
+                  await sleep(Math.max(delayMs, 800));
+                }
+                if (m.kind === "audio") {
+                  await sender.sendAudio(remote_jid, m.url);
+                } else if (m.kind === "video" || m.kind === "image" || m.kind === "document") {
+                  await sender.sendMedia(remote_jid, m.url, m.label || "", m.kind);
+                } else if (m.kind === "text") {
+                  await sender.sendText(remote_jid, m.label || "");
+                } else {
+                  await sender.sendMedia(remote_jid, m.url, m.label || "", m.kind);
+                }
+                dispatchedSlot = { slot_key: slotKey, variant: m.variant, media_id: m.id };
+                await supabase.from("conversations").insert({
+                  customer_id, message_direction: "outbound",
+                  message_text: `[${m.kind}:${slotKey}]`, message_type: m.kind,
+                  conversation_step: updates.conversation_step || stepBefore,
+                });
+                if (m.id) {
+                  const { data: cur } = await supabase
+                    .from("ai_media_library").select("sent_count").eq("id", m.id).single();
+                  if (cur) {
+                    await supabase.from("ai_media_library")
+                      .update({ sent_count: (cur.sent_count || 0) + 1 })
+                      .eq("id", m.id);
+                  }
                 }
               }
-              // Vídeo do slot — enviado logo após o áudio
-              if (slot.video_url) {
+              // Vídeo extra do slot (legado: ai_agent_slots.video_url) só envia se
+              // não houver vídeo na lista personal (evita duplicar)
+              const hasVideoInList = toSend.some((m) => m.kind === "video");
+              if (slot.video_url && !hasVideoInList) {
                 try {
                   await sleep(randInt(typingMin, typingMax));
                   await sender.sendMedia(remote_jid, slot.video_url, slot.video_label || "", "video");
