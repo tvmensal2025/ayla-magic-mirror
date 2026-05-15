@@ -558,13 +558,42 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       .order("position");
     let sentSomething = false;
 
-    const qaMediaList = ((mediaRows as any[]) || []);
-    const _qaOrder = await getStepMediaOrder(supabase, customer.consultant_id, step);
-    if (_qaOrder) qaMediaList.sort(makeKindComparator((m: any) => m.media_kind, _qaOrder));
-    for (let mi = 0; mi < qaMediaList.length; mi++) {
-      const m = qaMediaList[mi];
+    // F: texto entra como item ordenável junto com mídias
+    const baseText = qa.text_response
+      ? String(qa.text_response).replaceAll("{nome}", customer.name || "").replaceAll("{representante}", nomeRepresentante || "")
+      : "";
+    const nudgeStep = qa.is_closing ? "aguardando_conta" : (step || "qualificacao");
+    const nudge = qa.is_closing ? "" : buildStepNudge(nudgeStep, customer.name || null);
+    const responseText = (baseText + nudge).trim();
+
+    type QaItem = { kind: string; mediaRef?: any; text?: string };
+    const items: QaItem[] = ((mediaRows as any[]) || []).map((m) => ({
+      kind: String(m.media_kind || "document").toLowerCase(),
+      mediaRef: m,
+    }));
+    if (responseText) items.push({ kind: "text", text: responseText });
+
+    const _qaOrder = (await getStepMediaOrder(supabase, customer.consultant_id, step)) || ["text", "audio", "image", "video", "document"];
+    items.sort(makeKindComparator((it: QaItem) => it.kind, _qaOrder));
+
+    for (let mi = 0; mi < items.length; mi++) {
+      const it = items[mi];
+      const isLast = mi === items.length - 1;
+
+      if (it.kind === "text" && it.text) {
+        await sendText(remoteJid, it.text);
+        await supabase.from("conversations").insert({
+          customer_id: customer.id, message_direction: "outbound",
+          message_text: it.text, message_type: "text", conversation_step: step,
+        });
+        sentSomething = true;
+        continue;
+      }
+
+      const m = it.mediaRef;
+      if (!m) continue;
       let url: string | null = null;
-      let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
+      let kind = it.kind === "audio" ? "audio" : it.kind === "video" ? "video" : it.kind === "image" ? "image" : "document";
       let durationSec: number | null = null;
       if (m.media_id) {
         const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind, duration_sec").eq("id", m.media_id).maybeSingle();
@@ -580,11 +609,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           .select("url, duration_sec")
           .eq("consultant_id", customer.consultant_id)
           .eq("slot_key", m.slot_key)
-          .eq("active", true)
-          .eq("is_draft", false)
+          .eq("active", true).eq("is_draft", false)
           .order("send_order", { ascending: true })
-          .limit(1)
-          .maybeSingle();
+          .limit(1).maybeSingle();
         if (personal?.url) { url = personal.url; durationSec = Number((personal as any).duration_sec || 0) || null; }
         else {
           const { data: pub } = await supabase
@@ -594,8 +621,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             .eq("slot_key", m.slot_key)
             .eq("active", true)
             .order("send_order", { ascending: true })
-            .limit(1)
-            .maybeSingle();
+            .limit(1).maybeSingle();
           if (pub?.url) { url = pub.url; durationSec = Number((pub as any).duration_sec || 0) || null; }
         }
       }
@@ -603,52 +629,32 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       await sendMedia(remoteJid, url, "", kind);
       sentSomething = true;
       await supabase.from("conversations").insert({
-        customer_id: customer.id,
-        message_direction: "outbound",
-        message_text: `[flow-qa:${qa.id}:${kind}]`,
-        message_type: kind,
-        conversation_step: step,
+        customer_id: customer.id, message_direction: "outbound",
+        message_text: `[flow-qa:${qa.id}:${kind}]`, message_type: kind, conversation_step: step,
       });
-      // Espera proporcional à duração (áudio longo → não atropela com vídeo)
-      const isLast = mi === qaMediaList.length - 1;
       if (!isLast) await sleepForMedia(kind, durationSec);
     }
 
-    const baseText = qa.text_response
-      ? String(qa.text_response).replaceAll("{nome}", customer.name || "").replaceAll("{representante}", nomeRepresentante || "")
-      : "";
-    // Sempre puxa o lead para o próximo passo do funil (a não ser que o próprio Q&A seja o fechamento)
-    const nudgeStep = qa.is_closing ? "aguardando_conta" : (step || "qualificacao");
-    const nudge = qa.is_closing ? "" : buildStepNudge(nudgeStep, customer.name || null);
-    const responseText = (baseText + nudge).trim();
-    if (responseText) {
-      await sendText(remoteJid, responseText);
-      await supabase.from("conversations").insert({
-        customer_id: customer.id,
-        message_direction: "outbound",
-        message_text: responseText,
-        message_type: "text",
-        conversation_step: step,
-      });
-      sentSomething = true;
-    } else if (sentSomething && !qa.is_closing) {
-      // Mídia foi enviada sem texto: ainda assim mande um nudge curto pro próximo passo
+    // Se mídia foi enviada sem texto, manda um nudge curto (mantém comportamento)
+    if (sentSomething && !responseText && !qa.is_closing) {
       const nudgeOnly = buildStepNudge(step || "qualificacao", customer.name || null).trim();
       if (nudgeOnly) {
         await sendText(remoteJid, nudgeOnly);
         await supabase.from("conversations").insert({
-          customer_id: customer.id,
-          message_direction: "outbound",
-          message_text: nudgeOnly,
-          message_type: "text",
-          conversation_step: step,
+          customer_id: customer.id, message_direction: "outbound",
+          message_text: nudgeOnly, message_type: "text", conversation_step: step,
         });
       }
     }
 
     if (!sentSomething) return null;
+    // G: keepStep=true (off-topic intercept) → não muda conversation_step
+    if (opts?.keepStep) {
+      return { reply: "", updates: { __inline_sent: true } as any };
+    }
     return { reply: "", updates: { conversation_step: qa.is_closing ? "aguardando_conta" : (step || "qualificacao"), __inline_sent: true } as any };
   }
+
 
 
   let step = customer.conversation_step || "welcome";
