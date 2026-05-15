@@ -157,6 +157,190 @@ function buildNotReadyReply(nomeRepresentante: string): string {
   return `Sem problema, vou respeitar seu tempo 😊\n\nSe quiser continuar depois, é só mandar *cadastrar* ou chamar ${nomeRepresentante}.`;
 }
 
+// ───────────────────────────────────────────────────────────────
+// Anti-alucinação: nome OCR só sobrescreve nome confirmado se for muito similar
+// ───────────────────────────────────────────────────────────────
+const RG_HEADER_TERMS = /REP[ÚU]BLICA|FEDERATIVA|CARTEIRA|IDENTIDADE|MINIST[ÉE]RIO|NACIONAL|SECRETARIA|SEGURAN[ÇC]A|INSTITUTO|DETRAN|VALIDA EM TODO|REGISTRO GERAL/i;
+
+function _normName(s: string): string {
+  return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z ]/g, "").replace(/\s+/g, " ").trim();
+}
+function _levSim(a: string, b: string): number {
+  a = _normName(a); b = _normName(b);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const m = a.length, n = b.length;
+  const dp: number[] = Array(n + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    let prev = i - 1; dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return 1 - dp[n] / Math.max(m, n);
+}
+
+/**
+ * Decide o nome a usar dado OCR de doc.
+ * Retorna null se OCR é alucinação OU se o usuário já confirmou nome diferente.
+ */
+function safeAssignName(currentName: string | null | undefined, currentSource: string | null | undefined, ocrName: string | null | undefined): string | null {
+  if (!ocrName) return null;
+  const cleaned = String(ocrName).trim().replace(/\s+/g, " ");
+  if (cleaned.length < 5) return null;
+  if (/\d/.test(cleaned)) return null;
+  if (cleaned.split(/\s+/).length < 2) return null;
+  if (RG_HEADER_TERMS.test(cleaned)) return null;
+  // Já confirmado pelo usuário → nunca sobrescreve
+  if (currentSource === "user_confirmed" && currentName && String(currentName).trim().length >= 3) return null;
+  // Nome atual existe e é muito diferente: mantém (não confiamos no OCR)
+  if (currentName && String(currentName).trim().length >= 5) {
+    if (_levSim(currentName, cleaned) < 0.7) return null;
+  }
+  return cleaned;
+}
+
+// Heurística: a mensagem tem o formato esperado pelo step?
+function isExpectedShape(step: string, text: string): boolean {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  const digits = t.replace(/\D/g, "");
+  switch (step) {
+    case "ask_cpf":
+    case "editing_doc_cpf":
+      return digits.length >= 11;
+    case "ask_cep":
+    case "editing_conta_cep":
+      return digits.length >= 8;
+    case "ask_birth_date":
+    case "editing_doc_nascimento":
+      return /\d{2}\/\d{2}\/\d{4}/.test(t);
+    case "ask_phone":
+    case "ask_phone_confirm":
+      return digits.length >= 10;
+    case "ask_bill_value":
+    case "editing_conta_valor":
+      return /^[r\$\s]*\d{2,6}([\.,]\d{1,2})?\s*$/i.test(t);
+    case "ask_installation_number":
+    case "editing_conta_instalacao":
+      return digits.length >= 7;
+    case "ask_name":
+    case "editing_conta_nome":
+    case "editing_doc_nome":
+      return t.length >= 3 && t.split(/\s+/).length >= 1 && !/\?/.test(t);
+    case "ask_rg":
+    case "editing_doc_rg":
+      return digits.length >= 4;
+    case "editing_conta_endereco":
+    case "editing_conta_distribuidora":
+      return t.length >= 3 && !/\?/.test(t);
+    case "ask_email":
+      return /@/.test(t);
+    case "ask_number":
+      return digits.length >= 1 && t.length <= 10;
+    case "ask_complement":
+      return true; // qualquer coisa serve
+    case "editing_conta_menu":
+      return /^[0-6]$/.test(t) || /\b(nome|valor|rua|endere[çc]o|cep|distribuidora|instala[çc][ãa]o|cancelar|voltar)\b/i.test(t);
+    case "editing_doc_menu":
+      return /^[0-4]$/.test(t) || /\b(nome|cpf|rg|nascimento|data|cancelar|voltar)\b/i.test(t);
+    case "confirmando_dados_conta":
+    case "confirmando_dados_doc":
+    case "ask_tipo_documento":
+      return /^(sim|s|nao|n[aã]o|n|ok|editar|3|2|1|✅|❌|✏️)/i.test(t);
+    default:
+      return false;
+  }
+}
+
+function getReentryPromptForStep(step: string, customer: any): string {
+  const first = ((customer?.name || "") as string).split(/\s+/)[0];
+  const v = first ? `${first}, ` : "";
+  const prefix = "📋 *Voltando ao seu cadastro:* ";
+  const map: Record<string, string> = {
+    "ask_name": `${v}qual é o seu *nome completo*?`,
+    "ask_cpf": `${v}qual é o seu *CPF*? (apenas números)`,
+    "ask_rg": `${v}qual é o seu *RG*?`,
+    "ask_birth_date": `${v}qual sua *data de nascimento*? (DD/MM/AAAA)`,
+    "ask_phone": `${v}me confirma seu *telefone* (com DDD)?`,
+    "ask_phone_confirm": `${v}me confirma seu *telefone* (com DDD)?`,
+    "ask_email": `${v}qual é o seu *e-mail*?`,
+    "ask_cep": `${v}qual o *CEP* da sua casa? (8 dígitos)`,
+    "ask_number": `${v}qual o *número* da sua casa?`,
+    "ask_complement": `${v}tem *complemento*? (apto, bloco) — ou diga "não".`,
+    "ask_installation_number": `${v}qual o *número da instalação* da conta?`,
+    "ask_bill_value": `${v}qual a *média* da sua conta de luz? (ex: 350,50)`,
+    "ask_tipo_documento": `Pra seguir: qual documento vai enviar? *RG Novo*, *RG Antigo* ou *CNH*?`,
+    "aguardando_conta": `${v}me envia uma *foto ou PDF da conta de luz* pra eu seguir 📸`,
+    "aguardando_doc_frente": `${v}me envia a *frente* do seu documento 🪪`,
+    "aguardando_doc_verso": `${v}me envia o *verso* do seu documento 🪪`,
+    "aguardando_doc_auto": `${v}me envia o seu *documento* (RG ou CNH) 🪪`,
+    "editing_conta_menu": "Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ Endereço\n3️⃣ CEP\n4️⃣ Distribuidora\n5️⃣ Nº Instalação\n6️⃣ Valor da conta\n0️⃣ Cancelar",
+    "editing_doc_menu": "Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ CPF\n3️⃣ RG\n4️⃣ Data de Nascimento\n0️⃣ Cancelar",
+    "editing_conta_nome": "Digite o *nome completo* correto:",
+    "editing_conta_endereco": "Digite o *endereço completo* correto:",
+    "editing_conta_cep": "Digite o *CEP* correto (8 dígitos):",
+    "editing_conta_distribuidora": "Digite o nome da *distribuidora*:",
+    "editing_conta_instalacao": "Digite o *número da instalação*:",
+    "editing_conta_valor": "Digite o *valor da conta* (ex: 350,50):",
+    "editing_doc_nome": "Digite o *nome completo* correto:",
+    "editing_doc_cpf": "Digite o *CPF* correto (apenas números):",
+    "editing_doc_rg": "Digite o *RG* correto:",
+    "editing_doc_nascimento": "Digite a *data de nascimento* (DD/MM/AAAA):",
+    "confirmando_dados_conta": "Os dados da conta estão corretos? Responda *SIM*, *NÃO* ou *EDITAR*.",
+    "confirmando_dados_doc": "Os dados estão corretos? Responda *SIM*, *NÃO* ou *EDITAR*.",
+  };
+  const txt = map[step];
+  return txt ? prefix + txt : "";
+}
+
+// Steps onde QA semântico NUNCA deve disparar (cadastro/edição determinísticos)
+const NO_QA_STEPS = new Set([
+  "aguardando_conta", "processando_ocr_conta", "confirmando_dados_conta",
+  "aguardando_doc_auto", "aguardando_doc_frente", "aguardando_doc_verso",
+  "confirmando_dados_doc", "ask_tipo_documento",
+  "ask_name", "ask_cpf", "ask_rg", "ask_birth_date", "ask_phone", "ask_phone_confirm",
+  "ask_email", "ask_cep", "ask_number", "ask_complement",
+  "ask_installation_number", "ask_bill_value",
+  "ask_doc_frente_manual", "ask_doc_verso_manual", "ask_finalizar",
+  "finalizando", "portal_submitting", "aguardando_otp", "validando_otp",
+  "aguardando_assinatura", "complete", "aguardando_humano",
+  "editing_conta_menu", "editing_conta_nome", "editing_conta_endereco",
+  "editing_conta_cep", "editing_conta_distribuidora", "editing_conta_instalacao", "editing_conta_valor",
+  "editing_doc_menu", "editing_doc_nome", "editing_doc_cpf", "editing_doc_rg",
+  "editing_doc_nascimento",
+]);
+
+// Helpers de tela de confirmação completa (usados após editar campo)
+function _formatBRL(n: number): string {
+  return Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function buildConfirmacaoConta(merged: any): string {
+  const v = Number(merged.electricity_bill_value || 0);
+  const m = v * 0.20, a = m * 12;
+  return "📋 *Dados da conta:*\n\n" +
+    `👤 *Nome:* ${merged.name || "❌"}\n` +
+    `📍 *Endereço:* ${merged.address_street || "❌"} ${merged.address_number || ""}\n` +
+    `🏘️ *Bairro:* ${merged.address_neighborhood || "❌"}\n` +
+    `🏙️ *Cidade:* ${merged.address_city || "❌"} - ${merged.address_state || ""}\n` +
+    `📮 *CEP:* ${merged.cep || "❌"}\n` +
+    `⚡ *Distribuidora:* ${merged.distribuidora || "❌"}\n` +
+    `🔢 *Nº Instalação:* ${merged.numero_instalacao || "❌"}\n` +
+    `💰 *Valor:* R$ ${_formatBRL(v)}\n` +
+    `💚 *Economia estimada:* até R$ ${_formatBRL(m)}/mês • até R$ ${_formatBRL(a)}/ano (até 20%)\n\n` +
+    "Está tudo correto?";
+}
+function buildConfirmacaoDoc(merged: any): string {
+  return `📋 *Confirme seus dados pessoais:*\n\n` +
+    `👤 Nome: *${merged.name || "—"}*\n` +
+    `🆔 CPF: *${merged.cpf || "—"}*\n` +
+    `🪪 RG: *${merged.rg || "—"}*\n` +
+    `🎂 Nascimento: *${merged.data_nascimento || "—"}*\n\n` +
+    "Está tudo correto?";
+}
+
 export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   const {
     supabase,
@@ -263,8 +447,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
   }
 
-  async function trySendConfiguredQa(): Promise<BotResult | null> {
+  async function trySendConfiguredQa(opts?: { force?: boolean; keepStep?: boolean }): Promise<BotResult | null> {
     if (!messageText || isFile || isButton || !customer.consultant_id) return null;
+    // E: bypass em passos de cadastro/edição (a não ser que force=true via off-topic intercept)
+    if (!opts?.force && NO_QA_STEPS.has(step)) return null;
     const normalizedText = messageText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     if (normalizedText.length < 2) return null;
 
@@ -372,13 +558,42 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       .order("position");
     let sentSomething = false;
 
-    const qaMediaList = ((mediaRows as any[]) || []);
-    const _qaOrder = await getStepMediaOrder(supabase, customer.consultant_id, step);
-    if (_qaOrder) qaMediaList.sort(makeKindComparator((m: any) => m.media_kind, _qaOrder));
-    for (let mi = 0; mi < qaMediaList.length; mi++) {
-      const m = qaMediaList[mi];
+    // F: texto entra como item ordenável junto com mídias
+    const baseText = qa.text_response
+      ? String(qa.text_response).replaceAll("{nome}", customer.name || "").replaceAll("{representante}", nomeRepresentante || "")
+      : "";
+    const nudgeStep = qa.is_closing ? "aguardando_conta" : (step || "qualificacao");
+    const nudge = qa.is_closing ? "" : buildStepNudge(nudgeStep, customer.name || null);
+    const responseText = (baseText + nudge).trim();
+
+    type QaItem = { kind: string; mediaRef?: any; text?: string };
+    const items: QaItem[] = ((mediaRows as any[]) || []).map((m) => ({
+      kind: String(m.media_kind || "document").toLowerCase(),
+      mediaRef: m,
+    }));
+    if (responseText) items.push({ kind: "text", text: responseText });
+
+    const _qaOrder = (await getStepMediaOrder(supabase, customer.consultant_id, step)) || ["text", "audio", "image", "video", "document"];
+    items.sort(makeKindComparator((it: QaItem) => it.kind, _qaOrder));
+
+    for (let mi = 0; mi < items.length; mi++) {
+      const it = items[mi];
+      const isLast = mi === items.length - 1;
+
+      if (it.kind === "text" && it.text) {
+        await sendText(remoteJid, it.text);
+        await supabase.from("conversations").insert({
+          customer_id: customer.id, message_direction: "outbound",
+          message_text: it.text, message_type: "text", conversation_step: step,
+        });
+        sentSomething = true;
+        continue;
+      }
+
+      const m = it.mediaRef;
+      if (!m) continue;
       let url: string | null = null;
-      let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
+      let kind = it.kind === "audio" ? "audio" : it.kind === "video" ? "video" : it.kind === "image" ? "image" : "document";
       let durationSec: number | null = null;
       if (m.media_id) {
         const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind, duration_sec").eq("id", m.media_id).maybeSingle();
@@ -394,11 +609,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           .select("url, duration_sec")
           .eq("consultant_id", customer.consultant_id)
           .eq("slot_key", m.slot_key)
-          .eq("active", true)
-          .eq("is_draft", false)
+          .eq("active", true).eq("is_draft", false)
           .order("send_order", { ascending: true })
-          .limit(1)
-          .maybeSingle();
+          .limit(1).maybeSingle();
         if (personal?.url) { url = personal.url; durationSec = Number((personal as any).duration_sec || 0) || null; }
         else {
           const { data: pub } = await supabase
@@ -408,8 +621,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             .eq("slot_key", m.slot_key)
             .eq("active", true)
             .order("send_order", { ascending: true })
-            .limit(1)
-            .maybeSingle();
+            .limit(1).maybeSingle();
           if (pub?.url) { url = pub.url; durationSec = Number((pub as any).duration_sec || 0) || null; }
         }
       }
@@ -417,52 +629,32 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       await sendMedia(remoteJid, url, "", kind);
       sentSomething = true;
       await supabase.from("conversations").insert({
-        customer_id: customer.id,
-        message_direction: "outbound",
-        message_text: `[flow-qa:${qa.id}:${kind}]`,
-        message_type: kind,
-        conversation_step: step,
+        customer_id: customer.id, message_direction: "outbound",
+        message_text: `[flow-qa:${qa.id}:${kind}]`, message_type: kind, conversation_step: step,
       });
-      // Espera proporcional à duração (áudio longo → não atropela com vídeo)
-      const isLast = mi === qaMediaList.length - 1;
       if (!isLast) await sleepForMedia(kind, durationSec);
     }
 
-    const baseText = qa.text_response
-      ? String(qa.text_response).replaceAll("{nome}", customer.name || "").replaceAll("{representante}", nomeRepresentante || "")
-      : "";
-    // Sempre puxa o lead para o próximo passo do funil (a não ser que o próprio Q&A seja o fechamento)
-    const nudgeStep = qa.is_closing ? "aguardando_conta" : (step || "qualificacao");
-    const nudge = qa.is_closing ? "" : buildStepNudge(nudgeStep, customer.name || null);
-    const responseText = (baseText + nudge).trim();
-    if (responseText) {
-      await sendText(remoteJid, responseText);
-      await supabase.from("conversations").insert({
-        customer_id: customer.id,
-        message_direction: "outbound",
-        message_text: responseText,
-        message_type: "text",
-        conversation_step: step,
-      });
-      sentSomething = true;
-    } else if (sentSomething && !qa.is_closing) {
-      // Mídia foi enviada sem texto: ainda assim mande um nudge curto pro próximo passo
+    // Se mídia foi enviada sem texto, manda um nudge curto (mantém comportamento)
+    if (sentSomething && !responseText && !qa.is_closing) {
       const nudgeOnly = buildStepNudge(step || "qualificacao", customer.name || null).trim();
       if (nudgeOnly) {
         await sendText(remoteJid, nudgeOnly);
         await supabase.from("conversations").insert({
-          customer_id: customer.id,
-          message_direction: "outbound",
-          message_text: nudgeOnly,
-          message_type: "text",
-          conversation_step: step,
+          customer_id: customer.id, message_direction: "outbound",
+          message_text: nudgeOnly, message_type: "text", conversation_step: step,
         });
       }
     }
 
     if (!sentSomething) return null;
+    // G: keepStep=true (off-topic intercept) → não muda conversation_step
+    if (opts?.keepStep) {
+      return { reply: "", updates: { __inline_sent: true } as any };
+    }
     return { reply: "", updates: { conversation_step: qa.is_closing ? "aguardando_conta" : (step || "qualificacao"), __inline_sent: true } as any };
   }
+
 
 
   let step = customer.conversation_step || "welcome";
@@ -1041,6 +1233,53 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     console.log(`📧 [CAPTURA] Email "${updates.email}" salvo automaticamente (digitado no step "${step}")`);
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // G: INTERCEPÇÃO OFF-TOPIC durante coleta/edição.
+  // Se o lead está em ask_*/editing_*/confirmando_*/aguardando_(conta|doc)
+  // e digita uma pergunta que NÃO tem o formato esperado pelo step,
+  // responde via QA configurada (force=true bypassa NO_QA_STEPS) SEM mudar o step,
+  // e reenvia o prompt do passo atual ("Voltando ao seu cadastro: ...").
+  // ═══════════════════════════════════════════════════════════════════
+  if (messageText && !isFile && !isButton) {
+    const ASK_OR_EDIT_RX = /^(ask_|editing_|confirmando_|aguardando_(?:conta|doc))/;
+    if (ASK_OR_EDIT_RX.test(step)) {
+      const t = messageText.trim();
+      const expected = isExpectedShape(step, t);
+      const looksLikeQuestion =
+        /\?/.test(t) ||
+        /^(como|quanto|quando|onde|quem|qual|posso|preciso|funciona|porqu[eê]|por que|me explica|me conta|d[uú]vida|e\s+(se|quando|caso))/i.test(t);
+      // Mensagem longa sem formato esperado também é provavelmente off-topic
+      const probablyOffTopic = !expected && (looksLikeQuestion || t.length > 30);
+      if (probablyOffTopic) {
+        console.log(`[off-topic] step=${step} msg="${t.slice(0, 60)}" → respondendo dúvida e reenviando prompt`);
+        const qaResult = await trySendConfiguredQa({ force: true, keepStep: true });
+        if (qaResult) {
+          const reentry = getReentryPromptForStep(step, customer);
+          if (reentry) {
+            try {
+              await sendText(remoteJid, reentry);
+              await supabase.from("conversations").insert({
+                customer_id: customer.id, message_direction: "outbound",
+                message_text: reentry, message_type: "text", conversation_step: step,
+              });
+            } catch (e) { console.warn("[off-topic] reentry falhou:", (e as any)?.message); }
+          }
+          return { reply: "", updates: { ...updates, __inline_sent: true } as any };
+        }
+        // Sem QA configurada: ainda assim manda o reentry (não responde com "❌ inválido")
+        const reentry = getReentryPromptForStep(step, customer);
+        if (reentry) {
+          await sendText(remoteJid, reentry);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id, message_direction: "outbound",
+            message_text: reentry, message_type: "text", conversation_step: step,
+          });
+          return { reply: "", updates: { ...updates, __inline_sent: true } as any };
+        }
+      }
+    }
+  }
+
   switch (step) {
     // ─── 1. BOAS-VINDAS ────────────────────
     case "welcome": {
@@ -1296,7 +1535,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             }
             break;
           }
-          updates.name = d.nome || "";
+          // C: validação anti-alucinação no nome OCR da conta
+          {
+            const ocrName = (d.nome || "").trim();
+            const safe = safeAssignName(customer.name, (customer as any).name_source, ocrName);
+            if (safe) {
+              updates.name = safe;
+              updates.name_source = "ocr_conta";
+            } else if (!customer.name && ocrName) {
+              // Sem nome prévio: aceita o nome do OCR mas marca como não confirmado
+              updates.name = ocrName;
+              updates.name_source = "ocr_conta";
+            }
+          }
           updates.address_street = d.endereco || "";
           updates.address_number = d.numero || "";
           updates.address_neighborhood = d.bairro || "";
@@ -1304,10 +1555,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           updates.address_city = d.cidade || "";
           updates.address_state = d.estado || "";
           updates.distribuidora = d.distribuidora || "";
-          updates.numero_instalacao = d.numeroInstalacao || "";
+          // Validação número instalação ≥7 dígitos
+          {
+            const inst = String(d.numeroInstalacao || "").replace(/\D/g, "");
+            updates.numero_instalacao = inst.length >= 7 ? inst : "";
+          }
           updates.ocr_confianca = confianca;
           const valorParsed = d.valorConta ? parseFloat(d.valorConta) : 0;
           updates.electricity_bill_value = (valorParsed >= 30) ? valorParsed : 0;
+          // CEP: só aceita se tiver 8 dígitos
+          if (updates.cep) {
+            const cepClean = String(updates.cep).replace(/\D/g, "");
+            updates.cep = cepClean.length === 8 ? cepClean : "";
+          }
           if (!updates.cep && updates.address_city && updates.address_state && updates.address_street) {
             console.log("🔍 CEP não encontrado. Buscando via ViaCEP...");
             const cepBuscado = await buscarCepPorEndereco(updates.address_state, updates.address_city, updates.address_street);
@@ -1317,43 +1577,29 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             }
           }
 
-          // Helper de formatação BRL
-          const formatBRL = (n: number) =>
-            n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
           // BLINDAGEM: nome e valor são obrigatórios. Se faltar, perguntar antes da confirmação.
-          if (!updates.name || String(updates.name).trim().length < 3) {
+          const finalName = updates.name || customer.name;
+          if (!finalName || String(finalName).trim().length < 3) {
             updates.conversation_step = "editing_conta_nome";
             reply = "📋 Consegui ler quase tudo da sua conta! Só preciso confirmar uma coisa:\n\n👤 Qual é o seu *nome completo* (como aparece na conta)?";
             break;
           }
           if (!updates.electricity_bill_value || updates.electricity_bill_value < 30) {
             updates.conversation_step = "editing_conta_valor";
-            reply = `📋 Já peguei seus dados, ${String(updates.name).split(" ")[0]}! Só me confirma uma coisa:\n\n💰 Qual o *valor médio* da sua conta de luz? (ex: 350,00)`;
+            reply = `📋 Já peguei seus dados, ${String(finalName).split(" ")[0]}! Só me confirma uma coisa:\n\n💰 Qual o *valor médio* da sua conta de luz? (ex: 350,00)`;
             break;
           }
 
           updates.conversation_step = "confirmando_dados_conta";
-          const _val = Number(updates.electricity_bill_value);
-          const _mensal = _val * 0.20;
-          const _anual = _mensal * 12;
-          reply = "📋 *Dados encontrados na conta:*\n\n" +
-            `👤 *Nome:* ${updates.name}\n` +
-            `📍 *Endereço:* ${updates.address_street || "❌"} ${updates.address_number || ""}\n` +
-            `🏘️ *Bairro:* ${updates.address_neighborhood || "❌"}\n` +
-            `🏙️ *Cidade:* ${updates.address_city || "❌"} - ${updates.address_state || ""}\n` +
-            `📮 *CEP:* ${updates.cep || "❌"}\n` +
-            `⚡ *Distribuidora:* ${updates.distribuidora || "❌"}\n` +
-            `🔢 *Nº Instalação:* ${updates.numero_instalacao || "❌"}\n` +
-            `💰 *Valor:* R$ ${formatBRL(_val)}\n` +
-            `💚 *Economia estimada (20%):* R$ ${formatBRL(_mensal)}/mês • R$ ${formatBRL(_anual)}/ano\n\n` +
-            "Está tudo correto?";
+          const _merged = { ...customer, ...updates };
+          reply = buildConfirmacaoConta(_merged);
           await sendOptions(remoteJid, reply, [
             { id: "sim_conta", title: "✅ SIM" },
             { id: "nao_conta", title: "❌ NÃO" },
             { id: "editar_conta", title: "✏️ EDITAR" },
           ]);
           reply = "";
+
         } else {
           console.error("❌ OCR conta falhou:", ocrData.erro);
           const tries = (customer.ocr_conta_attempts || 0) + 1;
@@ -1386,6 +1632,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "confirmando_dados_conta": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
       if (resp === "sim_conta" || resp === "sim" || resp === "s" || resp === "1" || resp === "ok" || resp === "correto" || resp === "✅") {
+        // Usuário confirmou os dados (incluindo nome) — blindar contra OCR de doc futuro
+        if (customer.name) updates.name_source = "user_confirmed";
         // Vai para o pitch do Conexão Club ANTES de pedir RG/CNH
         updates.conversation_step = "pitch_conexao_club";
         // O case pitch_conexao_club abaixo vai ser disparado via re-entrada,
@@ -1397,8 +1645,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         const _mensal = valor * 0.20;
         const _anual = _mensal * 12;
         const economiaMsg = valor >= 30
-          ? `Show, ${v.trim().replace(/,$/, "")}! 💚\n\nSua conta de *R$ ${_fmtBRL(valor)}/mês* cabe certinho na economia:\n→ *R$ ${_fmtBRL(_mensal)}* por mês no seu bolso\n→ *R$ ${_fmtBRL(_anual)}* por ano (20% de desconto fixo)\n\nE ainda entra no *Conexão Club* — até 70% de desconto em farmácia, mercado, posto e várias parceiras. Minha mãe usa direto kkk`
-          : `Show, ${v}dados confirmados! 💚\n\nVocê garante *20% de desconto fixo* todo mês na sua luz e ainda entra no *Conexão Club* — até 70% de desconto em farmácia, mercado, posto e várias parceiras.`;
+          ? `Show, ${v.trim().replace(/,$/, "")}! 💚\n\nSua conta de *R$ ${_fmtBRL(valor)}/mês* cabe certinho na economia:\n→ até *R$ ${_fmtBRL(_mensal)}* por mês no seu bolso\n→ até *R$ ${_fmtBRL(_anual)}* por ano (desconto de até 20%)\n\nE ainda entra no *Conexão Club* — até 70% de desconto em farmácia, mercado, posto e várias parceiras. Minha mãe usa direto kkk`
+          : `Show, ${v}dados confirmados! 💚\n\nVocê garante *desconto de até 20%* na sua luz e ainda entra no *Conexão Club* — até 70% de desconto em farmácia, mercado, posto e várias parceiras.`;
         try {
           await sendText(remoteJid, economiaMsg);
           await supabase.from("conversations").insert({
@@ -1471,7 +1719,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         reply = "📸 Ok! Envie novamente a *FOTO da conta de energia* com melhor qualidade.";
       } else if (resp === "editar_conta" || resp === "editar" || resp === "3") {
         updates.conversation_step = "editing_conta_menu";
-        reply = "✏️ Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ Endereço\n3️⃣ CEP\n4️⃣ Distribuidora\n5️⃣ Nº Instalação\n6️⃣ Valor da conta\n\nDigite o número:";
+        reply = "✏️ Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ Endereço\n3️⃣ CEP\n4️⃣ Distribuidora\n5️⃣ Nº Instalação\n6️⃣ Valor da conta\n0️⃣ Cancelar\n\nDigite o número (ou a palavra-chave: nome, valor, cep…):";
       } else {
         const sent = await sendOptions(remoteJid, "Os dados da conta estão corretos?", [
           { id: "sim_conta", title: "✅ SIM" },
@@ -1596,7 +1844,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         );
         if (ocrData.sucesso && ocrData.dados) {
           const d = ocrData.dados;
-          if (d.nome) updates.name = d.nome;
+          { const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } }
           if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
           if (d.rg) updates.rg = d.rg;
           const dataConf = String(d.dataNascimentoConfianca || "").toLowerCase();
@@ -1693,7 +1941,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           console.log("📊 OCR CNH resultado:", JSON.stringify(ocrData).substring(0, 400));
           if (ocrData.sucesso && ocrData.dados) {
             const d = ocrData.dados;
-            if (d.nome) updates.name = d.nome;
+            { const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } }
             if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
             if (d.rg) updates.rg = d.rg;
             const dataConf = String(d.dataNascimentoConfianca || "").toLowerCase();
@@ -1771,7 +2019,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         console.log("📊 OCR Doc resultado:", JSON.stringify(ocrData).substring(0, 400));
         if (ocrData.sucesso && ocrData.dados) {
           const d = ocrData.dados;
-          if (d.nome) updates.name = d.nome;
+          { const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } }
           if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
           if (d.rg) updates.rg = d.rg;
           if (d.dataNascimento) updates.data_nascimento = d.dataNascimento;
@@ -1822,6 +2070,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "confirmando_dados_doc": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
       if (resp === "sim_doc" || resp === "sim" || resp === "s" || resp === "1" || resp === "ok" || resp === "correto" || resp === "✅") {
+        if (customer.name || updates.name) updates.name_source = "user_confirmed";
         const merged = { ...customer, ...updates };
         const next = await autoResolveCepIfNeeded(merged, updates);
         updates.conversation_step = next;
@@ -1831,7 +2080,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         reply = "📸 Ok! Envie novamente a *FRENTE do documento* com melhor qualidade.";
       } else if (resp === "editar_doc" || resp === "editar" || resp === "3") {
         updates.conversation_step = "editing_doc_menu";
-        reply = "✏️ Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ CPF\n3️⃣ RG\n4️⃣ Data de Nascimento\n\nDigite o número:";
+        reply = "✏️ Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ CPF\n3️⃣ RG\n4️⃣ Data de Nascimento\n0️⃣ Cancelar\n\nDigite o número (ou a palavra-chave: nome, cpf, rg, data):";
       } else {
         const sent = await sendOptions(remoteJid, "Os dados estão corretos?", [
           { id: "sim_doc", title: "✅ SIM" },
@@ -1845,126 +2094,206 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     // ─── 7. EDIÇÃO CONTA ─────────
     case "editing_conta_menu": {
-      const op = messageText.trim();
+      const op = messageText.trim().toLowerCase();
       const fieldMap: Record<string, [string, string]> = {
         "1": ["editing_conta_nome", "Digite o *nome completo* correto:"],
         "2": ["editing_conta_endereco", "Digite o *endereço completo* correto:"],
         "3": ["editing_conta_cep", "Digite o *CEP* correto (8 dígitos):"],
         "4": ["editing_conta_distribuidora", "Digite o nome da *distribuidora*:"],
         "5": ["editing_conta_instalacao", "Digite o *número da instalação*:"],
-        "6": ["editing_conta_valor", "Digite o *valor da conta* (ex: 350.50):"],
+        "6": ["editing_conta_valor", "Digite o *valor da conta* (ex: 350,50):"],
       };
-      if (fieldMap[op]) { updates.conversation_step = fieldMap[op][0]; reply = fieldMap[op][1]; }
-      else reply = "❌ Opção inválida. Digite um número de 1 a 6:";
+      // Palavras-chave (atalho amigável)
+      let target: [string, string] | null = fieldMap[op] || null;
+      if (!target) {
+        if (/\bnome\b/.test(op)) target = fieldMap["1"];
+        else if (/\b(endere[çc]o|rua)\b/.test(op)) target = fieldMap["2"];
+        else if (/\bcep\b/.test(op)) target = fieldMap["3"];
+        else if (/\bdistribuidora\b/.test(op)) target = fieldMap["4"];
+        else if (/\binstala[çc][ãa]o\b/.test(op)) target = fieldMap["5"];
+        else if (/\bvalor\b/.test(op)) target = fieldMap["6"];
+      }
+      if (op === "0" || /\b(cancelar|voltar)\b/.test(op)) {
+        // Volta pra tela completa de confirmação
+        updates.conversation_step = "confirmando_dados_conta";
+        const merged = { ...customer, ...updates };
+        await sendOptions(remoteJid, buildConfirmacaoConta(merged), [
+          { id: "sim_conta", title: "✅ SIM" },
+          { id: "nao_conta", title: "❌ NÃO" },
+          { id: "editar_conta", title: "✏️ EDITAR" },
+        ]);
+        reply = "";
+      } else if (target) {
+        updates.conversation_step = target[0];
+        reply = target[1];
+      } else {
+        reply = "❌ Opção inválida. Digite *1-6* ou *0* para cancelar:\n\n1️⃣ Nome\n2️⃣ Endereço\n3️⃣ CEP\n4️⃣ Distribuidora\n5️⃣ Nº Instalação\n6️⃣ Valor da conta\n0️⃣ Cancelar";
+      }
       break;
     }
 
-    case "editing_conta_nome":
-      updates.name = messageText.trim();
+    // Helper local: salva campo da conta e reenvia tela completa de confirmação
+    case "editing_conta_nome": {
+      const v = messageText.trim();
+      if (v.length < 3) { reply = "❌ Nome muito curto. Digite o *nome completo*:"; break; }
+      updates.name = v;
+      updates.name_source = "user_confirmed";
       updates.conversation_step = "confirmando_dados_conta";
-      reply = `✅ Nome atualizado: *${messageText.trim()}*\n\nOs dados estão corretos agora?`;
-      { await sendOptions(remoteJid, reply, [{ id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" }]); reply = ""; }
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Nome atualizado: *${v}*\n\n` + buildConfirmacaoConta(merged), [
+        { id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
+    }
 
-    case "editing_conta_endereco":
-      updates.address_street = messageText.trim();
+    case "editing_conta_endereco": {
+      const v = messageText.trim();
+      if (v.length < 3) { reply = "❌ Endereço muito curto. Digite novamente:"; break; }
+      updates.address_street = v;
       updates.conversation_step = "confirmando_dados_conta";
-      reply = `✅ Endereço atualizado.\n\nOs dados estão corretos agora?`;
-      { await sendOptions(remoteJid, reply, [{ id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" }]); reply = ""; }
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Endereço atualizado.\n\n` + buildConfirmacaoConta(merged), [
+        { id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
+    }
 
     case "editing_conta_cep": {
       const cepClean = messageText.replace(/\D/g, "");
-      if (cepClean.length === 8) {
-        updates.cep = cepClean;
-        updates.conversation_step = "confirmando_dados_conta";
-        reply = `✅ CEP atualizado: *${cepClean.replace(/(\d{5})(\d{3})/, "$1-$2")}*\n\nOs dados estão corretos agora?`;
-        await sendOptions(remoteJid, reply, [{ id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" }]);
-        reply = "";
-      } else reply = "❌ CEP inválido. Digite os 8 números:";
+      if (cepClean.length !== 8) { reply = "❌ CEP inválido. Digite os 8 números:"; break; }
+      updates.cep = cepClean;
+      updates.conversation_step = "confirmando_dados_conta";
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ CEP: *${cepClean.replace(/(\d{5})(\d{3})/, "$1-$2")}*\n\n` + buildConfirmacaoConta(merged), [
+        { id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
     }
 
-    case "editing_conta_distribuidora":
-      updates.distribuidora = messageText.trim();
+    case "editing_conta_distribuidora": {
+      const v = messageText.trim();
+      if (v.length < 2) { reply = "❌ Nome muito curto. Digite a *distribuidora*:"; break; }
+      updates.distribuidora = v;
       updates.conversation_step = "confirmando_dados_conta";
-      reply = `✅ Distribuidora atualizada: *${messageText.trim()}*\n\nOs dados estão corretos agora?`;
-      { await sendOptions(remoteJid, reply, [{ id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" }]); reply = ""; }
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Distribuidora: *${v}*\n\n` + buildConfirmacaoConta(merged), [
+        { id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
+    }
 
     case "editing_conta_instalacao": {
       const instClean = messageText.replace(/\D/g, "");
-      if (instClean.length >= 7) {
-        updates.numero_instalacao = instClean;
-        updates.conversation_step = "confirmando_dados_conta";
-        reply = `✅ Nº instalação atualizado: *${instClean}*\n\nOs dados estão corretos agora?`;
-        await sendOptions(remoteJid, reply, [{ id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" }]);
-        reply = "";
-      } else reply = "❌ Número inválido. Digite pelo menos 7 dígitos:";
+      if (instClean.length < 7) { reply = "❌ Número inválido. Digite pelo menos 7 dígitos:"; break; }
+      updates.numero_instalacao = instClean;
+      updates.conversation_step = "confirmando_dados_conta";
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Nº Instalação: *${instClean}*\n\n` + buildConfirmacaoConta(merged), [
+        { id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
     }
 
     case "editing_conta_valor": {
       const val = parseFloat(messageText.replace(/[^\d.,]/g, "").replace(",", "."));
-      if (!isNaN(val) && val > 0) {
-        updates.electricity_bill_value = val;
-        updates.conversation_step = "confirmando_dados_conta";
-        reply = `✅ Valor atualizado: *R$ ${val.toFixed(2)}*\n\nOs dados estão corretos agora?`;
-        await sendOptions(remoteJid, reply, [{ id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" }]);
-        reply = "";
-      } else reply = "❌ Valor inválido. Digite um número (ex: 350.50):";
+      if (isNaN(val) || val < 30) { reply = "❌ Valor inválido. Digite um número (ex: 350,50):"; break; }
+      updates.electricity_bill_value = val;
+      updates.conversation_step = "confirmando_dados_conta";
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Valor: *R$ ${_formatBRL(val)}*\n\n` + buildConfirmacaoConta(merged), [
+        { id: "sim_conta", title: "✅ SIM" }, { id: "nao_conta", title: "❌ NÃO" }, { id: "editar_conta", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
     }
 
     // ─── 8. EDIÇÃO DOCUMENTO ─────────
     case "editing_doc_menu": {
-      const op = messageText.trim();
+      const op = messageText.trim().toLowerCase();
       const fieldMap: Record<string, [string, string]> = {
         "1": ["editing_doc_nome", "Digite o *nome completo* correto:"],
         "2": ["editing_doc_cpf", "Digite o *CPF* correto (apenas números):"],
         "3": ["editing_doc_rg", "Digite o *RG* correto:"],
         "4": ["editing_doc_nascimento", "Digite a *data de nascimento* (DD/MM/AAAA):"],
       };
-      if (fieldMap[op]) { updates.conversation_step = fieldMap[op][0]; reply = fieldMap[op][1]; }
-      else reply = "❌ Opção inválida. Digite um número de 1 a 4:";
+      let target: [string, string] | null = fieldMap[op] || null;
+      if (!target) {
+        if (/\bnome\b/.test(op)) target = fieldMap["1"];
+        else if (/\bcpf\b/.test(op)) target = fieldMap["2"];
+        else if (/\brg\b/.test(op)) target = fieldMap["3"];
+        else if (/\b(nascimento|data)\b/.test(op)) target = fieldMap["4"];
+      }
+      if (op === "0" || /\b(cancelar|voltar)\b/.test(op)) {
+        updates.conversation_step = "confirmando_dados_doc";
+        const merged = { ...customer, ...updates };
+        await sendOptions(remoteJid, buildConfirmacaoDoc(merged), [
+          { id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" },
+        ]);
+        reply = "";
+      } else if (target) {
+        updates.conversation_step = target[0];
+        reply = target[1];
+      } else {
+        reply = "❌ Opção inválida. Digite *1-4* ou *0* para cancelar:\n\n1️⃣ Nome\n2️⃣ CPF\n3️⃣ RG\n4️⃣ Data de Nascimento\n0️⃣ Cancelar";
+      }
       break;
     }
 
-    case "editing_doc_nome":
-      updates.name = messageText.trim();
+    case "editing_doc_nome": {
+      const v = messageText.trim();
+      if (v.length < 3) { reply = "❌ Nome muito curto. Digite o *nome completo*:"; break; }
+      updates.name = v;
+      updates.name_source = "user_confirmed";
       updates.conversation_step = "confirmando_dados_doc";
-      reply = `✅ Nome atualizado: *${messageText.trim()}*\n\nOs dados estão corretos agora?`;
-      { await sendOptions(remoteJid, reply, [{ id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" }]); reply = ""; }
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Nome: *${v}*\n\n` + buildConfirmacaoDoc(merged), [
+        { id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
+    }
 
     case "editing_doc_cpf": {
       const cpfClean = messageText.replace(/\D/g, "");
-      if (cpfClean.length === 11) {
-        updates.cpf = cpfClean;
-        updates.conversation_step = "confirmando_dados_doc";
-        reply = `✅ CPF atualizado: *${cpfClean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4")}*\n\nOs dados estão corretos agora?`;
-        await sendOptions(remoteJid, reply, [{ id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" }]);
-        reply = "";
-      } else reply = "❌ CPF inválido. Digite os 11 números:";
+      if (cpfClean.length !== 11) { reply = "❌ CPF inválido. Digite os 11 números:"; break; }
+      updates.cpf = cpfClean;
+      updates.conversation_step = "confirmando_dados_doc";
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ CPF: *${cpfClean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4")}*\n\n` + buildConfirmacaoDoc(merged), [
+        { id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
     }
 
-    case "editing_doc_rg":
-      updates.rg = messageText.trim();
+    case "editing_doc_rg": {
+      const v = messageText.trim();
+      if (v.replace(/\D/g, "").length < 4) { reply = "❌ RG inválido. Digite novamente:"; break; }
+      updates.rg = v;
       updates.conversation_step = "confirmando_dados_doc";
-      reply = `✅ RG atualizado: *${messageText.trim()}*\n\nOs dados estão corretos agora?`;
-      { await sendOptions(remoteJid, reply, [{ id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" }]); reply = ""; }
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ RG: *${v}*\n\n` + buildConfirmacaoDoc(merged), [
+        { id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
+    }
 
     case "editing_doc_nascimento": {
       const dateMatch = messageText.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      if (dateMatch) {
-        updates.data_nascimento = messageText.trim();
-        updates.conversation_step = "confirmando_dados_doc";
-        reply = `✅ Data atualizada: *${messageText.trim()}*\n\nOs dados estão corretos agora?`;
-        await sendOptions(remoteJid, reply, [{ id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" }]);
-        reply = "";
-      } else reply = "❌ Data inválida. Use DD/MM/AAAA (ex: 20/07/1993):";
+      if (!dateMatch) { reply = "❌ Data inválida. Use DD/MM/AAAA (ex: 20/07/1993):"; break; }
+      updates.data_nascimento = messageText.trim();
+      updates.conversation_step = "confirmando_dados_doc";
+      const merged = { ...customer, ...updates };
+      await sendOptions(remoteJid, `✅ Data: *${messageText.trim()}*\n\n` + buildConfirmacaoDoc(merged), [
+        { id: "sim_doc", title: "✅ SIM" }, { id: "nao_doc", title: "❌ NÃO" }, { id: "editar_doc", title: "✏️ EDITAR" },
+      ]);
+      reply = "";
       break;
     }
 
@@ -1972,6 +2301,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "ask_name": {
       if (messageText.length < 3) { reply = "Por favor, digite seu *nome completo*."; break; }
       updates.name = messageText.trim();
+      updates.name_source = "user_confirmed";
       const merged = { ...customer, ...updates };
       const next = await autoResolveCepIfNeeded(merged, updates);
       updates.conversation_step = next;
