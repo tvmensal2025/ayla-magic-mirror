@@ -1115,6 +1115,7 @@ export type Database = {
           summary: string | null
           title: string | null
           transitions: Json
+          transitions_backup_pre_v2: Json | null
           updated_at: string
           wait_for: string
           wait_seconds: number
@@ -1137,6 +1138,7 @@ export type Database = {
           summary?: string | null
           title?: string | null
           transitions?: Json
+          transitions_backup_pre_v2?: Json | null
           updated_at?: string
           wait_for?: string
           wait_seconds?: number
@@ -1159,6 +1161,7 @@ export type Database = {
           summary?: string | null
           title?: string | null
           transitions?: Json
+          transitions_backup_pre_v2?: Json | null
           updated_at?: string
           wait_for?: string
           wait_seconds?: number

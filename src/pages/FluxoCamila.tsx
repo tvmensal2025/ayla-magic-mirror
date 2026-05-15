@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   ArrowLeft, MessageSquare, Video, ArrowDown, Sparkles, UserCheck, FileText,
   ChevronUp, ChevronDown, Plus, Trash2, FlaskConical, X, Target, Database, Bot, HelpCircle,
+  AlertTriangle, Play,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -19,6 +20,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
+import { simulateMatch, detectRuleConflicts } from "@/lib/flowSimulator";
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -161,6 +163,9 @@ export default function FluxoCamila() {
   const [testOpen, setTestOpen] = useState(false);
   const [testPhone, setTestPhone] = useState("");
   const [testCount, setTestCount] = useState(0);
+  const [showMigrationBanner, setShowMigrationBanner] = useState(
+    () => typeof window !== "undefined" && !localStorage.getItem("camila_migration_v2_dismissed")
+  );
 
   const reload = useCallback(async (uid: string) => {
     const [{ data: cons }, { data: flows }, { count }] = await Promise.all([
@@ -358,6 +363,28 @@ export default function FluxoCamila() {
           </div>
         </Card>
 
+        {showMigrationBanner && (
+          <Card className="p-4 border-sky-500/30 bg-sky-500/5 flex items-start gap-3">
+            <Sparkles className="h-5 w-5 text-sky-500 mt-0.5 shrink-0" />
+            <div className="flex-1 text-sm">
+              <div className="font-semibold mb-1">Atualizamos o sistema de regras</div>
+              <p className="text-muted-foreground text-[13px]">
+                Agora cada passo tem 3 blocos: <strong>Regras</strong>, <strong>Capturar dados</strong> e <strong>Plano B</strong>.
+                Seus fluxos antigos foram convertidos automaticamente — nada deixou de funcionar.
+                Confira o <strong>Plano B</strong> de cada passo para escolher entre repetir, pular ou deixar a IA decidir.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                localStorage.setItem("camila_migration_v2_dismissed", "1");
+                setShowMigrationBanner(false);
+              }}
+            >Entendi</Button>
+          </Card>
+        )}
+
         {/* Atalhos */}
         <Card className="p-4 sm:p-5 border-amber-500/30 bg-amber-500/5">
           <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
@@ -506,7 +533,7 @@ function StepCard(props: {
       <BlockShell
         icon={<Target className="h-4 w-4" />}
         title="Regras — quando o cliente disser..."
-        tooltip="Cada regra escuta uma intenção do cliente (SIM, NÃO, mandou valor, etc.) e leva pra um passo específico."
+        tooltip="Cada regra escuta uma intenção do cliente (SIM, NÃO, mandou valor, etc.) e leva pra um passo específico. As regras de cima têm prioridade sobre as de baixo."
         accent="emerald"
         action={
           <Button size="sm" variant="ghost" className="h-7" onClick={() => {
@@ -518,25 +545,35 @@ function StepCard(props: {
         {step.transitions.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">Nenhuma regra ainda. Sem regras, a Camila usa direto o Plano B abaixo.</p>
         ) : (
-          <div className="space-y-2">
-            {step.transitions.map((t, i) => (
-              <TransitionRow
-                key={i}
-                transition={t}
-                currentStepId={step.id}
-                allSteps={allSteps}
-                onChange={(nt) => {
-                  const novas = [...step.transitions];
-                  novas[i] = nt;
-                  onPatch({ transitions: novas });
-                }}
-                onRemove={() => {
-                  const novas = step.transitions.filter((_, idx) => idx !== i);
-                  onPatch({ transitions: novas });
-                }}
-              />
-            ))}
-          </div>
+          <>
+            <p className="text-[11px] text-muted-foreground mb-2 flex items-center gap-1">
+              <ChevronUp className="h-3 w-3" /> Regras do topo têm prioridade — só a primeira que casar é executada.
+            </p>
+            <div className="space-y-2">
+              {step.transitions.map((t, i) => {
+                const conflicts = detectRuleConflicts(step.transitions).filter(c => c.index === i);
+                return (
+                  <TransitionRow
+                    key={i}
+                    transition={t}
+                    currentStepId={step.id}
+                    allSteps={allSteps}
+                    conflicts={conflicts.map(c => c.reason)}
+                    onChange={(nt) => {
+                      const novas = [...step.transitions];
+                      novas[i] = nt;
+                      onPatch({ transitions: novas });
+                    }}
+                    onRemove={() => {
+                      const novas = step.transitions.filter((_, idx) => idx !== i);
+                      onPatch({ transitions: novas });
+                    }}
+                  />
+                );
+              })}
+            </div>
+            <RuleSimulator rules={step.transitions} allSteps={allSteps} />
+          </>
         )}
       </BlockShell>
 
@@ -722,10 +759,11 @@ function TransitionRow(props: {
   transition: Transition;
   currentStepId: string;
   allSteps: Step[];
+  conflicts?: string[];
   onChange: (t: Transition) => void;
   onRemove: () => void;
 }) {
-  const { transition, currentStepId, allSteps, onChange, onRemove } = props;
+  const { transition, currentStepId, allSteps, conflicts = [], onChange, onRemove } = props;
   const [phrases, setPhrases] = useState(transition.trigger_phrases.join(", "));
 
   useEffect(() => { setPhrases(transition.trigger_phrases.join(", ")); }, [transition.trigger_phrases]);
@@ -735,7 +773,13 @@ function TransitionRow(props: {
     transition.goto_step_id ? `step:${transition.goto_step_id}` : "";
 
   return (
-    <div className="rounded-lg border border-border/60 p-3 bg-muted/20 space-y-2">
+    <div className={`rounded-lg border p-3 bg-muted/20 space-y-2 ${conflicts.length ? "border-amber-500/50" : "border-border/60"}`}>
+      {conflicts.length > 0 && (
+        <div className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+          <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+          <span>{conflicts.join(" · ")}</span>
+        </div>
+      )}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs text-muted-foreground">Quando</span>
         <Select value={transition.trigger_intent} onValueChange={(v) => onChange({ ...transition, trigger_intent: v })}>
@@ -780,6 +824,65 @@ function TransitionRow(props: {
           </SelectContent>
         </Select>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RuleSimulator — testa uma mensagem contra as regras do passo
+// ---------------------------------------------------------------------------
+function RuleSimulator({ rules, allSteps }: { rules: Transition[]; allSteps: Step[] }) {
+  const [open, setOpen] = useState(false);
+  const [msg, setMsg] = useState("");
+  const result = msg ? simulateMatch(msg, rules) : null;
+
+  const destLabel = (r: Transition | undefined) => {
+    if (!r) return "—";
+    if (r.goto_special === "repeat") return "Repetir o passo";
+    if (r.goto_special === "cadastro") return "→ Cadastro";
+    if (r.goto_special === "humano") return "→ Aguardando humano";
+    if (r.goto_step_id) {
+      const s = allSteps.find(x => x.id === r.goto_step_id);
+      const num = allSteps.findIndex(x => x.id === r.goto_step_id) + 1;
+      return s ? `→ Passo ${num} — ${s.title}` : "→ Passo removido";
+    }
+    return "—";
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border/40">
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
+        >
+          <Play className="h-3 w-3" /> Testar uma mensagem
+        </button>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Input
+              value={msg}
+              onChange={(e) => setMsg(e.target.value)}
+              placeholder='Ex: "minha conta vem uns 350"'
+              className="h-8 text-sm"
+            />
+            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setOpen(false); setMsg(""); }}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          {msg && (
+            <div className={`text-xs rounded-md p-2 ${result ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-muted text-muted-foreground"}`}>
+              {result ? (
+                <>✓ <strong>Regra #{result.index + 1}</strong> dispara → {destLabel(rules[result.index])}</>
+              ) : (
+                <>Nenhuma regra casa — vai cair no <strong>Plano B</strong>.</>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

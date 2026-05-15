@@ -1,0 +1,105 @@
+// Capture extractors com cascata: regex → números por extenso → validação.
+// Usado pelo Fluxo da Camila para extrair dados da mensagem do lead.
+
+const NUM_EXTENSO: Record<string, number> = {
+  cem: 100, duzentos: 200, trezentos: 300, quatrocentos: 400, quinhentos: 500,
+  seiscentos: 600, setecentos: 700, oitocentos: 800, novecentos: 900, mil: 1000,
+};
+const DEZ_EXTENSO: Record<string, number> = {
+  dez: 10, vinte: 20, trinta: 30, quarenta: 40, cinquenta: 50,
+  sessenta: 60, setenta: 70, oitenta: 80, noventa: 90,
+};
+
+const DDDS_VALIDOS = new Set([
+  11,12,13,14,15,16,17,18,19, 21,22,24, 27,28, 31,32,33,34,35,37,38,
+  41,42,43,44,45,46, 47,48,49, 51,53,54,55, 61, 62,64, 63, 65,66, 67,
+  68, 69, 71,73,74,75,77, 79, 81,87, 82, 83, 84, 85,88, 86,89, 91,93,94,
+  92,97, 95, 96, 98,99,
+]);
+
+function cpfValido(cpf: string): boolean {
+  const digits = cpf.replace(/\D/g, "");
+  if (digits.length !== 11 || /^(\d)\1+$/.test(digits)) return false;
+  let s = 0;
+  for (let i = 0; i < 9; i++) s += parseInt(digits[i]) * (10 - i);
+  let d1 = (s * 10) % 11; if (d1 === 10) d1 = 0;
+  if (d1 !== parseInt(digits[9])) return false;
+  s = 0;
+  for (let i = 0; i < 10; i++) s += parseInt(digits[i]) * (11 - i);
+  let d2 = (s * 10) % 11; if (d2 === 10) d2 = 0;
+  return d2 === parseInt(digits[10]);
+}
+
+export function extractValor(text: string): number | null {
+  if (!text) return null;
+  const t = text.toLowerCase();
+  // 1) Regex direto: "R$ 380,50", "380 reais", "uns 400", "umas 500 pila", "minha conta vem 450"
+  const rx = /(?:r\$\s*|reais?\s*|conta\s+(?:de|vem|tá|é|cerca de|uns|umas|aproximadamente)?\s*|valor\s+(?:de|é)?\s*)?(\d{2,5}(?:[.,]\d{1,2})?)/i;
+  // só dispara se houver indício de dinheiro/conta
+  if (/r\$|\breais?\b|\bconta\b|\bluz\b|\bvalor\b|\bpila\b|^\s*\d{2,5}\s*$/i.test(t)) {
+    const m = t.match(rx);
+    if (m) {
+      const v = parseFloat(m[1].replace(/\./g, "").replace(",", "."));
+      if (!isNaN(v) && v >= 30 && v <= 50000) return v;
+    }
+  }
+  // 2) Extenso: "trezentos", "quinhentos e cinquenta"
+  for (const [palavra, val] of Object.entries(NUM_EXTENSO)) {
+    if (t.includes(palavra)) {
+      let total = val;
+      // pega "e cinquenta" depois
+      const after = t.split(palavra)[1] || "";
+      const dezMatch = after.match(/\s+e\s+(\w+)/);
+      if (dezMatch && DEZ_EXTENSO[dezMatch[1]]) total += DEZ_EXTENSO[dezMatch[1]];
+      if (total >= 30 && total <= 50000) return total;
+    }
+  }
+  return null;
+}
+
+export function extractTelefone(text: string): string | null {
+  if (!text) return null;
+  const m = text.match(/(?:\+?55\s*)?\(?(\d{2})\)?\s*9?\s*(\d{4})[-\s]?(\d{4})/);
+  if (!m) return null;
+  const ddd = parseInt(m[1]);
+  if (!DDDS_VALIDOS.has(ddd)) return null;
+  const digits = (m[0].replace(/\D/g, "")).replace(/^55/, "");
+  // normaliza pra 10 ou 11 dígitos (com 9 na frente do número)
+  if (digits.length === 10 || digits.length === 11) return digits;
+  return null;
+}
+
+export function extractCPF(text: string): string | null {
+  if (!text) return null;
+  const m = text.match(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/);
+  if (!m) return null;
+  const digits = m[0].replace(/\D/g, "");
+  return cpfValido(digits) ? digits : null;
+}
+
+const PALAVROES = /\b(merda|porra|caralho|fdp|puta|cu|viado|otario)\b/i;
+
+export function extractNome(text: string): string | null {
+  if (!text) return null;
+  const m = text.match(/(?:sou|me chamo|meu nome [eé]|aqui [eé]?o?\s?|nome:?\s?)\s+([a-zà-ÿ]{2,}(?:\s+[a-zà-ÿ]{2,}){0,3})/i);
+  if (!m) return null;
+  const cleaned = m[1].trim().split(/\s+/).slice(0, 3).join(" ");
+  if (cleaned.length < 2) return null;
+  if (/\d/.test(cleaned)) return null;
+  if (PALAVROES.test(cleaned)) return null;
+  // capitaliza
+  return cleaned.split(" ")
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+// Detecta intents puramente por regex (não dependem de IA).
+export function detectRegexIntents(text: string): string[] {
+  const intents: string[] = [];
+  if (!text) return intents;
+  if (extractValor(text) != null) intents.push("valor_brl");
+  if (extractTelefone(text)) intents.push("telefone_br");
+  if (extractCPF(text)) intents.push("cpf_br");
+  if (extractNome(text)) intents.push("nome_proprio");
+  return intents;
+}

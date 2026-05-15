@@ -7,6 +7,19 @@ import type { BotContext, BotResult } from "../types.ts";
 import { CONVERSATIONAL_STEPS, decideTransition, type ConversationalStep } from "./state-machine.ts";
 import { classifyIntent } from "./intent-classifier.ts";
 import { getTemplate, renderTemplate } from "./templates.ts";
+import {
+  extractValor, extractTelefone, extractCPF, extractNome, detectRegexIntents,
+} from "../../_shared/captureExtractors.ts";
+
+// Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
+const aiCooldown = new Map<string, number>();
+function aiInCooldown(key: string): boolean {
+  const until = aiCooldown.get(key);
+  return !!until && Date.now() < until;
+}
+function setAiCooldown(key: string) {
+  aiCooldown.set(key, Date.now() + 60_000);
+}
 
 export { CONVERSATIONAL_STEPS };
 
@@ -77,16 +90,8 @@ async function loadFlow(supabase: any, consultantId: string): Promise<DbStep[] |
 }
 
 // ---------------------------------------------------------------------------
-// Capture extractors — detect data in the lead's message
+// Capture phase — usa extractors compartilhados (regex + extenso + validação)
 // ---------------------------------------------------------------------------
-const CAPTURE_RX = {
-  electricity_bill_value: /(?:R?\$\s*)?(\d{1,4}(?:[.,]\d{1,2})?)\s*(?:reais|conta|de luz|R\$)?/i,
-  phone_whatsapp: /(?:\+?55\s*)?\(?\d{2}\)?\s*9?\s*\d{4}[-\s]?\d{4}/,
-  cpf: /\d{3}\.?\d{3}\.?\d{3}-?\d{2}/,
-  // nome: heurística "sou X", "me chamo X Y", "meu nome é X"
-  name: /(?:sou|me chamo|meu nome [eé]|aqui [eé]?|nome:?)\s+([A-Za-zÀ-ÿ]{2,}(?:\s+[A-Za-zÀ-ÿ]{2,}){0,3})/i,
-};
-
 interface ExtractedCaptures {
   electricity_bill_value?: number;
   phone_whatsapp?: string;
@@ -98,45 +103,23 @@ function extractCaptures(messageText: string, configured: DbCapture[]): Extracte
   const out: ExtractedCaptures = {};
   if (!messageText) return out;
   const enabled = new Set((configured || []).filter(c => c.enabled !== false).map(c => c.field));
-
   if (enabled.has("electricity_bill_value")) {
-    // Só captura se mensagem parece falar de dinheiro/conta — evita pegar idade etc.
-    if (/r\$|\bconta\b|\breais?\b|\bluz\b|\bvalor\b|^\s*\d{2,4}\s*$/i.test(messageText)) {
-      const m = messageText.match(/\d{1,4}(?:[.,]\d{1,2})?/);
-      if (m) {
-        const v = parseFloat(m[0].replace(/\./g, "").replace(",", "."));
-        if (!isNaN(v) && v >= 30 && v <= 5000) out.electricity_bill_value = v;
-      }
-    }
+    const v = extractValor(messageText);
+    if (v != null) out.electricity_bill_value = v;
   }
   if (enabled.has("phone_whatsapp")) {
-    const m = messageText.match(CAPTURE_RX.phone_whatsapp);
-    if (m) out.phone_whatsapp = m[0].replace(/\D/g, "");
+    const p = extractTelefone(messageText);
+    if (p) out.phone_whatsapp = p;
   }
   if (enabled.has("cpf")) {
-    const m = messageText.match(CAPTURE_RX.cpf);
-    if (m) out.cpf = m[0].replace(/\D/g, "");
+    const c = extractCPF(messageText);
+    if (c) out.cpf = c;
   }
   if (enabled.has("name")) {
-    const m = messageText.match(CAPTURE_RX.name);
-    if (m && m[1]) {
-      const cleaned = m[1].trim().split(/\s+/).slice(0, 3).join(" ");
-      if (cleaned.length >= 2) out.name = cleaned;
-    }
+    const n = extractNome(messageText);
+    if (n) out.name = n;
   }
   return out;
-}
-
-// Detect "regex-only" intents (não dependem do LLM) — usadas para casar com transitions.
-function detectRegexIntents(messageText: string): string[] {
-  const intents: string[] = [];
-  if (!messageText) return intents;
-  if (/r\$\s*\d|\b\d{2,4}\s*reais?\b|\bconta de \d|\bvalor\b.*\d/i.test(messageText)) intents.push("valor_brl");
-  else if (/^\s*\d{2,4}([.,]\d{1,2})?\s*$/.test(messageText)) intents.push("valor_brl");
-  if (CAPTURE_RX.phone_whatsapp.test(messageText)) intents.push("telefone_br");
-  if (CAPTURE_RX.cpf.test(messageText)) intents.push("cpf_br");
-  if (CAPTURE_RX.name.test(messageText)) intents.push("nome_proprio");
-  return intents;
 }
 
 function matchTransition(step: DbStep, intents: string[], messageText: string): DbTransition | null {
@@ -163,36 +146,79 @@ async function aiDecideFallback(
   messageText: string,
   candidates: { id: string; step_key: string; title?: string }[],
   geminiApiKey: string | undefined,
+  cooldownKey: string,
 ): Promise<string | null> {
   if (!geminiApiKey || !prompt) return null;
-  try {
-    const sys = `Você decide o próximo passo de um fluxo de WhatsApp.
+  if (aiInCooldown(cooldownKey)) {
+    console.warn("[conversational] AI fallback skipped (cooldown active)");
+    return null;
+  }
+  const validKeys = candidates.map(c => c.step_key);
+  const enumKeys = [...validKeys, "REPEAT", "HUMANO", "CADASTRO"];
+
+  const sys = `Você decide o próximo passo de um fluxo de WhatsApp.
 Instrução do consultor: ${prompt}
 
 Mensagem do cliente: "${messageText}"
 
-Passos disponíveis (responda APENAS com o step_key exato, ou "REPEAT" pra repetir, ou "HUMANO" pra mandar pra humano, ou "CADASTRO" pra ir ao cadastro):
-${candidates.map(c => `- ${c.step_key}`).join("\n")}
+Passos válidos: ${enumKeys.join(", ")}
 
-Responda com 1 palavra (o step_key escolhido).`;
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: sys }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 30 },
-        }),
-      },
-    );
-    const json: any = await res.json();
-    const out = (json?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim().split(/\s+/)[0];
-    return out || null;
-  } catch (e) {
-    console.error("[conversational] aiDecideFallback failed", e);
-    return null;
-  }
+Responda em JSON: {"next_step_key": "<um_dos_passos_válidos>", "reason": "breve"}.`;
+
+  const callOnce = async (timeoutMs: number): Promise<string | null> => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: sys }] }],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 80,
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "OBJECT",
+                properties: {
+                  next_step_key: { type: "STRING", enum: enumKeys },
+                  reason: { type: "STRING" },
+                },
+                required: ["next_step_key"],
+              },
+            },
+          }),
+          signal: ctrl.signal,
+        },
+      );
+      if (res.status === 429) { setAiCooldown(cooldownKey); return null; }
+      if (!res.ok) return null;
+      const json: any = await res.json();
+      const txt = (json?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+      if (!txt) return null;
+      try {
+        const parsed = JSON.parse(txt);
+        const choice = String(parsed?.next_step_key || "").trim();
+        return enumKeys.includes(choice) ? choice : null;
+      } catch {
+        // fallback: extrai primeira palavra que casa com enum
+        const first = txt.split(/[\s,"]+/).find((w: string) => enumKeys.includes(w));
+        return first || null;
+      }
+    } catch (e) {
+      console.error("[conversational] aiDecideFallback failed", (e as Error).message);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  // Tentativa 1 (4s) → se falhar, retry curto (3s)
+  const first = await callOnce(4000);
+  if (first) return first;
+  return await callOnce(3000);
 }
 
 export async function runConversationalFlow(ctx: BotContext): Promise<BotResult> {
@@ -326,7 +352,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   }
   if (fb.mode === "ai" && fb.ai_prompt) {
     const candidates = dbSteps.filter(s => s.is_active && s.id !== currentStep.id).map(s => ({ id: s.id, step_key: s.step_key }));
-    const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey);
+    const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey, consultantId || "global");
     if (choice) {
       const upper = choice.toUpperCase();
       if (upper === "REPEAT") return repeatCurrent();
