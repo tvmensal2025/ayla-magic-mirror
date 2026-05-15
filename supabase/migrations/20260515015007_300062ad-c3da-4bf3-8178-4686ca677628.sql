@@ -1,0 +1,1 @@
+UPDATE public.customers SET conversational_flow_enabled = true WHERE phone_whatsapp = '5511989000650';
