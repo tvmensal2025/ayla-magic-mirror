@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { ArrowLeft, MessageSquare, Video, ArrowDown, Sparkles, UserCheck, FileText, Pencil, FlaskConical, X } from "lucide-react";
 import { toast } from "sonner";
+import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
 
 // ---------------------------------------------------------------------------
 // Espelha 1-para-1 supabase/functions/whapi-webhook/handlers/conversational/state-machine.ts
@@ -152,6 +153,7 @@ export default function FluxoCamila() {
   const [testOpen, setTestOpen] = useState(false);
   const [testPhone, setTestPhone] = useState("");
   const [testCount, setTestCount] = useState(0);
+  const [stepOrders, setStepOrders] = useState<Record<string, ("audio" | "image" | "video" | "text")[]>>({});
 
   useEffect(() => {
     (async () => {
@@ -163,11 +165,12 @@ export default function FluxoCamila() {
         return;
       }
       const [{ data: cons }, { data: msgs }, { count }] = await Promise.all([
-        supabase.from("consultants").select("conversational_flow_enabled").eq("id", uid).maybeSingle(),
+        supabase.from("consultants").select("conversational_flow_enabled, flow_step_media_order").eq("id", uid).maybeSingle(),
         supabase.from("bot_messages").select("id, step_key, template_key, variant, text, active").eq("active", true),
         supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("conversational_flow_enabled", true),
       ]);
       setGlobalAtivo(!!cons?.conversational_flow_enabled);
+      setStepOrders((cons?.flow_step_media_order as Record<string, ("audio" | "image" | "video" | "text")[]>) ?? {});
       setMessages((msgs as BotMessage[]) ?? []);
       setTestCount(count ?? 0);
     })();
