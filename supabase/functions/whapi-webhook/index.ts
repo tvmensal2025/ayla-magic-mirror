@@ -312,7 +312,11 @@ Deno.serve(async (req) => {
     }
 
     // ─── Áudio do cliente → transcreve com Gemini e trata como texto ──────
-    if (hasAudio && fileBase64) {
+    if (hasAudio && testMode) {
+      // 🧪 modo teste: usa transcript embutido no payload
+      const t = (audioMessage as any)?.transcript || (parsed.message as any)?.audio?.transcript || "";
+      if (t) { messageText = String(t); isFile = false; }
+    } else if (hasAudio && fileBase64) {
       try {
         const mt = audioMessage?.mimetype || "audio/ogg";
         console.log(`🎙️ [whapi] Transcrevendo áudio do cliente (${mt}, ${fileBase64.length} b64 chars)...`);
@@ -330,8 +334,7 @@ Deno.serve(async (req) => {
         if (transcript) {
           console.log(`✅ [whapi] Transcrição (${transcript.length} chars): "${transcript.substring(0, 120)}"`);
           messageText = transcript;
-          isFile = false; // tratar como texto pra IA conversar normalmente
-          // Atualiza o log inbound com a transcrição (mantém marca [áudio])
+          isFile = false;
           if (inboundLog?.id) {
             await supabase.from("conversations").update({
               message_text: `[áudio] ${transcript}`,
