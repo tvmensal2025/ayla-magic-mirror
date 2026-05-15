@@ -97,17 +97,24 @@ Deno.serve(async (req) => {
     // ─── Modo teste end-to-end (telefone reservado 5500000xxx) ─────────
     const testMode = isTestPhone(phone);
     let testRunId: string | null = null;
+    let testTurn = 0;
     if (testMode) {
-      // Pega o run_id ativo mais recente para esse telefone
-      const { data: runRow } = await supabase
-        .from("bot_test_runs")
-        .select("id")
-        .eq("status", "running")
-        .order("started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      testRunId = runRow?.id || null;
-      console.log(`🧪 [test-mode] ATIVO phone=${phone} runId=${testRunId}`);
+      const headerRunId = req.headers.get("x-bot-test-run-id");
+      const headerTurn = Number(req.headers.get("x-bot-test-turn") || "0");
+      if (headerRunId) {
+        testRunId = headerRunId;
+        testTurn = Number.isFinite(headerTurn) ? headerTurn : 0;
+      } else {
+        const { data: runRow } = await supabase
+          .from("bot_test_runs")
+          .select("id")
+          .eq("status", "running")
+          .order("started_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        testRunId = runRow?.id || null;
+      }
+      console.log(`🧪 [test-mode] ATIVO phone=${phone} runId=${testRunId} turn=${testTurn}`);
     }
 
     // Sender real OU mock que registra em bot_test_outbound
@@ -396,7 +403,7 @@ Deno.serve(async (req) => {
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
           });
       const result = testMode && testRunId
-        ? await botRequestStore.run({ testMode: true, runId: testRunId, supabase, turn: 0 }, runEngine)
+        ? await botRequestStore.run({ testMode: true, runId: testRunId, supabase, turn: testTurn }, runEngine)
         : await runEngine();
       reply = result.reply;
       updates = result.updates;

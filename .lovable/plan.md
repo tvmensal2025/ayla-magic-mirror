@@ -1,71 +1,39 @@
-## Objetivo
+Plano para fazer isso funcionar de forma profissional, sem mais tentativa no escuro:
 
-Adicionar testes end-to-end **reais** do bot no `/admin/bot-audit`: o sistema vai disparar mensagens fictícias (mas com payload real do Whapi) contra o `whapi-webhook` em modo de teste, percorrer o fluxo completo (boas-vindas → nome → conta → vídeo → dúvidas → cadastro → conta de luz → documento → endereço → finalização) e mostrar a transcrição passo a passo. Sem custo de WhatsApp, sem 90s de delay de mídia, OCR mockado.
+1. Corrigir o erro atual que impede qualquer teste E2E de iniciar
+- O log real do Supabase mostra: `bot-e2e-runner error: supabaseKey is required`.
+- A função está tentando criar um client com `SUPABASE_PUBLISHABLE_KEY`, mas esse segredo não existe no ambiente Edge; deve usar uma variável compatível com o projeto, com fallback seguro para `SUPABASE_ANON_KEY`/`VITE_SUPABASE_PUBLISHABLE_KEY` quando disponível.
+- Resultado esperado: clicar em “Rodar bot do início ao fim” deixa de falhar imediatamente e cria uma run real em `bot_test_runs`.
 
-A infra do backend já está no ar (migration `bot_test_runs` + `bot_test_outbound`, função `bot-e2e-runner`, `_shared/test-mode.ts`, mocks no `whapi-webhook` e `bot-flow.ts`). Falta UI + cenários adicionais + endurecer o runner para validar de verdade.
+2. Garantir que o teste use o mesmo consultor do webhook
+- Hoje o runner tem fallback para o consultor do usuário logado, mas o `whapi-webhook` exige `settings.superadmin_consultant_id` e busca o customer por esse consultor.
+- Isso pode criar o lead em um consultor e o webhook tentar processar em outro, quebrando o fluxo.
+- Ajuste: o runner só deve rodar com o mesmo `superadmin_consultant_id` usado pelo webhook, ou retornar erro claro dizendo o que falta configurar.
 
-## O que será feito
+3. Corrigir o vínculo da run de teste dentro do webhook
+- Hoje o webhook pega “a run running mais recente” sem filtrar pelo telefone/customer.
+- Em testes simultâneos ou repetidos, isso pode registrar mensagens na run errada.
+- Ajuste: buscar a run ativa vinculada ao `customer_id`/telefone correto depois de localizar o customer.
 
-### 1. UI — nova seção "Teste end-to-end real" em `src/pages/BotAudit.tsx`
+4. Fazer o outbound mostrar turnos reais
+- O mock de envio grava `turn: 0` porque o `AsyncLocalStorage` é iniciado com `turn: 0`.
+- Ajuste: passar o turno real vindo do payload/test runner para o contexto de teste, para a timeline ficar confiável.
 
-Card novo abaixo dos dois existentes, com:
+5. Fortalecer o simulador para seguir o fluxo real sem alucinar
+- O runner vai responder por estado real (`conversation_step`) e não por texto inventado.
+- Melhorar respostas para: nome, valor da conta, dúvidas, aceite, conta de luz, confirmação de dados, tipo de documento, documento, e dados faltantes.
+- Para cada cenário, registrar claramente: mensagem do lead, resposta do bot, step antes/depois, status HTTP, latência e motivo de parada.
 
-- Dropdown de **cenário**:
-  - `happy_path` — lead colaborativo, completa o cadastro inteiro
-  - `lead_indeciso` — pede preço duas vezes, faz dúvidas, depois aceita
-  - `valor_baixo` — conta abaixo do mínimo (<R$ 100), bot deve descartar educadamente
-  - `lead_some` — para de responder no meio (valida detector de "stuck")
-  - `documento_cnh` — escolhe CNH em vez de RG no cadastro
-- Botão **"▶ Rodar bot do início ao fim"**
-- Enquanto roda: spinner + contador de turnos ao vivo (polling `bot_test_outbound` por `run_id` a cada 1s)
-- Timeline vertical com badges **USER** (azul) / **BOT** (verde) / **SYSTEM** (cinza), mostrando: tipo (texto/áudio/imagem), conteúdo (truncado a 200 chars), step antes → depois, latência em ms
-- Resumo final: status (`completed` / `stuck` / `max_turns` / `error`), nº de turnos, último step, tempo total
-- Botão **"🗑 Limpar dados deste teste"** que chama `cleanup_bot_test_data(run_id)` (já existe no DB)
-- Lista das últimas 5 runs (`bot_test_runs`) com status colorido e ação de re-abrir/limpar
+6. Validar com sinais reais antes de concluir
+- Consultar logs de `bot-e2e-runner` e `whapi-webhook` após deploy.
+- Chamar a Edge Function de teste diretamente e confirmar que uma run aparece no banco.
+- Conferir que a timeline tem eventos inbound/outbound e que o resumo final aponta exatamente onde o fluxo terminou: concluído, travado, lead silencioso, valor baixo, erro de webhook ou máximo de turnos.
 
-### 2. Cenários no `bot-e2e-runner`
+7. Pequeno ajuste na tela `/admin/bot-audit`
+- Mostrar erro técnico de forma útil: função, etapa, customer, último step e recomendação objetiva.
+- Remover linguagem que pareça “teste fake”: deixar claro que é simulação real do webhook/banco, sem enviar WhatsApp pago.
 
-Refatorar `nextReplyForStep()` para receber também o nome do cenário e variar as respostas:
-
-```ts
-function nextReply(scenario: string, step: string|null, turn: number): Reply
-```
-
-- `happy_path`: comportamento atual
-- `lead_indeciso`: nos steps `checkin_pos_video` e `duvidas_pos_club`, primeiro responde "tenho dúvida, é seguro?"; só na 2ª passada confirma
-- `valor_baixo`: no `qualificacao` envia áudio com transcript "minha conta é uns 60 reais"
-- `lead_some`: depois do turno 4, devolve `null` para o runner registrar "lead silencioso" e parar
-- `documento_cnh`: no `ask_tipo_documento` responde "cnh"
-
-### 3. Validações automáticas pós-run
-
-No final de cada run, o runner roda checagens e grava em `bot_test_runs.summary`:
-
-- ✅ todas as transições têm `from_step ≠ to_step` (não ficou parado)
-- ✅ nenhum `bot_test_outbound.kind === 'fetch_error'`
-- ✅ nenhuma resposta do bot contém placeholders não substituídos (`{{nome}}`, `{{valor_conta}}`, etc.)
-- ✅ no cenário `happy_path`, `customer.status` final ∈ {`pending_review`, `approved`, `active`}
-- ✅ no `valor_baixo`, último step contém `descarte` ou `bot_paused = true`
-
-A UI mostra cada checagem com ✓/✗ ao lado do resumo.
-
-### 4. Pequenos ajustes técnicos
-
-- `bot-e2e-runner` hoje usa `superadmin_consultant_id` de `settings`. Adicionar fallback: se ausente, pega o consultor do usuário logado (`consultants.user_id = auth.uid()`).
-- O runner já trata `lead_some` parando o loop quando `nextReply` devolve null.
-- Botão "Limpar customer de teste" em massa: `cleanup_bot_test_data` para todas as runs >24h em um clique (admin).
-
-## Arquivos
-
-- `src/pages/BotAudit.tsx` — nova seção + polling + timeline
-- `supabase/functions/bot-e2e-runner/index.ts` — cenários + validações + fallback de consultor
-
-Sem migrations novas. Sem mudanças no fluxo de produção do bot.
-
-## Riscos
-
-- **Customer fantasma**: range `5500000xxx` é reservado e o botão de limpeza apaga tudo. Garbage collection de runs >7 dias já no `cleanup_bot_test_data`.
-- **OCR mockado pode divergir do real**: o mock devolve exatamente o schema atual do Google Vision (`distribuidora`, `numero_instalacao`, `valor`); se o schema mudar no Vision, o mock precisa ser atualizado junto.
-- **Loop infinito**: limite de 25 turnos + detector de "stuck" (3 turnos sem mudança de step) já implementados.
-
-Depois que você aprovar, implemento direto.
+Critério de pronto:
+- O botão de E2E não falha com `supabaseKey is required`.
+- Pelo menos o cenário `happy_path` cria run, customer, mensagens inbound/outbound e resumo.
+- Se o bot travar, a tela mostra exatamente em qual step travou e qual foi a última resposta do bot, em vez de parecer que “alucinou”.

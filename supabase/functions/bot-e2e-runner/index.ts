@@ -105,10 +105,18 @@ Deno.serve(async (req) => {
     const scenario = (String(body.scenario || "happy_path") as Scenario);
     const maxTurns = Number(body.maxTurns || 25);
 
-    // Auth
+    // Auth — usa anon key (SUPABASE_PUBLISHABLE_KEY pode não estar injetado no runtime edge)
     const authHeader = req.headers.get("Authorization") || "";
     const token = authHeader.replace(/^Bearer\s+/i, "");
-    const userClient = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!, {
+    const ANON_KEY =
+      Deno.env.get("SUPABASE_ANON_KEY") ||
+      Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ||
+      Deno.env.get("VITE_SUPABASE_PUBLISHABLE_KEY") ||
+      "";
+    if (!ANON_KEY) {
+      return new Response(JSON.stringify({ error: "SUPABASE_ANON_KEY/PUBLISHABLE_KEY ausente no ambiente da função" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const userClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
     const { data: userData } = await userClient.auth.getUser();
@@ -190,7 +198,13 @@ Deno.serve(async (req) => {
       try {
         const res = await fetch(`${SUPABASE_URL}/functions/v1/whapi-webhook`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}`, apikey: SERVICE_ROLE },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${SERVICE_ROLE}`,
+            apikey: SERVICE_ROLE,
+            "x-bot-test-run-id": runId,
+            "x-bot-test-turn": String(turn),
+          },
           body: JSON.stringify(payload),
         });
         resStatus = res.status;
