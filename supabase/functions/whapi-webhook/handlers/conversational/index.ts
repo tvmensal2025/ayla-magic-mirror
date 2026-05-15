@@ -70,7 +70,9 @@ const CADASTRO_STEPS = new Set([
   "aguardando_assinatura", "complete",
 ]);
 
-async function loadFlow(supabase: any, consultantId: string): Promise<DbStep[] | null> {
+interface LoadedFlow { flowId: string; steps: DbStep[]; }
+
+async function loadFlow(supabase: any, consultantId: string): Promise<LoadedFlow | null> {
   try {
     const { data: flow } = await supabase
       .from("bot_flows")
@@ -80,21 +82,99 @@ async function loadFlow(supabase: any, consultantId: string): Promise<DbStep[] |
       .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle();
-    if (!flow?.id) return null;
+    if (!flow?.id) {
+      console.log(`[conversational] loadFlow: no active flow for consultant=${consultantId}`);
+      return null;
+    }
 
-    const { data: steps } = await supabase
+    const { data: steps, error: stepsErr } = await supabase
       .from("bot_flow_steps")
       .select("id, step_key, step_type, message_text, text_delay_ms, slot_key, is_active, position, transitions, captures, fallback, auto_detect_doc_type, media_order")
       .eq("flow_id", flow.id)
       .order("position", { ascending: true });
-    return ((steps || []) as DbStep[]).map((step) => ({
+    if (stepsErr) {
+      console.error("[conversational] loadFlow: steps query failed", stepsErr);
+      return null;
+    }
+    const normalized = ((steps || []) as DbStep[]).map((step) => ({
       ...step,
       // Fluxos antigos podem ter step_key nulo; usa o id como chave estável
       // para o motor dinâmico não cair no fluxo legado.
       step_key: step.step_key || step.id,
     }));
+    console.log(`[conversational] loadFlow: flow=${flow.id} steps=${normalized.length}`);
+    return { flowId: flow.id as string, steps: normalized };
   } catch (e) {
     console.error("[conversational] loadFlow failed", e);
+    return null;
+  }
+}
+
+// ─── Q&A matching (FAQ) ────────────────────────────────────────────────
+// Procura uma pergunta cadastrada em bot_flow_qa que case com a mensagem do
+// lead. Quando casa, manda mídia + texto e MANTÉM o passo atual (repete),
+// igual ao comportamento de FAQ do bot-flow legado.
+const _norm = (s: string) =>
+  String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+async function matchQA(
+  supabase: any,
+  flowId: string,
+  consultantId: string,
+  messageText: string,
+): Promise<{ text: string; mediaUrls: { url: string; kind: string }[] } | null> {
+  const normalized = _norm(messageText);
+  if (!normalized || normalized.length < 2) return null;
+  try {
+    const { data: qaRows } = await supabase
+      .from("bot_flow_qa")
+      .select("id, text_response, is_closing")
+      .eq("flow_id", flowId)
+      .eq("is_opening", false);
+    const qaIds = ((qaRows as any[]) || []).map((q) => q.id);
+    if (!qaIds.length) return null;
+
+    const { data: triggers } = await supabase
+      .from("bot_flow_qa_triggers")
+      .select("qa_id, phrase")
+      .in("qa_id", qaIds);
+    const hit = ((triggers as any[]) || []).find((t) => {
+      const phrase = _norm(t.phrase);
+      return phrase && (normalized === phrase || normalized.includes(phrase) || phrase.includes(normalized));
+    });
+    if (!hit) return null;
+
+    const qa = ((qaRows as any[]) || []).find((q) => q.id === hit.qa_id);
+    if (!qa) return null;
+
+    const { data: mediaRows } = await supabase
+      .from("bot_flow_qa_media")
+      .select("media_kind, slot_key, media_id, position")
+      .eq("qa_id", qa.id)
+      .order("position");
+
+    const mediaUrls: { url: string; kind: string }[] = [];
+    for (const m of ((mediaRows as any[]) || [])) {
+      let url: string | null = null;
+      let kind = ["audio", "video", "image"].includes(m.media_kind) ? m.media_kind : "document";
+      if (m.media_id) {
+        const { data: mr } = await supabase
+          .from("ai_media_library").select("url, kind").eq("id", m.media_id).maybeSingle();
+        if (mr?.url) { url = mr.url; if (mr.kind) kind = mr.kind; }
+      }
+      if (!url && m.slot_key) {
+        const { data: personal } = await supabase
+          .from("ai_media_library").select("url")
+          .eq("consultant_id", consultantId).eq("slot_key", m.slot_key)
+          .eq("active", true).limit(1).maybeSingle();
+        if (personal?.url) url = personal.url;
+      }
+      if (url) mediaUrls.push({ url, kind });
+    }
+
+    return { text: String(qa.text_response || "").trim(), mediaUrls };
+  } catch (e) {
+    console.error("[conversational] matchQA failed", e);
     return null;
   }
 }
