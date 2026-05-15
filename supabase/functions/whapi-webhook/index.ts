@@ -16,6 +16,7 @@ import { checkAndMarkProcessed, logStepTransition, jsonLog } from "../_shared/au
 import { runBotFlow } from "./handlers/bot-flow.ts";
 import { runConversationalFlow } from "./handlers/conversational/index.ts";
 import { captureError } from "../_shared/sentry.ts";
+import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
