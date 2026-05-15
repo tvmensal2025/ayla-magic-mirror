@@ -108,12 +108,47 @@ const ATALHOS = [
 
 function parseTransitions(raw: unknown): Transition[] {
   if (!Array.isArray(raw)) return [];
-  return (raw as any[]).map((t) => ({
-    trigger_intent: String(t?.trigger_intent ?? "default"),
-    trigger_phrases: Array.isArray(t?.trigger_phrases) ? t.trigger_phrases.map(String) : [],
-    goto_step_id: t?.goto_step_id ?? null,
-    goto_special: (t?.goto_special as Transition["goto_special"]) ?? null,
-  }));
+  return (raw as any[])
+    // remove o antigo "default" — virou bloco Plano B
+    .filter((t) => String(t?.trigger_intent ?? "") !== "default")
+    .map((t) => ({
+      trigger_intent: String(t?.trigger_intent ?? "afirmacao"),
+      trigger_phrases: Array.isArray(t?.trigger_phrases) ? t.trigger_phrases.map(String) : [],
+      goto_step_id: t?.goto_step_id ?? null,
+      goto_special: (t?.goto_special as Transition["goto_special"]) ?? null,
+    }));
+}
+
+function parseCaptures(raw: unknown): Capture[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as any[])
+    .filter((c) => c && typeof c.field === "string")
+    .map((c) => ({ field: c.field as CaptureField, enabled: c.enabled !== false }));
+}
+
+function parseFallback(raw: unknown, transitions: unknown): Fallback {
+  // 1) usa coluna nova se preenchida
+  if (raw && typeof raw === "object") {
+    const r = raw as any;
+    if (r.mode === "goto" || r.mode === "ai" || r.mode === "repeat") {
+      return {
+        mode: r.mode,
+        goto_step_id: r.goto_step_id ?? null,
+        ai_prompt: typeof r.ai_prompt === "string" ? r.ai_prompt : "",
+      };
+    }
+  }
+  // 2) migração: se nas transitions antigas tinha um item "default", vira fallback
+  if (Array.isArray(transitions)) {
+    const def = (transitions as any[]).find((t) => t?.trigger_intent === "default");
+    if (def) {
+      if (def.goto_special === "repeat" || (!def.goto_step_id && !def.goto_special)) {
+        return { mode: "repeat" };
+      }
+      if (def.goto_step_id) return { mode: "goto", goto_step_id: def.goto_step_id };
+    }
+  }
+  return { mode: "repeat" };
 }
 
 export default function FluxoCamila() {
