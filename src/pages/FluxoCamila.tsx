@@ -363,6 +363,28 @@ export default function FluxoCamila() {
           </div>
         </Card>
 
+        {showMigrationBanner && (
+          <Card className="p-4 border-sky-500/30 bg-sky-500/5 flex items-start gap-3">
+            <Sparkles className="h-5 w-5 text-sky-500 mt-0.5 shrink-0" />
+            <div className="flex-1 text-sm">
+              <div className="font-semibold mb-1">Atualizamos o sistema de regras</div>
+              <p className="text-muted-foreground text-[13px]">
+                Agora cada passo tem 3 blocos: <strong>Regras</strong>, <strong>Capturar dados</strong> e <strong>Plano B</strong>.
+                Seus fluxos antigos foram convertidos automaticamente — nada deixou de funcionar.
+                Confira o <strong>Plano B</strong> de cada passo para escolher entre repetir, pular ou deixar a IA decidir.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                localStorage.setItem("camila_migration_v2_dismissed", "1");
+                setShowMigrationBanner(false);
+              }}
+            >Entendi</Button>
+          </Card>
+        )}
+
         {/* Atalhos */}
         <Card className="p-4 sm:p-5 border-amber-500/30 bg-amber-500/5">
           <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
