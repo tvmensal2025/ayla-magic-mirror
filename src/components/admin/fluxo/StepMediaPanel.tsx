@@ -126,7 +126,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     (async () => {
       const { data, error } = await supabase
         .from("ai_media_library")
-        .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec")
+        .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms")
         .eq("consultant_id", consultantId)
         .eq("active", true)
         .in("slot_key", slotKeys)
