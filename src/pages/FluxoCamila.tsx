@@ -102,8 +102,10 @@ const ICON_OPTIONS: { value: IconKey; label: string }[] = [
 // pro estágio correspondente do cadastro automaticamente.
 const STEP_TYPE_OPTIONS: { value: string; label: string; hint: string }[] = [
   { value: "message",            label: "💬 Mensagem comum",                hint: "Texto + mídia + regras (padrão)." },
-  { value: "capture_conta",      label: "📸 Captar conta de luz",           hint: "Pede a conta, faz OCR e mostra dados com botões SIM/NÃO/EDITAR." },
+  { value: "capture_conta",      label: "📸 Captar conta de luz",           hint: "Pede a conta, faz OCR e mostra dados com botão Confirmar/Corrigir." },
   { value: "capture_documento",  label: "🪪 Captar documento (RG/CNH)",     hint: "Pede a foto. A IA detecta automaticamente se é RG ou CNH." },
+  { value: "capture_email",      label: "📧 Captar e-mail",                  hint: "Pede o e-mail e mostra botão Confirmar/Corrigir antes de seguir." },
+  { value: "confirm_phone",      label: "📱 Confirmar telefone do WhatsApp", hint: "Pergunta se vai usar este número do WhatsApp ou informar outro." },
   { value: "finalizar_cadastro", label: "🎉 Finalizar cadastro + parabéns", hint: "Envia ao portal, trata o OTP e dispara a mensagem de parabéns deste passo." },
 ];
 
