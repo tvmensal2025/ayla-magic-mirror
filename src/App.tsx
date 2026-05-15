@@ -20,6 +20,7 @@ const FluxoCamila = lazy(() => import("./pages/FluxoCamila"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const AdminBotTools = lazy(() => import("./pages/AdminBotTools"));
+const BotAudit = lazy(() => import("./pages/BotAudit"));
 
 const queryClient = new QueryClient();
 
@@ -49,6 +50,7 @@ const App = () => (
               <Route path="/admin/fluxos" element={<FluxoCamila />} />
               <Route path="/admin/fluxos-antigo" element={<FlowBuilder />} />
               <Route path="/admin/bot-tools" element={<AdminBotTools />} />
+              <Route path="/admin/bot-audit" element={<BotAudit />} />
               <Route path="/super-admin" element={<SuperAdmin />} />
               <Route path="/assistente" element={<AssistentePage />} />
               <Route path="/crm" element={<CRMLandingPage />} />
