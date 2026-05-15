@@ -457,7 +457,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   }
 
 
-  const step = customer.conversation_step || "welcome";
+  let step = customer.conversation_step || "welcome";
   let reply = "";
   const updates: Record<string, any> = {};
 
