@@ -463,6 +463,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     if (!opts?.force && NO_QA_STEPS.has(step)) return null;
     const normalizedText = messageText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     if (normalizedText.length < 2) return null;
+    if (!opts?.force && step === "checkin_pos_video" && isPositiveCheckinIntent(normalizedText)) return null;
+    if (!opts?.force && step === "duvidas_pos_club" && isClubProgressIntent(normalizedText)) return null;
 
     const { data: activeFlow } = await supabase
       .from("bot_flows")
