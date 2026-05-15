@@ -19,7 +19,7 @@ const FlowBuilder = lazy(() => import("./pages/FlowBuilder"));
 const FluxoCamila = lazy(() => import("./pages/FluxoCamila"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
 const NotFound = lazy(() => import("./pages/NotFound"));
-const AdminBotTools = lazy(() => import("./pages/AdminBotTools"));
+
 
 const queryClient = new QueryClient();
 
