@@ -183,6 +183,60 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── 🔇 BOT PAUSADO (handoff humano ativo) ────────────────────────
+    // Se o consultor tomou conta da conversa, NÃO interferimos por X horas.
+    if ((customer as any).bot_paused_until && new Date((customer as any).bot_paused_until) > new Date()) {
+      // Loga inbound mas não responde — deixa o consultor responder
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "inbound",
+        message_text: messageText || (hasAudio ? "[áudio]" : "[arquivo]"),
+        message_type: hasAudio ? "audio" : (isFile ? "image" : "text"),
+        conversation_step: customer.conversation_step,
+      });
+      console.log(`🔇 Bot pausado para ${phone} até ${(customer as any).bot_paused_until} — ignorando msg`);
+      return new Response(JSON.stringify({ ok: true, msg: "bot_paused", paused_until: (customer as any).bot_paused_until }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ─── 🆘 HANDOFF: cliente pediu pra falar com humano ────────────────
+    if (messageText && detectHandoffIntent(messageText)) {
+      const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      await supabase.from("customers").update({
+        bot_paused_until: pausedUntil,
+        bot_paused_reason: "handoff_request",
+      }).eq("id", customer.id);
+      await supabase.from("bot_handoff_alerts").insert({
+        customer_id: customer.id,
+        consultant_id: superAdminConsultantId,
+        phone,
+        reason: "client_requested_human",
+        user_message: messageText.slice(0, 500),
+      });
+      // Log inbound
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "inbound",
+        message_text: messageText,
+        message_type: "text",
+        conversation_step: customer.conversation_step,
+      });
+      const handoffReply = `Tudo bem! 🙏 Vou te transferir agora para ${nomeRepresentante}. Em alguns instantes alguém vai responder por aqui.`;
+      try { await sender.sendText(remoteJid, handoffReply); } catch (e: any) { console.error("erro handoff reply:", e); }
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "outbound",
+        message_text: handoffReply,
+        message_type: "text",
+        conversation_step: customer.conversation_step,
+      });
+      console.log(`🆘 Handoff ativado para ${phone} (${customer.id})`);
+      return new Response(JSON.stringify({ ok: true, msg: "handoff_triggered", paused_until: pausedUntil }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // ─── Log inbound (audio: marcamos como [áudio] e atualizamos depois com a transcrição) ──
     const inboundLogText = hasAudio ? "[áudio]" : (isFile ? "[arquivo]" : messageText);
     const inboundLogType = hasAudio ? "audio" : (isFile ? "image" : "text");
