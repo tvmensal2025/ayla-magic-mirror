@@ -213,8 +213,36 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     toast.success("Mídia removida");
   }
 
+  async function updateDelay(m: Media, newDelayMs: number) {
+    const clamped = Math.max(0, Math.min(60000, Math.round(newDelayMs)));
+    setItems(prev => prev.map(x => x.id === m.id ? { ...x, delay_before_ms: clamped } : x));
+    const { error } = await supabase
+      .from("ai_media_library")
+      .update({ delay_before_ms: clamped })
+      .eq("id", m.id);
+    if (error) toast.error("Erro ao salvar atraso: " + error.message);
+  }
+
+  async function moveItem(m: Media, dir: -1 | 1) {
+    // Reordena globalmente (todas as mídias do passo, sem agrupar por kind)
+    const sorted = [...items].sort((a, b) => a.send_order - b.send_order);
+    const idx = sorted.findIndex(x => x.id === m.id);
+    const target = idx + dir;
+    if (idx < 0 || target < 0 || target >= sorted.length) return;
+    [sorted[idx], sorted[target]] = [sorted[target], sorted[idx]];
+    // Reatribui send_order sequencial
+    const updates = sorted.map((x, i) => ({ ...x, send_order: 100 + i }));
+    setItems(updates);
+    await Promise.all(
+      updates.map(u =>
+        supabase.from("ai_media_library").update({ send_order: u.send_order }).eq("id", u.id)
+      )
+    );
+  }
+
   function renderMediaItem(m: Media) {
     const Icon = KIND_ICON[m.kind];
+    const delaySec = ((m.delay_before_ms ?? 1500) / 1000).toFixed(1);
     return (
       <div key={m.id} className="rounded-md border border-border/60 bg-muted/20 p-2 flex flex-col gap-2">
         <div className="flex items-start justify-between gap-2">
@@ -222,16 +250,37 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
             <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
             <div className="min-w-0">
               <div className="text-xs font-medium truncate">{m.label}</div>
-              <div className="text-[10px] text-muted-foreground">slot: {m.slot_key}</div>
+              <div className="text-[10px] text-muted-foreground">ordem: {m.send_order}</div>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removeMedia(m)}>
-            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-          </Button>
+          <div className="flex items-center gap-0.5">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => moveItem(m, -1)} title="Mover para cima">
+              <ArrowUp className="h-3.5 w-3.5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => moveItem(m, 1)} title="Mover para baixo">
+              <ArrowDown className="h-3.5 w-3.5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removeMedia(m)}>
+              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+            </Button>
+          </div>
         </div>
         {m.url && m.kind === "audio" && <audio controls src={m.url} className="w-full h-8" />}
         {m.url && m.kind === "image" && <img src={m.url} alt={m.label} className="w-full max-h-32 object-cover rounded" />}
         {m.url && m.kind === "video" && <video controls src={m.url} className="w-full max-h-40 rounded" />}
+        <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="shrink-0">⏱️ Aguardar antes de enviar:</span>
+          <input
+            type="number"
+            min={0}
+            max={60}
+            step={0.5}
+            defaultValue={delaySec}
+            onBlur={(e) => updateDelay(m, parseFloat(e.target.value || "0") * 1000)}
+            className="w-16 h-7 px-1.5 text-xs rounded border border-border bg-background"
+          />
+          <span>seg</span>
+        </label>
       </div>
     );
   }
