@@ -67,7 +67,13 @@ const CADASTRO_STEPS = new Set([
   "ask_complement", "ask_installation_number", "ask_bill_value",
   "ask_doc_frente_manual", "ask_doc_verso_manual", "ask_finalizar",
   "finalizando", "portal_submitting", "aguardando_otp", "validando_otp",
-  "aguardando_assinatura", "complete",
+  "aguardando_assinatura", "complete", "aguardando_humano",
+  // Edição pós-OCR (conta de luz)
+  "editing_conta_menu","editing_conta_nome","editing_conta_endereco",
+  "editing_conta_cep","editing_conta_distribuidora","editing_conta_instalacao","editing_conta_valor",
+  // Edição pós-OCR (documento)
+  "editing_doc_menu","editing_doc_nome","editing_doc_cpf","editing_doc_rg",
+  "editing_doc_nascimento","editing_doc_pai","editing_doc_mae",
 ]);
 
 interface LoadedFlow { flowId: string; steps: DbStep[]; }
