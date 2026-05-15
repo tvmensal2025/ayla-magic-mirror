@@ -972,7 +972,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       };
     }
 
-    if (Number.isFinite(typedBillValue) && typedBillValue >= 30) {
+    if (Number.isFinite(typedBillValue) && typedBillValue > 0 && typedBillValue < 100) {
+      return {
+        reply: `Obrigada por me falar. Com conta em torno de R$ ${typedBillValue.toFixed(0)}, normalmente a economia fica pequena e pode não compensar agora. Vou deixar registrado e, se seu consumo subir, a gente retoma 💚`,
+        updates: { electricity_bill_value: typedBillValue, status: "rejected", bot_paused: true, bot_paused_reason: "low_bill_value", conversation_step: "valor_baixo" },
+      };
+    }
+
+    if (Number.isFinite(typedBillValue) && typedBillValue >= 100) {
       return {
         reply: "Com essa média, já dá para calcular sua economia. Me envie uma FOTO ou PDF da sua conta de energia para eu confirmar os dados.",
         updates: { electricity_bill_value: typedBillValue, sales_phase: "fechamento", conversation_step: "aguardando_conta" },
@@ -1366,7 +1373,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const valueMatch = String(messageText || "").match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
       if (valueMatch) {
         const billValue = Number(valueMatch[1].replace(".", "").replace(",", "."));
-        if (Number.isFinite(billValue) && billValue >= 30) {
+        if (Number.isFinite(billValue) && billValue > 0 && billValue < 100) {
+          updates.electricity_bill_value = billValue;
+          updates.status = "rejected";
+          updates.bot_paused = true;
+          updates.bot_paused_reason = "low_bill_value";
+          reply = `Obrigada por me falar. Com conta em torno de R$ ${billValue.toFixed(0)}, normalmente a economia fica pequena e pode não compensar agora. Vou deixar registrado e, se seu consumo subir, a gente retoma 💚`;
+          updates.conversation_step = "valor_baixo";
+          break;
+        }
+        if (Number.isFinite(billValue) && billValue >= 100) {
           updates.electricity_bill_value = billValue;
           updates.sales_phase = "fechamento";
           reply = `Com essa média, já dá para calcular sua economia. Me envie uma FOTO ou PDF da sua conta de energia para eu confirmar os dados.`;
