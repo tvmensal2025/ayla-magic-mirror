@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Mic, Image as ImageIcon, Video, Trash2, Upload, ArrowUp, ArrowDown, Loader2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Mic, Image as ImageIcon, Video, Trash2, Upload, ArrowUp, ArrowDown, Loader2, Library, Check } from "lucide-react";
 import { toast } from "sonner";
 
 type Kind = "audio" | "image" | "video";
@@ -60,6 +61,56 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
   const [savingOrder, setSavingOrder] = useState(false);
   const fileInputs = useRef<Record<Kind, HTMLInputElement | null>>({ audio: null, image: null, video: null });
   const [uploading, setUploading] = useState<Kind | null>(null);
+  const [pickerKind, setPickerKind] = useState<Kind | null>(null);
+  const [libraryItems, setLibraryItems] = useState<Media[]>([]);
+  const [loadingLibrary, setLoadingLibrary] = useState(false);
+  const [linking, setLinking] = useState<string | null>(null);
+
+  async function openLibrary(kind: Kind) {
+    setPickerKind(kind);
+    setLoadingLibrary(true);
+    const { data } = await supabase
+      .from("ai_media_library")
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec")
+      .eq("consultant_id", consultantId)
+      .eq("kind", kind)
+      .eq("active", true)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    const existingUrls = new Set(items.filter(i => i.kind === kind).map(i => i.url));
+    setLibraryItems(((data as Media[]) ?? []).filter(m => !existingUrls.has(m.url)));
+    setLoadingLibrary(false);
+  }
+
+  async function linkFromLibrary(m: Media) {
+    const slotKey = slotKeys[0];
+    if (!slotKey) return;
+    setLinking(m.id);
+    // Cria uma nova linha vinculada (sem storage_path para não apagar o arquivo original ao remover)
+    const { data: row, error } = await supabase
+      .from("ai_media_library")
+      .insert({
+        consultant_id: consultantId,
+        kind: m.kind,
+        label: m.label,
+        slot_key: slotKey,
+        url: m.url,
+        storage_path: null,
+        active: true,
+        send_order: 100 + items.filter(i => i.kind === m.kind).length,
+        duration_sec: m.duration_sec,
+      })
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec")
+      .maybeSingle();
+    setLinking(null);
+    if (error) { toast.error("Erro ao vincular: " + error.message); return; }
+    if (row) {
+      setItems(prev => [...prev, row as Media]);
+      setLibraryItems(prev => prev.filter(x => x.id !== m.id));
+    }
+    toast.success("Mídia vinculada a este passo");
+  }
+
 
   useEffect(() => {
     if (!slotKeys.length) {
@@ -193,16 +244,29 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
             </span>
             <Badge variant="secondary" className="text-[10px] h-4">{list.length}</Badge>
           </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs"
-            disabled={uploading === kind || !slotForUpload}
-            onClick={() => fileInputs.current[kind]?.click()}
-          >
-            {uploading === kind ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Upload className="h-3 w-3 mr-1" />}
-            Adicionar
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              disabled={!slotForUpload}
+              onClick={() => openLibrary(kind)}
+              title="Usar mídia já salva na sua biblioteca"
+            >
+              <Library className="h-3 w-3 mr-1" />
+              Biblioteca
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              disabled={uploading === kind || !slotForUpload}
+              onClick={() => fileInputs.current[kind]?.click()}
+            >
+              {uploading === kind ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Upload className="h-3 w-3 mr-1" />}
+              Enviar
+            </Button>
+          </div>
           <input
             ref={el => (fileInputs.current[kind] = el)}
             type="file"
@@ -284,6 +348,49 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
           Define em que ordem a Camila envia as mídias e o texto deste passo.
         </p>
       </div>
+
+      <Dialog open={!!pickerKind} onOpenChange={(o) => !o && setPickerKind(null)}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Sua biblioteca de {pickerKind && KIND_LABEL[pickerKind].toLowerCase()}</DialogTitle>
+            <DialogDescription>
+              Toque em uma mídia para vincular a este passo. Não duplica arquivos — usa o mesmo que você já enviou.
+            </DialogDescription>
+          </DialogHeader>
+          {loadingLibrary ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center">
+              <Loader2 className="h-4 w-4 animate-spin" /> Carregando…
+            </div>
+          ) : libraryItems.length === 0 ? (
+            <div className="text-sm text-muted-foreground italic py-8 text-center">
+              Nenhuma mídia disponível na biblioteca. Envie uma nova pelo botão "Enviar".
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-2">
+              {libraryItems.map(m => (
+                <button
+                  key={m.id}
+                  onClick={() => linkFromLibrary(m)}
+                  disabled={!!linking}
+                  className="text-left rounded-md border border-border/60 bg-muted/20 p-2 hover:bg-muted/40 transition disabled:opacity-50"
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="text-xs font-medium truncate">{m.label}</div>
+                    {linking === m.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 text-muted-foreground" />}
+                  </div>
+                  {m.url && m.kind === "audio" && <audio controls src={m.url} className="w-full h-8" onClick={e => e.stopPropagation()} />}
+                  {m.url && m.kind === "image" && <img src={m.url} alt={m.label} className="w-full max-h-32 object-cover rounded" />}
+                  {m.url && m.kind === "video" && <video controls src={m.url} className="w-full max-h-40 rounded" onClick={e => e.stopPropagation()} />}
+                  {m.slot_key && <div className="text-[10px] text-muted-foreground mt-1">já usada em: {m.slot_key}</div>}
+                </button>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPickerKind(null)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
