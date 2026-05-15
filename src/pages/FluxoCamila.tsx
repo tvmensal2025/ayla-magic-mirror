@@ -369,6 +369,16 @@ export default function FluxoCamila() {
                 );
               })}
 
+              {userId && passo.slots.length > 0 && (
+                <StepMediaPanel
+                  consultantId={userId}
+                  stepKey={passo.id}
+                  slotKeys={passo.slots}
+                  initialOrder={stepOrders[passo.id]}
+                  onOrderChange={(o) => setStepOrders(prev => ({ ...prev, [passo.id]: o }))}
+                />
+              )}
+
               {passo.ramificacoes.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-border/60">
                   <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Para onde vai depois</div>
