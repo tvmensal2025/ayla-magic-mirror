@@ -7,6 +7,19 @@ import type { BotContext, BotResult } from "../types.ts";
 import { CONVERSATIONAL_STEPS, decideTransition, type ConversationalStep } from "./state-machine.ts";
 import { classifyIntent } from "./intent-classifier.ts";
 import { getTemplate, renderTemplate } from "./templates.ts";
+import {
+  extractValor, extractTelefone, extractCPF, extractNome, detectRegexIntents,
+} from "../../_shared/captureExtractors.ts";
+
+// Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
+const aiCooldown = new Map<string, number>();
+function aiInCooldown(key: string): boolean {
+  const until = aiCooldown.get(key);
+  return !!until && Date.now() < until;
+}
+function setAiCooldown(key: string) {
+  aiCooldown.set(key, Date.now() + 60_000);
+}
 
 export { CONVERSATIONAL_STEPS };
 
