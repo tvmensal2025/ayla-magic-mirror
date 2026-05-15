@@ -1,135 +1,60 @@
-## Objetivo
+# 5 Recursos Enterprise para o Fluxo Camila
 
-Eliminar os 4 riscos identificados no Fluxo da Camila, deixando o sistema robusto contra entradas inesperadas e fluxos antigos.
+## 1. Idempotência de webhook
+- Nova tabela `processed_whatsapp_messages(message_id PK, received_at)` com TTL de 7 dias.
+- No `whapi-webhook`: antes de processar, `INSERT ... ON CONFLICT DO NOTHING`. Se já existia, retorna 200 OK e ignora.
+- Cron diário limpa registros > 7 dias.
 
----
+## 2. Rate limit / debounce por contato
+- Nova tabela `whatsapp_message_buffer(phone, consultant_id, messages jsonb[], scheduled_at)`.
+- Quando chega mensagem: agenda processamento para 3s no futuro e acumula no buffer.
+- Se chegar outra antes dos 3s, reseta o timer e concatena texto.
+- Edge function `process-message-buffer` (cron a cada 2s) processa buffers expirados, juntando mensagens em uma única entrada para a IA.
 
-## 1. Regex de captura — cobrir casos reais
+## 3. Handoff humano automático
+- Adicionar coluna `bot_paused_until timestamptz` em `customers`.
+- Detectar intents de handoff: "falar com humano", "atendente", "pessoa real", "não é robô?", "consultor".
+- Ao detectar: setar `bot_paused_until = now() + 24h`, criar registro em `ai_agent_logs` com `handoff=true`, e disparar notificação (registro em `crm_auto_message_log` com tipo `handoff_alert`) para o consultor.
+- Webhook checa `bot_paused_until` antes de processar — se ativo, ignora mensagem (deixa o consultor responder).
+- UI no painel CRM: botão "Reativar bot" no card do customer.
 
-**Problema hoje:** só pega "R$ 380", "minha conta vem 450", CPF/telefone formatados. Falha em "trezentos reais", "quinhentos e cinquenta", "minha conta tá vindo uns quatrocentos", nome em minúsculas ("sou joão silva"), telefone sem DDD.
+## 4. Timeout de conversa (follow-up)
+- Adicionar `last_bot_interaction_at` em `customers`.
+- Cron `bot-followup-checker` (a cada 30 min) busca customers em fluxo ativo sem interação há > 6h e < 48h.
+- Envia mensagem de follow-up configurável ("Oi {{nome}}, ainda está aí? Posso te ajudar?") com `followup_count` para evitar spam (máx 1).
+- Se > 48h sem resposta após follow-up: marca deal como `frio` no CRM.
 
-**Solução em camadas (cascata, do mais barato para o mais caro):**
+## 5. A/B testing de mensagens
+- A tabela `bot_messages` já tem campo `variant`. Aproveitar.
+- Adicionar tabela `bot_message_ab_results(template_key, variant, sent_count, replied_count, advanced_count, updated_at)`.
+- No envio: escolher variant aleatoriamente (round-robin ponderado), registrar envio.
+- Quando customer responde dentro de 1h: incrementar `replied_count`.
+- Quando avança no fluxo: incrementar `advanced_count`.
+- UI nova: `/admin/ab-testing` mostrando variantes lado a lado com taxas e botão "Promover vencedora".
 
-1. **Regex expandido** (grátis, instantâneo):
-   - Valor: aceita "380", "R$380", "R$ 380,50", "380 reais", "uns 400", "umas 500 pila"
-   - Nome: aceita minúsculas após "sou/me chamo/meu nome é/aqui é", capitaliza automático
-   - Telefone: aceita 8, 9, 10, 11 dígitos com/sem DDD, com/sem 9
-   - CPF: 11 dígitos com qualquer pontuação
+## Arquivos afetados
 
-2. **Tabela de números por extenso** (grátis):
-   - Mapa "cem→100, duzentos→200, trezentos→300...mil→1000"
-   - Combina com "e cinquenta", "e poucos" → 350
-   - Cobre 95% dos casos brasileiros sem chamar IA
+### Backend
+- Migration: `processed_whatsapp_messages`, `whatsapp_message_buffer`, `bot_message_ab_results`, colunas em `customers`, cron jobs.
+- `supabase/functions/whapi-webhook/index.ts` — idempotência + check `bot_paused_until` + buffer.
+- Nova: `supabase/functions/process-message-buffer/index.ts` — processa buffer agrupado.
+- Nova: `supabase/functions/bot-followup-checker/index.ts` — follow-ups.
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` — detecção de handoff + tracking A/B.
 
-3. **Fallback IA só se regex falhar E o campo está marcado para captura** (Gemini Flash, ~150 tokens):
-   - Prompt curto: "Extraia {nome|valor|telefone|cpf} desta mensagem. Responda só JSON ou null."
-   - Cache de 1h por (telefone + mensagem) para não gastar à toa
-   - Timeout 3s — se falhar, segue sem capturar (não trava o fluxo)
+### Frontend
+- `src/pages/CamilaCRM.tsx` (ou similar) — botão "Reativar bot" + indicador de pausa.
+- `src/pages/AdminABTesting.tsx` — nova página.
+- `src/pages/FluxoCamila.tsx` — config de timeout/follow-up message + variantes A/B por step.
 
-**Validação pós-captura:**
-- Valor entre R$ 30 e R$ 50.000 (descarta "1" ou "999999")
-- Telefone com DDD válido brasileiro (lista DDDs)
-- CPF com dígito verificador correto
-- Nome com 2+ palavras, sem números, sem palavrão
+## Ordem de execução
+1. Migration única com todas as tabelas/colunas + cron jobs.
+2. Idempotência (mais crítico).
+3. Handoff (mais visível para o usuário).
+4. Buffer/debounce.
+5. Follow-up.
+6. A/B testing (UI + tracking).
 
-Se inválido → ignora e loga, não salva lixo no `customers`.
-
----
-
-## 2. Gemini no Plano B — blindar contra falha
-
-**Problema hoje:** se Gemini falha, retorna formato estranho ou demora, o passo só repete sem aviso.
-
-**Solução:**
-
-1. **Schema rígido com `jsonSchema`** no `aiChat`:
-   ```
-   { next_step_key: enum[lista_de_steps_válidos], reason: string }
-   ```
-   Modelo é forçado a devolver um step que existe — impossível devolver "passo 99".
-
-2. **Timeout de 4s + 1 retry** com prompt encurtado.
-
-3. **Cascata de fallback explícita:**
-   - IA falha/timeout → vai pro step configurado em "se IA falhar" (novo campo no Plano B)
-   - Esse campo defaulta pra "repetir passo"
-   - UI mostra checkbox: "Se a IA der erro, [repetir | ir pro passo X]"
-
-4. **Rate limit awareness:** se vier 429 da gateway, marca conversa com flag e usa só regex+fallback fixo pelos próximos 60s (evita cascata de erros).
-
-5. **Log visível no Admin:** painel "Decisões da IA" mostra últimas 50 chamadas com input, output, latência, erro. Já temos `ai_decisions` no banco — só precisa expor.
-
----
-
-## 3. Conflito de regras — UI que avisa
-
-**Problema hoje:** se o usuário cria 2 regras que pegam a mesma coisa (ex: "disse SIM" + "palavra-chave: sim"), a primeira ganha silenciosamente.
-
-**Solução (frontend, sem mudança de backend):**
-
-1. **Validação ao salvar o passo:**
-   - Detecta intents duplicados (mesmo `intent` em 2 regras)
-   - Detecta palavras-chave que sobrepõem ("sim" em palavra-chave + intent "afirmacao")
-   - Mostra aviso amarelo: "⚠️ Estas 2 regras podem competir. A regra de cima sempre ganha."
-
-2. **Botão de reordenar (drag handle)** já existe no array — adicionar dica visual: "↑ regras do topo têm prioridade".
-
-3. **Simulador inline:** input "testar mensagem" no topo do passo. Usuário digita "sim quero", vê qual regra dispara. Roda o mesmo matcher do backend (extrair pra um util compartilhado).
-
-4. **Bloqueio de regras impossíveis:**
-   - "Plano B = repetir" + nenhuma regra → aviso vermelho "este passo nunca avança"
-   - 2 regras 100% idênticas → impede salvar
-
----
-
-## 4. Migração de fluxos antigos — converter sem trabalho manual
-
-**Problema hoje:** fluxos criados antes da mudança têm regra "default" que virou "repetir" no Plano B. Usuário precisa abrir cada passo e reconfigurar.
-
-**Solução (migração SQL única, idempotente):**
-
-1. **Detectar transições antigas com `intent: "default"`:**
-   - Se existe → mover o `to_step` dela pro `fallback.mode = "goto"` + `fallback.target_step`
-   - Remover a regra "default" do array `transitions`
-   - Roda em todos os `bot_flow_steps` existentes
-
-2. **Detectar passos sem nenhuma regra E sem fallback configurado:**
-   - Setar `fallback = {"mode": "ai", "prompt": "Decida o melhor próximo passo baseado no contexto da conversa."}`
-   - Só pra fluxos com `is_active=true` (ativos)
-
-3. **Banner no FluxoCamila** (mostrado uma vez, dismissível):
-   > "Atualizamos o sistema de regras. Seus fluxos foram convertidos automaticamente. [Ver o que mudou] [Entendi]"
-
-4. **Backup antes da migração:** copiar `transitions` atual pra coluna nova `transitions_backup_pre_v2 jsonb` — permite rollback se algo quebrar.
-
----
-
-## Detalhes técnicos
-
-**Backend** (`supabase/functions/whapi-webhook/handlers/conversational/index.ts`):
-- Novo arquivo `_shared/captureExtractors.ts` com regex + tabela de extenso + validadores
-- `extractCaptures()` chama cascata: regex → extenso → IA (se habilitado)
-- `aiDecideFallback()` usa `jsonSchema` com enum de step_keys válidos + timeout 4s
-- Wrapper `withAIFallback(fn, fallbackStep)` pra qualquer chamada de IA
-
-**Frontend** (`src/pages/FluxoCamila.tsx`):
-- `validateStepRules(step)` retorna array de warnings/errors
-- `<RuleConflictBadge>` em cada regra duplicada
-- `<StepSimulator>` collapsible no header do StepCard
-- Banner de migração em `<FlowsList>` lendo flag em localStorage
-
-**Migração** (SQL):
-- Função `migrate_default_to_fallback()` rodada uma vez
-- Coluna `transitions_backup_pre_v2` adicionada com cópia
-- Adicionar `fallback.on_ai_error jsonb` (default `{"mode":"repeat"}`)
-
-**Sem mudança em:**
-- Cadastro / OCR / portal worker
-- Mídia / atalhos globais
-- Estrutura de `customers`
-
----
-
-## Entrega
-
-Migração SQL → backend (extractors + IA blindada) → frontend (validação + simulador + banner). Tudo numa parte. Aprovando, sigo.
+## Notas
+- Sem rate limiting tradicional (por IP/user) — apenas debounce funcional por contato.
+- Detecção de handoff usa regex + AI fallback (mesmo padrão já implementado).
+- A/B testing começa simples: escolha aleatória 50/50 entre variantes ativas. Otimização (Thompson sampling, etc.) pode vir depois.
