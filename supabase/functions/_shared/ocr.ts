@@ -98,6 +98,7 @@ export async function ocrContaEnergia(
   mediaMessage?: any
 ): Promise<{ sucesso: boolean; dados?: any; erro?: string }> {
   try {
+    if (isTestMode()) { console.log("🧪 [test-mode] ocrContaEnergia mocked"); return mockBillOcr(); }
     if (!geminiApiKey) return { sucesso: false, erro: "GEMINI_API_KEY não configurada" };
 
     const img = await baixarImagem(imagemUrl, base64FromEvolution, mediaMessage);
