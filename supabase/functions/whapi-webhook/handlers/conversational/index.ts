@@ -377,12 +377,16 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   }
 
   const consultantId = (ctx as any).consultorId || ctx.customer?.consultant_id;
-  const dbSteps = consultantId ? await loadFlow(ctx.supabase, consultantId) : null;
+  const loaded = consultantId ? await loadFlow(ctx.supabase, consultantId) : null;
+  console.log(`[conversational] entry stepKey="${stepKey}" consultantId=${consultantId} dbSteps=${loaded?.steps?.length ?? 0}`);
 
   // Fallback to legacy hardcoded machine if no flow seeded
-  if (!dbSteps || dbSteps.length === 0) {
+  if (!loaded || loaded.steps.length === 0) {
+    console.log(`[conversational] → falling back to LEGACY (no dynamic flow)`);
     return runLegacyConversational(ctx);
   }
+  const dbSteps = loaded.steps;
+  const flowId = loaded.flowId;
 
   const firstActive = dbSteps.find((s) => s.is_active) || dbSteps[0];
   const currentStep = dbSteps.find((s) => s.step_key === stepKey);
@@ -398,6 +402,22 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     return {
       reply,
       updates: { conversation_step: firstActive.step_key, __inline_sent: mediaSent || undefined },
+    };
+  }
+
+  // ─── Q&A FAQ matching ───────────────────────────────────────────────
+  // Antes de classificar intenção, vê se a mensagem casa com uma pergunta
+  // cadastrada no Flow Builder. Se casar, responde e MANTÉM o passo atual.
+  const qaHit = await matchQA(ctx.supabase, flowId, consultantId, ctx.messageText || "");
+  if (qaHit) {
+    console.log(`[conversational] QA hit at step="${stepKey}"`);
+    // Envia mídia inline (se houver) — texto vai pelo retorno padrão
+    for (const m of qaHit.mediaUrls) {
+      try { await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", m.kind); } catch (_) {}
+    }
+    return {
+      reply: renderTemplate(qaHit.text || "", { nome: ctx.customer.name, representante: ctx.nomeRepresentante }),
+      updates: { conversation_step: stepKey, __inline_sent: qaHit.mediaUrls.length > 0 || undefined },
     };
   }
 
