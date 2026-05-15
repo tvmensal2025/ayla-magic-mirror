@@ -309,6 +309,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   const stepTypeToCadastro = (st: string | null | undefined): string | null => {
     if (st === "capture_conta") return "aguardando_conta";
     if (st === "capture_documento") return "aguardando_doc_auto"; // novo: detecta tipo automaticamente
+    if (st === "capture_email") return "ask_email";
+    if (st === "confirm_phone") return "ask_phone_confirm";
     if (st === "finalizar_cadastro") return "ask_finalizar";
     return null;
   };
