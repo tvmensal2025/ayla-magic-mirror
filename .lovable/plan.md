@@ -1,75 +1,101 @@
-## Diagnóstico (o que eu achei olhando seu banco e os logs)
+## Diagnóstico (a partir dos logs reais do último teste)
 
-Você não fez nada errado no editor. Tem **3 bugs no backend** que estão sabotando o fluxo:
+Olhei os logs do webhook e o código dos handlers. Encontrei **3 falhas reais** e **1 melhoria pedida**:
 
-### Bug 1 — Cliente travado em "fluxo antigo" mesmo após Limpar conversa
-O número **5511989000650** tem na tabela `customers` o campo `conversational_flow_enabled = false` (gravado em algum momento antigo). Esse campo **não é resetado** pela função `reset_lead_conversation`. Resultado: por mais que você limpe a conversa, esse lead **nunca entra no novo motor** que lê o seu FluxoCamila — ele cai no `runBotFlow` antigo (hardcoded), que responde "*amigo, Pra eu te ajudar melhor, qual o valor médio…*". Por isso você vê SEMPRE essa mesma frase em vez do seu passo 1.
+### 1. Valor da conta vira "1,69" (deveria ser R$ 1.688,15)
+O Gemini extraiu corretamente `valorConta: "1.688,15"`. O bug está em `supabase/functions/_shared/ocr.ts:171`:
 
-### Bug 2 — `step_key` nulo nos passos do editor → motor não acha o passo atual
-Os passos que você criou no /admin/fluxos foram salvos com `step_key = NULL` (só os 4 últimos, "Conta de energia/Cadastro/Conta de luz/Confirmacao", têm `passo_xxx`). Quando o lead chega com um `conversation_step` antigo (ex.: "qualificacao"), o motor procura `step_key = "qualificacao"`, não acha, e **deveria** restartar no passo 1 — mas em alguns casos cai no fluxo legado e dispara a mensagem velha.
-
-### Bug 3 — Passo 1 ("Boas Vindas e Nome.") com `message_text` NULL e sem texto de saudação
-Ele tem só 1 áudio anexado (slot `boas_vindas`). Como `message_text` está vazio, o motor manda o áudio e **não manda nenhum texto** depois — fica parecendo que o fluxo "não iniciou".
-
----
-
-## O que vou fazer
-
-### 1) Migração SQL (corrige o coração do problema)
-
-```sql
--- 1.a) reset_lead_conversation: também zerar o override individual,
---      garantindo que TODO lead resetado volte a respeitar o flag do consultor.
-ALTER FUNCTION public.reset_lead_conversation … 
-   -- adicionar:  conversational_flow_enabled = NULL
-
--- 1.b) Limpeza pontual: zerar override falso já existente em todos os leads
-UPDATE customers
-   SET conversational_flow_enabled = NULL
- WHERE conversational_flow_enabled = false
-   AND consultant_id IN (SELECT id FROM consultants WHERE conversational_flow_enabled = true);
-
--- 1.c) Backfill: passos antigos sem step_key recebem o id como step_key
-UPDATE bot_flow_steps
-   SET step_key = id::text
- WHERE step_key IS NULL OR step_key = '';
+```ts
+parseFloat(String(dados.valorConta).replace(/[^\d.,]/g, "").replace(",", "."))
+// "1.688,15" → "1.688.15" → parseFloat = 1.688 → toFixed(2) = "1.69"
 ```
 
-### 2) `conversational/index.ts` — endurecer o restart
+Como `1.69 < 30`, o `bot-flow.ts:1310` zera o valor e mostra `R$ ❌`. Por isso o lead viu valor errado e clicou em "EDITAR".
 
-Quando `currentStep` não é encontrado, hoje ele tenta enviar `firstActive` mas se o `message_text` for vazio retorna `reply=""` e nada acontece. Vou:
+**Correção**: detectar o formato brasileiro — se houver `,` decimal, remover `.` (milhar) antes de trocar `,` por `.`.
 
-- Sempre **persistir `conversation_step = firstActive.step_key`** (já faz) **e enviar a mídia configurada** mesmo sem texto;
-- Se `message_text` estiver vazio E não houver mídia, mandar uma saudação curtinha padrão `"Oi {{nome}}! 👋"` para garantir que o lead sempre receba algo no passo 1;
-- Logar `[conversational] flow loaded steps=N firstActive=…` para a gente nunca mais ficar no escuro.
+### 2. Bot "esquece" o passo ao tentar editar (volta pro início do fluxo)
+Os logs mostram exatamente:
+```
+[conversational] unknown step="editing_conta_menu" → restart at firstActive
+```
+O dispatcher em `supabase/functions/whapi-webhook/index.ts:333-342` (`CADASTRO_OR_SYSTEM`) **não inclui** os passos `editing_conta_*`, `editing_doc_*` e `aguardando_doc_auto`. Resultado: quando o lead clica "✏️ EDITAR", o `conversation_step` vira `editing_conta_menu`, mas a próxima mensagem é roteada para o **conversational** (motor novo), que não conhece esse passo e reinicia o fluxo do zero. O `bot-flow.ts` (que tem todos os cases de edição entre as linhas 1822-1990) nunca é chamado.
 
-### 3) `webhook/index.ts` — respeitar override **só quando explícito**
+**Correção**: incluir todos os passos `editing_conta_*`, `editing_doc_*` e `aguardando_doc_auto` no set `CADASTRO_OR_SYSTEM` do dispatcher e no `CADASTRO_STEPS` do guard do conversational.
 
-Hoje: `customerOverride === true || (customerOverride == null && consultantFlag)`.
-Vou trocar para: `customerOverride !== false && consultantFlag` quando o consultor tem o flag ligado — o cliente só fica fora do conversational se for **explicitamente desabilitado por um admin agora** (não por um valor antigo gravado em produção).
+### 3. Nome e Valor podem aparecer como ❌ mesmo com OCR OK
+Hoje, se o Gemini falhar em extrair `nome` ou se o valor for parseado errado, a confirmação mostra `❌` e segue. Pedido: **nunca falhar nesses dois campos**.
 
-### 4) Editor (`FluxoCamila.tsx`) — gerar `step_key` automático ao criar passo novo
+**Correção**: se após o OCR `nome` ou `valor` vierem vazios/inválidos, **não enviar a tela de confirmação** — direcionar a Camila a perguntar especificamente o campo faltante (`editing_conta_nome` ou `editing_conta_valor`) antes de seguir. Manter o resto dos dados já extraídos.
 
-Quando o usuário adiciona um passo, gerar `step_key = passo_<id curto>` no insert. Assim nunca mais nasce com `step_key` NULL.
+### 4. Mostrar a economia em número (R$/ano com 20%)
+Hoje a mensagem só diz "até 20%". Vamos calcular e exibir:
+
+```
+Economia estimada: 20% ao mês
+→ R$ {valor*0.20} por mês
+→ R$ {valor*0.20*12} por ano
+```
+
+Aplicar em `bot-flow.ts:1375-1377` (mensagem após "✅ SIM" na confirmação) e também na tela de confirmação dos dados (`bot-flow.ts:1320-1329`), substituindo a linha do valor por algo do tipo:
+
+```
+💰 Valor: R$ 1.688,15
+💚 Economia: 20% ao mês = R$ 337,63/mês ou R$ 4.051,56/ano
+```
 
 ---
 
-## Resultado esperado
+## Plano de implementação
 
-- Você manda "oi" em qualquer número limpo → o motor encontra seu fluxo, manda **o áudio do passo 1 ("Boas Vindas e Nome.")** + mensagem curta de saudação, salva `conversation_step` no passo 1 e segue normalmente para o passo 2 quando o lead responder.
-- Os passos 11–14 (conta de luz / RG-CNH / e-mail / confirmar telefone) continuam exatamente como você montou.
+### Arquivo 1 — `supabase/functions/_shared/ocr.ts`
+Substituir o normalizador do `valorConta` (linha 171) por um parser que entende formato BR (`1.688,15`), formato US (`1688.15`) e número puro (`1688`).
 
-## Arquivos afetados
+### Arquivo 2 — `supabase/functions/whapi-webhook/index.ts`
+Adicionar ao `CADASTRO_OR_SYSTEM` (linha 333):
+- `editing_conta_menu`, `editing_conta_nome`, `editing_conta_endereco`, `editing_conta_cep`, `editing_conta_distribuidora`, `editing_conta_instalacao`, `editing_conta_valor`
+- `editing_doc_menu`, `editing_doc_nome`, `editing_doc_cpf`, `editing_doc_rg`, `editing_doc_nascimento`, `editing_doc_pai`, `editing_doc_mae`
+- `aguardando_doc_auto`
+- `aguardando_humano`
 
-- Migração SQL (1 nova)
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
-- `supabase/functions/whapi-webhook/index.ts` (5 linhas)
-- `src/pages/FluxoCamila.tsx` (gerar step_key no create)
+### Arquivo 3 — `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
+Espelhar a mesma lista no `CADASTRO_STEPS` (linha 62) — assim o guard defensivo no topo do `runConversationalFlow` devolve `{reply:""}` e libera o `bot-flow.ts` para processar.
 
-## O que NÃO muda
+### Arquivo 4 — `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
 
-- Layout do editor /admin/fluxos
-- Pipeline de OCR, portal, OTP no `bot-flow.ts`
-- Mídias já anexadas
+**a) Blindagem nome/valor após OCR (~linha 1298)**: depois do `criticos.length < 3` check, adicionar:
+- Se `!d.nome` → `conversation_step = "editing_conta_nome"`, perguntar nome.
+- Se `nome` ok mas `valor` ausente/inválido → `conversation_step = "editing_conta_valor"`, perguntar valor.
+- Só então mostrar a tela de confirmação completa.
 
-Posso aplicar?
+**b) Mensagem de confirmação (linhas 1320-1329)**: trocar a linha do valor por:
+```
+💰 Valor: R$ {valor formatado pt-BR}
+💚 Economia: ~20% = R$ {valor*0.20}/mês • R$ {valor*0.20*12}/ano
+```
+Helper inline `formatBRL(n)` para `n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})`.
+
+**c) Mensagem após "✅ SIM" (linhas 1375-1377)**: trocar o texto por algo concreto:
+```
+Show, {nome}! Sua conta de R$ {valor}/mês cabe certinho na economia 💚
+→ Você economiza ~R$ {mensal} por mês
+→ R$ {anual} por ano sem mexer em nada na sua casa
+
+E ainda entra no Conexão Club: até 70% de desconto em farmácia, mercado, posto e várias parceiras.
+```
+
+### Arquivo 5 (opcional) — `supabase/migrations/...sql`
+Resetar de novo os dois leads de teste (`5511971254913`, `5511989000650`) para começar do zero após o deploy.
+
+---
+
+## Validação
+
+1. Reset dos 2 leads de teste.
+2. Mandar "oi" → fluxo visual da Camila (já validado).
+3. Enviar a foto da conta → OCR vem com `valorConta: "1.688,15"` → tela de confirmação mostra `R$ 1.688,15` e linha de economia (`R$ 337,63/mês`).
+4. Clicar "✏️ EDITAR" → menu numerado aparece → digitar "5" → bot pede o número da instalação (sem reiniciar o fluxo).
+5. Confirmar com "✅ SIM" → mensagem do Conexão Club já com R$ economizados/ano.
+6. Conferir nos logs do `whapi-webhook` que **não aparece mais** `unknown step="editing_conta_..." → restart`.
+
+Pronto pra implementar — me dá o ok e eu faço as edições + deploy + reset dos leads.
