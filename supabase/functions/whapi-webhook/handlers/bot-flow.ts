@@ -134,6 +134,14 @@ const RE_SELF_INTRO = /(?:me\s+chamo|meu\s+nome\s+(?:é|eh|e)|aqui\s+(?:é|eh|e)
 // Lead recusa mandar foto da conta — aceita seguir sem.
 const RE_REFUSE_BILL = /\b(n[aã]o\s+(?:tenho|quero|posso|vou)\s+(?:mandar|enviar|tirar|mostrar)|sem\s+(?:foto|conta|comprovante)|n[aã]o\s+(?:tenho|achei)\s+a\s+conta|conta\s+(?:n[aã]o|nao)\s+est[aá]\s+aqui|s[oó]\s+(?:o\s+)?valor)\b/i;
 
+function isPositiveCheckinIntent(text: string): boolean {
+  return /^(sim|s|ss+|joia|ok|okay|blz|beleza|perfeito|quero|pode|vamos|bora|seguir|claro|certo|tranquilo|entendi|deu|show|fechou)\b/i.test(text) || /[👍✅]/.test(text);
+}
+
+function isClubProgressIntent(text: string): boolean {
+  return isPositiveCheckinIntent(text) || /^(pode seguir|sem duvida|nenhuma|nao tenho|não tenho|nao|não|tudo certo|partiu|segue)\b/i.test(text) || /(quero|vamos|bora).*(cadastr|seguir|finaliz)/i.test(text);
+}
+
 function normalizeLeadName(rawText: string | null | undefined): string | null {
   const raw = String(rawText || "").trim().replace(/[.!?,;:"']/g, "").replace(/\s+/g, " ");
   const looksLikeName =
