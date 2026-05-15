@@ -815,6 +815,27 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     !!customer.electricity_bill_photo_url &&
     !!customer.ocr_done &&
     TRUSTED_NAME_SOURCES.has(String(customer.name_source || ""));
+
+  // 🎯 Atalho determinístico: intenção forte de cadastro em step conversacional
+  // → pula a IA e empurra para coletar a conta de luz (próximo passo físico).
+  // Resolve o caso "Jeferson disse 'Cadastro' e a IA mandou 2 vídeos sem texto".
+  const STRONG_PURCHASE_INTENT = /^(cadastr|quero\s+(?:cadastr|fazer|come[çc]ar|entrar|me\s*cadastr)|bora|vamos|partiu|simbora|aceito|topo|t[oô]\s+dentro|pode\s+(?:fazer|cadastr)|fa[çc]a\s+(?:o\s*)?cadastr|come[çc]ar|fechado|fechou)\b/i;
+  const conversationalForShortcut = new Set(["welcome", "menu_inicial", "pos_video", "checkin_pos_video", "qualificacao"]);
+  if (
+    !isFile && !customer.bot_paused && !billTrusted &&
+    conversationalForShortcut.has(step) &&
+    messageText && STRONG_PURCHASE_INTENT.test(messageText.trim())
+  ) {
+    console.log(`🎯 [intent-shortcut] cadastro detectado em step=${step} → forçando aguardando_conta`);
+    step = "aguardando_conta";
+    (customer as any).conversation_step = "aguardando_conta";
+    updates.conversation_step = "aguardando_conta";
+    const firstNm = ((customer as any).name || "").split(/\s+/)[0];
+    const v = firstNm ? `${firstNm}, ` : "";
+    const reply = `Show, ${v.trim().replace(/,$/, "")}! 📸 Pra eu já calcular sua economia exata e iniciar o cadastro, me envia uma *foto ou PDF da sua conta de luz* (qualquer página serve).`;
+    return { reply, updates };
+  }
+
   if (
     !isFile &&
     !customer.bot_paused &&
