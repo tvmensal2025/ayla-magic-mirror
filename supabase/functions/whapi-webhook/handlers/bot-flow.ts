@@ -906,8 +906,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       };
     }
 
-    const configuredQaResult = await trySendConfiguredQa();
-    if (configuredQaResult) return configuredQaResult;
+    if (step !== "checkin_pos_video" && step !== "duvidas_pos_club") {
+      const configuredQaResult = await trySendConfiguredQa();
+      if (configuredQaResult) return configuredQaResult;
+    }
   }
 
   if (
