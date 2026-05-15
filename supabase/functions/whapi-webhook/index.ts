@@ -341,7 +341,8 @@ Deno.serve(async (req) => {
         "aguardando_assinatura","complete",
       ]);
       const useConversational =
-        (customerOverride === true || (customerOverride == null && consultantFlag)) &&
+        customerOverride !== false &&
+        consultantFlag &&
         !CADASTRO_OR_SYSTEM.has(stepBefore);
 
       const result = useConversational
