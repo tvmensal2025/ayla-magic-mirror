@@ -1394,6 +1394,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             .eq("slot_key", "conexao_club")
             .eq("active", true)
             .eq("is_draft", false)
+            .order("send_order", { ascending: true })
+            .limit(1)
             .maybeSingle();
           if (personal?.url) { clubUrl = personal.url; clubDur = Number((personal as any).duration_sec || 0) || null; }
           if (!clubUrl) {
@@ -1403,6 +1405,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               .eq("is_public", true)
               .eq("slot_key", "conexao_club")
               .eq("active", true)
+              .order("send_order", { ascending: true })
+              .limit(1)
               .maybeSingle();
             if (pub?.url) { clubUrl = pub.url; clubDur = Number((pub as any).duration_sec || 0) || null; }
           }
