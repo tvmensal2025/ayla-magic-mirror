@@ -569,7 +569,13 @@ function StepCard(props: {
         {step.step_type !== "message" && step.step_type && (
           <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400 leading-snug">
             ✨ Quando o lead chegar neste passo, a Camila envia o texto/mídia abaixo e em seguida entra automaticamente
-            no pipeline de <strong>{step.step_type === "capture_conta" ? "captura da conta" : step.step_type === "capture_documento" ? "captura do documento" : "finalização (portal + OTP + parabéns)"}</strong>.
+            no pipeline de <strong>{
+              step.step_type === "capture_conta" ? "captura da conta" :
+              step.step_type === "capture_documento" ? "captura do documento" :
+              step.step_type === "capture_email" ? "captura do e-mail" :
+              step.step_type === "confirm_phone" ? "confirmação do telefone" :
+              "finalização (portal + OTP + parabéns)"
+            }</strong>.
           </p>
         )}
       </div>
