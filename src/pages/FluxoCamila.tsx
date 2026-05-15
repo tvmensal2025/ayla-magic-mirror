@@ -508,7 +508,7 @@ function StepCard(props: {
       <BlockShell
         icon={<Target className="h-4 w-4" />}
         title="Regras — quando o cliente disser..."
-        tooltip="Cada regra escuta uma intenção do cliente (SIM, NÃO, mandou valor, etc.) e leva pra um passo específico."
+        tooltip="Cada regra escuta uma intenção do cliente (SIM, NÃO, mandou valor, etc.) e leva pra um passo específico. As regras de cima têm prioridade sobre as de baixo."
         accent="emerald"
         action={
           <Button size="sm" variant="ghost" className="h-7" onClick={() => {
@@ -520,25 +520,35 @@ function StepCard(props: {
         {step.transitions.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">Nenhuma regra ainda. Sem regras, a Camila usa direto o Plano B abaixo.</p>
         ) : (
-          <div className="space-y-2">
-            {step.transitions.map((t, i) => (
-              <TransitionRow
-                key={i}
-                transition={t}
-                currentStepId={step.id}
-                allSteps={allSteps}
-                onChange={(nt) => {
-                  const novas = [...step.transitions];
-                  novas[i] = nt;
-                  onPatch({ transitions: novas });
-                }}
-                onRemove={() => {
-                  const novas = step.transitions.filter((_, idx) => idx !== i);
-                  onPatch({ transitions: novas });
-                }}
-              />
-            ))}
-          </div>
+          <>
+            <p className="text-[11px] text-muted-foreground mb-2 flex items-center gap-1">
+              <ChevronUp className="h-3 w-3" /> Regras do topo têm prioridade — só a primeira que casar é executada.
+            </p>
+            <div className="space-y-2">
+              {step.transitions.map((t, i) => {
+                const conflicts = detectRuleConflicts(step.transitions).filter(c => c.index === i);
+                return (
+                  <TransitionRow
+                    key={i}
+                    transition={t}
+                    currentStepId={step.id}
+                    allSteps={allSteps}
+                    conflicts={conflicts.map(c => c.reason)}
+                    onChange={(nt) => {
+                      const novas = [...step.transitions];
+                      novas[i] = nt;
+                      onPatch({ transitions: novas });
+                    }}
+                    onRemove={() => {
+                      const novas = step.transitions.filter((_, idx) => idx !== i);
+                      onPatch({ transitions: novas });
+                    }}
+                  />
+                );
+              })}
+            </div>
+            <RuleSimulator rules={step.transitions} allSteps={allSteps} />
+          </>
         )}
       </BlockShell>
 
