@@ -1071,7 +1071,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     const v = firstNm ? `${firstNm}, ` : "";
     const valueMatch = txt.match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
     const billValue = valueMatch ? Number(valueMatch[1].replace(".", "").replace(",", ".")) : 0;
-    const positive = /^(sim|s|ss+|joia|👍|✅|entendi|deu|ok|okay|blz|beleza|perfeito|quero|pode|vamos|bora|seguir|claro|certo|tranquilo)\b/i.test(txt);
+    const positive = isPositiveCheckinIntent(txt);
     if (Number.isFinite(billValue) && billValue >= 100) {
       return {
         reply: `Boa! Com R$ ${billValue.toFixed(0)} já dá pra calcular sua economia. Me envia uma *foto* ou PDF da conta de luz pra eu confirmar os dados 📸`,
@@ -1102,7 +1102,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   // sem passar pela IA e sem loop de mídia.
   if (!isFile && !customer.bot_paused && step === "duvidas_pos_club" && messageText) {
     const txt = messageText.trim().toLowerCase();
-    const segueAgora = /^(sim|s|ok|joia|👍|✅|pode|pode seguir|bora|vamos|partiu|segue|seguir|tudo certo|sem d[uú]vida|nenhuma|nao tenho|n[ãa]o tenho|n[ãa]o|fechou|beleza|blz)\b/.test(txt) || /(quero|vamos|bora).*(cadastr|seguir|finaliz)/i.test(messageText);
+    const segueAgora = isClubProgressIntent(txt);
     if (segueAgora) {
       const ctaMsg = `Show! Pra finalizar seu cadastro me manda só a foto do seu *RG ou CNH* 📄`;
       await sendOptions(remoteJid, ctaMsg, [
