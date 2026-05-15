@@ -27,6 +27,8 @@ type Passo = {
   video_slot?: { key: string; descricao: string };
   templates: TemplateRef[];
   ramificacoes: Branch[];
+  /** slot_keys da ai_media_library aceitos neste passo (áudio/imagem/vídeo) */
+  slots: string[];
 };
 
 const FLUXO: Passo[] = [
