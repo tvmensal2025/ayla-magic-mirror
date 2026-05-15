@@ -853,7 +853,7 @@ function RuleSimulator({ rules, allSteps }: { rules: Transition[]; allSteps: Ste
           {msg && (
             <div className={`text-xs rounded-md p-2 ${result ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-muted text-muted-foreground"}`}>
               {result ? (
-                <>✓ <strong>Regra #{result.index + 1}</strong> dispara → {destLabel(result.rule)}</>
+                <>✓ <strong>Regra #{result.index + 1}</strong> dispara → {destLabel(rules[result.index])}</>
               ) : (
                 <>Nenhuma regra casa — vai cair no <strong>Plano B</strong>.</>
               )}
