@@ -226,13 +226,31 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
 
   const cls = await classifyIntent(ctx.messageText, stepKey as ConversationalStep, ctx.geminiApiKey);
 
+  // ---------------------------------------------------------------------------
+  // Capture phase — extract data the consultor configured for this step
+  // ---------------------------------------------------------------------------
+  const captureUpdates: Record<string, any> = {};
+  try {
+    const extracted = extractCaptures(ctx.messageText || "", currentStep.captures || []);
+    if (extracted.electricity_bill_value != null) captureUpdates.electricity_bill_value = extracted.electricity_bill_value;
+    if (extracted.phone_whatsapp && !ctx.customer.phone_whatsapp) captureUpdates.phone_whatsapp = extracted.phone_whatsapp;
+    if (extracted.cpf) captureUpdates.cpf = extracted.cpf;
+    if (extracted.name && !ctx.customer.name) captureUpdates.name = extracted.name;
+
+    if (Object.keys(captureUpdates).length > 0 && ctx.customer.id) {
+      await ctx.supabase.from("customers").update(captureUpdates).eq("id", ctx.customer.id);
+    }
+  } catch (e) {
+    console.error("[conversational] capture phase failed", e);
+  }
+
   // Global overrides: cadastro / humano keywords win in any step
   if (cls.intent === "quer_cadastrar") {
     return {
       reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
         nome: ctx.customer.name, representante: ctx.nomeRepresentante,
       }),
-      updates: { conversation_step: "aguardando_conta", __intent: cls.intent, __confidence: cls.confidence },
+      updates: { conversation_step: "aguardando_conta", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
     };
   }
   if (cls.intent === "quer_humano") {
@@ -240,79 +258,87 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", {
         nome: ctx.customer.name, representante: ctx.nomeRepresentante,
       }),
-      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence },
+      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
     };
   }
 
-  const transition = matchTransition(currentStep, cls.intent, ctx.messageText);
+  // Build candidate intent list: classifier intent + regex-derived intents
+  const candidateIntents = [cls.intent, ...detectRegexIntents(ctx.messageText || "")];
+  const transition = matchTransition(currentStep, candidateIntents, ctx.messageText);
 
-  // No transition matched → repeat current step
-  if (!transition) {
-    return {
-      reply: renderTemplate(currentStep.message_text || "", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: stepKey, __intent: cls.intent, __confidence: cls.confidence },
-    };
-  }
-
-  // Special destinations
-  if (transition.goto_special === "cadastro") {
-    return {
-      reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence },
-    };
-  }
-  if (transition.goto_special === "humano") {
-    return {
-      reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence },
-    };
-  }
-  if (transition.goto_special === "repeat" || (!transition.goto_step_id && !transition.goto_special)) {
-    return {
-      reply: renderTemplate(currentStep.message_text || "", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: stepKey, __intent: cls.intent, __confidence: cls.confidence },
-    };
-  }
-
-  // Resolve goto_step_id → step_key
-  const nextStep = dbSteps.find((s) => s.id === transition.goto_step_id);
-  if (!nextStep || !nextStep.is_active) {
-    return {
-      reply: renderTemplate(currentStep.message_text || "", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: stepKey, __intent: cls.intent, __confidence: cls.confidence },
-    };
-  }
-
-  // If destination is cadastro step, route through cadastro entry
-  if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
-    return {
-      reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence },
-    };
-  }
-
-  return {
-    reply: renderTemplate(nextStep.message_text || "", {
-      nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-    }),
-    updates: {
-      conversation_step: nextStep.step_key,
-      __intent: cls.intent,
-      __confidence: cls.confidence,
-    },
+  const vars = {
+    nome: captureUpdates.name || ctx.customer.name,
+    representante: ctx.nomeRepresentante,
+    valor_conta: captureUpdates.electricity_bill_value ?? (ctx.customer as any).electricity_bill_value,
+    telefone: captureUpdates.phone_whatsapp || ctx.customer.phone_whatsapp,
+    cpf: captureUpdates.cpf || (ctx.customer as any).cpf,
   };
+
+  // Helper — render and return a step
+  const goToStep = (s: DbStep, extra: Record<string, any> = {}) => ({
+    reply: renderTemplate(s.message_text || "", vars),
+    updates: { conversation_step: s.step_key, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...extra },
+  });
+  const repeatCurrent = () => goToStep(currentStep);
+
+  // Resolve a transition (special or step) to a BotResult
+  const resolveTransition = async (t: DbTransition): Promise<BotResult> => {
+    if (t.goto_special === "cadastro") {
+      return {
+        reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
+        updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
+      };
+    }
+    if (t.goto_special === "humano") {
+      return {
+        reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", vars),
+        updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
+      };
+    }
+    if (t.goto_special === "repeat" || (!t.goto_step_id && !t.goto_special)) return repeatCurrent();
+    const nextStep = dbSteps.find((s) => s.id === t.goto_step_id);
+    if (!nextStep || !nextStep.is_active) return repeatCurrent();
+    if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
+      return {
+        reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
+        updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
+      };
+    }
+    return goToStep(nextStep);
+  };
+
+  // 1) A regular rule matched
+  if (transition) return resolveTransition(transition);
+
+  // 2) FALLBACK (Plano B)
+  const fb = currentStep.fallback || { mode: "repeat" };
+  if (fb.mode === "goto" && fb.goto_step_id) {
+    const nextStep = dbSteps.find((s) => s.id === fb.goto_step_id);
+    if (nextStep && nextStep.is_active) {
+      if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
+        return {
+          reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
+          updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
+        };
+      }
+      return goToStep(nextStep);
+    }
+  }
+  if (fb.mode === "ai" && fb.ai_prompt) {
+    const candidates = dbSteps.filter(s => s.is_active && s.id !== currentStep.id).map(s => ({ id: s.id, step_key: s.step_key }));
+    const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey);
+    if (choice) {
+      const upper = choice.toUpperCase();
+      if (upper === "REPEAT") return repeatCurrent();
+      if (upper === "HUMANO") return resolveTransition({ goto_special: "humano" } as DbTransition);
+      if (upper === "CADASTRO") return resolveTransition({ goto_special: "cadastro" } as DbTransition);
+      const nextStep = dbSteps.find(s => s.step_key === choice);
+      if (nextStep && nextStep.is_active) return goToStep(nextStep);
+    }
+  }
+
+  // Default: repeat
+  return repeatCurrent();
 }
 
 // Legacy hardcoded path — preserved for consultants without a custom flow.
