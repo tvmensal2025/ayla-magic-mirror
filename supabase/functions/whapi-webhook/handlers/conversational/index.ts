@@ -501,7 +501,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Helper — render and return a step (respeita text_delay_ms configurado no passo)
   const goToStep = async (s: DbStep, extra: Record<string, any> = {}) => {
     const delay = Math.max(0, Math.min(60000, s.text_delay_ms ?? 1500));
-    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    if (delay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, delay));
     const mediaSent = await sendStepMedia(ctx, s, consultantId);
     const cadastroStep = stepTypeToCadastro(s.step_type);
     // Se for um passo especial (capture_conta/documento/finalizar), o conversation_step
