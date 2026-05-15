@@ -87,7 +87,14 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     const slotKey = slotKeys[0];
     if (!slotKey) return;
     setLinking(m.id);
-    // Cria uma nova linha vinculada (sem storage_path para não apagar o arquivo original ao remover)
+    // Desativa qualquer mídia ativa do consultor neste slot (constraint: 1 por consultant_id+slot_key)
+    await supabase
+      .from("ai_media_library")
+      .update({ active: false, slot_key: null })
+      .eq("consultant_id", consultantId)
+      .eq("slot_key", slotKey)
+      .eq("active", true);
+
     const { data: row, error } = await supabase
       .from("ai_media_library")
       .insert({
@@ -98,6 +105,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
         url: m.url,
         storage_path: null,
         active: true,
+        is_public: false,
         send_order: 100 + items.filter(i => i.kind === m.kind).length,
         duration_sec: m.duration_sec,
       })
@@ -106,7 +114,8 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     setLinking(null);
     if (error) { toast.error("Erro ao vincular: " + error.message); return; }
     if (row) {
-      setItems(prev => [...prev, row as Media]);
+      // Remove os antigos do slot da lista local + adiciona o novo
+      setItems(prev => [...prev.filter(x => x.slot_key !== slotKey), row as Media]);
       setLibraryItems(prev => prev.filter(x => x.id !== m.id));
     }
     toast.success("Mídia vinculada a este passo");
