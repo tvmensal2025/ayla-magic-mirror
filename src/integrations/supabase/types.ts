@@ -1173,34 +1173,73 @@ export type Database = {
         }
         Relationships: []
       }
+      bot_messages: {
+        Row: {
+          active: boolean
+          created_at: string
+          id: string
+          step_key: string
+          template_key: string
+          text: string
+          updated_at: string
+          variant: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          step_key: string
+          template_key: string
+          text: string
+          updated_at?: string
+          variant?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          step_key?: string
+          template_key?: string
+          text?: string
+          updated_at?: string
+          variant?: string
+        }
+        Relationships: []
+      }
       bot_step_transitions: {
         Row: {
+          confidence: number | null
           consultant_id: string | null
           created_at: string
           customer_id: string | null
           duration_ms: number | null
           from_step: string | null
           id: string
+          intent: string | null
           phone: string | null
           to_step: string
         }
         Insert: {
+          confidence?: number | null
           consultant_id?: string | null
           created_at?: string
           customer_id?: string | null
           duration_ms?: number | null
           from_step?: string | null
           id?: string
+          intent?: string | null
           phone?: string | null
           to_step: string
         }
         Update: {
+          confidence?: number | null
           consultant_id?: string | null
           created_at?: string
           customer_id?: string | null
           duration_ms?: number | null
           from_step?: string | null
           id?: string
+          intent?: string | null
           phone?: string | null
           to_step?: string
         }
