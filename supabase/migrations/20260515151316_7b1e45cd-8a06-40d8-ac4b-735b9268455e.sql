@@ -1,0 +1,1 @@
+ALTER TABLE public.bot_flow_steps ADD COLUMN IF NOT EXISTS text_delay_ms integer NOT NULL DEFAULT 1500;

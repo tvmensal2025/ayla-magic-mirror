@@ -59,6 +59,7 @@ type Step = {
   summary: string | null;
   icon: IconKey;
   message_text: string | null;
+  text_delay_ms: number | null;
   slot_key: string | null;
   transitions: Transition[];
   captures: Capture[];
