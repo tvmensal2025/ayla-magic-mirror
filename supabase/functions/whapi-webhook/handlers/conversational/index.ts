@@ -417,7 +417,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const tpl = (firstActive.message_text || "").trim();
     const fallbackGreeting = mediaSent ? "" : `Oi${ctx.customer.name ? " " + String(ctx.customer.name).split(" ")[0] : ""}! 👋`;
     const reply = tpl
-      ? renderTemplate(tpl, { nome: ctx.customer.name, representante: ctx.nomeRepresentante })
+      ? renderTemplate(tpl, {
+          nome: ctx.customer.name,
+          representante: ctx.nomeRepresentante,
+          valor_conta: (ctx.customer as any).electricity_bill_value,
+          telefone: ctx.customer.phone_whatsapp,
+          cpf: (ctx.customer as any).cpf,
+        })
       : fallbackGreeting;
     return {
       reply,
