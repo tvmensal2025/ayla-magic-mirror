@@ -372,6 +372,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     let sentSomething = false;
 
     const qaMediaList = ((mediaRows as any[]) || []);
+    const _qaOrder = await getStepMediaOrder(supabase, customer.consultant_id, step);
+    if (_qaOrder) qaMediaList.sort(makeKindComparator((m: any) => m.media_kind, _qaOrder));
     for (let mi = 0; mi < qaMediaList.length; mi++) {
       const m = qaMediaList[mi];
       let url: string | null = null;
