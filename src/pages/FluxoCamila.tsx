@@ -163,6 +163,9 @@ export default function FluxoCamila() {
   const [testOpen, setTestOpen] = useState(false);
   const [testPhone, setTestPhone] = useState("");
   const [testCount, setTestCount] = useState(0);
+  const [showMigrationBanner, setShowMigrationBanner] = useState(
+    () => typeof window !== "undefined" && !localStorage.getItem("camila_migration_v2_dismissed")
+  );
 
   const reload = useCallback(async (uid: string) => {
     const [{ data: cons }, { data: flows }, { count }] = await Promise.all([
