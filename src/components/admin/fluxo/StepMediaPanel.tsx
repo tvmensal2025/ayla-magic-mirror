@@ -87,13 +87,13 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     const slotKey = slotKeys[0];
     if (!slotKey) return;
     setLinking(m.id);
-    // Desativa qualquer mídia ativa do consultor neste slot (constraint: 1 por consultant_id+slot_key)
+    // Limpa slot_key de QUALQUER linha do consultor nesse slot (ativa ou não)
+    // O índice único é (consultant_id, slot_key) WHERE slot_key IS NOT NULL — ignora active
     await supabase
       .from("ai_media_library")
       .update({ active: false, slot_key: null })
       .eq("consultant_id", consultantId)
-      .eq("slot_key", slotKey)
-      .eq("active", true);
+      .eq("slot_key", slotKey);
 
     const { data: row, error } = await supabase
       .from("ai_media_library")
