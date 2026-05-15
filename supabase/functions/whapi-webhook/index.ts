@@ -267,14 +267,36 @@ Deno.serve(async (req) => {
     let reply = "";
     let updates: Record<string, any> = {};
     try {
-      const result = await runBotFlow({
-        supabase, sender, customer, consultorId, nomeRepresentante,
-        remoteJid, phone, messageText, buttonId, isFile, isButton,
-        hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
-        fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
-      });
+      // Feature flag: novo motor conversacional (state machine + intent classifier).
+      // Override por cliente (customer.conversational_flow_enabled) tem precedência sobre o do consultor.
+      // Só assume os passos pós-cadastro listados em CONVERSATIONAL_STEPS — cadastro segue intacto pelo runBotFlow.
+      const customerOverride = (customer as any).conversational_flow_enabled;
+      const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
+      const useConversational =
+        (customerOverride === true || (customerOverride == null && consultantFlag)) &&
+        CONVERSATIONAL_STEPS.has(stepBefore);
+
+      const result = useConversational
+        ? await runConversationalFlow({
+            supabase, sender, customer, consultorId, nomeRepresentante,
+            remoteJid, phone, messageText, buttonId, isFile, isButton,
+            hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
+            fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
+          })
+        : await runBotFlow({
+            supabase, sender, customer, consultorId, nomeRepresentante,
+            remoteJid, phone, messageText, buttonId, isFile, isButton,
+            hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
+            fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
+          });
       reply = result.reply;
       updates = result.updates;
+
+      // Telemetria do classificador (intent/confidence) — registrada na transição, não persistida no customer.
+      if (useConversational) {
+        (updates as any).__intent = (updates as any).__intent;
+        (updates as any).__confidence = (updates as any).__confidence;
+      }
     } catch (botErr: any) {
       console.error(`💥 [whapi bot-flow crash] step=${stepBefore}:`, botErr);
       captureError(botErr, {
