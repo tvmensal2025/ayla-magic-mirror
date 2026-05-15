@@ -16,6 +16,7 @@ const AssistentePage = lazy(() => import("./pages/AssistentePage"));
 const Auth = lazy(() => import("./pages/Auth"));
 const Admin = lazy(() => import("./pages/Admin"));
 const FlowBuilder = lazy(() => import("./pages/FlowBuilder"));
+const FluxoCamila = lazy(() => import("./pages/FluxoCamila"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
