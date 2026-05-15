@@ -20,6 +20,7 @@ import {
   TIMEOUT_VIA_CEP,
   logStructured,
 } from "../../_shared/utils.ts";
+import { getStepMediaOrder, makeKindComparator } from "../../_shared/step-media-order.ts";
 import {
   getReplyForStep,
   getNextMissingStep,
@@ -371,6 +372,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     let sentSomething = false;
 
     const qaMediaList = ((mediaRows as any[]) || []);
+    const _qaOrder = await getStepMediaOrder(supabase, customer.consultant_id, step);
+    if (_qaOrder) qaMediaList.sort(makeKindComparator((m: any) => m.media_kind, _qaOrder));
     for (let mi = 0; mi < qaMediaList.length; mi++) {
       const m = qaMediaList[mi];
       let url: string | null = null;
@@ -501,6 +504,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               .order("position");
 
             const orderedMedia = (medias as any[]) || [];
+            const _openOrder = await getStepMediaOrder(supabase, customer.consultant_id, step);
+            if (_openOrder) orderedMedia.sort(makeKindComparator((m: any) => m.media_kind, _openOrder));
             let sentSomething = false;
 
             for (let oi = 0; oi < orderedMedia.length; oi++) {
