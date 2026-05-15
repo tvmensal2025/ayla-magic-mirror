@@ -121,6 +121,7 @@ Deno.serve(async (req) => {
       "awaiting_manual_submit", "portal_submitted", "registered_igreen",
       "awaiting_signature", "complete",
     ];
+    // Comparações com conversation_step usam stripPrefix() para tolerar valores legacy + namespaced.
     const stepsFinalizados = ["complete", "portal_submitting"];
 
     let { data: activeRecords } = await supabase
@@ -144,7 +145,7 @@ Deno.serve(async (req) => {
       customer.status = "pending";
     }
 
-    if (customer && stepsFinalizados.includes(customer.conversation_step || "")) {
+    if (customer && stepsFinalizados.includes(stripPrefix(customer.conversation_step || ""))) {
       customer = null;
     }
 
@@ -168,7 +169,7 @@ Deno.serve(async (req) => {
           .limit(1)
           .maybeSingle();
         if (fallback) {
-          if (stepsFinalizados.includes(fallback.conversation_step || "") || statusFinalizados.includes(fallback.status)) {
+          if (stepsFinalizados.includes(stripPrefix(fallback.conversation_step || "")) || statusFinalizados.includes(fallback.status)) {
             await supabase.from("customers").update({ conversation_step: "sys:welcome", status: "pending" }).eq("id", fallback.id);
             fallback.conversation_step = "sys:welcome";
             fallback.status = "pending";
