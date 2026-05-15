@@ -397,6 +397,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   }
   const dbSteps = loaded.steps;
   const flowId = loaded.flowId;
+  const strictMode = loaded.strictMode;
+
+  // Helper: encontra o primeiro step ativo de um determinado step_type
+  // (usado para resolver goto_special='cadastro' — preferimos ir para o
+  // passo configurado de captura de documento, em vez de pular pra conta).
+  const findActiveByType = (t: string) => dbSteps.find((s) => s.is_active && s.step_type === t);
 
   const firstActive = dbSteps.find((s) => s.is_active) || dbSteps[0];
   // Lookup robusto: tenta por id (preferido — estável) e por step_key (compat reversa).
