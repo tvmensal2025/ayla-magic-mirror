@@ -45,16 +45,18 @@ export function routeEngine(raw: string | null | undefined): Engine {
 /**
  * Garante prefixo correto na escrita.
  * - sys engine: grava nome cru (sem prefixo) — compat com workers/cron/OTP.
- * - flow engine: grava "flow:<id>" para o orchestrator rotear corretamente
- *   na próxima mensagem.
+ * - flow engine: prefixa "flow:" APENAS quando o valor parecer id de step
+ *   dinâmico (UUID ou "passo_xxx"). Se o conversational devolveu um nome
+ *   canônico do cadastro (ex.: "aguardando_conta" via stepTypeToCadastro),
+ *   mantém cru — assim a próxima mensagem é roteada pro sys engine.
  */
 export function normalizeOutgoing(raw: string | null | undefined, engine: Engine): string | null {
   if (!raw) return null;
-  if (engine === "sys") {
-    // Nunca prefixa sys. Se vier com flow: por engano, strippa.
-    return stripPrefix(raw);
-  }
+  if (engine === "sys") return stripPrefix(raw);
   // engine === "flow"
   if (raw.startsWith(FLOW_PREFIX)) return raw;
-  return FLOW_PREFIX + raw;
+  const looksLikeFlowId =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw) ||
+    raw.startsWith("passo_");
+  return looksLikeFlowId ? FLOW_PREFIX + raw : raw;
 }
