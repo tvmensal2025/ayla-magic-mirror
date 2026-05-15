@@ -1,111 +1,63 @@
-## O problema identificado
+# Plano: Levar o bot a 100% antes de colocar no mercado
 
-O teste atual não está validando um fluxo real de venda. Ele fica travado em `checkin_pos_video`, repetindo áudio/vídeo, e nunca chega naturalmente em:
+## Diagnóstico atual (verificado agora no banco)
 
-```text
-boas-vindas → nome/valor da conta → explicação/dúvidas → aceite → conta de luz → confirmar/recusar → documento → confirmar/recusar → dados finais → pronto para envio
-```
+- Instância WhatsApp do consultor `0c2711ad-4836-...` está em `needs_reconnect` → cliente real não recebe nada.
+- 7 customers reais travados em `checkin_pos_video`.
+- 5 últimos testes E2E (happy_path, recusa_conta, documento_cnh, lead_some, valor_baixo) terminaram `stuck` no mesmo passo.
+- Veredicto do próprio runner: "Não colocar no mercado".
 
-Isso acontece porque o simulador responde “sim, quero economizar” no momento em que o bot ainda espera algo mais específico, e o motor conversacional volta a mandar mídia em vez de avançar para valor da conta/cadastro.
+A correção do loop (`isPositiveCheckinIntent`) feita no turno anterior precisa ser **revalidada** — os runs com falha são posteriores ao código, então ou o deploy não pegou, ou a correção não cobre os triggers que o runner usa.
 
-## O que vou implantar
+## Etapas
 
-### 1. Criar um fluxo de teste realmente profissional
+### 1. Garantir que `whapi-webhook` está com a última versão
+- Re-deploy explícito de `whapi-webhook` para garantir que `isPositiveCheckinIntent` está em produção.
+- Conferir o código deployado puxando logs recentes e procurando o marcador novo.
 
-Substituir o E2E atual por uma jornada guiada por estados reais do cliente, com roteiros como:
+### 2. Rodar `bot-e2e-runner` para `happy_path` e ler o resultado real
+- Disparar o runner.
+- Ler `bot_test_runs` mais recente: `visitedSteps`, `lastStep`, `stopReason`.
+- Critério de sucesso desta etapa: o teste sai de `checkin_pos_video` e visita ao menos `qualificacao` ou `aguardando_conta`.
 
-```text
-1. Lead chama: “oi”
-2. Bot responde boas-vindas / pergunta nome ou valor
-3. Lead informa nome: “João Silva”
-4. Bot pede valor da conta
-5. Lead informa: “350 reais”
-6. Bot calcula economia e pede conta
-7. Lead pode:
-   - dar joinha / aceitar
-   - recusar
-   - perguntar dúvida
-8. Bot responde e tenta avançar
-9. Lead envia conta fictícia
-10. Bot faz OCR mockado e mostra dados extraídos
-11. Lead pode:
-   - aprovar
-   - recusar e reenviar
-   - editar campo
-12. Bot pede RG/CNH
-13. Lead envia documento fictício
-14. Bot confirma dados
-15. Lead aprova ou recusa
-16. Bot coleta dados faltantes e encerra em estado validável
-```
+### 3. Se ainda travar em `checkin_pos_video`
+Investigar **por que** o handler não reconhece o sinal positivo:
+- Ler `bot_messages` do customer de teste para ver a frase exata enviada pelo runner.
+- Conferir se `trySendConfiguredQa` ainda intercepta antes do `isPositiveCheckinIntent`.
+- Conferir ordem das verificações em `bot-flow.ts` (intent positivo → avançar; só depois Q&A/IA).
+- Ajustar e redeployar.
 
-### 2. Adicionar “dar joia” e “recusar” como ações explícitas no teste
+### 4. Cobrir os 5 cenários do runner até todos passarem
+- `happy_path` → vai até `cadastro_completo` (ou pausa em `aguardando_humano` por motivo legítimo).
+- `recusa_conta` → bot reage com fluxo de recuperação, não fica em loop.
+- `documento_cnh` → aceita CNH como documento.
+- `lead_some` → bot pausa após X tentativas, não fica martelando.
+- `valor_baixo` → bot descarta ou pausa com motivo claro, não pede conta de novo.
 
-Na tela `/admin/bot-audit`, trocar a sensação de “teste automático cego” por um painel de validação real:
+### 5. Validar com mensagem real (Whapi simulado)
+Como a instância está `needs_reconnect`, simulo o webhook diretamente:
+- `curl` para `whapi-webhook` com payload de DM (não grupo) usando um número de teste.
+- Confirmar que `bot_messages` registra o BOT respondendo.
+- Confirmar avanço em `customers.conversation_step`.
 
-- botão “Aprovar etapa” / “Joia”
-- botão “Recusar etapa”
-- botão “Enviar dúvida”
-- botão “Enviar valor da conta”
-- botão “Enviar conta fictícia”
-- botão “Enviar RG/CNH fictício”
+### 6. Reportar resultado real para o usuário
+Tabela final por cenário com:
+- Status (PASS / FAIL).
+- `visitedSteps`.
+- Motivo de falha, se houver.
+- Veredicto: "pode colocar no mercado" ou "ainda não".
 
-Assim você consegue validar como um operador/profissional faria: olhando a resposta do bot e decidindo se o lead aprova, recusa, pergunta ou segue.
+### 7. Avisar sobre a instância desconectada
+Independente do bot estar correto, **nenhuma mensagem real sai enquanto `igreen-0c2711ad4836` estiver `needs_reconnect`**. O usuário precisa reconectar via QR code antes de receber leads de verdade.
 
-### 3. Corrigir o travamento em `checkin_pos_video`
+## Arquivos que podem ser tocados
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (ajustes finos na ordem das verificações)
+- `supabase/functions/bot-e2e-runner/index.ts` (apenas se o runner estiver com mensagem que não casa com nenhum trigger razoável)
 
-Alterar a lógica para que, quando o lead responder “sim”, “joia”, “entendi”, “pode seguir”, “quero economizar” ou equivalente, o bot avance para pedir o valor da conta ou iniciar cadastro — sem repetir áudio/vídeo em loop.
+## O que NÃO vai ser feito
+- Nenhuma mudança de UI (página BotAudit já foi removida).
+- Nenhuma reescrita grande — só corrigir o que os testes reais apontarem.
+- Nada de "achismo": cada mudança vai ser seguida de re-run do `bot-e2e-runner` e leitura do resultado no banco.
 
-### 4. Fazer o teste medir conversão real, não só “sem erro técnico”
-
-O resultado final precisa mostrar:
-
-- quantas etapas foram concluídas
-- onde travou, se travou
-- última mensagem do bot
-- último step real
-- se houve repetição de mídia
-- se houve placeholder sem substituir
-- se houve erro HTTP/função
-- se o lead chegou em estado de conversão
-- se a recusa foi tratada corretamente
-- se dúvidas foram respondidas sem alucinação aparente
-
-### 5. Usar dados fictícios, mas passando pelo fluxo real
-
-Manter telefone reservado `5500000...`, OCR mockado e envio sem custo de WhatsApp, mas o caminho será pelo mesmo `whapi-webhook` e pelo mesmo `bot-flow.ts`. Ou seja: não é teste de mentira; é um lead falso usando o fluxo real.
-
-### 6. Melhorar a tela de auditoria para decisão de mercado
-
-A tela deve deixar claro:
-
-- “Pronto para vender” quando passa
-- “Não colocar no mercado” quando trava
-- motivo objetivo do bloqueio
-- recomendação concreta do próximo ajuste
-
-Remover linguagem confusa como “dados fictícios” como teste principal e deixar o foco em “Simulação real de conversa”.
-
-## Critério de pronto
-
-Só considero pronto quando o teste conseguir provar pelo menos estes caminhos:
-
-```text
-Caminho feliz: lead aceita tudo e chega ao final
-Dúvida: lead pergunta, bot responde e volta ao fechamento
-Recusa da conta: lead recusa/edita e o bot se recupera
-Valor baixo: bot não tenta vender como se fosse lead bom
-Documento CNH: CNH segue sem pedir verso indevido
-Lead some: sistema identifica abandono sem chamar de erro de bot
-```
-
-## Arquivos que serão ajustados
-
-- `supabase/functions/bot-e2e-runner/index.ts`
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
-- `src/pages/BotAudit.tsx`
-- possivelmente `supabase/functions/_shared/test-mode.ts` para registrar melhor os eventos de aprovação/recusa
-
-## Sem mexer agora
-
-Não vou criar um novo produto, nem landing page, nem refazer todo o CRM. O foco será um sistema de validação real do bot e correção do loop que impede o fluxo de converter.
+## Critério de "100%"
+Os 5 cenários do `bot-e2e-runner` retornarem `status: passed` (ou `summary.marketReadiness: "Pronto para o mercado"`) **e** uma simulação de DM via webhook gerar resposta do bot em `bot_messages` com `direction='out'`.

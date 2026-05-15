@@ -465,6 +465,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     if (normalizedText.length < 2) return null;
     if (!opts?.force && step === "checkin_pos_video" && isPositiveCheckinIntent(normalizedText)) return null;
     if (!opts?.force && step === "duvidas_pos_club" && isClubProgressIntent(normalizedText)) return null;
+    // 🚧 Em qualificacao, se a msg contém um valor numérico (conta de luz),
+    // NÃO deixa QA semântica capturar — o handler determinístico (linha ~961)
+    // precisa extrair o valor e avançar pra aguardando_conta.
+    if (!opts?.force && step === "qualificacao" && /\d{2,5}/.test(normalizedText)) return null;
 
     const { data: activeFlow } = await supabase
       .from("bot_flows")
@@ -944,7 +948,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     !isFile &&
     !isButton &&
     !customer.name &&
-    !customer.electricity_bill_photo_url
+    !customer.electricity_bill_photo_url &&
+    // 🚧 Não capturar "nome" quando o lead está só confirmando que entendeu
+    // ("joia quero economizar", "pode seguir", etc).
+    step !== "checkin_pos_video" &&
+    step !== "duvidas_pos_club" &&
+    !isPositiveCheckinIntent(messageText.trim())
   ) {
     const formatted = normalizeLeadName(messageText);
     if (formatted) {
