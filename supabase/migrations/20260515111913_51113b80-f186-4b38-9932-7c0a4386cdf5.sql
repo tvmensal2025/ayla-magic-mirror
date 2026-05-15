@@ -1,0 +1,2 @@
+ALTER TABLE public.bot_flow_steps ADD COLUMN IF NOT EXISTS captures jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.bot_flow_steps ADD COLUMN IF NOT EXISTS fallback jsonb NOT NULL DEFAULT '{"mode":"repeat"}'::jsonb;

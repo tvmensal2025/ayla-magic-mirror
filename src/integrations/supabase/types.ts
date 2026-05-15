@@ -1098,8 +1098,10 @@ export type Database = {
       }
       bot_flow_steps: {
         Row: {
+          captures: Json
           condition_text: string | null
           created_at: string
+          fallback: Json
           flow_id: string
           icon: string
           id: string
@@ -1118,8 +1120,10 @@ export type Database = {
           wait_seconds: number
         }
         Insert: {
+          captures?: Json
           condition_text?: string | null
           created_at?: string
+          fallback?: Json
           flow_id: string
           icon?: string
           id?: string
@@ -1138,8 +1142,10 @@ export type Database = {
           wait_seconds?: number
         }
         Update: {
+          captures?: Json
           condition_text?: string | null
           created_at?: string
+          fallback?: Json
           flow_id?: string
           icon?: string
           id?: string
