@@ -1206,6 +1206,84 @@ export type Database = {
         }
         Relationships: []
       }
+      bot_handoff_alerts: {
+        Row: {
+          consultant_id: string
+          created_at: string
+          customer_id: string | null
+          id: string
+          phone: string | null
+          reason: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          user_message: string | null
+        }
+        Insert: {
+          consultant_id: string
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          phone?: string | null
+          reason?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          user_message?: string | null
+        }
+        Update: {
+          consultant_id?: string
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          phone?: string | null
+          reason?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          user_message?: string | null
+        }
+        Relationships: []
+      }
+      bot_message_ab_results: {
+        Row: {
+          advanced_count: number
+          consultant_id: string | null
+          created_at: string
+          id: string
+          last_sent_at: string | null
+          replied_count: number
+          sent_count: number
+          step_key: string
+          template_key: string
+          updated_at: string
+          variant: string
+        }
+        Insert: {
+          advanced_count?: number
+          consultant_id?: string | null
+          created_at?: string
+          id?: string
+          last_sent_at?: string | null
+          replied_count?: number
+          sent_count?: number
+          step_key: string
+          template_key: string
+          updated_at?: string
+          variant?: string
+        }
+        Update: {
+          advanced_count?: number
+          consultant_id?: string | null
+          created_at?: string
+          id?: string
+          last_sent_at?: string | null
+          replied_count?: number
+          sent_count?: number
+          step_key?: string
+          template_key?: string
+          updated_at?: string
+          variant?: string
+        }
+        Relationships: []
+      }
       bot_messages: {
         Row: {
           active: boolean
@@ -1689,6 +1767,7 @@ export type Database = {
           bot_paused: boolean
           bot_paused_at: string | null
           bot_paused_reason: string | null
+          bot_paused_until: string | null
           cashback: string | null
           cep: string | null
           consultant_id: string | null
@@ -1718,11 +1797,14 @@ export type Database = {
           email: string | null
           error_message: string | null
           facial_confirmed_at: string | null
+          followup_count: number
           id: string
           igreen_code: string | null
           igreen_link: string | null
           intent_signals: Json | null
+          last_bot_interaction_at: string | null
           last_bot_reply_at: string | null
+          last_followup_at: string | null
           last_rescue_at: string | null
           lead_source: Json | null
           link_assinatura: string | null
@@ -1783,6 +1865,7 @@ export type Database = {
           bot_paused?: boolean
           bot_paused_at?: string | null
           bot_paused_reason?: string | null
+          bot_paused_until?: string | null
           cashback?: string | null
           cep?: string | null
           consultant_id?: string | null
@@ -1812,11 +1895,14 @@ export type Database = {
           email?: string | null
           error_message?: string | null
           facial_confirmed_at?: string | null
+          followup_count?: number
           id?: string
           igreen_code?: string | null
           igreen_link?: string | null
           intent_signals?: Json | null
+          last_bot_interaction_at?: string | null
           last_bot_reply_at?: string | null
+          last_followup_at?: string | null
           last_rescue_at?: string | null
           lead_source?: Json | null
           link_assinatura?: string | null
@@ -1877,6 +1963,7 @@ export type Database = {
           bot_paused?: boolean
           bot_paused_at?: string | null
           bot_paused_reason?: string | null
+          bot_paused_until?: string | null
           cashback?: string | null
           cep?: string | null
           consultant_id?: string | null
@@ -1906,11 +1993,14 @@ export type Database = {
           email?: string | null
           error_message?: string | null
           facial_confirmed_at?: string | null
+          followup_count?: number
           id?: string
           igreen_code?: string | null
           igreen_link?: string | null
           intent_signals?: Json | null
+          last_bot_interaction_at?: string | null
           last_bot_reply_at?: string | null
+          last_followup_at?: string | null
           last_rescue_at?: string | null
           lead_source?: Json | null
           link_assinatura?: string | null
@@ -3039,6 +3129,45 @@ export type Database = {
         }
         Relationships: []
       }
+      whatsapp_message_buffer: {
+        Row: {
+          consultant_id: string
+          created_at: string
+          customer_id: string | null
+          id: string
+          message_id: string | null
+          message_text: string | null
+          phone: string
+          processed_at: string | null
+          raw_payload: Json | null
+          remote_jid: string | null
+        }
+        Insert: {
+          consultant_id: string
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          message_id?: string | null
+          message_text?: string | null
+          phone: string
+          processed_at?: string | null
+          raw_payload?: Json | null
+          remote_jid?: string | null
+        }
+        Update: {
+          consultant_id?: string
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          message_id?: string | null
+          message_text?: string | null
+          phone?: string
+          processed_at?: string | null
+          raw_payload?: Json | null
+          remote_jid?: string | null
+        }
+        Relationships: []
+      }
       worker_phase_logs: {
         Row: {
           attempt: number | null
@@ -3228,6 +3357,7 @@ export type Database = {
     }
     Functions: {
       admin_unpause_global_bot: { Args: never; Returns: number }
+      cleanup_webhook_artifacts: { Args: never; Returns: undefined }
       credit_consultant_wallet:
         | {
             Args: {
@@ -3316,6 +3446,16 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      increment_ab_metric: {
+        Args: {
+          p_consultant_id: string
+          p_metric: string
+          p_step_key: string
+          p_template_key: string
+          p_variant: string
+        }
+        Returns: undefined
       }
       is_super_admin: { Args: { _user_id: string }; Returns: boolean }
       log_admin_action: {
