@@ -1585,6 +1585,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "confirmando_dados_conta": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
       if (resp === "sim_conta" || resp === "sim" || resp === "s" || resp === "1" || resp === "ok" || resp === "correto" || resp === "✅") {
+        // Usuário confirmou os dados (incluindo nome) — blindar contra OCR de doc futuro
+        if (customer.name) updates.name_source = "user_confirmed";
         // Vai para o pitch do Conexão Club ANTES de pedir RG/CNH
         updates.conversation_step = "pitch_conexao_club";
         // O case pitch_conexao_club abaixo vai ser disparado via re-entrada,
@@ -2021,6 +2023,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "confirmando_dados_doc": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
       if (resp === "sim_doc" || resp === "sim" || resp === "s" || resp === "1" || resp === "ok" || resp === "correto" || resp === "✅") {
+        if (customer.name || updates.name) updates.name_source = "user_confirmed";
         const merged = { ...customer, ...updates };
         const next = await autoResolveCepIfNeeded(merged, updates);
         updates.conversation_step = next;
@@ -2251,6 +2254,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "ask_name": {
       if (messageText.length < 3) { reply = "Por favor, digite seu *nome completo*."; break; }
       updates.name = messageText.trim();
+      updates.name_source = "user_confirmed";
       const merged = { ...customer, ...updates };
       const next = await autoResolveCepIfNeeded(merged, updates);
       updates.conversation_step = next;
