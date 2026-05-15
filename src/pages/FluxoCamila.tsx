@@ -70,7 +70,7 @@ const FLUXO: Passo[] = [
     resumo: "Confere se o lead viu o vídeo e o que ele achou.",
     icone: "msg",
     templates: [
-      { step_key: "checkin_pos_video", template_key: "reforco_checkin", titulo: "Reforço do check-in", ajuda: "Mensagem que tira o lead da inércia." },
+      { step_key: "checkin_pos_video", template_key: "reforco_checkin", titulo: "Resposta após o lead enviar o valor da conta", ajuda: "É AQUI que a Camila fala que dá pra reduzir 8% a 20% da conta. Edite à vontade — use {{nome}} e {{valor_conta}}." },
       { step_key: "checkin_pos_video", template_key: "pedir_conta", titulo: "Pedir conta de luz (entra no Cadastro)", ajuda: "Disparada quando o lead já quer cadastrar." },
     ],
     ramificacoes: [
@@ -199,10 +199,17 @@ export default function FluxoCamila() {
     }
   }
 
+  function suggestedDraft(t: TemplateRef): string {
+    if (t.template_key === "reforco_checkin") {
+      return "Que ótimo {{nome}}! 🙌\n\nCom uma conta de {{valor_conta}}, dá pra eu te ajudar a economizar de 8% a 20% todo mês — sem obra, sem instalação e sem mudar nada na sua casa. ⚡\n\nPosso te explicar rapidinho como funciona?";
+    }
+    return "";
+  }
+
   function openEdit(t: TemplateRef) {
     const cur = findMsg(t.step_key, t.template_key);
     setEditing(t);
-    setDraft(cur?.text ?? "");
+    setDraft(cur?.text ?? suggestedDraft(t));
   }
 
   async function saveEdit() {
