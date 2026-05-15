@@ -376,7 +376,9 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     return { reply: "", updates: {} };
   }
 
-  const consultantId = (ctx as any).consultorId || ctx.customer?.consultant_id;
+  // bot_flows / bot_flow_steps / bot_flow_qa use the consultant UUID (customer.consultant_id),
+  // NOT the iGreen numeric id (consultorId). Prefer the UUID; fall back to consultorId only as last resort.
+  const consultantId = ctx.customer?.consultant_id || (ctx as any).consultorId;
   const loaded = consultantId ? await loadFlow(ctx.supabase, consultantId) : null;
   console.log(`[conversational] entry stepKey="${stepKey}" consultantId=${consultantId} dbSteps=${loaded?.steps?.length ?? 0}`);
 
