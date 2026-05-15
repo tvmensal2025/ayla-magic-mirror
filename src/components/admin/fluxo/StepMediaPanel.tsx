@@ -61,6 +61,56 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
   const [savingOrder, setSavingOrder] = useState(false);
   const fileInputs = useRef<Record<Kind, HTMLInputElement | null>>({ audio: null, image: null, video: null });
   const [uploading, setUploading] = useState<Kind | null>(null);
+  const [pickerKind, setPickerKind] = useState<Kind | null>(null);
+  const [libraryItems, setLibraryItems] = useState<Media[]>([]);
+  const [loadingLibrary, setLoadingLibrary] = useState(false);
+  const [linking, setLinking] = useState<string | null>(null);
+
+  async function openLibrary(kind: Kind) {
+    setPickerKind(kind);
+    setLoadingLibrary(true);
+    const { data } = await supabase
+      .from("ai_media_library")
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec")
+      .eq("consultant_id", consultantId)
+      .eq("kind", kind)
+      .eq("active", true)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    const existingUrls = new Set(items.filter(i => i.kind === kind).map(i => i.url));
+    setLibraryItems(((data as Media[]) ?? []).filter(m => !existingUrls.has(m.url)));
+    setLoadingLibrary(false);
+  }
+
+  async function linkFromLibrary(m: Media) {
+    const slotKey = slotKeys[0];
+    if (!slotKey) return;
+    setLinking(m.id);
+    // Cria uma nova linha vinculada (sem storage_path para não apagar o arquivo original ao remover)
+    const { data: row, error } = await supabase
+      .from("ai_media_library")
+      .insert({
+        consultant_id: consultantId,
+        kind: m.kind,
+        label: m.label,
+        slot_key: slotKey,
+        url: m.url,
+        storage_path: null,
+        active: true,
+        send_order: 100 + items.filter(i => i.kind === m.kind).length,
+        duration_sec: m.duration_sec,
+      })
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec")
+      .maybeSingle();
+    setLinking(null);
+    if (error) { toast.error("Erro ao vincular: " + error.message); return; }
+    if (row) {
+      setItems(prev => [...prev, row as Media]);
+      setLibraryItems(prev => prev.filter(x => x.id !== m.id));
+    }
+    toast.success("Mídia vinculada a este passo");
+  }
+
 
   useEffect(() => {
     if (!slotKeys.length) {
