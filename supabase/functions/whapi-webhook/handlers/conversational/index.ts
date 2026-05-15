@@ -77,13 +77,13 @@ const CADASTRO_STEPS = new Set([
   "editing_doc_nascimento","editing_doc_pai","editing_doc_mae",
 ]);
 
-interface LoadedFlow { flowId: string; steps: DbStep[]; }
+interface LoadedFlow { flowId: string; steps: DbStep[]; strictMode: boolean; }
 
 async function loadFlow(supabase: any, consultantId: string): Promise<LoadedFlow | null> {
   try {
     const { data: flow } = await supabase
       .from("bot_flows")
-      .select("id")
+      .select("id, strict_mode")
       .eq("consultant_id", consultantId)
       .eq("is_active", true)
       .order("created_at", { ascending: true })
@@ -109,8 +109,8 @@ async function loadFlow(supabase: any, consultantId: string): Promise<LoadedFlow
       // para o motor dinâmico não cair no fluxo legado.
       step_key: step.step_key || step.id,
     }));
-    console.log(`[conversational] loadFlow: flow=${flow.id} steps=${normalized.length}`);
-    return { flowId: flow.id as string, steps: normalized };
+    console.log(`[conversational] loadFlow: flow=${flow.id} steps=${normalized.length} strict=${!!(flow as any).strict_mode}`);
+    return { flowId: flow.id as string, steps: normalized, strictMode: !!(flow as any).strict_mode };
   } catch (e) {
     console.error("[conversational] loadFlow failed", e);
     return null;
