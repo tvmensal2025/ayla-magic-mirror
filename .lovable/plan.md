@@ -1,74 +1,88 @@
-## Status atual
+## Objetivo
 
-Os 20 testes unitários de namespace **foram rodados e passaram** (`step-namespace_test.ts`, 20/20 ok). E o lint no DB real mostrou:
+Botão "Rodar bot" na página `/admin/bot-audit` que executa um cenário **end-to-end real**: o webhook é chamado de verdade, o bot processa cada mensagem, mas **nada vai pro WhatsApp** e **nenhum delay de mídia bloqueia** o fluxo. Resultado: roda do welcome até `complete` em segundos, com transcrição completa de cada turno.
 
-- 7236 customers `NULL` (nunca interagiram)
-- 5 customers em nomes canônicos crus (`welcome`, `complete`, `menu_inicial`) — **correto** pela nova estratégia
-- 1 customer com `flow:` prefixado (PAULO) — **correto**
-- **0 UUIDs bare legacy** (a migration anterior limpou tudo)
+## Componentes
 
-A "bagunça" que você está vendo é o **linter da DB desatualizado**: a função `lint_bot_flow_consistency()` ainda marca nomes canônicos crus como `missing_prefix` (severidade `high`), mas pela nova estratégia isso é o esperado. Vou consertar isso junto da página.
+### 1. Modo teste no bot (mudanças cirúrgicas no código existente)
 
-## O que vou construir
+**`bot-flow.ts` → `sleepForMedia()`**
+- Aceita um flag `isTestMode` lido do contexto do customer.
+- Quando ativo: `return` imediato (zero delay).
+- Em produção: comportamento atual intacto.
 
-### 1. Edge function `bot-audit-runner`
-Endpoint único com `?mode=fake` ou `?mode=real`:
+**Detecção de modo teste**
+- Customer com flag `metadata->>'test_mode' = 'true'` OU telefone começando com `5500000` (range reservado).
+- O flag é setado pelo runner ao criar o customer temporário.
 
-- **`mode=fake`** — roda 20 cenários sintéticos **sem tocar o DB**:
-  1. Cliente novo (null → welcome)
-  2. Welcome → qualificação
-  3. UUID legacy bare → flow
-  4. `passo_<ts>` legacy → flow
-  5. `flow:<uuid>` idempotente
-  6. Conversational devolve nome canônico → volta sys
-  7. Jornada completa PAULO (welcome→flow→cadastro→complete)
-  8. Ping-pong flow→sys→flow
-  9. Reset → null → welcome
-  10. UUID maiúsculo
-  11-15. Variações de cadastro (`aguardando_conta`, `editing_conta_valor`, `editing_doc_menu`, OCR retry, fallback)
-  16-18. Edge cases (string vazia, hífens não-UUID, `flow:` sem id)
-  19. Injeção maliciosa (`welcome; DROP TABLE`)
-  20. Fluxo conversacional com 3 transições flow→flow
+**Outbound mock (Whapi)**
+- Ponto único onde o bot chama `whapi-proxy` para enviar texto/áudio/imagem/vídeo.
+- Quando `isTestMode`: ao invés de chamar Whapi, grava o "envio" numa tabela nova `bot_test_outbound` (turno, tipo, conteúdo, ts) e retorna sucesso simulado.
+- OCR (Google Vision): se em modo teste e a imagem for `data:test/...`, devolve um payload mockado pré-definido (nome, CPF, valor, etc.) — sem chamar Vision real.
 
-- **`mode=real`** — consulta o DB real (read-only):
-  - Roda `lint_bot_flow_consistency()` corrigida
-  - Conta `customers` por tipo de step (NULL/canônico/flow:/UUID-legacy)
-  - Últimas 20 transições do `bot_step_transitions`
-  - Customers com `bot_paused = true` nas últimas 24h
+### 2. Tabela `bot_test_runs` + `bot_test_outbound`
 
-### 2. Migração: corrigir `lint_bot_flow_consistency()`
-Substituir a regra atual (que flaga canônicos crus como erro) por:
-- `unprefixed_flow_id` — UUID/`passo_<ts>` sem prefixo `flow:` (real risco)
-- `orphan_flow_step` — `flow:<id>` que não existe em `bot_flow_steps`
-- `possible_loop` — >5 mensagens no mesmo step em 24h
-
-### 3. Página `/admin/bot-audit`
-- Header: "Auditoria do Bot-Flow"
-- 2 botões grandes lado a lado:
-  - **"Testar com dados fictícios"** (verde) → chama `bot-audit-runner?mode=fake`
-  - **"Testar com dados reais"** (azul) → chama `bot-audit-runner?mode=real`
-- Resultado em cards: cada cenário com badge ✅/❌, nome, esperado vs obtido
-- Resumo no topo: "20/20 passaram" + "0 problemas no DB"
-- Detalhes expandíveis (Accordion) para cenários que falharem
-
-### 4. Rota
-Adicionar em `App.tsx`:
-```tsx
-<Route path="/admin/bot-audit" element={<BotAudit />} />
+```text
+bot_test_runs(id, started_at, finished_at, status, customer_id, scenario, summary)
+bot_test_outbound(id, run_id, turn, kind, content, conversation_step, created_at)
 ```
-E link no menu do `/admin`.
+RLS: só admin/super_admin lê.
+
+### 3. Edge function `bot-e2e-runner`
+
+POST `/bot-e2e-runner` → body `{ scenario: "happy_path" }`:
+
+1. Cria customer temp (`phone_whatsapp = 550000099XXXX`, `metadata.test_mode = true`, `consultant_id` = consultor demo).
+2. Cria `bot_test_runs` row, captura `run_id`.
+3. Loop de turnos (max 30, abort se `complete` ou erro):
+   - Lê `customers.conversation_step` atual.
+   - Decide payload do próximo "input" do usuário pelo step (tabela hardcoded de respostas do "lead simulado":
+     - `null/welcome` → texto "oi"
+     - `qualificacao` → áudio fake "350"
+     - `checkin_pos_video` → "sim"
+     - `aguardando_conta` → imagem fake `data:test/conta` (OCR mockado retorna João Silva, R$350, distribuidora X)
+     - `confirmando_dados_conta` → "sim, está certo"
+     - `coleta_doc` / `ask_tipo_documento` → "rg"
+     - `aguardando_doc_*` → imagem fake `data:test/rg` (OCR mockado retorna CPF, RG, nascimento)
+     - `editing_*_menu` → "ok"
+     - etc. (15-18 entradas cobrindo todo o cadastro)
+   - POSTa no `whapi-webhook` o payload Whapi-shaped (`{messages: [...]}`).
+   - Aguarda 200ms e relê `customer.conversation_step`.
+   - Se mudou → registra turno em `bot_test_outbound`.
+   - Se ficou parado 3 turnos seguidos → marca como **stuck**, encerra.
+4. Finaliza `bot_test_runs` com status (`completed` / `stuck` / `error`).
+5. Retorna o transcript completo + tempos.
+
+### 4. UI — `/admin/bot-audit`
+
+Adiciona seção "Teste end-to-end real":
+- Dropdown de cenário: **Happy path** (único por enquanto).
+- Botão grande "▶ Rodar bot do início ao fim".
+- Enquanto roda: spinner + log ao vivo (polling `bot_test_outbound` via realtime).
+- Resultado:
+  - Timeline vertical: cada turno com badge (USER/BOT), tipo (texto/áudio/imagem), conteúdo, step antes→depois, latência.
+  - Status final: ✅ Completou / ⚠️ Travou em `<step>` / ❌ Erro.
+  - Botão "Limpar customer de teste" (apaga registros do teste).
+
+### 5. Limpeza automática
+- Função SQL `cleanup_bot_test_data(run_id)` chamada ao final ou via botão UI, deleta:
+  - `customers` test
+  - `conversations` desse customer
+  - `bot_step_transitions`
+  - `bot_test_outbound`/`bot_test_runs` mais antigos que 7 dias
 
 ## Arquivos
 
 ```text
-NOVO  supabase/functions/bot-audit-runner/index.ts
-EDIT  supabase/migrations/<ts>_fix_lint.sql      (corrige lint_bot_flow_consistency)
-NOVO  src/pages/BotAudit.tsx
-EDIT  src/App.tsx                                 (rota)
-EDIT  src/pages/Admin.tsx                         (botão de acesso)
+EDIT  supabase/functions/whapi-webhook/handlers/bot-flow.ts   (sleepForMedia + outbound mock + OCR mock)
+EDIT  supabase/functions/whapi-webhook/index.ts                (passa isTestMode pro contexto)
+NOVO  supabase/functions/bot-e2e-runner/index.ts
+NOVO  supabase/migrations/<ts>_bot_test_tables.sql             (2 tabelas + RLS + cleanup fn)
+EDIT  src/pages/BotAudit.tsx                                   (nova seção end-to-end)
 ```
 
-## Observações
-- A edge function é `verify_jwt = false` mas valida internamente (super_admin only para `mode=real`).
-- `mode=fake` é puramente determinístico; pode ser chamado sem auth.
-- Não persiste nada no DB em nenhum modo.
+## Riscos & mitigações
+- **Customer fantasma sobrando**: cleanup automático + botão manual.
+- **Bot travar em loop infinito**: max 30 turnos + detector de "step não mudou em 3 turnos".
+- **OCR mock divergir do real**: payload mockado replica exatamente o schema que o Vision retorna hoje.
+- **Mídias reais (vídeos do consultor)**: o outbound mock registra que SERIA enviado mas não envia — não busca arquivo no MinIO.
