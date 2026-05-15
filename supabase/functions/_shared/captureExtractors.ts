@@ -101,5 +101,27 @@ export function detectRegexIntents(text: string): string[] {
   if (extractTelefone(text)) intents.push("telefone_br");
   if (extractCPF(text)) intents.push("cpf_br");
   if (extractNome(text)) intents.push("nome_proprio");
+  if (detectHandoffIntent(text)) intents.push("quer_humano");
   return intents;
+}
+
+/**
+ * Detecta pedido explícito de handoff humano.
+ * Cobre variações comuns: "falar com humano", "atendente", "consultor",
+ * "pessoa de verdade", "isso é robô?", "quero falar com alguém", etc.
+ */
+const HANDOFF_PATTERNS: RegExp[] = [
+  /\b(falar|conversar|atendimento)\s+(com|por)\s+(um[ao]?\s+)?(humano|pessoa|atendente|consultor[ae]?|gerente|respons[áa]vel|alguém|algu[eé]m\s+de\s+verdade)\b/i,
+  /\bquer[oa]?\s+(falar|conversar|atendimento)\s+com\b/i,
+  /\b(é|eh|isso|voc[eê])\s+(um\s+)?(rob[oôó]|bot|m[aá]quina|ia|ai)\??/i,
+  /\b(n[ãa]o\s+(é|eh)\s+rob[oôó]|n[ãa]o\s+sou\s+rob[oôó])\b/i,
+  /\b(atendimento|atendente|suporte)\s+(humano|real)\b/i,
+  /\bme\s+passa\s+(para|pro|pra)\s+(um[ao]?\s+)?(humano|atendente|consultor|pessoa)\b/i,
+  /\bchama[r]?\s+(um[ao]?\s+)?(consultor|atendente|gerente|humano)\b/i,
+];
+
+export function detectHandoffIntent(text: string): boolean {
+  if (!text) return false;
+  const t = text.toLowerCase();
+  return HANDOFF_PATTERNS.some(rx => rx.test(t));
 }

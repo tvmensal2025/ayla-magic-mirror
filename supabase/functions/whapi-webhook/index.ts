@@ -16,6 +16,7 @@ import { checkAndMarkProcessed, logStepTransition, jsonLog } from "../_shared/au
 import { runBotFlow } from "./handlers/bot-flow.ts";
 import { runConversationalFlow } from "./handlers/conversational/index.ts";
 import { captureError } from "../_shared/sentry.ts";
+import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -182,6 +183,60 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── 🔇 BOT PAUSADO (handoff humano ativo) ────────────────────────
+    // Se o consultor tomou conta da conversa, NÃO interferimos por X horas.
+    if ((customer as any).bot_paused_until && new Date((customer as any).bot_paused_until) > new Date()) {
+      // Loga inbound mas não responde — deixa o consultor responder
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "inbound",
+        message_text: messageText || (hasAudio ? "[áudio]" : "[arquivo]"),
+        message_type: hasAudio ? "audio" : (isFile ? "image" : "text"),
+        conversation_step: customer.conversation_step,
+      });
+      console.log(`🔇 Bot pausado para ${phone} até ${(customer as any).bot_paused_until} — ignorando msg`);
+      return new Response(JSON.stringify({ ok: true, msg: "bot_paused", paused_until: (customer as any).bot_paused_until }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ─── 🆘 HANDOFF: cliente pediu pra falar com humano ────────────────
+    if (messageText && detectHandoffIntent(messageText)) {
+      const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      await supabase.from("customers").update({
+        bot_paused_until: pausedUntil,
+        bot_paused_reason: "handoff_request",
+      }).eq("id", customer.id);
+      await supabase.from("bot_handoff_alerts").insert({
+        customer_id: customer.id,
+        consultant_id: superAdminConsultantId,
+        phone,
+        reason: "client_requested_human",
+        user_message: messageText.slice(0, 500),
+      });
+      // Log inbound
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "inbound",
+        message_text: messageText,
+        message_type: "text",
+        conversation_step: customer.conversation_step,
+      });
+      const handoffReply = `Tudo bem! 🙏 Vou te transferir agora para ${nomeRepresentante}. Em alguns instantes alguém vai responder por aqui.`;
+      try { await sender.sendText(remoteJid, handoffReply); } catch (e: any) { console.error("erro handoff reply:", e); }
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "outbound",
+        message_text: handoffReply,
+        message_type: "text",
+        conversation_step: customer.conversation_step,
+      });
+      console.log(`🆘 Handoff ativado para ${phone} (${customer.id})`);
+      return new Response(JSON.stringify({ ok: true, msg: "handoff_triggered", paused_until: pausedUntil }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // ─── Log inbound (audio: marcamos como [áudio] e atualizamos depois com a transcrição) ──
     const inboundLogText = hasAudio ? "[áudio]" : (isFile ? "[arquivo]" : messageText);
     const inboundLogType = hasAudio ? "audio" : (isFile ? "image" : "text");
@@ -322,6 +377,9 @@ Deno.serve(async (req) => {
     // ─── Persist updates ───────────────────────────────────────────────
     if (Object.keys(updates).length > 0 || reply) {
       (updates as any).last_bot_reply_at = new Date().toISOString();
+      // Reseta follow-up state — cliente respondeu, conversa está viva
+      (updates as any).last_bot_interaction_at = new Date().toISOString();
+      if ((customer as any).followup_count > 0) (updates as any).followup_count = 0;
     }
     const STUCK_STATES = new Set(["abandoned", "stuck_finalizar", "stuck_contact", "email_pendente_revisao", "contato_incompleto", "automation_failed"]);
     if ((Object.keys(updates).length > 0 || reply) && customer?.status && STUCK_STATES.has(customer.status) && !(updates as any).status) {
@@ -329,6 +387,23 @@ Deno.serve(async (req) => {
       (updates as any).error_message = null;
       (updates as any).rescue_attempts = 0;
     }
+    // A/B: cliente respondeu (qualquer msg dentro de 1h da última outbound conta como "replied")
+    try {
+      const lastOut = (customer as any).last_bot_reply_at ? new Date((customer as any).last_bot_reply_at) : null;
+      if (lastOut && (Date.now() - lastOut.getTime()) < 60 * 60 * 1000) {
+        await supabase.rpc("increment_ab_metric", {
+          p_template_key: "any", p_step_key: stepBefore, p_variant: "default",
+          p_consultant_id: superAdminConsultantId, p_metric: "replied",
+        });
+      }
+      if (updates.conversation_step && updates.conversation_step !== stepBefore) {
+        await supabase.rpc("increment_ab_metric", {
+          p_template_key: "any", p_step_key: stepBefore, p_variant: "default",
+          p_consultant_id: superAdminConsultantId, p_metric: "advanced",
+        });
+      }
+    } catch (e) { /* tracking não bloqueia */ }
+
     // Extrai metadados de telemetria (não persistir no customers).
     const __intent = (updates as any).__intent ?? null;
     const __confidence = (updates as any).__confidence ?? null;
