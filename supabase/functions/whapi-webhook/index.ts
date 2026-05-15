@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
 
     const { data: consultantData } = await supabase
       .from("consultants")
-      .select("id, name, igreen_id")
+      .select("id, name, igreen_id, conversational_flow_enabled")
       .eq("id", superAdminConsultantId)
       .single();
 
