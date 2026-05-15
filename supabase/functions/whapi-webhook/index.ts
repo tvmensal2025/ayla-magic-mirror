@@ -14,7 +14,7 @@ import { normalizePhone } from "../_shared/utils.ts";
 import { createWhapiSender, parseWhapiMessage } from "../_shared/whapi-api.ts";
 import { checkAndMarkProcessed, logStepTransition, jsonLog } from "../_shared/audit.ts";
 import { runBotFlow } from "./handlers/bot-flow.ts";
-import { runConversationalFlow, CONVERSATIONAL_STEPS } from "./handlers/conversational/index.ts";
+import { runConversationalFlow } from "./handlers/conversational/index.ts";
 import { captureError } from "../_shared/sentry.ts";
 
 const corsHeaders = {
@@ -272,9 +272,21 @@ Deno.serve(async (req) => {
       // Só assume os passos pós-cadastro listados em CONVERSATIONAL_STEPS — cadastro segue intacto pelo runBotFlow.
       const customerOverride = (customer as any).conversational_flow_enabled;
       const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
+      // Cadastro/system states stay with runBotFlow. Anything else (incluindo step_keys
+      // novos criados pelo usuário no FluxoCamila) vai para o motor conversacional dinâmico.
+      const CADASTRO_OR_SYSTEM = new Set([
+        "aguardando_conta","processando_ocr_conta","confirmando_dados_conta",
+        "ask_tipo_documento","aguardando_doc_frente","aguardando_doc_verso",
+        "confirmando_dados_doc","ask_name","ask_cpf","ask_rg","ask_birth_date",
+        "ask_phone_confirm","ask_phone","ask_email","ask_cep","ask_number",
+        "ask_complement","ask_installation_number","ask_bill_value",
+        "ask_doc_frente_manual","ask_doc_verso_manual","ask_finalizar",
+        "finalizando","portal_submitting","aguardando_otp","validando_otp",
+        "aguardando_assinatura","complete",
+      ]);
       const useConversational =
         (customerOverride === true || (customerOverride == null && consultantFlag)) &&
-        CONVERSATIONAL_STEPS.has(stepBefore);
+        !CADASTRO_OR_SYSTEM.has(stepBefore);
 
       const result = useConversational
         ? await runConversationalFlow({
