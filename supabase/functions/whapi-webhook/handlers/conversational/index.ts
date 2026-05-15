@@ -301,11 +301,15 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     cpf: captureUpdates.cpf || (ctx.customer as any).cpf,
   };
 
-  // Helper — render and return a step
-  const goToStep = (s: DbStep, extra: Record<string, any> = {}) => ({
-    reply: renderTemplate(s.message_text || "", vars),
-    updates: { conversation_step: s.step_key, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...extra },
-  });
+  // Helper — render and return a step (respeita text_delay_ms configurado no passo)
+  const goToStep = async (s: DbStep, extra: Record<string, any> = {}) => {
+    const delay = Math.max(0, Math.min(60000, s.text_delay_ms ?? 1500));
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    return {
+      reply: renderTemplate(s.message_text || "", vars),
+      updates: { conversation_step: s.step_key, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...extra },
+    };
+  };
   const repeatCurrent = () => goToStep(currentStep);
 
   // Resolve a transition (special or step) to a BotResult
