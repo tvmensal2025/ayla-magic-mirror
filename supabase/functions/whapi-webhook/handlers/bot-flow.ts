@@ -1795,7 +1795,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         );
         if (ocrData.sucesso && ocrData.dados) {
           const d = ocrData.dados;
-          if (d.nome) updates.name = d.nome;
+          { const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } }
           if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
           if (d.rg) updates.rg = d.rg;
           const dataConf = String(d.dataNascimentoConfianca || "").toLowerCase();
@@ -1892,7 +1892,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           console.log("📊 OCR CNH resultado:", JSON.stringify(ocrData).substring(0, 400));
           if (ocrData.sucesso && ocrData.dados) {
             const d = ocrData.dados;
-            if (d.nome) updates.name = d.nome;
+            { const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } }
             if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
             if (d.rg) updates.rg = d.rg;
             const dataConf = String(d.dataNascimentoConfianca || "").toLowerCase();
@@ -1970,7 +1970,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         console.log("📊 OCR Doc resultado:", JSON.stringify(ocrData).substring(0, 400));
         if (ocrData.sucesso && ocrData.dados) {
           const d = ocrData.dados;
-          if (d.nome) updates.name = d.nome;
+          { const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } }
           if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
           if (d.rg) updates.rg = d.rg;
           if (d.dataNascimento) updates.data_nascimento = d.dataNascimento;
