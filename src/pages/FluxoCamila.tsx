@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { ArrowLeft, MessageSquare, Video, ArrowDown, Sparkles, UserCheck, FileText, Pencil, FlaskConical, X } from "lucide-react";
 import { toast } from "sonner";
+import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
 
 // ---------------------------------------------------------------------------
 // Espelha 1-para-1 supabase/functions/whapi-webhook/handlers/conversational/state-machine.ts
@@ -27,6 +28,8 @@ type Passo = {
   video_slot?: { key: string; descricao: string };
   templates: TemplateRef[];
   ramificacoes: Branch[];
+  /** slot_keys da ai_media_library aceitos neste passo (áudio/imagem/vídeo) */
+  slots: string[];
 };
 
 const FLUXO: Passo[] = [
@@ -42,6 +45,7 @@ const FLUXO: Passo[] = [
     ramificacoes: [
       { quando: "Lead responde 'oi' / 'sim' / qualquer saudação", vai_para: "Passo 2 — Vídeo + qualificação" },
     ],
+    slots: ["boas_vindas"],
   },
   {
     id: "qualificacao",
@@ -57,6 +61,7 @@ const FLUXO: Passo[] = [
       { quando: "Lead diz 'já assisti'", vai_para: "Passo 3 — Check-in" },
       { quando: "Lead responde qualquer outra coisa", vai_para: "Repete a pergunta" },
     ],
+    slots: ["explainer", "como_funciona"],
   },
   {
     id: "checkin_pos_video",
@@ -73,6 +78,7 @@ const FLUXO: Passo[] = [
       { quando: "Lead diz 'tenho dúvida'", vai_para: "Passo 5 — Tirar dúvidas" },
       { quando: "Lead diz 'não / depois'", vai_para: "Repete o reforço" },
     ],
+    slots: ["checkin"],
   },
   {
     id: "pitch_conexao_club",
@@ -87,6 +93,7 @@ const FLUXO: Passo[] = [
     ramificacoes: [
       { quando: "Sempre depois do vídeo", vai_para: "Passo 5 — Tirar dúvidas" },
     ],
+    slots: ["club"],
   },
   {
     id: "duvidas_pos_club",
@@ -102,6 +109,7 @@ const FLUXO: Passo[] = [
       { quando: "Lead diz 'quero seguir'", vai_para: "FIM — entra no Cadastro" },
       { quando: "Lead diz 'não quero'", vai_para: "Mensagem de empurrão e segue ouvindo" },
     ],
+    slots: ["duvidas", "objecao_preco", "objecao_distribuidora", "prova_social", "fazenda_solar"],
   },
   {
     id: "cadastro",
@@ -111,6 +119,7 @@ const FLUXO: Passo[] = [
     icone: "file",
     templates: [],
     ramificacoes: [],
+    slots: ["cadastro_pedir_conta"],
   },
 ];
 
@@ -144,6 +153,7 @@ export default function FluxoCamila() {
   const [testOpen, setTestOpen] = useState(false);
   const [testPhone, setTestPhone] = useState("");
   const [testCount, setTestCount] = useState(0);
+  const [stepOrders, setStepOrders] = useState<Record<string, ("audio" | "image" | "video" | "text")[]>>({});
 
   useEffect(() => {
     (async () => {
@@ -155,11 +165,12 @@ export default function FluxoCamila() {
         return;
       }
       const [{ data: cons }, { data: msgs }, { count }] = await Promise.all([
-        supabase.from("consultants").select("conversational_flow_enabled").eq("id", uid).maybeSingle(),
+        supabase.from("consultants").select("conversational_flow_enabled, flow_step_media_order").eq("id", uid).maybeSingle(),
         supabase.from("bot_messages").select("id, step_key, template_key, variant, text, active").eq("active", true),
         supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("conversational_flow_enabled", true),
       ]);
       setGlobalAtivo(!!cons?.conversational_flow_enabled);
+      setStepOrders((cons?.flow_step_media_order as Record<string, ("audio" | "image" | "video" | "text")[]>) ?? {});
       setMessages((msgs as BotMessage[]) ?? []);
       setTestCount(count ?? 0);
     })();
@@ -357,6 +368,16 @@ export default function FluxoCamila() {
                   </div>
                 );
               })}
+
+              {userId && passo.slots.length > 0 && (
+                <StepMediaPanel
+                  consultantId={userId}
+                  stepKey={passo.id}
+                  slotKeys={passo.slots}
+                  initialOrder={stepOrders[passo.id]}
+                  onOrderChange={(o) => setStepOrders(prev => ({ ...prev, [passo.id]: o }))}
+                />
+              )}
 
               {passo.ramificacoes.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-border/60">
