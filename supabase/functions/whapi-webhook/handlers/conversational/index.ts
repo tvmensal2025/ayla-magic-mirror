@@ -10,6 +10,7 @@ import { getTemplate, renderTemplate } from "./templates.ts";
 import {
   extractValor, extractTelefone, extractCPF, extractNome, detectRegexIntents,
 } from "../../_shared/captureExtractors.ts";
+import { getStepMediaOrder, makeKindComparator } from "../../_shared/step-media-order.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
@@ -54,6 +55,7 @@ interface DbStep {
   captures: DbCapture[] | null;
   fallback: DbFallback | null;
   auto_detect_doc_type: boolean | null;
+  media_order?: string[] | null;
 }
 
 // Steps the bot must NEVER override (cadastro pipeline owns them)
@@ -85,11 +87,33 @@ async function loadFlow(supabase: any, consultantId: string): Promise<DbStep[] |
       .select("id, step_key, step_type, message_text, text_delay_ms, slot_key, is_active, position, transitions, captures, fallback, auto_detect_doc_type")
       .eq("flow_id", flow.id)
       .order("position", { ascending: true });
-    return (steps || []) as DbStep[];
+    return ((steps || []) as DbStep[]).map((step) => ({
+      ...step,
+      // Fluxos antigos podem ter step_key nulo; usa o id como chave estável
+      // para o motor dinâmico não cair no fluxo legado.
+      step_key: step.step_key || step.id,
+    }));
   } catch (e) {
     console.error("[conversational] loadFlow failed", e);
     return null;
   }
+}
+
+async function sleepForMedia(kind: string, durationSec?: number | null, delayBeforeMs?: number | null): Promise<void> {
+  const configuredDelay = Number(delayBeforeMs || 0);
+  if (configuredDelay > 0) {
+    await new Promise((r) => setTimeout(r, Math.min(configuredDelay, 60_000)));
+    return;
+  }
+  if (kind === "audio") {
+    await new Promise((r) => setTimeout(r, Math.min(((durationSec && durationSec > 0) ? durationSec : 7) * 1000, 120_000)));
+    return;
+  }
+  if (kind === "video") {
+    await new Promise((r) => setTimeout(r, Math.min(((durationSec && durationSec > 0) ? durationSec : 30) * 1000, 90_000)));
+    return;
+  }
+  await new Promise((r) => setTimeout(r, 1500));
 }
 
 // ---------------------------------------------------------------------------
