@@ -66,7 +66,7 @@ async function loadFlow(supabase: any, consultantId: string): Promise<DbStep[] |
 
     const { data: steps } = await supabase
       .from("bot_flow_steps")
-      .select("id, step_key, message_text, slot_key, is_active, position, transitions")
+      .select("id, step_key, message_text, slot_key, is_active, position, transitions, captures, fallback")
       .eq("flow_id", flow.id)
       .order("position", { ascending: true });
     return (steps || []) as DbStep[];
@@ -76,14 +76,78 @@ async function loadFlow(supabase: any, consultantId: string): Promise<DbStep[] |
   }
 }
 
-function matchTransition(step: DbStep, intent: string, messageText: string): DbTransition | null {
+// ---------------------------------------------------------------------------
+// Capture extractors — detect data in the lead's message
+// ---------------------------------------------------------------------------
+const CAPTURE_RX = {
+  electricity_bill_value: /(?:R?\$\s*)?(\d{1,4}(?:[.,]\d{1,2})?)\s*(?:reais|conta|de luz|R\$)?/i,
+  phone_whatsapp: /(?:\+?55\s*)?\(?\d{2}\)?\s*9?\s*\d{4}[-\s]?\d{4}/,
+  cpf: /\d{3}\.?\d{3}\.?\d{3}-?\d{2}/,
+  // nome: heurística "sou X", "me chamo X Y", "meu nome é X"
+  name: /(?:sou|me chamo|meu nome [eé]|aqui [eé]?|nome:?)\s+([A-Za-zÀ-ÿ]{2,}(?:\s+[A-Za-zÀ-ÿ]{2,}){0,3})/i,
+};
+
+interface ExtractedCaptures {
+  electricity_bill_value?: number;
+  phone_whatsapp?: string;
+  cpf?: string;
+  name?: string;
+}
+
+function extractCaptures(messageText: string, configured: DbCapture[]): ExtractedCaptures {
+  const out: ExtractedCaptures = {};
+  if (!messageText) return out;
+  const enabled = new Set((configured || []).filter(c => c.enabled !== false).map(c => c.field));
+
+  if (enabled.has("electricity_bill_value")) {
+    // Só captura se mensagem parece falar de dinheiro/conta — evita pegar idade etc.
+    if (/r\$|\bconta\b|\breais?\b|\bluz\b|\bvalor\b|^\s*\d{2,4}\s*$/i.test(messageText)) {
+      const m = messageText.match(/\d{1,4}(?:[.,]\d{1,2})?/);
+      if (m) {
+        const v = parseFloat(m[0].replace(/\./g, "").replace(",", "."));
+        if (!isNaN(v) && v >= 30 && v <= 5000) out.electricity_bill_value = v;
+      }
+    }
+  }
+  if (enabled.has("phone_whatsapp")) {
+    const m = messageText.match(CAPTURE_RX.phone_whatsapp);
+    if (m) out.phone_whatsapp = m[0].replace(/\D/g, "");
+  }
+  if (enabled.has("cpf")) {
+    const m = messageText.match(CAPTURE_RX.cpf);
+    if (m) out.cpf = m[0].replace(/\D/g, "");
+  }
+  if (enabled.has("name")) {
+    const m = messageText.match(CAPTURE_RX.name);
+    if (m && m[1]) {
+      const cleaned = m[1].trim().split(/\s+/).slice(0, 3).join(" ");
+      if (cleaned.length >= 2) out.name = cleaned;
+    }
+  }
+  return out;
+}
+
+// Detect "regex-only" intents (não dependem do LLM) — usadas para casar com transitions.
+function detectRegexIntents(messageText: string): string[] {
+  const intents: string[] = [];
+  if (!messageText) return intents;
+  if (/r\$\s*\d|\b\d{2,4}\s*reais?\b|\bconta de \d|\bvalor\b.*\d/i.test(messageText)) intents.push("valor_brl");
+  else if (/^\s*\d{2,4}([.,]\d{1,2})?\s*$/.test(messageText)) intents.push("valor_brl");
+  if (CAPTURE_RX.phone_whatsapp.test(messageText)) intents.push("telefone_br");
+  if (CAPTURE_RX.cpf.test(messageText)) intents.push("cpf_br");
+  if (CAPTURE_RX.name.test(messageText)) intents.push("nome_proprio");
+  return intents;
+}
+
+function matchTransition(step: DbStep, intents: string[], messageText: string): DbTransition | null {
   const transitions = Array.isArray(step.transitions) ? step.transitions : [];
   const text = (messageText || "").toLowerCase();
-  // 1) exact intent match
+  // 1) match against any of the candidate intents (regex-derived + classifier-derived)
   for (const t of transitions) {
-    if (t.trigger_intent && t.trigger_intent !== "default" && t.trigger_intent === intent) return t;
+    if (!t.trigger_intent || t.trigger_intent === "default" || t.trigger_intent === "palavra_chave") continue;
+    if (intents.includes(t.trigger_intent)) return t;
   }
-  // 2) keyword match
+  // 2) keyword match (palavra_chave OR any rule with phrases)
   for (const t of transitions) {
     const phrases = Array.isArray(t.trigger_phrases) ? t.trigger_phrases : [];
     for (const p of phrases) {
@@ -91,11 +155,44 @@ function matchTransition(step: DbStep, intent: string, messageText: string): DbT
       if (needle && text.includes(needle)) return t;
     }
   }
-  // 3) default
-  for (const t of transitions) {
-    if (t.trigger_intent === "default") return t;
-  }
   return null;
+}
+
+async function aiDecideFallback(
+  prompt: string,
+  messageText: string,
+  candidates: { id: string; step_key: string; title?: string }[],
+  geminiApiKey: string | undefined,
+): Promise<string | null> {
+  if (!geminiApiKey || !prompt) return null;
+  try {
+    const sys = `Você decide o próximo passo de um fluxo de WhatsApp.
+Instrução do consultor: ${prompt}
+
+Mensagem do cliente: "${messageText}"
+
+Passos disponíveis (responda APENAS com o step_key exato, ou "REPEAT" pra repetir, ou "HUMANO" pra mandar pra humano, ou "CADASTRO" pra ir ao cadastro):
+${candidates.map(c => `- ${c.step_key}`).join("\n")}
+
+Responda com 1 palavra (o step_key escolhido).`;
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: sys }] }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 30 },
+        }),
+      },
+    );
+    const json: any = await res.json();
+    const out = (json?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim().split(/\s+/)[0];
+    return out || null;
+  } catch (e) {
+    console.error("[conversational] aiDecideFallback failed", e);
+    return null;
+  }
 }
 
 export async function runConversationalFlow(ctx: BotContext): Promise<BotResult> {
