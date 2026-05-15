@@ -36,6 +36,7 @@ import { normalizeDocumentType, isCNH, friendlyLabel } from "../../_shared/docum
 import { detectDocumentType } from "../../_shared/detect-doc-type.ts";
 import { uploadMediaToMinio, OCR_CONFIDENCE_THRESHOLD } from "../_helpers.ts";
 import { jsonLog } from "../../_shared/audit.ts";
+import { isTestMode } from "../../_shared/test-mode.ts";
 import type { BotContext, BotResult } from "./types.ts";
 
 // Trigrama similarity para anti-loop (0..1)
@@ -58,6 +59,7 @@ function trigramSim(a: string, b: string): number {
 
 // ── Sleep based on media duration (lets audio finish before sending video) ──
 async function sleepForMedia(kind: string, durationSec?: number | null): Promise<void> {
+  if (isTestMode()) return; // 🧪 modo teste: zero espera entre mídias
   if (kind === "audio") {
     const ms = Math.min(((durationSec && durationSec > 0) ? durationSec : 90) * 1000, 120_000);
     await new Promise((r) => setTimeout(r, ms));
@@ -1158,7 +1160,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               const cap = i === 0 ? (args.caption || "") : "";
               try {
                 await sendMedia(remoteJid, m.url, cap, k);
-                if (i < ordered.length - 1) await new Promise((r) => setTimeout(r, 1500));
+                if (i < ordered.length - 1 && !isTestMode()) await new Promise((r) => setTimeout(r, 1500));
               } catch (e) {
                 console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);
               }

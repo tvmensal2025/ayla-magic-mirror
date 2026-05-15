@@ -11,6 +11,7 @@ import {
   extractValor, extractTelefone, extractCPF, extractNome, detectRegexIntents,
 } from "../../../_shared/captureExtractors.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
+import { isTestMode } from "../../../_shared/test-mode.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
@@ -186,6 +187,7 @@ async function matchQA(
 }
 
 async function sleepForMedia(kind: string, durationSec?: number | null, delayBeforeMs?: number | null): Promise<void> {
+  if (isTestMode()) return; // 🧪 modo teste: zero espera
   const configuredDelay = Number(delayBeforeMs || 0);
   if (configuredDelay > 0) {
     await new Promise((r) => setTimeout(r, Math.min(configuredDelay, 60_000)));
@@ -499,7 +501,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Helper — render and return a step (respeita text_delay_ms configurado no passo)
   const goToStep = async (s: DbStep, extra: Record<string, any> = {}) => {
     const delay = Math.max(0, Math.min(60000, s.text_delay_ms ?? 1500));
-    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    if (delay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, delay));
     const mediaSent = await sendStepMedia(ctx, s, consultantId);
     const cadastroStep = stepTypeToCadastro(s.step_type);
     // Se for um passo especial (capture_conta/documento/finalizar), o conversation_step

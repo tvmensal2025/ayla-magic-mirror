@@ -1,0 +1,93 @@
+/**
+ * Test mode infrastructure for bot end-to-end testing.
+ *
+ * When active:
+ * - sleepForMedia() returns instantly (no waiting for audio/video to finish)
+ * - sender wrapper logs to bot_test_outbound instead of calling Whapi
+ * - OCR helpers return predictable mocked payloads instead of calling Gemini
+ * - Audio transcription uses the supplied transcript instead of calling Gemini
+ *
+ * Activation: customer's phone_whatsapp starts with "5500000" (reserved test range).
+ */
+
+import { AsyncLocalStorage } from "node:async_hooks";
+
+export interface TestStore {
+  testMode: true;
+  runId: string;
+  supabase: any;
+  turn: number;
+}
+
+export const botRequestStore = new AsyncLocalStorage<TestStore>();
+
+export function isTestMode(): boolean {
+  return botRequestStore.getStore()?.testMode === true;
+}
+
+export function getTestStore(): TestStore | undefined {
+  return botRequestStore.getStore();
+}
+
+export function isTestPhone(phone: string | null | undefined): boolean {
+  if (!phone) return false;
+  return /^5500000/.test(String(phone).replace(/\D/g, ""));
+}
+
+/** Mocked OCR payload for an electricity bill. */
+export function mockBillOcr() {
+  return {
+    sucesso: true,
+    dados: {
+      nome: "Joao Silva Teste",
+      cpf: "12345678909",
+      endereco: "Rua das Flores, 123",
+      cep: "01310100",
+      cidade: "Sao Paulo",
+      uf: "SP",
+      bairro: "Centro",
+      distribuidora: "ENEL SP",
+      numero_instalacao: "9876543210",
+      valor_conta: 350.5,
+      mes_referencia: "10/2025",
+      confianca: 95,
+    },
+  };
+}
+
+/** Mocked OCR payload for an identity document (RG). */
+export function mockDocOcr() {
+  return {
+    sucesso: true,
+    dados: {
+      nome: "Joao Silva Teste",
+      cpf: "12345678909",
+      rg: "12.345.678-9",
+      data_nascimento: "15/05/1985",
+      nome_pai: "Pedro Silva",
+      nome_mae: "Maria Silva",
+      tipo_documento: "RG",
+      confianca: 95,
+    },
+  };
+}
+
+/** Records what the bot tried to send during a test turn. */
+export async function logTestOutbound(
+  kind: string,
+  content: string,
+): Promise<void> {
+  const store = getTestStore();
+  if (!store) return;
+  try {
+    await store.supabase.from("bot_test_outbound").insert({
+      run_id: store.runId,
+      turn: store.turn,
+      direction: "outbound",
+      kind,
+      content: content.substring(0, 4000),
+    });
+  } catch (e) {
+    console.error("[test-mode] logTestOutbound failed:", e);
+  }
+}

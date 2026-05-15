@@ -18,6 +18,7 @@ import { runConversationalFlow } from "./handlers/conversational/index.ts";
 import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
+import { botRequestStore, isTestPhone, logTestOutbound } from "../_shared/test-mode.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -93,7 +94,41 @@ Deno.serve(async (req) => {
       });
     }
 
-    const sender = createWhapiSender(whapiToken);
+    // ─── Modo teste end-to-end (telefone reservado 5500000xxx) ─────────
+    const testMode = isTestPhone(phone);
+    let testRunId: string | null = null;
+    if (testMode) {
+      // Pega o run_id ativo mais recente para esse telefone
+      const { data: runRow } = await supabase
+        .from("bot_test_runs")
+        .select("id")
+        .eq("status", "running")
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      testRunId = runRow?.id || null;
+      console.log(`🧪 [test-mode] ATIVO phone=${phone} runId=${testRunId}`);
+    }
+
+    // Sender real OU mock que registra em bot_test_outbound
+    const realSender = createWhapiSender(whapiToken);
+    const sender = testMode
+      ? {
+          sendText: async (_jid: string, text: string) => {
+            await logTestOutbound("text", text); return true;
+          },
+          sendButtons: async (_jid: string, message: string, buttons: any[]) => {
+            await logTestOutbound("buttons", `${message}\n[${buttons.map((b: any) => b.title || b.id).join(" | ")}]`);
+            return true;
+          },
+          sendMedia: async (_jid: string, mediaUrl: string, caption: string, mediatype: string) => {
+            await logTestOutbound(`media:${mediatype}`, `${mediaUrl} | ${caption || ""}`);
+            return true;
+          },
+          sendPresence: async () => true,
+          downloadMedia: async () => null,
+        }
+      : realSender;
 
     // ─── Identificar consultor super admin ─────────────────────────────
     // O super admin tem consultant_id fixo na settings
@@ -277,7 +312,11 @@ Deno.serve(async (req) => {
     }
 
     // ─── Áudio do cliente → transcreve com Gemini e trata como texto ──────
-    if (hasAudio && fileBase64) {
+    if (hasAudio && testMode) {
+      // 🧪 modo teste: usa transcript embutido no payload
+      const t = (audioMessage as any)?.transcript || (parsed.message as any)?.audio?.transcript || "";
+      if (t) { messageText = String(t); isFile = false; }
+    } else if (hasAudio && fileBase64) {
       try {
         const mt = audioMessage?.mimetype || "audio/ogg";
         console.log(`🎙️ [whapi] Transcrevendo áudio do cliente (${mt}, ${fileBase64.length} b64 chars)...`);
@@ -295,8 +334,7 @@ Deno.serve(async (req) => {
         if (transcript) {
           console.log(`✅ [whapi] Transcrição (${transcript.length} chars): "${transcript.substring(0, 120)}"`);
           messageText = transcript;
-          isFile = false; // tratar como texto pra IA conversar normalmente
-          // Atualiza o log inbound com a transcrição (mantém marca [áudio])
+          isFile = false;
           if (inboundLog?.id) {
             await supabase.from("conversations").update({
               message_text: `[áudio] ${transcript}`,
@@ -344,7 +382,7 @@ Deno.serve(async (req) => {
       }
       engineUsed = engine;
 
-      const result = engine === "flow"
+      const runEngine = async () => engine === "flow"
         ? await runConversationalFlow({
             supabase, sender, customer, consultorId, nomeRepresentante,
             remoteJid, phone, messageText, buttonId, isFile, isButton,
@@ -357,6 +395,9 @@ Deno.serve(async (req) => {
             hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
           });
+      const result = testMode && testRunId
+        ? await botRequestStore.run({ testMode: true, runId: testRunId, supabase, turn: 0 }, runEngine)
+        : await runEngine();
       reply = result.reply;
       updates = result.updates;
 

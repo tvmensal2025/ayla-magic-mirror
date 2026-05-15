@@ -1365,6 +1365,89 @@ export type Database = {
         }
         Relationships: []
       }
+      bot_test_outbound: {
+        Row: {
+          content: string | null
+          conversation_step_after: string | null
+          conversation_step_before: string | null
+          created_at: string
+          direction: string
+          id: string
+          kind: string
+          latency_ms: number | null
+          run_id: string
+          turn: number
+        }
+        Insert: {
+          content?: string | null
+          conversation_step_after?: string | null
+          conversation_step_before?: string | null
+          created_at?: string
+          direction: string
+          id?: string
+          kind: string
+          latency_ms?: number | null
+          run_id: string
+          turn: number
+        }
+        Update: {
+          content?: string | null
+          conversation_step_after?: string | null
+          conversation_step_before?: string | null
+          created_at?: string
+          direction?: string
+          id?: string
+          kind?: string
+          latency_ms?: number | null
+          run_id?: string
+          turn?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bot_test_outbound_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "bot_test_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bot_test_runs: {
+        Row: {
+          consultant_id: string | null
+          created_by: string | null
+          customer_id: string | null
+          finished_at: string | null
+          id: string
+          scenario: string
+          started_at: string
+          status: string
+          summary: Json | null
+        }
+        Insert: {
+          consultant_id?: string | null
+          created_by?: string | null
+          customer_id?: string | null
+          finished_at?: string | null
+          id?: string
+          scenario?: string
+          started_at?: string
+          status?: string
+          summary?: Json | null
+        }
+        Update: {
+          consultant_id?: string | null
+          created_by?: string | null
+          customer_id?: string | null
+          finished_at?: string | null
+          id?: string
+          scenario?: string
+          started_at?: string
+          status?: string
+          summary?: Json | null
+        }
+        Relationships: []
+      }
       consultant_ad_settings: {
         Row: {
           age_max: number
@@ -3366,6 +3449,7 @@ export type Database = {
     }
     Functions: {
       admin_unpause_global_bot: { Args: never; Returns: number }
+      cleanup_bot_test_data: { Args: { _run_id: string }; Returns: Json }
       cleanup_webhook_artifacts: { Args: never; Returns: undefined }
       credit_consultant_wallet:
         | {
