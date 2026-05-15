@@ -348,6 +348,49 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
           Define em que ordem a Camila envia as mídias e o texto deste passo.
         </p>
       </div>
+
+      <Dialog open={!!pickerKind} onOpenChange={(o) => !o && setPickerKind(null)}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Sua biblioteca de {pickerKind && KIND_LABEL[pickerKind].toLowerCase()}</DialogTitle>
+            <DialogDescription>
+              Toque em uma mídia para vincular a este passo. Não duplica arquivos — usa o mesmo que você já enviou.
+            </DialogDescription>
+          </DialogHeader>
+          {loadingLibrary ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center">
+              <Loader2 className="h-4 w-4 animate-spin" /> Carregando…
+            </div>
+          ) : libraryItems.length === 0 ? (
+            <div className="text-sm text-muted-foreground italic py-8 text-center">
+              Nenhuma mídia disponível na biblioteca. Envie uma nova pelo botão "Enviar".
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-2">
+              {libraryItems.map(m => (
+                <button
+                  key={m.id}
+                  onClick={() => linkFromLibrary(m)}
+                  disabled={!!linking}
+                  className="text-left rounded-md border border-border/60 bg-muted/20 p-2 hover:bg-muted/40 transition disabled:opacity-50"
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="text-xs font-medium truncate">{m.label}</div>
+                    {linking === m.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 text-muted-foreground" />}
+                  </div>
+                  {m.url && m.kind === "audio" && <audio controls src={m.url} className="w-full h-8" onClick={e => e.stopPropagation()} />}
+                  {m.url && m.kind === "image" && <img src={m.url} alt={m.label} className="w-full max-h-32 object-cover rounded" />}
+                  {m.url && m.kind === "video" && <video controls src={m.url} className="w-full max-h-40 rounded" onClick={e => e.stopPropagation()} />}
+                  {m.slot_key && <div className="text-[10px] text-muted-foreground mt-1">já usada em: {m.slot_key}</div>}
+                </button>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPickerKind(null)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
