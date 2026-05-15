@@ -443,7 +443,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       try { await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", m.kind); } catch (_) {}
     }
     return {
-      reply: renderTemplate(qaHit.text || "", { nome: ctx.customer.name, representante: ctx.nomeRepresentante }),
+      reply: renderTemplate(qaHit.text || "", {
+        nome: ctx.customer.name,
+        representante: ctx.nomeRepresentante,
+        valor_conta: (ctx.customer as any).electricity_bill_value,
+        telefone: ctx.customer.phone_whatsapp,
+        cpf: (ctx.customer as any).cpf,
+      }),
       updates: { conversation_step: stepKey, __inline_sent: qaHit.mediaUrls.length > 0 || undefined },
     };
   }
