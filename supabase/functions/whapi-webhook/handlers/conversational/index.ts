@@ -304,16 +304,17 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     return runLegacyConversational(ctx);
   }
 
+  const firstActive = dbSteps.find((s) => s.is_active) || dbSteps[0];
   const currentStep = dbSteps.find((s) => s.step_key === stepKey);
   if (!currentStep) {
-    // Unknown step → if it's a legacy known step, run legacy; else reset to first
-    if (CONVERSATIONAL_STEPS.has(stepKey)) return runLegacyConversational(ctx);
-    const firstActive = dbSteps.find((s) => s.is_active) || dbSteps[0];
+    // Unknown/legacy step → with a visual flow configured, always restart at
+    // the first active dynamic step instead of falling back to the old machine.
+    const mediaSent = await sendStepMedia(ctx, firstActive, consultantId);
     return {
       reply: renderTemplate(firstActive.message_text || "", {
         nome: ctx.customer.name, representante: ctx.nomeRepresentante,
       }),
-      updates: { conversation_step: firstActive.step_key },
+      updates: { conversation_step: firstActive.step_key, __inline_sent: mediaSent || undefined },
     };
   }
 
@@ -383,6 +384,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   const goToStep = async (s: DbStep, extra: Record<string, any> = {}) => {
     const delay = Math.max(0, Math.min(60000, s.text_delay_ms ?? 1500));
     if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    const mediaSent = await sendStepMedia(ctx, s, consultantId);
     const cadastroStep = stepTypeToCadastro(s.step_type);
     // Se for um passo especial (capture_conta/documento/finalizar), o conversation_step
     // salvo já é o do pipeline de cadastro — assim a próxima mensagem do lead cai direto
@@ -390,7 +392,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const nextConversationStep = cadastroStep || s.step_key;
     return {
       reply: renderTemplate(s.message_text || "", vars),
-      updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...extra },
+      updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: mediaSent || undefined, ...extra },
     };
   };
   const repeatCurrent = () => goToStep(currentStep);
