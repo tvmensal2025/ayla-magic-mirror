@@ -802,3 +802,62 @@ function TransitionRow(props: {
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// RuleSimulator — testa uma mensagem contra as regras do passo
+// ---------------------------------------------------------------------------
+function RuleSimulator({ rules, allSteps }: { rules: Transition[]; allSteps: Step[] }) {
+  const [open, setOpen] = useState(false);
+  const [msg, setMsg] = useState("");
+  const result = msg ? simulateMatch(msg, rules) : null;
+
+  const destLabel = (r: Transition | undefined) => {
+    if (!r) return "—";
+    if (r.goto_special === "repeat") return "Repetir o passo";
+    if (r.goto_special === "cadastro") return "→ Cadastro";
+    if (r.goto_special === "humano") return "→ Aguardando humano";
+    if (r.goto_step_id) {
+      const s = allSteps.find(x => x.id === r.goto_step_id);
+      const num = allSteps.findIndex(x => x.id === r.goto_step_id) + 1;
+      return s ? `→ Passo ${num} — ${s.title}` : "→ Passo removido";
+    }
+    return "—";
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border/40">
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
+        >
+          <Play className="h-3 w-3" /> Testar uma mensagem
+        </button>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Input
+              value={msg}
+              onChange={(e) => setMsg(e.target.value)}
+              placeholder='Ex: "minha conta vem uns 350"'
+              className="h-8 text-sm"
+            />
+            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setOpen(false); setMsg(""); }}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          {msg && (
+            <div className={`text-xs rounded-md p-2 ${result ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-muted text-muted-foreground"}`}>
+              {result ? (
+                <>✓ <strong>Regra #{result.index + 1}</strong> dispara → {destLabel(result.rule)}</>
+              ) : (
+                <>Nenhuma regra casa — vai cair no <strong>Plano B</strong>.</>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
