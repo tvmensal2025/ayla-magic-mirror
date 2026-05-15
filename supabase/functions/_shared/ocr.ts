@@ -1,6 +1,7 @@
 import { fetchWithTimeout, withRetry, TIMEOUT_FETCH_IMAGE, TIMEOUT_GEMINI } from "./utils.ts";
 import { normalizarRG, validarDataNascimento, validarNomeOCR, validarCPFDigitos } from "./conversation-helpers.ts";
 import { captureError } from "./sentry.ts";
+import { isTestMode, mockBillOcr, mockDocOcr } from "./test-mode.ts";
 
 // ─── Baixar imagem (Evolution API ou URL direta) ────────────────────
 export async function baixarImagem(
