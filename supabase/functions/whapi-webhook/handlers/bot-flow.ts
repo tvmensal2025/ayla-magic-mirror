@@ -1508,6 +1508,103 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       break;
     }
 
+    // ─── 3a-AUTO. CAPTURA DE DOC COM DETECÇÃO AUTOMÁTICA DE TIPO ─────
+    // Usado pelos passos do FluxoCamila com step_type=capture_documento
+    // (auto_detect_doc_type=true). A IA olha a foto e classifica RG/CNH
+    // sem perguntar. Se não vier foto ainda, pede a foto.
+    case "aguardando_doc_auto": {
+      if (!isFile) {
+        reply = "📸 Me envie a foto da *frente* do seu *RG ou CNH*.\n\nA IA reconhece automaticamente qual documento é. Formatos: JPG, PNG ou PDF.";
+        break;
+      }
+      const mime = imageMessage?.mimetype || documentMessage?.mimetype || "image/jpeg";
+      let detectedType: "cnh" | "rg_novo" | "rg_antigo" = "rg_antigo";
+      try {
+        detectedType = await detectDocumentType({
+          base64: fileBase64 || undefined,
+          mimeType: mime,
+          imageUrl: fileUrl?.startsWith("http") ? fileUrl : undefined,
+          geminiApiKey,
+        });
+        console.log(`🤖 [doc-auto] tipo detectado pela IA: ${detectedType}`);
+      } catch (e) {
+        console.warn(`⚠️ [doc-auto] falha detectando tipo:`, (e as Error).message);
+      }
+      updates.document_type = detectedType;
+      // Reaproveita o handler clássico: marca o passo como aguardando_doc_frente
+      // e encaminha o processamento para o case já existente abaixo.
+      // Aqui só salvamos o tipo + step e devolvemos confirmação curta;
+      // a próxima mensagem (ou a mesma se for re-entrada) cai em aguardando_doc_frente.
+      // PORÉM: o lead JÁ enviou a foto agora — então processamos imediatamente
+      // chamando a mesma lógica do aguardando_doc_frente inline.
+      updates.conversation_step = "aguardando_doc_frente";
+      // Falha controlada: deixa o switch re-executar via fall-through manual
+      // setando step e reescrevendo a lógica seria ruim. Em vez disso, devolvemos
+      // uma mensagem curta e aguardamos o próximo evento. Para não perder a foto
+      // que já chegou, salvamos a frente aqui mesmo:
+      if (fileBase64) {
+        updates.document_front_url = `data:${mime};base64,${fileBase64}`;
+        updates.document_front_base64 = fileBase64;
+        updates.media_message_id = messageId || null;
+        updates.media_storage = "inline";
+      } else if (fileUrl) {
+        updates.document_front_url = fileUrl.startsWith("http") ? fileUrl : "evolution-media:pending";
+      }
+      // Se for CNH, marca verso "não aplicável" para o pipeline pular o passo.
+      if (detectedType === "cnh") {
+        updates.document_back_url = "nao_aplicavel";
+        await sendText(remoteJid, "✅ CNH identificada! ⏳ Analisando os dados...");
+      } else {
+        const friendly = detectedType === "rg_novo" ? "RG (Novo)" : "RG (Antigo)";
+        await sendText(remoteJid, `✅ ${friendly} identificado! ⏳ Analisando a frente...\n\nDepois vou te pedir o verso.`);
+      }
+      // Roda OCR da frente já agora (mesma lógica do aguardando_doc_frente)
+      try {
+        const docFrenteUrl = fileUrl || updates.document_front_url || "evolution-media:pending";
+        const ocrData = await ocrDocumentoFrenteVerso(
+          docFrenteUrl,
+          detectedType === "cnh" ? "nao_aplicavel" : (customer.document_back_url || ""),
+          detectedType === "cnh" ? "CNH" : (detectedType === "rg_novo" ? "RG_NOVO" : "RG_ANTIGO"),
+          geminiApiKey,
+          fileBase64 || undefined,
+          documentMessage || imageMessage,
+          undefined,
+        );
+        if (ocrData.sucesso && ocrData.dados) {
+          const d = ocrData.dados;
+          if (d.nome) updates.name = d.nome;
+          if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
+          if (d.rg) updates.rg = d.rg;
+          const dataConf = String(d.dataNascimentoConfianca || "").toLowerCase();
+          if (d.dataNascimento && (detectedType !== "cnh" || dataConf === "alta")) {
+            updates.data_nascimento = d.dataNascimento;
+          }
+          if (d.nomePai) updates.nome_pai = d.nomePai;
+          if (d.nomeMae) updates.nome_mae = d.nomeMae;
+        }
+      } catch (e) {
+        console.warn(`[doc-auto] OCR falhou:`, (e as Error).message);
+      }
+      // CNH → vai direto pra confirmação. RG → pede verso.
+      if (detectedType === "cnh") {
+        updates.conversation_step = "confirmando_dados_doc";
+        const nome = updates.name || customer.name || "—";
+        const cpf = updates.cpf || customer.cpf || "—";
+        const rg = updates.rg || customer.rg || "—";
+        const nasc = updates.data_nascimento || customer.data_nascimento || "_(será preenchido pelo portal via CPF)_";
+        await sendOptions(remoteJid, `📋 *Dados extraídos da CNH:*\n\n👤 Nome: *${nome}*\n🆔 CPF: *${cpf}*\n🪪 RG: *${rg}*\n🎂 Nascimento: *${nasc}*\n\nEstá tudo correto?`, [
+          { id: "sim_doc", title: "✅ SIM" },
+          { id: "nao_doc", title: "❌ NÃO" },
+          { id: "editar_doc", title: "✏️ EDITAR" },
+        ]);
+        reply = "";
+      } else {
+        updates.conversation_step = "aguardando_doc_verso";
+        reply = "✅ Frente recebida!\n\n📸 Agora envie o *VERSO do RG*.\n\nFormatos: JPG, PNG ou PDF";
+      }
+      break;
+    }
+
     // ─── 3b. TIPO DE DOCUMENTO ─────────
     case "ask_tipo_documento": {
       const resp = isButton ? buttonId : messageText.trim().toLowerCase();
