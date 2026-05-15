@@ -526,6 +526,51 @@ function StepCard(props: {
         </div>
       </div>
 
+      {/* Tipo do passo */}
+      <div className="mb-3 rounded-lg border border-border/60 bg-muted/30 p-2.5">
+        <div className="flex items-center gap-2 mb-1.5">
+          <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Tipo deste passo</Label>
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="text-muted-foreground hover:text-foreground"><HelpCircle className="h-3.5 w-3.5" /></button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[280px] text-xs">
+                Mensagem comum = passo livre que você edita à vontade. Os outros tipos amarram esse passo a uma etapa do cadastro automático (conta, documento, finalização).
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+        <Select value={step.step_type || "message"} onValueChange={(v) => onPatch({ step_type: v })}>
+          <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {STEP_TYPE_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                <div className="flex flex-col">
+                  <span>{o.label}</span>
+                  <span className="text-[10px] text-muted-foreground">{o.hint}</span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {step.step_type === "capture_documento" && (
+          <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+            <Checkbox
+              checked={step.auto_detect_doc_type !== false}
+              onCheckedChange={(v) => onPatch({ auto_detect_doc_type: !!v } as any)}
+            />
+            <span>Detectar RG/CNH automaticamente pela foto (IA decide). Se desligar, a Camila pergunta ao lead.</span>
+          </label>
+        )}
+        {step.step_type !== "message" && step.step_type && (
+          <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400 leading-snug">
+            ✨ Quando o lead chegar neste passo, a Camila envia o texto/mídia abaixo e em seguida entra automaticamente
+            no pipeline de <strong>{step.step_type === "capture_conta" ? "captura da conta" : step.step_type === "capture_documento" ? "captura do documento" : "finalização (portal + OTP + parabéns)"}</strong>.
+          </p>
+        )}
+      </div>
+
       {/* Mídia */}
       <StepMediaPanel consultantId={consultantId} stepKey={slotKey} slotKeys={[slotKey]} />
 
