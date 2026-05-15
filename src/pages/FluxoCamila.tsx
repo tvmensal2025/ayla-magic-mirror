@@ -226,6 +226,20 @@ export default function FluxoCamila() {
     else { toast.success("Mensagem salva"); setEditing(null); }
   }
 
+  async function deleteText() {
+    if (!editing) return;
+    const cur = findMsg(editing.step_key, editing.template_key);
+    if (!cur) { setEditing(null); return; }
+    if (!confirm("Apagar este texto? A Camila vai parar de enviar essa mensagem.")) return;
+    setSaving(true);
+    const { error } = await supabase.from("bot_messages").update({ active: false }).eq("id", cur.id);
+    setSaving(false);
+    if (error) { toast.error("Erro ao apagar: " + error.message); return; }
+    setMessages(prev => prev.filter(m => m.id !== cur.id));
+    toast.success("Texto apagado");
+    setEditing(null);
+  }
+
   async function addTestNumber() {
     if (!userId) return;
     const phone = testPhone.replace(/\D/g, "");
