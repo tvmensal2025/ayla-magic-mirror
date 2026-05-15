@@ -244,16 +244,29 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
             </span>
             <Badge variant="secondary" className="text-[10px] h-4">{list.length}</Badge>
           </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs"
-            disabled={uploading === kind || !slotForUpload}
-            onClick={() => fileInputs.current[kind]?.click()}
-          >
-            {uploading === kind ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Upload className="h-3 w-3 mr-1" />}
-            Adicionar
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              disabled={!slotForUpload}
+              onClick={() => openLibrary(kind)}
+              title="Usar mídia já salva na sua biblioteca"
+            >
+              <Library className="h-3 w-3 mr-1" />
+              Biblioteca
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              disabled={uploading === kind || !slotForUpload}
+              onClick={() => fileInputs.current[kind]?.click()}
+            >
+              {uploading === kind ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Upload className="h-3 w-3 mr-1" />}
+              Enviar
+            </Button>
+          </div>
           <input
             ref={el => (fileInputs.current[kind] = el)}
             type="file"
