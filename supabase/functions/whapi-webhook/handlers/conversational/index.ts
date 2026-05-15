@@ -17,6 +17,17 @@ interface DbTransition {
   goto_special?: string | null; // 'cadastro' | 'humano' | 'repeat' | null
 }
 
+interface DbCapture {
+  field: "name" | "electricity_bill_value" | "phone_whatsapp" | "cpf";
+  enabled?: boolean;
+}
+
+interface DbFallback {
+  mode?: "repeat" | "goto" | "ai";
+  goto_step_id?: string | null;
+  ai_prompt?: string | null;
+}
+
 interface DbStep {
   id: string;
   step_key: string;
@@ -25,6 +36,8 @@ interface DbStep {
   is_active: boolean;
   position: number;
   transitions: DbTransition[] | null;
+  captures: DbCapture[] | null;
+  fallback: DbFallback | null;
 }
 
 // Steps the bot must NEVER override (cadastro pipeline owns them)
@@ -53,7 +66,7 @@ async function loadFlow(supabase: any, consultantId: string): Promise<DbStep[] |
 
     const { data: steps } = await supabase
       .from("bot_flow_steps")
-      .select("id, step_key, message_text, slot_key, is_active, position, transitions")
+      .select("id, step_key, message_text, slot_key, is_active, position, transitions, captures, fallback")
       .eq("flow_id", flow.id)
       .order("position", { ascending: true });
     return (steps || []) as DbStep[];
@@ -63,14 +76,78 @@ async function loadFlow(supabase: any, consultantId: string): Promise<DbStep[] |
   }
 }
 
-function matchTransition(step: DbStep, intent: string, messageText: string): DbTransition | null {
+// ---------------------------------------------------------------------------
+// Capture extractors — detect data in the lead's message
+// ---------------------------------------------------------------------------
+const CAPTURE_RX = {
+  electricity_bill_value: /(?:R?\$\s*)?(\d{1,4}(?:[.,]\d{1,2})?)\s*(?:reais|conta|de luz|R\$)?/i,
+  phone_whatsapp: /(?:\+?55\s*)?\(?\d{2}\)?\s*9?\s*\d{4}[-\s]?\d{4}/,
+  cpf: /\d{3}\.?\d{3}\.?\d{3}-?\d{2}/,
+  // nome: heurística "sou X", "me chamo X Y", "meu nome é X"
+  name: /(?:sou|me chamo|meu nome [eé]|aqui [eé]?|nome:?)\s+([A-Za-zÀ-ÿ]{2,}(?:\s+[A-Za-zÀ-ÿ]{2,}){0,3})/i,
+};
+
+interface ExtractedCaptures {
+  electricity_bill_value?: number;
+  phone_whatsapp?: string;
+  cpf?: string;
+  name?: string;
+}
+
+function extractCaptures(messageText: string, configured: DbCapture[]): ExtractedCaptures {
+  const out: ExtractedCaptures = {};
+  if (!messageText) return out;
+  const enabled = new Set((configured || []).filter(c => c.enabled !== false).map(c => c.field));
+
+  if (enabled.has("electricity_bill_value")) {
+    // Só captura se mensagem parece falar de dinheiro/conta — evita pegar idade etc.
+    if (/r\$|\bconta\b|\breais?\b|\bluz\b|\bvalor\b|^\s*\d{2,4}\s*$/i.test(messageText)) {
+      const m = messageText.match(/\d{1,4}(?:[.,]\d{1,2})?/);
+      if (m) {
+        const v = parseFloat(m[0].replace(/\./g, "").replace(",", "."));
+        if (!isNaN(v) && v >= 30 && v <= 5000) out.electricity_bill_value = v;
+      }
+    }
+  }
+  if (enabled.has("phone_whatsapp")) {
+    const m = messageText.match(CAPTURE_RX.phone_whatsapp);
+    if (m) out.phone_whatsapp = m[0].replace(/\D/g, "");
+  }
+  if (enabled.has("cpf")) {
+    const m = messageText.match(CAPTURE_RX.cpf);
+    if (m) out.cpf = m[0].replace(/\D/g, "");
+  }
+  if (enabled.has("name")) {
+    const m = messageText.match(CAPTURE_RX.name);
+    if (m && m[1]) {
+      const cleaned = m[1].trim().split(/\s+/).slice(0, 3).join(" ");
+      if (cleaned.length >= 2) out.name = cleaned;
+    }
+  }
+  return out;
+}
+
+// Detect "regex-only" intents (não dependem do LLM) — usadas para casar com transitions.
+function detectRegexIntents(messageText: string): string[] {
+  const intents: string[] = [];
+  if (!messageText) return intents;
+  if (/r\$\s*\d|\b\d{2,4}\s*reais?\b|\bconta de \d|\bvalor\b.*\d/i.test(messageText)) intents.push("valor_brl");
+  else if (/^\s*\d{2,4}([.,]\d{1,2})?\s*$/.test(messageText)) intents.push("valor_brl");
+  if (CAPTURE_RX.phone_whatsapp.test(messageText)) intents.push("telefone_br");
+  if (CAPTURE_RX.cpf.test(messageText)) intents.push("cpf_br");
+  if (CAPTURE_RX.name.test(messageText)) intents.push("nome_proprio");
+  return intents;
+}
+
+function matchTransition(step: DbStep, intents: string[], messageText: string): DbTransition | null {
   const transitions = Array.isArray(step.transitions) ? step.transitions : [];
   const text = (messageText || "").toLowerCase();
-  // 1) exact intent match
+  // 1) match against any of the candidate intents (regex-derived + classifier-derived)
   for (const t of transitions) {
-    if (t.trigger_intent && t.trigger_intent !== "default" && t.trigger_intent === intent) return t;
+    if (!t.trigger_intent || t.trigger_intent === "default" || t.trigger_intent === "palavra_chave") continue;
+    if (intents.includes(t.trigger_intent)) return t;
   }
-  // 2) keyword match
+  // 2) keyword match (palavra_chave OR any rule with phrases)
   for (const t of transitions) {
     const phrases = Array.isArray(t.trigger_phrases) ? t.trigger_phrases : [];
     for (const p of phrases) {
@@ -78,11 +155,44 @@ function matchTransition(step: DbStep, intent: string, messageText: string): DbT
       if (needle && text.includes(needle)) return t;
     }
   }
-  // 3) default
-  for (const t of transitions) {
-    if (t.trigger_intent === "default") return t;
-  }
   return null;
+}
+
+async function aiDecideFallback(
+  prompt: string,
+  messageText: string,
+  candidates: { id: string; step_key: string; title?: string }[],
+  geminiApiKey: string | undefined,
+): Promise<string | null> {
+  if (!geminiApiKey || !prompt) return null;
+  try {
+    const sys = `Você decide o próximo passo de um fluxo de WhatsApp.
+Instrução do consultor: ${prompt}
+
+Mensagem do cliente: "${messageText}"
+
+Passos disponíveis (responda APENAS com o step_key exato, ou "REPEAT" pra repetir, ou "HUMANO" pra mandar pra humano, ou "CADASTRO" pra ir ao cadastro):
+${candidates.map(c => `- ${c.step_key}`).join("\n")}
+
+Responda com 1 palavra (o step_key escolhido).`;
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: sys }] }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 30 },
+        }),
+      },
+    );
+    const json: any = await res.json();
+    const out = (json?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim().split(/\s+/)[0];
+    return out || null;
+  } catch (e) {
+    console.error("[conversational] aiDecideFallback failed", e);
+    return null;
+  }
 }
 
 export async function runConversationalFlow(ctx: BotContext): Promise<BotResult> {
@@ -116,13 +226,31 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
 
   const cls = await classifyIntent(ctx.messageText, stepKey as ConversationalStep, ctx.geminiApiKey);
 
+  // ---------------------------------------------------------------------------
+  // Capture phase — extract data the consultor configured for this step
+  // ---------------------------------------------------------------------------
+  const captureUpdates: Record<string, any> = {};
+  try {
+    const extracted = extractCaptures(ctx.messageText || "", currentStep.captures || []);
+    if (extracted.electricity_bill_value != null) captureUpdates.electricity_bill_value = extracted.electricity_bill_value;
+    if (extracted.phone_whatsapp && !ctx.customer.phone_whatsapp) captureUpdates.phone_whatsapp = extracted.phone_whatsapp;
+    if (extracted.cpf) captureUpdates.cpf = extracted.cpf;
+    if (extracted.name && !ctx.customer.name) captureUpdates.name = extracted.name;
+
+    if (Object.keys(captureUpdates).length > 0 && ctx.customer.id) {
+      await ctx.supabase.from("customers").update(captureUpdates).eq("id", ctx.customer.id);
+    }
+  } catch (e) {
+    console.error("[conversational] capture phase failed", e);
+  }
+
   // Global overrides: cadastro / humano keywords win in any step
   if (cls.intent === "quer_cadastrar") {
     return {
       reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
         nome: ctx.customer.name, representante: ctx.nomeRepresentante,
       }),
-      updates: { conversation_step: "aguardando_conta", __intent: cls.intent, __confidence: cls.confidence },
+      updates: { conversation_step: "aguardando_conta", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
     };
   }
   if (cls.intent === "quer_humano") {
@@ -130,79 +258,87 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", {
         nome: ctx.customer.name, representante: ctx.nomeRepresentante,
       }),
-      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence },
+      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
     };
   }
 
-  const transition = matchTransition(currentStep, cls.intent, ctx.messageText);
+  // Build candidate intent list: classifier intent + regex-derived intents
+  const candidateIntents = [cls.intent, ...detectRegexIntents(ctx.messageText || "")];
+  const transition = matchTransition(currentStep, candidateIntents, ctx.messageText);
 
-  // No transition matched → repeat current step
-  if (!transition) {
-    return {
-      reply: renderTemplate(currentStep.message_text || "", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: stepKey, __intent: cls.intent, __confidence: cls.confidence },
-    };
-  }
-
-  // Special destinations
-  if (transition.goto_special === "cadastro") {
-    return {
-      reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence },
-    };
-  }
-  if (transition.goto_special === "humano") {
-    return {
-      reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence },
-    };
-  }
-  if (transition.goto_special === "repeat" || (!transition.goto_step_id && !transition.goto_special)) {
-    return {
-      reply: renderTemplate(currentStep.message_text || "", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: stepKey, __intent: cls.intent, __confidence: cls.confidence },
-    };
-  }
-
-  // Resolve goto_step_id → step_key
-  const nextStep = dbSteps.find((s) => s.id === transition.goto_step_id);
-  if (!nextStep || !nextStep.is_active) {
-    return {
-      reply: renderTemplate(currentStep.message_text || "", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: stepKey, __intent: cls.intent, __confidence: cls.confidence },
-    };
-  }
-
-  // If destination is cadastro step, route through cadastro entry
-  if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
-    return {
-      reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence },
-    };
-  }
-
-  return {
-    reply: renderTemplate(nextStep.message_text || "", {
-      nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-    }),
-    updates: {
-      conversation_step: nextStep.step_key,
-      __intent: cls.intent,
-      __confidence: cls.confidence,
-    },
+  const vars = {
+    nome: captureUpdates.name || ctx.customer.name,
+    representante: ctx.nomeRepresentante,
+    valor_conta: captureUpdates.electricity_bill_value ?? (ctx.customer as any).electricity_bill_value,
+    telefone: captureUpdates.phone_whatsapp || ctx.customer.phone_whatsapp,
+    cpf: captureUpdates.cpf || (ctx.customer as any).cpf,
   };
+
+  // Helper — render and return a step
+  const goToStep = (s: DbStep, extra: Record<string, any> = {}) => ({
+    reply: renderTemplate(s.message_text || "", vars),
+    updates: { conversation_step: s.step_key, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...extra },
+  });
+  const repeatCurrent = () => goToStep(currentStep);
+
+  // Resolve a transition (special or step) to a BotResult
+  const resolveTransition = async (t: DbTransition): Promise<BotResult> => {
+    if (t.goto_special === "cadastro") {
+      return {
+        reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
+        updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
+      };
+    }
+    if (t.goto_special === "humano") {
+      return {
+        reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", vars),
+        updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
+      };
+    }
+    if (t.goto_special === "repeat" || (!t.goto_step_id && !t.goto_special)) return repeatCurrent();
+    const nextStep = dbSteps.find((s) => s.id === t.goto_step_id);
+    if (!nextStep || !nextStep.is_active) return repeatCurrent();
+    if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
+      return {
+        reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
+        updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
+      };
+    }
+    return goToStep(nextStep);
+  };
+
+  // 1) A regular rule matched
+  if (transition) return resolveTransition(transition);
+
+  // 2) FALLBACK (Plano B)
+  const fb = currentStep.fallback || { mode: "repeat" };
+  if (fb.mode === "goto" && fb.goto_step_id) {
+    const nextStep = dbSteps.find((s) => s.id === fb.goto_step_id);
+    if (nextStep && nextStep.is_active) {
+      if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
+        return {
+          reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
+          updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
+        };
+      }
+      return goToStep(nextStep);
+    }
+  }
+  if (fb.mode === "ai" && fb.ai_prompt) {
+    const candidates = dbSteps.filter(s => s.is_active && s.id !== currentStep.id).map(s => ({ id: s.id, step_key: s.step_key }));
+    const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey);
+    if (choice) {
+      const upper = choice.toUpperCase();
+      if (upper === "REPEAT") return repeatCurrent();
+      if (upper === "HUMANO") return resolveTransition({ goto_special: "humano" } as DbTransition);
+      if (upper === "CADASTRO") return resolveTransition({ goto_special: "cadastro" } as DbTransition);
+      const nextStep = dbSteps.find(s => s.step_key === choice);
+      if (nextStep && nextStep.is_active) return goToStep(nextStep);
+    }
+  }
+
+  // Default: repeat
+  return repeatCurrent();
 }
 
 // Legacy hardcoded path — preserved for consultants without a custom flow.
