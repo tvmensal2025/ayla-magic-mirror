@@ -2177,8 +2177,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         updates.conversation_step = next;
         reply = getReplyForStep(next, merged);
       } else if (resp === "nao_doc" || resp === "nao" || resp === "não" || resp === "n" || resp === "2" || resp === "errado" || resp === "❌") {
-        updates.conversation_step = "aguardando_doc_frente";
-        reply = "📸 Ok! Envie novamente a *FRENTE do documento* com melhor qualidade.";
+        // ── ANTI-LOOP: após 2 rejeições, força avanço para coleta manual em vez de re-pedir foto ──
+        const rejectCount = (customer.ocr_doc_attempts || 0) + 1;
+        updates.ocr_doc_attempts = rejectCount;
+        if (rejectCount >= 2) {
+          console.warn(`⚠️ [ANTI-LOOP DOC] ${customer.id} rejeitou doc ${rejectCount}x — indo para coleta manual.`);
+          updates.conversation_step = "ask_cpf";
+          reply = "Sem problema! Vamos coletar os dados manualmente.\n\nQual o seu *CPF*? (apenas números)";
+        } else {
+          updates.conversation_step = "aguardando_doc_frente";
+          reply = "📸 Ok! Envie novamente a *FRENTE do documento* com melhor qualidade.";
+        }
       } else if (resp === "editar_doc" || resp === "editar" || resp === "3") {
         updates.conversation_step = "editing_doc_menu";
         reply = "✏️ Qual campo deseja editar?\n\n1️⃣ Nome\n2️⃣ CPF\n3️⃣ RG\n4️⃣ Data de Nascimento\n0️⃣ Cancelar\n\nDigite o número (ou a palavra-chave: nome, cpf, rg, data):";
@@ -2844,10 +2853,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         customer_id: customer.id, step: "finalizando", errors: validation.errors,
       });
       
-      // ── ANTI-LOOP: Se já redirecionou 2+ vezes, forçar finalização mesmo com warnings ──
+      // ── ANTI-LOOP: Se já redirecionou 1+ vez, forçar finalização (evita ping-pong ask_email⇄ask_finalizar) ──
       // Usa rescue_attempts como contador (coluna já existente) para não depender de coluna nova
       const redirectCount = customer.rescue_attempts || 0;
-      if (redirectCount >= 2) {
+      if (redirectCount >= 1) {
         console.warn(`⚠️ [ANTI-LOOP] ${customer.id} já foi redirecionado ${redirectCount}x. Forçando finalização.`);
         logStructured("warn", "force_finalize_after_redirects", {
           customer_id: customer.id, errors: validation.errors, redirects: redirectCount,
