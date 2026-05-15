@@ -502,39 +502,216 @@ function StepCard(props: {
         />
       </div>
 
-      {/* Transições */}
-      <div className="mt-4 pt-4 border-t border-border/60">
-        <div className="flex items-center justify-between mb-2">
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Para onde vai depois</Label>
-          <Button size="sm" variant="outline" onClick={() => {
-            const novas = [...step.transitions, { trigger_intent: "default", trigger_phrases: [], goto_step_id: null, goto_special: "repeat" } as Transition];
+      {/* BLOCO 1 — REGRAS */}
+      <BlockShell
+        icon={<Target className="h-4 w-4" />}
+        title="Regras — quando o cliente disser..."
+        tooltip="Cada regra escuta uma intenção do cliente (SIM, NÃO, mandou valor, etc.) e leva pra um passo específico."
+        accent="emerald"
+        action={
+          <Button size="sm" variant="ghost" className="h-7" onClick={() => {
+            const novas = [...step.transitions, { trigger_intent: "afirmacao", trigger_phrases: [], goto_step_id: null, goto_special: null } as Transition];
             onPatch({ transitions: novas });
           }}><Plus className="h-3 w-3 mr-1" /> Regra</Button>
+        }
+      >
+        {step.transitions.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">Nenhuma regra ainda. Sem regras, a Camila usa direto o Plano B abaixo.</p>
+        ) : (
+          <div className="space-y-2">
+            {step.transitions.map((t, i) => (
+              <TransitionRow
+                key={i}
+                transition={t}
+                currentStepId={step.id}
+                allSteps={allSteps}
+                onChange={(nt) => {
+                  const novas = [...step.transitions];
+                  novas[i] = nt;
+                  onPatch({ transitions: novas });
+                }}
+                onRemove={() => {
+                  const novas = step.transitions.filter((_, idx) => idx !== i);
+                  onPatch({ transitions: novas });
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </BlockShell>
+
+      {/* BLOCO 2 — CAPTURAR DADOS */}
+      <BlockShell
+        icon={<Database className="h-4 w-4" />}
+        title="Capturar dados que o cliente mandou"
+        tooltip="Marque o que a Camila deve detectar automaticamente na mensagem do cliente. O dado é salvo no cadastro e fica disponível como variável nas próximas mensagens."
+        accent="sky"
+      >
+        <div className="grid sm:grid-cols-2 gap-2">
+          {CAPTURE_FIELDS.map((cf) => {
+            const isOn = step.captures.some((c) => c.field === cf.field && c.enabled);
+            return (
+              <label
+                key={cf.field}
+                className="flex items-start gap-2 rounded-md border border-border/60 bg-background/60 p-2.5 cursor-pointer hover:border-sky-500/40 transition"
+              >
+                <Checkbox
+                  checked={isOn}
+                  onCheckedChange={(v) => {
+                    const others = step.captures.filter((c) => c.field !== cf.field);
+                    const novas = v ? [...others, { field: cf.field, enabled: true }] : others;
+                    onPatch({ captures: novas });
+                  }}
+                  className="mt-0.5"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium leading-tight">{cf.label}</div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">{cf.hint}</div>
+                  <code className="text-[10px] text-sky-500 mt-1 block">salva em {cf.varName}</code>
+                </div>
+              </label>
+            );
+          })}
         </div>
-        <div className="space-y-2">
-          {step.transitions.length === 0 && (
-            <p className="text-sm text-muted-foreground italic">Nenhuma regra. A Camila vai repetir esse passo.</p>
-          )}
-          {step.transitions.map((t, i) => (
-            <TransitionRow
-              key={i}
-              transition={t}
-              currentStepId={step.id}
-              allSteps={allSteps}
-              onChange={(nt) => {
-                const novas = [...step.transitions];
-                novas[i] = nt;
-                onPatch({ transitions: novas });
-              }}
-              onRemove={() => {
-                const novas = step.transitions.filter((_, idx) => idx !== i);
-                onPatch({ transitions: novas });
-              }}
-            />
-          ))}
-        </div>
-      </div>
+      </BlockShell>
+
+      {/* BLOCO 3 — PLANO B */}
+      <BlockShell
+        icon={<Bot className="h-4 w-4" />}
+        title="Plano B — quando nada acima funcionar"
+        tooltip="Se o cliente mandar algo que nenhuma regra reconhece, o que a Camila faz?"
+        accent="amber"
+      >
+        <FallbackBlock
+          fallback={step.fallback}
+          currentStepId={step.id}
+          allSteps={allSteps}
+          onChange={(f) => onPatch({ fallback: f })}
+        />
+      </BlockShell>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BlockShell — visual wrapper para os 3 blocos
+// ---------------------------------------------------------------------------
+function BlockShell({
+  icon, title, tooltip, accent, action, children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  tooltip: string;
+  accent: "emerald" | "sky" | "amber";
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const accentMap = {
+    emerald: "border-emerald-500/20 bg-emerald-500/[0.04] text-emerald-500",
+    sky:     "border-sky-500/20 bg-sky-500/[0.04] text-sky-500",
+    amber:   "border-amber-500/20 bg-amber-500/[0.04] text-amber-500",
+  } as const;
+  return (
+    <div className={`mt-3 rounded-xl border ${accentMap[accent].split(" ").slice(0,2).join(" ")} p-3 sm:p-4`}>
+      <div className="flex items-center justify-between gap-2 mb-2.5">
+        <div className="flex items-center gap-2">
+          <div className={`h-7 w-7 rounded-lg flex items-center justify-center ${accentMap[accent].split(" ").slice(0,2).join(" ")} ${accentMap[accent].split(" ")[2]}`}>
+            {icon}
+          </div>
+          <h3 className="text-sm font-semibold">{title}</h3>
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="text-muted-foreground hover:text-foreground transition">
+                  <HelpCircle className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[260px] text-xs">{tooltip}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FallbackBlock
+// ---------------------------------------------------------------------------
+function FallbackBlock({
+  fallback, currentStepId, allSteps, onChange,
+}: {
+  fallback: Fallback;
+  currentStepId: string;
+  allSteps: Step[];
+  onChange: (f: Fallback) => void;
+}) {
+  const [prompt, setPrompt] = useState(fallback.ai_prompt ?? "");
+  useEffect(() => { setPrompt(fallback.ai_prompt ?? ""); }, [fallback.ai_prompt]);
+
+  return (
+    <div className="space-y-2.5">
+      <RadioGroup
+        value={fallback.mode}
+        onValueChange={(v) => onChange({ ...fallback, mode: v as FallbackMode })}
+        className="space-y-2"
+      >
+        <label className="flex items-start gap-2.5 rounded-md border border-border/60 bg-background/60 p-2.5 cursor-pointer hover:border-amber-500/40 transition">
+          <RadioGroupItem value="repeat" className="mt-0.5" />
+          <div className="flex-1">
+            <div className="text-sm font-medium">Repetir esse mesmo passo</div>
+            <div className="text-[11px] text-muted-foreground">A Camila reenvia a mensagem deste passo. Opção mais segura.</div>
+          </div>
+        </label>
+
+        <label className="flex items-start gap-2.5 rounded-md border border-border/60 bg-background/60 p-2.5 cursor-pointer hover:border-amber-500/40 transition">
+          <RadioGroupItem value="goto" className="mt-0.5" />
+          <div className="flex-1 space-y-2">
+            <div>
+              <div className="text-sm font-medium">Ir para um passo específico</div>
+              <div className="text-[11px] text-muted-foreground">Escolha pra qual passo a Camila pula quando nada bater.</div>
+            </div>
+            {fallback.mode === "goto" && (
+              <Select
+                value={fallback.goto_step_id ?? ""}
+                onValueChange={(v) => onChange({ ...fallback, goto_step_id: v })}
+              >
+                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Escolher passo" /></SelectTrigger>
+                <SelectContent>
+                  {allSteps.filter((s) => s.id !== currentStepId).map((s) => {
+                    const num = allSteps.findIndex(x => x.id === s.id) + 1;
+                    return <SelectItem key={s.id} value={s.id}>Passo {num} — {s.title}</SelectItem>;
+                  })}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        </label>
+
+        <label className="flex items-start gap-2.5 rounded-md border border-border/60 bg-background/60 p-2.5 cursor-pointer hover:border-amber-500/40 transition">
+          <RadioGroupItem value="ai" className="mt-0.5" />
+          <div className="flex-1 space-y-2">
+            <div className="flex items-center gap-1.5">
+              <div className="text-sm font-medium">Deixar a IA decidir</div>
+              <Sparkles className="h-3 w-3 text-amber-500" />
+            </div>
+            <div className="text-[11px] text-muted-foreground">A IA lê a mensagem do cliente e escolhe o próximo passo seguindo a sua instrução.</div>
+            {fallback.mode === "ai" && (
+              <Textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onBlur={() => onChange({ ...fallback, ai_prompt: prompt })}
+                rows={3}
+                placeholder='Ex: "Se parecer interessado, vá para o Passo 3. Se tiver dúvida, repita o passo. Se quiser falar com humano, mande para Aguardando humano."'
+                className="text-sm"
+              />
+            )}
+          </div>
+        </label>
+      </RadioGroup>
+    </div>
   );
 }
 
