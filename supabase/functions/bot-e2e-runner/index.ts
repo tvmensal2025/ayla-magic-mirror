@@ -1,14 +1,7 @@
 /**
- * Bot end-to-end runner.
- *
- * POST /bot-e2e-runner
- * Cria um customer fictício no range de telefone reservado (5500000xxx),
- * dispara mensagens sintéticas no whapi-webhook e segue o fluxo do bot
- * do welcome até completar (ou travar). O webhook detecta o telefone de
- * teste, ativa AsyncLocalStorage de test-mode, zera delays de mídia,
- * mocka o OCR e troca o sender real por um que grava em bot_test_outbound.
+ * Bot end-to-end runner com cenários e validações automáticas.
+ * POST /bot-e2e-runner { scenario, maxTurns? }
  */
-
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -19,42 +12,73 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-// Mapeia o conversation_step atual para a próxima resposta do "lead simulado".
-// Cada entrada produz UM payload de mensagem do tipo Whapi inbound.
 type Reply =
   | { kind: "text"; text: string }
   | { kind: "audio"; transcript: string }
   | { kind: "image"; mime?: string }
-  | { kind: "document"; mime?: string };
+  | { kind: "document"; mime?: string }
+  | null; // null = lead silencioso, encerra run
 
-function nextReplyForStep(step: string | null | undefined): Reply {
+type Scenario = "happy_path" | "lead_indeciso" | "valor_baixo" | "lead_some" | "documento_cnh";
+
+function nextReply(scenario: Scenario, step: string | null | undefined, turn: number, stepHits: Record<string, number>): Reply {
   const s = String(step || "welcome").toLowerCase();
-  // Início e qualificação
+  const hits = stepHits[s] || 0;
+
+  // lead_some: para de responder após turno 4
+  if (scenario === "lead_some" && turn > 4) return null;
+
+  // Início
   if (!step || s === "welcome") return { kind: "text", text: "oi" };
-  if (s === "qualificacao") return { kind: "audio", transcript: "minha conta vem em torno de 350 reais" };
-  if (s === "checkin_pos_video" || s === "menu_inicial" || s === "pos_video") return { kind: "text", text: "sim, quero economizar" };
-  if (s === "duvidas_pos_club" || s === "pitch_conexao_club") return { kind: "text", text: "vamos lá, pode mandar" };
+
+  // Qualificação - varia valor por cenário
+  if (s === "qualificacao") {
+    if (scenario === "valor_baixo") return { kind: "audio", transcript: "minha conta vem uns 60 reais" };
+    return { kind: "audio", transcript: "minha conta vem em torno de 350 reais" };
+  }
+
+  // Check-in pós vídeo - lead_indeciso pergunta antes
+  if (s === "checkin_pos_video" || s === "menu_inicial" || s === "pos_video") {
+    if (scenario === "lead_indeciso" && hits === 0) {
+      return { kind: "text", text: "espera, é seguro mesmo? não vou pagar nada extra?" };
+    }
+    return { kind: "text", text: "sim, quero economizar" };
+  }
+
+  // Dúvidas pós-club - lead_indeciso pergunta antes
+  if (s === "duvidas_pos_club" || s === "pitch_conexao_club") {
+    if (scenario === "lead_indeciso" && hits === 0) {
+      return { kind: "text", text: "como cancelo se eu quiser?" };
+    }
+    return { kind: "text", text: "vamos lá, pode mandar" };
+  }
+
   // Cadastro - conta de luz
   if (s === "cadastro" || s === "aguardando_conta") return { kind: "image", mime: "image/jpeg" };
   if (s === "confirmando_dados_conta") return { kind: "text", text: "sim, está tudo certo" };
-  // Documento
-  if (s === "ask_tipo_documento" || s === "coleta_doc") return { kind: "text", text: "rg" };
-  if (s.startsWith("aguardando_doc") || s === "aguardando_doc_frente" || s === "aguardando_doc_verso") return { kind: "image", mime: "image/jpeg" };
+
+  // Documento - cenário muda tipo
+  if (s === "ask_tipo_documento" || s === "coleta_doc") {
+    return { kind: "text", text: scenario === "documento_cnh" ? "cnh" : "rg" };
+  }
+  if (s.startsWith("aguardando_doc")) return { kind: "image", mime: "image/jpeg" };
   if (s === "confirmando_dados_doc") return { kind: "text", text: "sim, está correto" };
+
   // Email/contato
   if (s === "ask_email") return { kind: "text", text: "joao.teste@example.com" };
   if (s === "ask_phone" || s === "ask_phone_confirm") return { kind: "text", text: "sim, esse mesmo" };
+
   // Endereço
   if (s === "ask_number") return { kind: "text", text: "123" };
   if (s === "ask_complement") return { kind: "text", text: "apto 45" };
   if (s === "ask_cep" || s === "editing_conta_cep") return { kind: "text", text: "01310100" };
-  // Edits genéricos
+
   if (s.startsWith("editing_")) return { kind: "text", text: "ok, pode seguir" };
-  // Default: confirma
   return { kind: "text", text: "sim" };
 }
 
 function buildWhapiBody(phone: string, reply: Reply, idx: number): any {
+  if (!reply) return null;
   const id = `test_${Date.now()}_${idx}`;
   const chatId = `${phone}@s.whatsapp.net`;
   const base = { id, chat_id: chatId, from: phone, from_me: false, timestamp: Math.floor(Date.now() / 1000) };
@@ -62,15 +86,12 @@ function buildWhapiBody(phone: string, reply: Reply, idx: number): any {
     return { event: { type: "messages" }, messages: [{ ...base, type: "text", text: { body: reply.text } }] };
   }
   if (reply.kind === "audio") {
-    // O webhook em test mode lê audio.transcript em vez de transcrever.
     return { event: { type: "messages" }, messages: [{ ...base, type: "voice", voice: { mime_type: "audio/ogg", transcript: reply.transcript, link: null, data: null } }] };
   }
   if (reply.kind === "image") {
-    // Pixel base64 1x1 PNG (data URL inline) — OCR é mockado, conteúdo é irrelevante.
     const tinyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
     return { event: { type: "messages" }, messages: [{ ...base, type: "image", image: { mime_type: reply.mime || "image/png", data: tinyPng, link: `data:image/png;base64,${tinyPng}` } }] };
   }
-  // document
   return { event: { type: "messages" }, messages: [{ ...base, type: "document", document: { mime_type: reply.mime || "application/pdf", data: "", link: "" } }] };
 }
 
@@ -81,10 +102,10 @@ Deno.serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
     let body: any = {};
     try { body = await req.json(); } catch {}
-    const scenario = String(body.scenario || "happy_path");
+    const scenario = (String(body.scenario || "happy_path") as Scenario);
     const maxTurns = Number(body.maxTurns || 25);
 
-    // Auth: somente admin/super_admin
+    // Auth
     const authHeader = req.headers.get("Authorization") || "";
     const token = authHeader.replace(/^Bearer\s+/i, "");
     const userClient = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!, {
@@ -101,20 +122,22 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "forbidden" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Obtém consultant super-admin via settings
+    // Consultor: superadmin_consultant_id ou fallback para o consultor do usuário logado
     const { data: settingsRows } = await supabase.from("settings").select("*");
     const settings: Record<string, string> = {};
     settingsRows?.forEach((s: any) => { settings[s.key] = s.value; });
-    const consultantId = settings.superadmin_consultant_id || "";
+    let consultantId = settings.superadmin_consultant_id || "";
     if (!consultantId) {
-      return new Response(JSON.stringify({ error: "superadmin_consultant_id ausente" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const { data: myConsultant } = await supabase.from("consultants").select("id").eq("user_id", userId).maybeSingle();
+      consultantId = myConsultant?.id || "";
+    }
+    if (!consultantId) {
+      return new Response(JSON.stringify({ error: "Nenhum consultor encontrado (superadmin_consultant_id ausente e usuário não tem consultor)" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Telefone fictício único
     const suffix = Math.floor(Math.random() * 9_999_999).toString().padStart(7, "0");
     const phone = `5500000${suffix}`;
 
-    // Cria run
     const { data: runRow, error: runErr } = await supabase
       .from("bot_test_runs")
       .insert({ scenario, status: "running", consultant_id: consultantId, created_by: userId })
@@ -122,7 +145,6 @@ Deno.serve(async (req) => {
     if (runErr) throw runErr;
     const runId = runRow.id;
 
-    // Cria customer fictício
     const { data: customer, error: cErr } = await supabase.from("customers").insert({
       phone_whatsapp: phone, consultant_id: consultantId, status: "pending",
       conversation_step: "welcome", name: "Joao Silva Teste",
@@ -134,62 +156,60 @@ Deno.serve(async (req) => {
     let lastStep: string | null = null;
     let stuckCount = 0;
     let finalStatus = "running";
+    const stepHits: Record<string, number> = {};
 
     for (let turn = 1; turn <= maxTurns; turn++) {
-      // Lê step atual
       const { data: cur } = await supabase.from("customers").select("conversation_step,status").eq("id", customer.id).maybeSingle();
       const stepBefore = cur?.conversation_step || null;
       if (stepBefore && /complete|portal_submit/.test(String(stepBefore))) { finalStatus = "completed"; break; }
 
-      // Decide próximo input
-      const reply = nextReplyForStep(stepBefore);
-      const payload = buildWhapiBody(phone, reply, turn);
+      const reply = nextReply(scenario, stepBefore, turn, stepHits);
+      if (!reply) {
+        await supabase.from("bot_test_outbound").insert({
+          run_id: runId, turn, direction: "system", kind: "silent",
+          content: "Lead parou de responder (cenário lead_some)",
+          conversation_step_before: stepBefore,
+        });
+        finalStatus = "lead_silent";
+        break;
+      }
 
-      // Atualiza turn no run para o test-mode logTestOutbound usar o número correto
-      // (o whapi-webhook abre seu próprio AsyncLocalStorage com turn=0; vamos gravar turn aqui via update)
-      // -> Em vez disso registramos o input e os outputs do turno via marker:
+      const stepKey = String(stepBefore || "welcome").toLowerCase();
+      stepHits[stepKey] = (stepHits[stepKey] || 0) + 1;
+
+      const payload = buildWhapiBody(phone, reply, turn);
       const startedAt = Date.now();
       await supabase.from("bot_test_outbound").insert({
         run_id: runId, turn, direction: "inbound",
-        kind: reply.kind, content: reply.kind === "text" ? reply.text : reply.kind === "audio" ? `[audio] ${reply.transcript}` : `[${reply.kind}]`,
+        kind: reply.kind,
+        content: reply.kind === "text" ? reply.text : reply.kind === "audio" ? `[audio] ${reply.transcript}` : `[${reply.kind}]`,
         conversation_step_before: stepBefore,
       });
 
-      // Chama o webhook real
       let resStatus = 0;
       try {
         const res = await fetch(`${SUPABASE_URL}/functions/v1/whapi-webhook`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${SERVICE_ROLE}`,
-            apikey: SERVICE_ROLE,
-          },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}`, apikey: SERVICE_ROLE },
           body: JSON.stringify(payload),
         });
         resStatus = res.status;
         await res.text();
       } catch (e: any) {
         await supabase.from("bot_test_outbound").insert({
-          run_id: runId, turn, direction: "error", kind: "fetch_error",
-          content: e?.message || String(e),
+          run_id: runId, turn, direction: "error", kind: "fetch_error", content: e?.message || String(e),
         });
         finalStatus = "error";
         break;
       }
       const latency = Date.now() - startedAt;
 
-      // Lê step depois
       const { data: after } = await supabase.from("customers").select("conversation_step").eq("id", customer.id).maybeSingle();
       const stepAfter = after?.conversation_step || null;
 
       turns.push({ turn, stepBefore, stepAfter, latencyMs: latency, httpStatus: resStatus, sent: reply });
 
-      // Atualiza step_after no marker
-      // (encontramos o último inbound desse turn e atualizamos)
-      await supabase
-        .from("bot_test_outbound")
-        .update({ conversation_step_after: stepAfter, latency_ms: latency })
+      await supabase.from("bot_test_outbound").update({ conversation_step_after: stepAfter, latency_ms: latency })
         .eq("run_id", runId).eq("turn", turn).eq("direction", "inbound");
 
       if (stepAfter === lastStep) {
@@ -203,21 +223,50 @@ Deno.serve(async (req) => {
 
     if (finalStatus === "running") finalStatus = "max_turns";
 
-    await supabase.from("bot_test_runs").update({
-      status: finalStatus, finished_at: new Date().toISOString(),
-      summary: { turns: turns.length, lastStep },
-    }).eq("id", runId);
-
-    // Carrega outbound completo para devolver
-    const { data: outbound } = await supabase
+    // ---------- Validações automáticas ----------
+    const checks: Array<{ name: string; passed: boolean; detail?: string }> = [];
+    const { data: outboundAll } = await supabase
       .from("bot_test_outbound")
       .select("turn,direction,kind,content,conversation_step_before,conversation_step_after,latency_ms,created_at")
       .eq("run_id", runId)
       .order("created_at", { ascending: true });
 
-    return new Response(JSON.stringify({ ok: true, runId, status: finalStatus, phone, turns: turns.length, lastStep, outbound }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    const fetchErrors = (outboundAll || []).filter((o: any) => o.kind === "fetch_error");
+    checks.push({ name: "Sem fetch errors", passed: fetchErrors.length === 0, detail: fetchErrors.length ? `${fetchErrors.length} erros` : undefined });
+
+    const botMsgs = (outboundAll || []).filter((o: any) => o.direction === "outbound");
+    const placeholderRegex = /\{\{\s*\w+\s*\}\}/;
+    const withPlaceholder = botMsgs.filter((o: any) => placeholderRegex.test(String(o.content || "")));
+    checks.push({ name: "Sem placeholders não substituídos", passed: withPlaceholder.length === 0, detail: withPlaceholder.length ? `${withPlaceholder.length} mensagens` : undefined });
+
+    const { data: finalCustomer } = await supabase.from("customers").select("status,bot_paused,conversation_step").eq("id", customer.id).maybeSingle();
+
+    if (scenario === "happy_path") {
+      const ok = ["pending_review", "approved", "active"].includes(String(finalCustomer?.status || ""));
+      checks.push({ name: "Happy path: status final qualificado", passed: ok, detail: `status=${finalCustomer?.status}` });
+    }
+    if (scenario === "valor_baixo") {
+      const stepStr = String(finalCustomer?.conversation_step || "");
+      const ok = /descarte|low_value|baixo/i.test(stepStr) || finalCustomer?.bot_paused === true;
+      checks.push({ name: "Valor baixo: descartado ou pausado", passed: ok, detail: `step=${stepStr} paused=${finalCustomer?.bot_paused}` });
+    }
+    if (scenario === "lead_some") {
+      checks.push({ name: "Lead silencioso detectado", passed: finalStatus === "lead_silent", detail: `status=${finalStatus}` });
+    }
+
+    const checksPassed = checks.filter((c) => c.passed).length;
+
+    await supabase.from("bot_test_runs").update({
+      status: finalStatus,
+      finished_at: new Date().toISOString(),
+      summary: { turns: turns.length, lastStep, checks, checksPassed, checksTotal: checks.length, finalStatus: finalCustomer?.status || null },
+    }).eq("id", runId);
+
+    return new Response(JSON.stringify({
+      ok: true, runId, status: finalStatus, phone, turns: turns.length, lastStep,
+      outbound: outboundAll, checks, checksPassed, checksTotal: checks.length,
+      customerId: customer.id, finalCustomerStatus: finalCustomer?.status || null,
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e: any) {
     console.error("bot-e2e-runner error:", e);
     return new Response(JSON.stringify({ error: e?.message || String(e) }), {
