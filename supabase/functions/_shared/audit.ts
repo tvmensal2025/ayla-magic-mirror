@@ -46,6 +46,8 @@ export async function logStepTransition(
     from_step?: string | null;
     to_step: string;
     duration_ms?: number | null;
+    intent?: string | null;
+    confidence?: number | null;
   },
 ): Promise<void> {
   if (!args.to_step) return;
@@ -61,6 +63,8 @@ export async function logStepTransition(
       from_step: args.from_step || null,
       to_step: args.to_step,
       duration_ms: args.duration_ms || null,
+      intent: args.intent ?? null,
+      confidence: args.confidence ?? null,
     })
     .then(({ error }: any) => {
       if (error) console.warn(`[step-transition] ${error.message}`);

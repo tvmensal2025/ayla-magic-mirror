@@ -14,6 +14,7 @@ import { normalizePhone } from "../_shared/utils.ts";
 import { createWhapiSender, parseWhapiMessage } from "../_shared/whapi-api.ts";
 import { checkAndMarkProcessed, logStepTransition, jsonLog } from "../_shared/audit.ts";
 import { runBotFlow } from "./handlers/bot-flow.ts";
+import { runConversationalFlow, CONVERSATIONAL_STEPS } from "./handlers/conversational/index.ts";
 import { captureError } from "../_shared/sentry.ts";
 
 const corsHeaders = {
@@ -104,7 +105,7 @@ Deno.serve(async (req) => {
 
     const { data: consultantData } = await supabase
       .from("consultants")
-      .select("id, name, igreen_id")
+      .select("id, name, igreen_id, conversational_flow_enabled")
       .eq("id", superAdminConsultantId)
       .single();
 
@@ -266,14 +267,36 @@ Deno.serve(async (req) => {
     let reply = "";
     let updates: Record<string, any> = {};
     try {
-      const result = await runBotFlow({
-        supabase, sender, customer, consultorId, nomeRepresentante,
-        remoteJid, phone, messageText, buttonId, isFile, isButton,
-        hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
-        fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
-      });
+      // Feature flag: novo motor conversacional (state machine + intent classifier).
+      // Override por cliente (customer.conversational_flow_enabled) tem precedência sobre o do consultor.
+      // Só assume os passos pós-cadastro listados em CONVERSATIONAL_STEPS — cadastro segue intacto pelo runBotFlow.
+      const customerOverride = (customer as any).conversational_flow_enabled;
+      const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
+      const useConversational =
+        (customerOverride === true || (customerOverride == null && consultantFlag)) &&
+        CONVERSATIONAL_STEPS.has(stepBefore);
+
+      const result = useConversational
+        ? await runConversationalFlow({
+            supabase, sender, customer, consultorId, nomeRepresentante,
+            remoteJid, phone, messageText, buttonId, isFile, isButton,
+            hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
+            fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
+          })
+        : await runBotFlow({
+            supabase, sender, customer, consultorId, nomeRepresentante,
+            remoteJid, phone, messageText, buttonId, isFile, isButton,
+            hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
+            fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
+          });
       reply = result.reply;
       updates = result.updates;
+
+      // Telemetria do classificador (intent/confidence) — registrada na transição, não persistida no customer.
+      if (useConversational) {
+        (updates as any).__intent = (updates as any).__intent;
+        (updates as any).__confidence = (updates as any).__confidence;
+      }
     } catch (botErr: any) {
       console.error(`💥 [whapi bot-flow crash] step=${stepBefore}:`, botErr);
       captureError(botErr, {
@@ -294,6 +317,12 @@ Deno.serve(async (req) => {
       (updates as any).error_message = null;
       (updates as any).rescue_attempts = 0;
     }
+    // Extrai metadados de telemetria (não persistir no customers).
+    const __intent = (updates as any).__intent ?? null;
+    const __confidence = (updates as any).__confidence ?? null;
+    delete (updates as any).__intent;
+    delete (updates as any).__confidence;
+
     if (Object.keys(updates).length > 0) {
       delete (updates as any).__inline_sent;
       const { error: updateError } = await supabase.from("customers").update(updates).eq("id", customer.id).select();
@@ -302,6 +331,7 @@ Deno.serve(async (req) => {
         await logStepTransition(supabase, {
           customer_id: customer.id, consultant_id: superAdminConsultantId,
           phone, from_step: stepBefore, to_step: updates.conversation_step,
+          intent: __intent, confidence: __confidence,
         });
       }
     }
