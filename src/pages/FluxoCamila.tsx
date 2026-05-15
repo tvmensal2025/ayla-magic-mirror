@@ -199,10 +199,17 @@ export default function FluxoCamila() {
     }
   }
 
+  function suggestedDraft(t: TemplateRef): string {
+    if (t.template_key === "reforco_checkin") {
+      return "Que ótimo {{nome}}! 🙌\n\nCom uma conta de {{valor_conta}}, dá pra eu te ajudar a economizar de 8% a 20% todo mês — sem obra, sem instalação e sem mudar nada na sua casa. ⚡\n\nPosso te explicar rapidinho como funciona?";
+    }
+    return "";
+  }
+
   function openEdit(t: TemplateRef) {
     const cur = findMsg(t.step_key, t.template_key);
     setEditing(t);
-    setDraft(cur?.text ?? "");
+    setDraft(cur?.text ?? suggestedDraft(t));
   }
 
   async function saveEdit() {
