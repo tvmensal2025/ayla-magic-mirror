@@ -1160,7 +1160,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               const cap = i === 0 ? (args.caption || "") : "";
               try {
                 await sendMedia(remoteJid, m.url, cap, k);
-                if (i < ordered.length - 1) await new Promise((r) => setTimeout(r, 1500));
+                if (i < ordered.length - 1 && !isTestMode()) await new Promise((r) => setTimeout(r, 1500));
               } catch (e) {
                 console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);
               }
