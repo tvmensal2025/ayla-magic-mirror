@@ -447,9 +447,14 @@ export default function FluxoCamila() {
           <div className="text-xs text-muted-foreground">
             Variáveis disponíveis: <code>{"{{nome}}"}</code>, <code>{"{{representante}}"}</code>, <code>{"{{telefone}}"}</code>, <code>{"{{valor_conta}}"}</code>
           </div>
-          <DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-2 flex-wrap">
+            {editing && findMsg(editing.step_key, editing.template_key) && (
+              <Button variant="ghost" className="text-destructive hover:text-destructive mr-auto" onClick={deleteText} disabled={saving}>
+                Apagar texto
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
-            <Button onClick={saveEdit} disabled={saving || !draft.trim()}>{saving ? "Salvando..." : "Salvar"}</Button>
+            <Button onClick={saveEdit} disabled={saving}>{saving ? "Salvando..." : "Salvar"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
