@@ -816,24 +816,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             }
 
             if (sentSomething) {
-              console.log(`🎙️ [opening-flow] Áudio/mídia de abertura enviado para customer ${customer.id}`);
-              // Pergunta "deu pra entender?" antes de qualificar — dá tempo do lead absorver áudio+vídeo
-              const firstName = ((customer as any).name || "").split(/\s+/)[0];
-              const checkinMsg = firstName
-                ? `Deu pra entender, ${firstName}? Posso te explicar melhor se precisar 😊`
-                : `Deu pra entender? Posso te explicar melhor se precisar 😊`;
-              try {
-                await sendText(remoteJid, checkinMsg);
-                await supabase.from("conversations").insert({
-                  customer_id: customer.id,
-                  message_direction: "outbound",
-                  message_text: checkinMsg,
-                  message_type: "text",
-                  conversation_step: "checkin_pos_video",
-                });
-              } catch (e) {
-                console.warn("[bot-flow] checkin send failed:", (e as any)?.message);
-              }
+              console.log(`🎙️ [opening-flow] Abertura (Passo 1) enviada para customer ${customer.id} — aguardando resposta conforme Fluxo da Camila`);
+              // Removido o "Deu pra entender?" hardcoded: o Passo 1 já contém áudio + texto
+              // configurados pelo usuário. Apenas avançamos o step e aguardamos a resposta do lead;
+              // o state-machine de checkin_pos_video cuida das transições seguintes.
               return {
                 reply: "",
                 updates: { conversation_step: "checkin_pos_video", __inline_sent: true } as any,
