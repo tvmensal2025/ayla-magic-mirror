@@ -1321,6 +1321,7 @@ export type Database = {
         Row: {
           approved: boolean | null
           cadastro_url: string
+          conversational_flow_enabled: boolean
           created_at: string | null
           facebook_label_id: string | null
           facebook_pixel_id: string | null
@@ -1339,6 +1340,7 @@ export type Database = {
         Insert: {
           approved?: boolean | null
           cadastro_url: string
+          conversational_flow_enabled?: boolean
           created_at?: string | null
           facebook_label_id?: string | null
           facebook_pixel_id?: string | null
@@ -1357,6 +1359,7 @@ export type Database = {
         Update: {
           approved?: boolean | null
           cadastro_url?: string
+          conversational_flow_enabled?: boolean
           created_at?: string | null
           facebook_label_id?: string | null
           facebook_pixel_id?: string | null
@@ -1656,6 +1659,7 @@ export type Database = {
           conta_pdf_protegida: boolean | null
           conversation_step: string | null
           conversation_summary: string | null
+          conversational_flow_enabled: boolean | null
           cpf: string | null
           created_at: string
           customer_referred_by_consultant_id: string | null
@@ -1749,6 +1753,7 @@ export type Database = {
           conta_pdf_protegida?: boolean | null
           conversation_step?: string | null
           conversation_summary?: string | null
+          conversational_flow_enabled?: boolean | null
           cpf?: string | null
           created_at?: string
           customer_referred_by_consultant_id?: string | null
@@ -1842,6 +1847,7 @@ export type Database = {
           conta_pdf_protegida?: boolean | null
           conversation_step?: string | null
           conversation_summary?: string | null
+          conversational_flow_enabled?: boolean | null
           cpf?: string | null
           created_at?: string
           customer_referred_by_consultant_id?: string | null
