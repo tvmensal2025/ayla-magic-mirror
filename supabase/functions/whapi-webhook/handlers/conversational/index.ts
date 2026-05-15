@@ -9,8 +9,8 @@ import { classifyIntent } from "./intent-classifier.ts";
 import { getTemplate, renderTemplate } from "./templates.ts";
 import {
   extractValor, extractTelefone, extractCPF, extractNome, detectRegexIntents,
-} from "../../_shared/captureExtractors.ts";
-import { getStepMediaOrder, makeKindComparator } from "../../_shared/step-media-order.ts";
+} from "../../../_shared/captureExtractors.ts";
+import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
