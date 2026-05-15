@@ -1488,7 +1488,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             }
             break;
           }
-          updates.name = d.nome || "";
+          // C: validação anti-alucinação no nome OCR da conta
+          {
+            const ocrName = (d.nome || "").trim();
+            const safe = safeAssignName(customer.name, (customer as any).name_source, ocrName);
+            if (safe) {
+              updates.name = safe;
+              updates.name_source = "ocr_conta";
+            } else if (!customer.name && ocrName) {
+              // Sem nome prévio: aceita o nome do OCR mas marca como não confirmado
+              updates.name = ocrName;
+              updates.name_source = "ocr_conta";
+            }
+          }
           updates.address_street = d.endereco || "";
           updates.address_number = d.numero || "";
           updates.address_neighborhood = d.bairro || "";
@@ -1496,10 +1508,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           updates.address_city = d.cidade || "";
           updates.address_state = d.estado || "";
           updates.distribuidora = d.distribuidora || "";
-          updates.numero_instalacao = d.numeroInstalacao || "";
+          // Validação número instalação ≥7 dígitos
+          {
+            const inst = String(d.numeroInstalacao || "").replace(/\D/g, "");
+            updates.numero_instalacao = inst.length >= 7 ? inst : "";
+          }
           updates.ocr_confianca = confianca;
           const valorParsed = d.valorConta ? parseFloat(d.valorConta) : 0;
           updates.electricity_bill_value = (valorParsed >= 30) ? valorParsed : 0;
+          // CEP: só aceita se tiver 8 dígitos
+          if (updates.cep) {
+            const cepClean = String(updates.cep).replace(/\D/g, "");
+            updates.cep = cepClean.length === 8 ? cepClean : "";
+          }
           if (!updates.cep && updates.address_city && updates.address_state && updates.address_street) {
             console.log("🔍 CEP não encontrado. Buscando via ViaCEP...");
             const cepBuscado = await buscarCepPorEndereco(updates.address_state, updates.address_city, updates.address_street);
@@ -1509,43 +1530,29 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             }
           }
 
-          // Helper de formatação BRL
-          const formatBRL = (n: number) =>
-            n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
           // BLINDAGEM: nome e valor são obrigatórios. Se faltar, perguntar antes da confirmação.
-          if (!updates.name || String(updates.name).trim().length < 3) {
+          const finalName = updates.name || customer.name;
+          if (!finalName || String(finalName).trim().length < 3) {
             updates.conversation_step = "editing_conta_nome";
             reply = "📋 Consegui ler quase tudo da sua conta! Só preciso confirmar uma coisa:\n\n👤 Qual é o seu *nome completo* (como aparece na conta)?";
             break;
           }
           if (!updates.electricity_bill_value || updates.electricity_bill_value < 30) {
             updates.conversation_step = "editing_conta_valor";
-            reply = `📋 Já peguei seus dados, ${String(updates.name).split(" ")[0]}! Só me confirma uma coisa:\n\n💰 Qual o *valor médio* da sua conta de luz? (ex: 350,00)`;
+            reply = `📋 Já peguei seus dados, ${String(finalName).split(" ")[0]}! Só me confirma uma coisa:\n\n💰 Qual o *valor médio* da sua conta de luz? (ex: 350,00)`;
             break;
           }
 
           updates.conversation_step = "confirmando_dados_conta";
-          const _val = Number(updates.electricity_bill_value);
-          const _mensal = _val * 0.20;
-          const _anual = _mensal * 12;
-          reply = "📋 *Dados encontrados na conta:*\n\n" +
-            `👤 *Nome:* ${updates.name}\n` +
-            `📍 *Endereço:* ${updates.address_street || "❌"} ${updates.address_number || ""}\n` +
-            `🏘️ *Bairro:* ${updates.address_neighborhood || "❌"}\n` +
-            `🏙️ *Cidade:* ${updates.address_city || "❌"} - ${updates.address_state || ""}\n` +
-            `📮 *CEP:* ${updates.cep || "❌"}\n` +
-            `⚡ *Distribuidora:* ${updates.distribuidora || "❌"}\n` +
-            `🔢 *Nº Instalação:* ${updates.numero_instalacao || "❌"}\n` +
-            `💰 *Valor:* R$ ${formatBRL(_val)}\n` +
-            `💚 *Economia estimada (20%):* R$ ${formatBRL(_mensal)}/mês • R$ ${formatBRL(_anual)}/ano\n\n` +
-            "Está tudo correto?";
+          const _merged = { ...customer, ...updates };
+          reply = buildConfirmacaoConta(_merged);
           await sendOptions(remoteJid, reply, [
             { id: "sim_conta", title: "✅ SIM" },
             { id: "nao_conta", title: "❌ NÃO" },
             { id: "editar_conta", title: "✏️ EDITAR" },
           ]);
           reply = "";
+
         } else {
           console.error("❌ OCR conta falhou:", ocrData.erro);
           const tries = (customer.ocr_conta_attempts || 0) + 1;
