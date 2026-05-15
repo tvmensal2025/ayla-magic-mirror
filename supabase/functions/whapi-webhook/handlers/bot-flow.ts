@@ -942,6 +942,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }
           if (tool === "send_media") {
             const ordered = [...medias].sort((a, b) => (a.kind === "audio" ? -1 : b.kind === "audio" ? 1 : 0));
+            // Detecta vídeo do Conexão Club entre as mídias para forçar follow-up determinístico
+            const isClubMedia = (m: any) =>
+              m && m.kind === "video" && /club|conex[aã]o[_\s-]*club/i.test(`${m.label || ""} ${m.slot_key || ""} ${m.url || ""}`);
+            const clubMedia = ordered.find(isClubMedia);
             for (let i = 0; i < ordered.length; i++) {
               const m = ordered[i];
               const k = ["audio", "video", "image"].includes(m.kind) ? m.kind : "document";
@@ -952,6 +956,27 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               } catch (e) {
                 console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);
               }
+            }
+            // 🎬 Após vídeo do Conexão Club: pergunta determinística "ficou alguma dúvida?"
+            // e avança step pra duvidas_pos_club (regra de negócio do usuário).
+            if (clubMedia) {
+              try {
+                await sleepForMedia("video", Number((clubMedia as any).duration_sec || 0) || null);
+              } catch (_) { /* best-effort */ }
+              const firstNm = ((customer as any).name || "").split(/\s+/)[0];
+              const duvidaMsg = firstNm
+                ? `${firstNm}, ficou alguma dúvida sobre o Conexão Club ou sobre como funciona? Pode mandar aqui que eu te explico 😊\n\nSe estiver tudo certo, é só me dizer *"pode seguir"* que a gente já avança pro cadastro.`
+                : `Ficou alguma dúvida sobre o Conexão Club ou sobre como funciona? Pode mandar aqui que eu te explico 😊\n\nSe estiver tudo certo, é só me dizer *"pode seguir"* que a gente já avança pro cadastro.`;
+              try {
+                await sendText(remoteJid, duvidaMsg);
+                await supabase.from("conversations").insert({
+                  customer_id: customer.id, message_direction: "outbound",
+                  message_text: duvidaMsg, message_type: "text",
+                  conversation_step: "duvidas_pos_club",
+                });
+              } catch (e) { console.warn("[club-followup] envio falhou:", (e as any)?.message); }
+              updates.conversation_step = "duvidas_pos_club";
+              console.log("🎬 [club-followup] vídeo do Conexão Club enviado → step=duvidas_pos_club");
             }
             reply = "";
             (updates as any).__inline_sent = true;
