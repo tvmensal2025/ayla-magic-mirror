@@ -820,6 +820,7 @@ export type Database = {
           active: boolean
           consultant_id: string | null
           created_at: string
+          delay_before_ms: number
           duration_sec: number | null
           id: string
           intent_tags: string[]
@@ -844,6 +845,7 @@ export type Database = {
           active?: boolean
           consultant_id?: string | null
           created_at?: string
+          delay_before_ms?: number
           duration_sec?: number | null
           id?: string
           intent_tags?: string[]
@@ -868,6 +870,7 @@ export type Database = {
           active?: boolean
           consultant_id?: string | null
           created_at?: string
+          delay_before_ms?: number
           duration_sec?: number | null
           id?: string
           intent_tags?: string[]

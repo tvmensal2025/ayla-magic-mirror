@@ -16,6 +16,7 @@ type Media = {
   slot_key: string | null;
   send_order: number;
   duration_sec: number | null;
+  delay_before_ms?: number | null;
 };
 
 const ACCEPT: Record<Kind, string> = {
