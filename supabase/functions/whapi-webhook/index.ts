@@ -319,40 +319,34 @@ Deno.serve(async (req) => {
     }
 
     // ─── Run bot flow ──────────────────────────────────────────────────
-    const stepBefore = customer.conversation_step || "welcome";
+    // Normaliza o step lido do banco (compat reversa para valores sem prefixo).
+    const rawStep = customer.conversation_step || null;
+    const normalizedStep = normalizeIncoming(rawStep);
+    const stepBefore = stripPrefix(normalizedStep); // valor cru consumido pelos engines
+
+    // Sincroniza o customer em memória com o valor cru — engines mantêm sua lógica intacta.
+    (customer as any).conversation_step = stepBefore;
+
     let reply = "";
     let updates: Record<string, any> = {};
+    let engineUsed: "sys" | "flow" = "sys";
     try {
-      // Feature flag: novo motor conversacional (state machine + intent classifier).
-      // Override por cliente (customer.conversational_flow_enabled) tem precedência sobre o do consultor.
-      // Só assume os passos pós-cadastro listados em CONVERSATIONAL_STEPS — cadastro segue intacto pelo runBotFlow.
+      // Roteamento explícito por namespace.
+      // - "sys:<name>"  → motor determinístico (cadastro + edição + welcome legacy)
+      // - "flow:<id>"   → motor conversacional DB-driven
+      // Override individual: customer.conversational_flow_enabled === false força sys.
       const customerOverride = (customer as any).conversational_flow_enabled;
       const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
-      // Override individual só DESLIGA o motor novo se for explicitamente false.
-      // Qualquer outro estado (true, null, undefined) respeita o flag do consultor.
-      // Cadastro/system states stay with runBotFlow.
-      const CADASTRO_OR_SYSTEM = new Set([
-        "aguardando_conta","processando_ocr_conta","confirmando_dados_conta",
-        "ask_tipo_documento","aguardando_doc_auto","aguardando_doc_frente","aguardando_doc_verso",
-        "confirmando_dados_doc","ask_name","ask_cpf","ask_rg","ask_birth_date",
-        "ask_phone_confirm","ask_phone","ask_email","ask_cep","ask_number",
-        "ask_complement","ask_installation_number","ask_bill_value",
-        "ask_doc_frente_manual","ask_doc_verso_manual","ask_finalizar",
-        "finalizando","portal_submitting","aguardando_otp","validando_otp",
-        "aguardando_assinatura","complete","aguardando_humano",
-        // Edição pós-OCR (conta de luz)
-        "editing_conta_menu","editing_conta_nome","editing_conta_endereco",
-        "editing_conta_cep","editing_conta_distribuidora","editing_conta_instalacao","editing_conta_valor",
-        // Edição pós-OCR (documento)
-        "editing_doc_menu","editing_doc_nome","editing_doc_cpf","editing_doc_rg",
-        "editing_doc_nascimento","editing_doc_pai","editing_doc_mae",
-      ]);
-      const useConversational =
-        customerOverride !== false &&
-        consultantFlag &&
-        !CADASTRO_OR_SYSTEM.has(stepBefore);
 
-      const result = useConversational
+      let engine = routeEngine(normalizedStep);
+      // Se o consultor não habilitou o motor novo, ou o cliente desligou explicitamente,
+      // qualquer step "flow:" é rebaixado para sys (que cai no welcome canônico).
+      if (engine === "flow" && (!consultantFlag || customerOverride === false)) {
+        engine = "sys";
+      }
+      engineUsed = engine;
+
+      const result = engine === "flow"
         ? await runConversationalFlow({
             supabase, sender, customer, consultorId, nomeRepresentante,
             remoteJid, phone, messageText, buttonId, isFile, isButton,
@@ -369,7 +363,7 @@ Deno.serve(async (req) => {
       updates = result.updates;
 
       // Telemetria do classificador (intent/confidence) — registrada na transição, não persistida no customer.
-      if (useConversational) {
+      if (engine === "flow") {
         (updates as any).__intent = (updates as any).__intent;
         (updates as any).__confidence = (updates as any).__confidence;
       }
@@ -381,6 +375,12 @@ Deno.serve(async (req) => {
       });
       reply = "Tive um probleminha aqui. Pode me mandar de novo, por favor?";
       updates = {};
+    }
+
+    // Normaliza o conversation_step de saída — sempre persistir com prefixo.
+    if (updates.conversation_step) {
+      const prefixed = normalizeOutgoing(String(updates.conversation_step), engineUsed);
+      if (prefixed) updates.conversation_step = prefixed;
     }
 
     // ─── Persist updates ───────────────────────────────────────────────
