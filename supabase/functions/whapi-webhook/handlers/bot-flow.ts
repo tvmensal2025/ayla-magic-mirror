@@ -134,6 +134,14 @@ const RE_SELF_INTRO = /(?:me\s+chamo|meu\s+nome\s+(?:é|eh|e)|aqui\s+(?:é|eh|e)
 // Lead recusa mandar foto da conta — aceita seguir sem.
 const RE_REFUSE_BILL = /\b(n[aã]o\s+(?:tenho|quero|posso|vou)\s+(?:mandar|enviar|tirar|mostrar)|sem\s+(?:foto|conta|comprovante)|n[aã]o\s+(?:tenho|achei)\s+a\s+conta|conta\s+(?:n[aã]o|nao)\s+est[aá]\s+aqui|s[oó]\s+(?:o\s+)?valor)\b/i;
 
+function isPositiveCheckinIntent(text: string): boolean {
+  return /^(sim|s|ss+|joia|ok|okay|blz|beleza|perfeito|quero|pode|vamos|bora|seguir|claro|certo|tranquilo|entendi|deu|show|fechou)\b/i.test(text) || /[👍✅]/.test(text);
+}
+
+function isClubProgressIntent(text: string): boolean {
+  return isPositiveCheckinIntent(text) || /^(pode seguir|sem duvida|nenhuma|nao tenho|não tenho|nao|não|tudo certo|partiu|segue)\b/i.test(text) || /(quero|vamos|bora).*(cadastr|seguir|finaliz)/i.test(text);
+}
+
 function normalizeLeadName(rawText: string | null | undefined): string | null {
   const raw = String(rawText || "").trim().replace(/[.!?,;:"']/g, "").replace(/\s+/g, " ");
   const looksLikeName =
@@ -455,6 +463,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     if (!opts?.force && NO_QA_STEPS.has(step)) return null;
     const normalizedText = messageText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     if (normalizedText.length < 2) return null;
+    if (!opts?.force && step === "checkin_pos_video" && isPositiveCheckinIntent(normalizedText)) return null;
+    if (!opts?.force && step === "duvidas_pos_club" && isClubProgressIntent(normalizedText)) return null;
 
     const { data: activeFlow } = await supabase
       .from("bot_flows")
@@ -896,8 +906,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       };
     }
 
-    const configuredQaResult = await trySendConfiguredQa();
-    if (configuredQaResult) return configuredQaResult;
+    if (step !== "checkin_pos_video" && step !== "duvidas_pos_club") {
+      const configuredQaResult = await trySendConfiguredQa();
+      if (configuredQaResult) return configuredQaResult;
+    }
   }
 
   if (
@@ -1059,7 +1071,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     const v = firstNm ? `${firstNm}, ` : "";
     const valueMatch = txt.match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
     const billValue = valueMatch ? Number(valueMatch[1].replace(".", "").replace(",", ".")) : 0;
-    const positive = /^(sim|s|ss+|joia|👍|✅|entendi|deu|ok|okay|blz|beleza|perfeito|quero|pode|vamos|bora|seguir|claro|certo|tranquilo)\b/i.test(txt);
+    const positive = isPositiveCheckinIntent(txt);
     if (Number.isFinite(billValue) && billValue >= 100) {
       return {
         reply: `Boa! Com R$ ${billValue.toFixed(0)} já dá pra calcular sua economia. Me envia uma *foto* ou PDF da conta de luz pra eu confirmar os dados 📸`,
@@ -1090,7 +1102,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   // sem passar pela IA e sem loop de mídia.
   if (!isFile && !customer.bot_paused && step === "duvidas_pos_club" && messageText) {
     const txt = messageText.trim().toLowerCase();
-    const segueAgora = /^(sim|s|ok|joia|👍|✅|pode|pode seguir|bora|vamos|partiu|segue|seguir|tudo certo|sem d[uú]vida|nenhuma|nao tenho|n[ãa]o tenho|n[ãa]o|fechou|beleza|blz)\b/.test(txt) || /(quero|vamos|bora).*(cadastr|seguir|finaliz)/i.test(messageText);
+    const segueAgora = isClubProgressIntent(txt);
     if (segueAgora) {
       const ctaMsg = `Show! Pra finalizar seu cadastro me manda só a foto do seu *RG ou CNH* 📄`;
       await sendOptions(remoteJid, ctaMsg, [
