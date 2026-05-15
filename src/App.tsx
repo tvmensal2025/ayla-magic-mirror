@@ -19,7 +19,7 @@ const FlowBuilder = lazy(() => import("./pages/FlowBuilder"));
 const FluxoCamila = lazy(() => import("./pages/FluxoCamila"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
 const NotFound = lazy(() => import("./pages/NotFound"));
-const AdminBotTools = lazy(() => import("./pages/AdminBotTools"));
+
 
 const queryClient = new QueryClient();
 
@@ -48,7 +48,7 @@ const App = () => (
               <Route path="/admin/whatsapp-clients" element={<WhatsAppClientsPage />} />
               <Route path="/admin/fluxos" element={<FluxoCamila />} />
               <Route path="/admin/fluxos-antigo" element={<FlowBuilder />} />
-              <Route path="/admin/bot-tools" element={<AdminBotTools />} />
+              <Route path="/admin/bot-tools" element={<Navigate to="/admin/whatsapp-clients" replace />} />
               <Route path="/admin/bot-audit" element={<Navigate to="/admin/whatsapp-clients" replace />} />
               <Route path="/super-admin" element={<SuperAdmin />} />
               <Route path="/assistente" element={<AssistentePage />} />

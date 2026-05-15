@@ -104,13 +104,6 @@ export function AIAgentTab({ userId }: { userId: string }) {
           <Workflow className="w-3.5 h-3.5" />
           Construtor de Fluxos
         </Link>
-        <Link
-          to="/admin/bot-tools"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-card/80 text-foreground text-xs font-medium transition-colors"
-        >
-          <Workflow className="w-3.5 h-3.5" />
-          Handoffs & A/B
-        </Link>
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card">
           {savingEnabled || enabled === null ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
