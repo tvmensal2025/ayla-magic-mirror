@@ -14,7 +14,7 @@ import { normalizePhone } from "../_shared/utils.ts";
 import { createWhapiSender, parseWhapiMessage } from "../_shared/whapi-api.ts";
 import { checkAndMarkProcessed, logStepTransition, jsonLog } from "../_shared/audit.ts";
 import { runBotFlow } from "./handlers/bot-flow.ts";
-import { runConversationalFlow, CONVERSATIONAL_STEPS } from "./handlers/conversational/index.ts";
+import { runConversationalFlow } from "./handlers/conversational/index.ts";
 import { captureError } from "../_shared/sentry.ts";
 
 const corsHeaders = {
