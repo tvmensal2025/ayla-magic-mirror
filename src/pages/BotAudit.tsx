@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
-import { CheckCircle2, XCircle, Loader2, FlaskConical, Database, Bot, Play, Trash2, AlertTriangle } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, FlaskConical, Database, Bot, Play, Trash2, AlertTriangle, ThumbsUp, MessageSquare, FileX } from "lucide-react";
 import { toast } from "sonner";
 
 type FakeResult = { id: number; name: string; passed: boolean; expected: unknown; got: unknown };
@@ -35,20 +35,27 @@ type E2EResult = {
   phone: string;
   turns: number;
   lastStep: string | null;
+  stopReason?: string;
+  visitedSteps?: string[];
   outbound: OutboundRow[];
   checks: Check[];
   checksPassed: number;
   checksTotal: number;
   customerId: string;
   finalCustomerStatus: string | null;
+  marketReadiness?: string;
+  recommendation?: string;
 };
 
 const SCENARIOS = [
-  { value: "happy_path", label: "Happy path — lead colaborativo" },
-  { value: "lead_indeciso", label: "Lead indeciso — pergunta antes de aceitar" },
-  { value: "valor_baixo", label: "Valor baixo — conta < R$100" },
-  { value: "lead_some", label: "Lead some — para de responder" },
-  { value: "documento_cnh", label: "CNH — escolhe CNH em vez de RG" },
+  { value: "happy_path", label: "Venda completa — aceita tudo" },
+  { value: "joia_validacao", label: "Joia — aprova com 👍" },
+  { value: "lead_indeciso", label: "Dúvida real — pergunta antes de seguir" },
+  { value: "recusa_conta", label: "Recusa conta — reprova e recupera" },
+  { value: "recusa_documento", label: "Recusa documento — reprova e recupera" },
+  { value: "valor_baixo", label: "Valor baixo — não vender" },
+  { value: "lead_some", label: "Lead some — abandono" },
+  { value: "documento_cnh", label: "CNH — sem pedir verso" },
 ];
 
 export default function BotAudit() {
@@ -95,7 +102,9 @@ export default function BotAudit() {
   }
   useEffect(() => () => stopPolling(), []);
 
-  async function runE2E() {
+  async function runE2E(scenarioOverride?: string) {
+    const selectedScenario = scenarioOverride || scenario;
+    setScenario(selectedScenario);
     setLoading("e2e");
     setE2eResult(null);
     setLivePolling([]);
@@ -109,7 +118,7 @@ export default function BotAudit() {
       const { data: runs } = await supabase
         .from("bot_test_runs")
         .select("id,started_at,scenario,status")
-        .eq("scenario", scenario)
+        .eq("scenario", selectedScenario)
         .order("started_at", { ascending: false })
         .limit(1);
       const r = runs?.[0];
@@ -120,7 +129,7 @@ export default function BotAudit() {
 
     try {
       const { data, error } = await supabase.functions.invoke("bot-e2e-runner", {
-        method: "POST", body: { scenario },
+        method: "POST", body: { scenario: selectedScenario },
       });
       if (error) throw error;
       const result = data as E2EResult;
@@ -202,14 +211,12 @@ export default function BotAudit() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Bot className="h-5 w-5 text-emerald-500" />
-            Teste end-to-end real
+            Simulação real de conversa
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Cria um lead fictício (telefone <code className="px-1 rounded bg-muted">5500000…</code>), dispara mensagens reais
-            no <code className="px-1 rounded bg-muted">whapi-webhook</code> e percorre o fluxo do início ao fim.
-            Sem custo de WhatsApp, sem delay de mídia, OCR mockado.
+            Roda o mesmo bot do WhatsApp com um lead de teste: aprova, recusa, pergunta dúvidas, envia conta/documento e mostra se está pronto para vender.
           </p>
 
           <div className="flex gap-2 items-center">
@@ -219,9 +226,21 @@ export default function BotAudit() {
                 {SCENARIOS.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Button onClick={runE2E} disabled={loading !== null} size="lg" className="gap-2">
+            <Button onClick={() => runE2E()} disabled={loading !== null} size="lg" className="gap-2">
               {loading === "e2e" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              Rodar bot do início ao fim
+              Rodar cenário
+            </Button>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Button type="button" variant="secondary" disabled={loading !== null} onClick={() => runE2E("joia_validacao")} className="gap-2">
+              <ThumbsUp className="h-4 w-4" /> Aprovar com joia
+            </Button>
+            <Button type="button" variant="secondary" disabled={loading !== null} onClick={() => runE2E("lead_indeciso")} className="gap-2">
+              <MessageSquare className="h-4 w-4" /> Testar dúvida
+            </Button>
+            <Button type="button" variant="secondary" disabled={loading !== null} onClick={() => runE2E("recusa_conta")} className="gap-2">
+              <FileX className="h-4 w-4" /> Recusar dados
             </Button>
           </div>
 
@@ -237,6 +256,9 @@ export default function BotAudit() {
                 <Badge variant={e2eResult.status === "completed" ? "default" : e2eResult.status === "stuck" || e2eResult.status === "error" ? "destructive" : "secondary"}>
                   {e2eResult.status}
                 </Badge>
+                {e2eResult.marketReadiness && (
+                  <Badge variant={e2eResult.marketReadiness === "Pronto para vender" ? "default" : "secondary"}>{e2eResult.marketReadiness}</Badge>
+                )}
                 <span><strong>{e2eResult.turns}</strong> turnos</span>
                 <span>último step: <code className="px-1 rounded bg-background">{e2eResult.lastStep || "∅"}</code></span>
                 <span>customer status: <code className="px-1 rounded bg-background">{e2eResult.finalCustomerStatus || "∅"}</code></span>
@@ -246,6 +268,10 @@ export default function BotAudit() {
                   </Button>
                 </span>
               </div>
+              {e2eResult.recommendation && <p className="text-xs text-muted-foreground">{e2eResult.recommendation}</p>}
+              {e2eResult.visitedSteps?.length ? (
+                <div className="text-[11px] font-mono text-muted-foreground break-words">{e2eResult.visitedSteps.join(" → ")}</div>
+              ) : null}
 
               {e2eResult.checks?.length > 0 && (
                 <div className="grid gap-1">

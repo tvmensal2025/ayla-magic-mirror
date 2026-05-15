@@ -972,7 +972,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       };
     }
 
-    if (Number.isFinite(typedBillValue) && typedBillValue >= 30) {
+    if (Number.isFinite(typedBillValue) && typedBillValue > 0 && typedBillValue < 100) {
+      return {
+        reply: `Obrigada por me falar. Com conta em torno de R$ ${typedBillValue.toFixed(0)}, normalmente a economia fica pequena e pode não compensar agora. Vou deixar registrado e, se seu consumo subir, a gente retoma 💚`,
+        updates: { electricity_bill_value: typedBillValue, status: "rejected", bot_paused: true, bot_paused_reason: "low_bill_value", conversation_step: "valor_baixo" },
+      };
+    }
+
+    if (Number.isFinite(typedBillValue) && typedBillValue >= 100) {
       return {
         reply: "Com essa média, já dá para calcular sua economia. Me envie uma FOTO ou PDF da sua conta de energia para eu confirmar os dados.",
         updates: { electricity_bill_value: typedBillValue, sales_phase: "fechamento", conversation_step: "aguardando_conta" },
@@ -1042,6 +1049,68 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     const v = firstNm ? `${firstNm}, ` : "";
     const reply = `Show, ${v.trim().replace(/,$/, "")}! 📸 Pra eu já calcular sua economia exata e iniciar o cadastro, me envia uma *foto ou PDF da sua conta de luz* (qualquer página serve).`;
     return { reply, updates };
+  }
+
+  // ✅ Caminho determinístico para validação/conversão: respostas positivas no check-in
+  // não podem cair na IA e repetir áudio/vídeo. Se vier valor junto, já avança direto.
+  if (!isFile && !isButton && step === "checkin_pos_video" && messageText) {
+    const txt = messageText.trim();
+    const firstNm = ((customer as any).name || "").split(/\s+/)[0];
+    const v = firstNm ? `${firstNm}, ` : "";
+    const valueMatch = txt.match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
+    const billValue = valueMatch ? Number(valueMatch[1].replace(".", "").replace(",", ".")) : 0;
+    const positive = /^(sim|s|ss+|joia|👍|✅|entendi|deu|ok|okay|blz|beleza|perfeito|quero|pode|vamos|bora|seguir|claro|certo|tranquilo)\b/i.test(txt);
+    if (Number.isFinite(billValue) && billValue >= 100) {
+      return {
+        reply: `Boa! Com R$ ${billValue.toFixed(0)} já dá pra calcular sua economia. Me envia uma *foto* ou PDF da conta de luz pra eu confirmar os dados 📸`,
+        updates: { electricity_bill_value: billValue, sales_phase: "fechamento", conversation_step: "aguardando_conta" },
+      };
+    }
+    if (Number.isFinite(billValue) && billValue > 0 && billValue < 100) {
+      return {
+        reply: `Obrigada por me falar. Com conta em torno de R$ ${billValue.toFixed(0)}, normalmente a economia fica pequena e pode não compensar agora. Vou deixar registrado e, se seu consumo subir, a gente retoma 💚`,
+        updates: { electricity_bill_value: billValue, status: "rejected", bot_paused: true, bot_paused_reason: "low_bill_value", conversation_step: "valor_baixo" },
+      };
+    }
+    if (positive) {
+      return {
+        reply: `Boa! ${v}me conta uma coisa: quanto vem em média na sua conta de luz? Assim eu já te calculo quanto dá pra economizar 💡`,
+        updates: { conversation_step: "qualificacao" },
+      };
+    }
+    if (/\?|seguro|taxa|pagar|custa|funciona|entendi|d[uú]vida/i.test(txt)) {
+      return {
+        reply: `Sem problema! Funciona assim: você continua recebendo energia normalmente, sem obra e sem trocar instalação. O desconto vem na conta porque a iGreen aplica créditos de energia limpa.\n\n${v}pra eu calcular se vale a pena no seu caso, quanto vem em média na sua conta de luz?`,
+        updates: { conversation_step: "qualificacao" },
+      };
+    }
+  }
+
+  // ✅ No pós-pitch, “pode seguir/joia/sem dúvida” precisa abrir documento imediatamente,
+  // sem passar pela IA e sem loop de mídia.
+  if (!isFile && !customer.bot_paused && step === "duvidas_pos_club" && messageText) {
+    const txt = messageText.trim().toLowerCase();
+    const segueAgora = /^(sim|s|ok|joia|👍|✅|pode|pode seguir|bora|vamos|partiu|segue|seguir|tudo certo|sem d[uú]vida|nenhuma|nao tenho|n[ãa]o tenho|n[ãa]o|fechou|beleza|blz)\b/.test(txt) || /(quero|vamos|bora).*(cadastr|seguir|finaliz)/i.test(messageText);
+    if (segueAgora) {
+      const ctaMsg = `Show! Pra finalizar seu cadastro me manda só a foto do seu *RG ou CNH* 📄`;
+      await sendOptions(remoteJid, ctaMsg, [
+        { id: "tipo_rg_novo", title: "📄 RG Novo" },
+        { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
+        { id: "tipo_cnh", title: "🪪 CNH" },
+      ]);
+      await supabase.from("conversations").insert({
+        customer_id: customer.id, message_direction: "outbound",
+        message_text: ctaMsg, message_type: "text",
+        conversation_step: "ask_tipo_documento",
+      });
+      return { reply: "", updates: { conversation_step: "ask_tipo_documento", __inline_sent: true } as any };
+    }
+    if (/\?|cancel|cancela|taxa|fidelidade|seguro|pagar|custa|club|clube|funciona/i.test(txt)) {
+      return {
+        reply: "Pode ficar tranquilo: não tem obra, não muda instalação e você pode pedir suporte se tiver qualquer dúvida. O Conexão Club é um benefício extra de descontos/cashback em parceiros; o principal aqui é reduzir sua conta de luz.\n\nSe estiver tudo certo, me responde *pode seguir* que eu peço seu RG ou CNH pra finalizar.",
+        updates: { conversation_step: "duvidas_pos_club" },
+      };
+    }
   }
 
   if (
@@ -1316,7 +1385,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const valueMatch = String(messageText || "").match(/(?:r\$\s*)?(\d{2,5}(?:[\.,]\d{1,2})?)/i);
       if (valueMatch) {
         const billValue = Number(valueMatch[1].replace(".", "").replace(",", "."));
-        if (Number.isFinite(billValue) && billValue >= 30) {
+        if (Number.isFinite(billValue) && billValue > 0 && billValue < 100) {
+          updates.electricity_bill_value = billValue;
+          updates.status = "rejected";
+          updates.bot_paused = true;
+          updates.bot_paused_reason = "low_bill_value";
+          reply = `Obrigada por me falar. Com conta em torno de R$ ${billValue.toFixed(0)}, normalmente a economia fica pequena e pode não compensar agora. Vou deixar registrado e, se seu consumo subir, a gente retoma 💚`;
+          updates.conversation_step = "valor_baixo";
+          break;
+        }
+        if (Number.isFinite(billValue) && billValue >= 100) {
           updates.electricity_bill_value = billValue;
           updates.sales_phase = "fechamento";
           reply = `Com essa média, já dá para calcular sua economia. Me envie uma FOTO ou PDF da sua conta de energia para eu confirmar os dados.`;
@@ -2806,6 +2884,11 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       updates.debitos_aberto = false;
       updates.status = "portal_submitting";
       updates.conversation_step = "portal_submitting";
+
+      if (isTestMode()) {
+        reply = "✅ *Teste concluído:* todos os dados foram coletados e o lead chegou ao ponto de envio para o portal.";
+        return { reply, updates };
+      }
 
       // ✅ Regenerar igreen_link a partir do cadastro_url do consultor dono
       // (impede o bug em que o lead é submetido com o link de outro consultor)
