@@ -44,6 +44,7 @@ interface DbFallback {
 interface DbStep {
   id: string;
   step_key: string;
+  step_type: string | null;
   message_text: string | null;
   text_delay_ms: number | null;
   slot_key: string | null;
@@ -52,6 +53,7 @@ interface DbStep {
   transitions: DbTransition[] | null;
   captures: DbCapture[] | null;
   fallback: DbFallback | null;
+  auto_detect_doc_type: boolean | null;
 }
 
 // Steps the bot must NEVER override (cadastro pipeline owns them)
