@@ -541,6 +541,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   .eq("slot_key", m.slot_key)
                   .eq("active", true)
                   .eq("is_draft", false)
+                  .order("send_order", { ascending: true })
+                  .limit(1)
                   .maybeSingle();
                 if (personal?.url) {
                   url = personal.url;
@@ -552,6 +554,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                     .eq("is_public", true)
                     .eq("slot_key", m.slot_key)
                     .eq("active", true)
+                    .order("send_order", { ascending: true })
+                    .limit(1)
                     .maybeSingle();
                   if (pub?.url) {
                     url = pub.url;
