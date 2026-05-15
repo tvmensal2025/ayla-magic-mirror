@@ -1,101 +1,89 @@
-## Diagnóstico (a partir dos logs reais do último teste)
+## Diagnóstico expandido — agora 7 problemas
 
-Olhei os logs do webhook e o código dos handlers. Encontrei **3 falhas reais** e **1 melhoria pedida**:
+Os 5 anteriores (20%, nome sobrescrito, menus de edição, QA semântico vazando, ordem texto→áudio→vídeo) **+ 2 novos** descobertos analisando como o bot lida com pergunta/mudança de assunto:
 
-### 1. Valor da conta vira "1,69" (deveria ser R$ 1.688,15)
-O Gemini extraiu corretamente `valorConta: "1.688,15"`. O bug está em `supabase/functions/_shared/ocr.ts:171`:
+### 6. (NOVO) Pergunta durante edição/coleta = "❌ Inválido"
+Hoje, em `bot-flow.ts:822`, a IA de vendas (`ai-sales-agent`) só é acionada quando o step está em `conversationalSteps` (welcome, menu_inicial, pos_video, checkin_pos_video, qualificacao, duvidas_pos_club, aguardando_humano) ou em `collectionSteps` **muito limitado** (`aguardando_conta`, `coleta_doc`, `ask_email`, `ask_cep`).
+
+Resultado: se o cliente está em `editing_conta_valor`, `ask_cpf`, `ask_rg`, `ask_phone`, `confirmando_dados_conta`, etc., e digita **"quanto vou economizar?"** ou **"isso é seguro?"** ou **"quanto tempo demora?"**, o switch trata como entrada inválida e responde "❌ CPF inválido" / "❌ Valor inválido". Isso é grosseiro e quebra confiança — exatamente o oposto de "vendedor humano".
+
+### 7. (NOVO) Mudança de assunto não tem rota de volta
+Quando a IA é chamada e responde uma dúvida off-topic, **nada lembra o lead do que estava sendo perguntado**. Se ele estava em `ask_cpf`, depois de responder a dúvida o bot fica calado esperando o CPF que nunca vem (e o `bot-stuck-recovery` só age 5–15 min depois).
+
+---
+
+## Plano final (revisado, 7 itens)
+
+Tudo em **`supabase/functions/whapi-webhook/handlers/bot-flow.ts`**.
+
+### A. "até 20%" (não promessa fixa)
+- `~1352`: `💚 Economia estimada: *até* R$ {mensal}/mês • *até* R$ {anual}/ano (até 20%)`
+- `~1375`: trocar "20% de desconto fixo" → "desconto de *até* 20%", prefixar valores com "até".
+
+### B. `safeAssignName()` blinda nome contra OCR de doc
+Helper com 5 checks (≥5 chars, ≥2 palavras, sem dígitos, sem termos de cabeçalho RG, similaridade Levenshtein ≥0.7 com o nome atual). Se `name_source === 'user_confirmed'` e nome ≥3 chars: nunca sobrescreve. Aplicar nas 3 chamadas (linhas 1599, 1696, 1774). Marcar `name_source='user_confirmed'` em `editing_conta_nome`, `editing_doc_nome`, `ask_name`, e nos ramos SIM de `confirmando_dados_conta`/`confirmando_dados_doc`.
+
+### C. Anti-alucinação no OCR da conta (~1326)
+Reusar `safeAssignName` para validar `d.nome` — se inválido força `editing_conta_nome`. Validar `numero_instalacao` (≥7 dígitos) e `cep` (8 dígitos) — se inválidos abrir as edições correspondentes.
+
+### D. Menus de edição completos + Cancelar + palavras-chave
+**`editing_conta_menu`**: opções 1-6 + `0️⃣ Cancelar`. Aceitar `"0"|"cancelar"|"voltar"` → volta a `confirmando_dados_conta` reenviando a tela completa. Aceitar palavras-chave (`nome|valor|rua|endereço|instalação|cep|distribuidora`).
+
+**`editing_doc_menu`**: 1-4 + `0️⃣ Cancelar`. Idem com palavras-chave (`nome|cpf|rg|nascimento|data`).
+
+Após salvar em qualquer `editing_*`, **reenviar a tela de confirmação completa** (helper `buildConfirmacaoConta(merged)` / `buildConfirmacaoDoc(merged)`).
+
+### E. Bypassar QA semântico em passos de cadastro/edição
+No início de `runFlowQAIntercept` (e antes de `trySendConfiguredQa()`), retornar `null` se `step ∈ NO_QA_STEPS` (todos `editing_*`, `ask_*`, `confirmando_*`, `aguardando_*`, `processando_*`, `finalizando`, `portal_*`, `validando_*`, `complete`).
+
+### F. Ordem texto → áudio → vídeo no QA
+Refatorar `bot-flow.ts:380-440`: tratar texto como item ordenável (`items = [...media, {kind:'text'}]`), ordenar pela sequência configurada (default `["text","audio","image","video"]`), enviar em ordem com `sleepForMedia` entre mídias. Remover `sendText` final isolado.
+
+### G. (NOVO) Pergunta/mudança de assunto durante coleta
+Antes de cair no switch determinístico, em qualquer step `ask_*`, `editing_*`, `confirmando_*`, **detectar se a mensagem é pergunta off-topic** (`looksLikeQuestion` regex já existe + heurística "não parece com a entrada esperada"). Se sim:
 
 ```ts
-parseFloat(String(dados.valorConta).replace(/[^\d.,]/g, "").replace(",", "."))
-// "1.688,15" → "1.688.15" → parseFloat = 1.688 → toFixed(2) = "1.69"
+const ASK_OR_EDIT_STEPS = /^(ask_|editing_|confirmando_|aguardando_(conta|doc))/;
+if (ASK_OR_EDIT_STEPS.test(step) && messageText && !isButton && !isFile) {
+  const looksLikeAnswer = isExpectedShape(step, messageText);  // CPF tem 11 dígitos, valor é número, etc.
+  if (!looksLikeAnswer && (looksLikeQuestion || messageText.length > 25)) {
+    // Responde a dúvida via SalesAI (ou QA configurada se houver)
+    const aiAnswer = await callSalesAi(customer, messageText, /*keepStep=*/true);
+    if (aiAnswer) {
+      await sendText(remoteJid, aiAnswer);
+      // 🪄 ROTA DE VOLTA: lembra o lead do que estava sendo pedido
+      const reentryPrompt = getReentryPromptForStep(step, customer);
+      // Ex.: "Voltando ao seu cadastro: qual é o seu CPF? (apenas números)"
+      await sendText(remoteJid, reentryPrompt);
+      return { reply: "", updates: { __inline_sent: true } as any };
+      // ⚠️ NÃO muda step — fica esperando o dado certo.
+    }
+  }
+}
 ```
 
-Como `1.69 < 30`, o `bot-flow.ts:1310` zera o valor e mostra `R$ ❌`. Por isso o lead viu valor errado e clicou em "EDITAR".
-
-**Correção**: detectar o formato brasileiro — se houver `,` decimal, remover `.` (milhar) antes de trocar `,` por `.`.
-
-### 2. Bot "esquece" o passo ao tentar editar (volta pro início do fluxo)
-Os logs mostram exatamente:
-```
-[conversational] unknown step="editing_conta_menu" → restart at firstActive
-```
-O dispatcher em `supabase/functions/whapi-webhook/index.ts:333-342` (`CADASTRO_OR_SYSTEM`) **não inclui** os passos `editing_conta_*`, `editing_doc_*` e `aguardando_doc_auto`. Resultado: quando o lead clica "✏️ EDITAR", o `conversation_step` vira `editing_conta_menu`, mas a próxima mensagem é roteada para o **conversational** (motor novo), que não conhece esse passo e reinicia o fluxo do zero. O `bot-flow.ts` (que tem todos os cases de edição entre as linhas 1822-1990) nunca é chamado.
-
-**Correção**: incluir todos os passos `editing_conta_*`, `editing_doc_*` e `aguardando_doc_auto` no set `CADASTRO_OR_SYSTEM` do dispatcher e no `CADASTRO_STEPS` do guard do conversational.
-
-### 3. Nome e Valor podem aparecer como ❌ mesmo com OCR OK
-Hoje, se o Gemini falhar em extrair `nome` ou se o valor for parseado errado, a confirmação mostra `❌` e segue. Pedido: **nunca falhar nesses dois campos**.
-
-**Correção**: se após o OCR `nome` ou `valor` vierem vazios/inválidos, **não enviar a tela de confirmação** — direcionar a Camila a perguntar especificamente o campo faltante (`editing_conta_nome` ou `editing_conta_valor`) antes de seguir. Manter o resto dos dados já extraídos.
-
-### 4. Mostrar a economia em número (R$/ano com 20%)
-Hoje a mensagem só diz "até 20%". Vamos calcular e exibir:
-
-```
-Economia estimada: 20% ao mês
-→ R$ {valor*0.20} por mês
-→ R$ {valor*0.20*12} por ano
-```
-
-Aplicar em `bot-flow.ts:1375-1377` (mensagem após "✅ SIM" na confirmação) e também na tela de confirmação dos dados (`bot-flow.ts:1320-1329`), substituindo a linha do valor por algo do tipo:
-
-```
-💰 Valor: R$ 1.688,15
-💚 Economia: 20% ao mês = R$ 337,63/mês ou R$ 4.051,56/ano
-```
+Implementar:
+1. **`isExpectedShape(step, text)`** — heurísticas baratas: `ask_cpf` → ≥11 dígitos; `ask_cep` → ≥8 dígitos; `editing_conta_valor` → contém número decimal/inteiro; `ask_birth_date` → padrão DD/MM/AAAA; etc.
+2. **`getReentryPromptForStep(step, customer)`** — mapa `step → prompt` reaproveitando os textos já existentes em cada `case`. Prefixar com "📋 *Voltando ao seu cadastro:* ".
+3. **`callSalesAi(customer, text, keepStep)`** — extrair a chamada já existente para `ai-sales-agent` numa função, passando `keepStep=true` para que a IA não tente avançar fluxo (prompt do agent precisa receber instrução: "responda à dúvida, sem mudar o estado do cadastro").
+4. Fallback: se `ai-sales-agent` não estiver habilitado (`use_sales_ai !== true`), usar `trySendConfiguredQa()` e, mesmo assim, enviar o `reentryPrompt`.
 
 ---
 
-## Plano de implementação
+## Por que isso resolve "100%"
+- **Cadastro determinístico** segue intacto — números/datas continuam validados.
+- **Pergunta off-topic** é tratada com a IA mas **sem perder o passo** — vendedor humano faz exatamente isso.
+- **Atalhos de QA por áudio** ficam confinados aos passos conversacionais (welcome, qualificacao, duvidas).
+- **Handoff humano/cancelar/reset** continua funcionando em qualquer step (intent-override roda antes de tudo).
 
-### Arquivo 1 — `supabase/functions/_shared/ocr.ts`
-Substituir o normalizador do `valorConta` (linha 171) por um parser que entende formato BR (`1.688,15`), formato US (`1688.15`) e número puro (`1688`).
+## Validação extra (G)
+1. Em `ask_cpf`, digitar "isso é seguro?" → IA responde sobre segurança + bot reenvia "📋 Voltando: digite seu CPF (11 números)". Step continua `ask_cpf`.
+2. Em `editing_conta_valor`, digitar "quanto eu economizo?" → IA responde com cálculo + reenvia "📋 Voltando: digite o valor da conta (ex: 350,50)".
+3. Em `ask_cpf`, digitar "12345678901" → switch processa normal (CPF válido), IA não é chamada.
+4. Em `confirmando_dados_conta`, digitar "vai cair na minha conta?" → IA responde + reenvia botões SIM/NÃO/EDITAR.
+5. Em `editing_conta_valor`, digitar "390.90" → não dispara QA (E), valida e salva (F já garantiu que o switch roda).
 
-### Arquivo 2 — `supabase/functions/whapi-webhook/index.ts`
-Adicionar ao `CADASTRO_OR_SYSTEM` (linha 333):
-- `editing_conta_menu`, `editing_conta_nome`, `editing_conta_endereco`, `editing_conta_cep`, `editing_conta_distribuidora`, `editing_conta_instalacao`, `editing_conta_valor`
-- `editing_doc_menu`, `editing_doc_nome`, `editing_doc_cpf`, `editing_doc_rg`, `editing_doc_nascimento`, `editing_doc_pai`, `editing_doc_mae`
-- `aguardando_doc_auto`
-- `aguardando_humano`
+## Arquivos tocados
+Apenas `supabase/functions/whapi-webhook/handlers/bot-flow.ts`.
 
-### Arquivo 3 — `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
-Espelhar a mesma lista no `CADASTRO_STEPS` (linha 62) — assim o guard defensivo no topo do `runConversationalFlow` devolve `{reply:""}` e libera o `bot-flow.ts` para processar.
-
-### Arquivo 4 — `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
-
-**a) Blindagem nome/valor após OCR (~linha 1298)**: depois do `criticos.length < 3` check, adicionar:
-- Se `!d.nome` → `conversation_step = "editing_conta_nome"`, perguntar nome.
-- Se `nome` ok mas `valor` ausente/inválido → `conversation_step = "editing_conta_valor"`, perguntar valor.
-- Só então mostrar a tela de confirmação completa.
-
-**b) Mensagem de confirmação (linhas 1320-1329)**: trocar a linha do valor por:
-```
-💰 Valor: R$ {valor formatado pt-BR}
-💚 Economia: ~20% = R$ {valor*0.20}/mês • R$ {valor*0.20*12}/ano
-```
-Helper inline `formatBRL(n)` para `n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})`.
-
-**c) Mensagem após "✅ SIM" (linhas 1375-1377)**: trocar o texto por algo concreto:
-```
-Show, {nome}! Sua conta de R$ {valor}/mês cabe certinho na economia 💚
-→ Você economiza ~R$ {mensal} por mês
-→ R$ {anual} por ano sem mexer em nada na sua casa
-
-E ainda entra no Conexão Club: até 70% de desconto em farmácia, mercado, posto e várias parceiras.
-```
-
-### Arquivo 5 (opcional) — `supabase/migrations/...sql`
-Resetar de novo os dois leads de teste (`5511971254913`, `5511989000650`) para começar do zero após o deploy.
-
----
-
-## Validação
-
-1. Reset dos 2 leads de teste.
-2. Mandar "oi" → fluxo visual da Camila (já validado).
-3. Enviar a foto da conta → OCR vem com `valorConta: "1.688,15"` → tela de confirmação mostra `R$ 1.688,15` e linha de economia (`R$ 337,63/mês`).
-4. Clicar "✏️ EDITAR" → menu numerado aparece → digitar "5" → bot pede o número da instalação (sem reiniciar o fluxo).
-5. Confirmar com "✅ SIM" → mensagem do Conexão Club já com R$ economizados/ano.
-6. Conferir nos logs do `whapi-webhook` que **não aparece mais** `unknown step="editing_conta_..." → restart`.
-
-Pronto pra implementar — me dá o ok e eu faço as edições + deploy + reset dos leads.
+Sem migration. Redeploy do `whapi-webhook` ao final.
