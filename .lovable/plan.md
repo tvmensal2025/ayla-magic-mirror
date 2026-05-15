@@ -1,85 +1,135 @@
-## O que vai mudar (em linguagem simples)
+## Objetivo
 
-Hoje, no Fluxo da Camila, cada passo só consegue decidir o próximo passo se o cliente disser **sim** ou **não**. Se ele mandar o nome, o valor da conta, ou qualquer coisa diferente, a Camila trava ou repete o passo.
+Eliminar os 4 riscos identificados no Fluxo da Camila, deixando o sistema robusto contra entradas inesperadas e fluxos antigos.
 
-Vou deixar cada passo com **3 blocos visuais bem separados**, fáceis de entender:
+---
 
-```
-┌─ PASSO 1 ─────────────────────────────────┐
-│ 📝 Mensagem da Camila (texto que ela manda)│
-├───────────────────────────────────────────┤
-│ 🎯 REGRAS — "Se o cliente disser..."      │
-│   • SIM / quero  →  Passo 3                │
-│   • NÃO / depois →  Passo 5                │
-│   • mandar valor (R$) → Passo 3            │
-│   [+ adicionar regra]                      │
-├───────────────────────────────────────────┤
-│ 💾 CAPTURAR DADOS do que o cliente mandou │
-│   ☑ Nome do cliente   → salva em {{nome}} │
-│   ☑ Valor da conta    → salva em {{valor_conta}}│
-│   ☐ Telefone          → salva em {{telefone}}│
-│   ☐ CPF               → salva em {{cpf}}  │
-├───────────────────────────────────────────┤
-│ 🤖 PLANO B — "Se nada acima funcionar"    │
-│   ◉ Repetir o passo                        │
-│   ○ Ir para passo: [Passo 2 ▾]            │
-│   ○ Deixar a IA decidir (Gemini)          │
-│      └ Instrução: "Se parecer interessado,│
-│         vá pro Passo 3. Se confuso, repita."│
-└───────────────────────────────────────────┘
-```
+## 1. Regex de captura — cobrir casos reais
 
-### Como cada bloco ajuda você
+**Problema hoje:** só pega "R$ 380", "minha conta vem 450", CPF/telefone formatados. Falha em "trezentos reais", "quinhentos e cinquenta", "minha conta tá vindo uns quatrocentos", nome em minúsculas ("sou joão silva"), telefone sem DDD.
 
-**🎯 REGRAS** — continua como já é, só com mais opções no menu de gatilhos:
-- `Disse SIM` / `Disse NÃO` (já existe)
-- `Mandou valor (R$)` — detecta "350", "R$ 450", "minha conta é 600"
-- `Mandou nome próprio` — detecta "Maria Silva", "sou João"
-- `Mandou telefone` / `Mandou CPF`
-- `Palavra específica` — você digita as palavras
+**Solução em camadas (cascata, do mais barato para o mais caro):**
 
-**💾 CAPTURAR** — checkboxes simples. Marcando "Valor da conta", se o cliente mandar "minha conta vem 380", o sistema extrai `380`, salva no cadastro dele e passa a estar disponível como `{{valor_conta}}` em mensagens futuras. Mesma coisa pra nome, telefone, CPF.
+1. **Regex expandido** (grátis, instantâneo):
+   - Valor: aceita "380", "R$380", "R$ 380,50", "380 reais", "uns 400", "umas 500 pila"
+   - Nome: aceita minúsculas após "sou/me chamo/meu nome é/aqui é", capitaliza automático
+   - Telefone: aceita 8, 9, 10, 11 dígitos com/sem DDD, com/sem 9
+   - CPF: 11 dígitos com qualquer pontuação
 
-**🤖 PLANO B** — substitui a regra "Qualquer outra coisa" de hoje. Em vez de uma única opção, você escolhe entre:
-- Repetir o passo (padrão seguro)
-- Pular pra um passo específico
-- **Deixar a IA decidir** — você escreve em português o que ela deve fazer ("se o cliente parecer interessado, vá pro Passo 3; se tiver dúvida, repita") e a Gemini lê a mensagem e decide.
+2. **Tabela de números por extenso** (grátis):
+   - Mapa "cem→100, duzentos→200, trezentos→300...mil→1000"
+   - Combina com "e cinquenta", "e poucos" → 350
+   - Cobre 95% dos casos brasileiros sem chamar IA
 
-## Visual
+3. **Fallback IA só se regex falhar E o campo está marcado para captura** (Gemini Flash, ~150 tokens):
+   - Prompt curto: "Extraia {nome|valor|telefone|cpf} desta mensagem. Responda só JSON ou null."
+   - Cache de 1h por (telefone + mensagem) para não gastar à toa
+   - Timeout 3s — se falhar, segue sem capturar (não trava o fluxo)
 
-- Cada bloco com fundo levemente diferente e ícone na esquerda (🎯 💾 🤖) pra você bater o olho e saber o que é.
-- Tipografia clara, tudo em português, zero jargão técnico ("intent", "regex", etc.).
-- Tooltips curtos no `?` ao lado de cada bloco explicando o que faz.
-- Cores do design system (verde primário, glassmorphism dark) — mantém a identidade.
+**Validação pós-captura:**
+- Valor entre R$ 30 e R$ 50.000 (descarta "1" ou "999999")
+- Telefone com DDD válido brasileiro (lista DDDs)
+- CPF com dígito verificador correto
+- Nome com 2+ palavras, sem números, sem palavrão
+
+Se inválido → ignora e loga, não salva lixo no `customers`.
+
+---
+
+## 2. Gemini no Plano B — blindar contra falha
+
+**Problema hoje:** se Gemini falha, retorna formato estranho ou demora, o passo só repete sem aviso.
+
+**Solução:**
+
+1. **Schema rígido com `jsonSchema`** no `aiChat`:
+   ```
+   { next_step_key: enum[lista_de_steps_válidos], reason: string }
+   ```
+   Modelo é forçado a devolver um step que existe — impossível devolver "passo 99".
+
+2. **Timeout de 4s + 1 retry** com prompt encurtado.
+
+3. **Cascata de fallback explícita:**
+   - IA falha/timeout → vai pro step configurado em "se IA falhar" (novo campo no Plano B)
+   - Esse campo defaulta pra "repetir passo"
+   - UI mostra checkbox: "Se a IA der erro, [repetir | ir pro passo X]"
+
+4. **Rate limit awareness:** se vier 429 da gateway, marca conversa com flag e usa só regex+fallback fixo pelos próximos 60s (evita cascata de erros).
+
+5. **Log visível no Admin:** painel "Decisões da IA" mostra últimas 50 chamadas com input, output, latência, erro. Já temos `ai_decisions` no banco — só precisa expor.
+
+---
+
+## 3. Conflito de regras — UI que avisa
+
+**Problema hoje:** se o usuário cria 2 regras que pegam a mesma coisa (ex: "disse SIM" + "palavra-chave: sim"), a primeira ganha silenciosamente.
+
+**Solução (frontend, sem mudança de backend):**
+
+1. **Validação ao salvar o passo:**
+   - Detecta intents duplicados (mesmo `intent` em 2 regras)
+   - Detecta palavras-chave que sobrepõem ("sim" em palavra-chave + intent "afirmacao")
+   - Mostra aviso amarelo: "⚠️ Estas 2 regras podem competir. A regra de cima sempre ganha."
+
+2. **Botão de reordenar (drag handle)** já existe no array — adicionar dica visual: "↑ regras do topo têm prioridade".
+
+3. **Simulador inline:** input "testar mensagem" no topo do passo. Usuário digita "sim quero", vê qual regra dispara. Roda o mesmo matcher do backend (extrair pra um util compartilhado).
+
+4. **Bloqueio de regras impossíveis:**
+   - "Plano B = repetir" + nenhuma regra → aviso vermelho "este passo nunca avança"
+   - 2 regras 100% idênticas → impede salvar
+
+---
+
+## 4. Migração de fluxos antigos — converter sem trabalho manual
+
+**Problema hoje:** fluxos criados antes da mudança têm regra "default" que virou "repetir" no Plano B. Usuário precisa abrir cada passo e reconfigurar.
+
+**Solução (migração SQL única, idempotente):**
+
+1. **Detectar transições antigas com `intent: "default"`:**
+   - Se existe → mover o `to_step` dela pro `fallback.mode = "goto"` + `fallback.target_step`
+   - Remover a regra "default" do array `transitions`
+   - Roda em todos os `bot_flow_steps` existentes
+
+2. **Detectar passos sem nenhuma regra E sem fallback configurado:**
+   - Setar `fallback = {"mode": "ai", "prompt": "Decida o melhor próximo passo baseado no contexto da conversa."}`
+   - Só pra fluxos com `is_active=true` (ativos)
+
+3. **Banner no FluxoCamila** (mostrado uma vez, dismissível):
+   > "Atualizamos o sistema de regras. Seus fluxos foram convertidos automaticamente. [Ver o que mudou] [Entendi]"
+
+4. **Backup antes da migração:** copiar `transitions` atual pra coluna nova `transitions_backup_pre_v2 jsonb` — permite rollback se algo quebrar.
+
+---
 
 ## Detalhes técnicos
 
-**Banco** — adicionar coluna `captures jsonb default '[]'` em `bot_flow_steps`. Cada item: `{ field: 'electricity_bill_value' | 'name' | 'phone' | 'cpf', enabled: true }`.
+**Backend** (`supabase/functions/whapi-webhook/handlers/conversational/index.ts`):
+- Novo arquivo `_shared/captureExtractors.ts` com regex + tabela de extenso + validadores
+- `extractCaptures()` chama cascata: regex → extenso → IA (se habilitado)
+- `aiDecideFallback()` usa `jsonSchema` com enum de step_keys válidos + timeout 4s
+- Wrapper `withAIFallback(fn, fallbackStep)` pra qualquer chamada de IA
 
 **Frontend** (`src/pages/FluxoCamila.tsx`):
-- Quebrar `TransitionRow` em 3 sub-componentes: `<RulesBlock>`, `<CaptureBlock>`, `<FallbackBlock>`.
-- Novos `INTENT_OPTIONS`: `valor_brl`, `nome_proprio`, `telefone_br`, `cpf_br`, `palavra_chave`, `ai_decide`.
-- `FallbackBlock` com radio group (repetir / pular / IA) + textarea pra prompt da IA.
+- `validateStepRules(step)` retorna array de warnings/errors
+- `<RuleConflictBadge>` em cada regra duplicada
+- `<StepSimulator>` collapsible no header do StepCard
+- Banner de migração em `<FlowsList>` lendo flag em localStorage
 
-**Backend** (`supabase/functions/whapi-webhook/handlers/conversational/index.ts`):
-- Nova função `extractCaptures(step, messageText)` que roda regex antes da classificação:
-  - valor: `/R?\$?\s*(\d{2,5}([.,]\d{2})?)/`
-  - telefone: `/(\d{2})\s?9?\s?\d{4}-?\d{4}/`
-  - CPF: `/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/`
-  - nome: heurística (2+ palavras capitalizadas após "sou/me chamo/nome é")
-- Salva os capturados em `customers` (`electricity_bill_value`, `name`, `phone`, `cpf`).
-- Quando o intent matcher reconhece `valor_brl`/`nome_proprio`/etc., usa a transição correspondente.
-- Quando cai no Plano B com `ai_decide`, chama Gemini com o prompt do usuário + lista de passos válidos e pega o `step_key` de retorno.
+**Migração** (SQL):
+- Função `migrate_default_to_fallback()` rodada uma vez
+- Coluna `transitions_backup_pre_v2` adicionada com cópia
+- Adicionar `fallback.on_ai_error jsonb` (default `{"mode":"repeat"}`)
 
-**Migração** — adiciona `captures` com default `[]`. Zero impacto em fluxos existentes.
+**Sem mudança em:**
+- Cadastro / OCR / portal worker
+- Mídia / atalhos globais
+- Estrutura de `customers`
 
-## O que NÃO muda
-
-- Cadastro (OCR + portal) — intacto.
-- Biblioteca de mídia — intacta.
-- Atalhos globais (`quero cadastrar` / `quero humano`) — intactos.
-- Fluxos já criados continuam funcionando (Plano B vazio = repete passo, igual hoje).
+---
 
 ## Entrega
 
-Tudo numa parte só (UI + backend + migração). Aprovando, sigo.
+Migração SQL → backend (extractors + IA blindada) → frontend (validação + simulador + banner). Tudo numa parte. Aprovando, sigo.
