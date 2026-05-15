@@ -2302,7 +2302,35 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     case "complete": {
-      reply = "✅ Seus dados já foram registrados! Se precisar de algo, um consultor entrará em contato. ☀️";
+      // Mensagem padrão se a admin não tiver configurado um passo "finalizar_cadastro"
+      // no FluxoCamila. Se tiver, usa o message_text do passo dela.
+      let parabens = "✅ Seus dados já foram registrados! Se precisar de algo, um consultor entrará em contato. ☀️";
+      try {
+        const { data: flow } = await supabase
+          .from("bot_flows").select("id")
+          .eq("consultant_id", customer.consultant_id || consultorId)
+          .eq("is_active", true).order("created_at", { ascending: true })
+          .limit(1).maybeSingle();
+        if (flow?.id) {
+          const { data: passo } = await supabase
+            .from("bot_flow_steps")
+            .select("message_text")
+            .eq("flow_id", flow.id)
+            .eq("step_type", "finalizar_cadastro")
+            .eq("is_active", true)
+            .order("position", { ascending: true })
+            .limit(1).maybeSingle();
+          const txt = (passo?.message_text || "").trim();
+          if (txt) {
+            parabens = txt
+              .replaceAll("{{nome}}", (customer.name || "").split(/\s+/)[0] || "")
+              .replaceAll("{{representante}}", nomeRepresentante || "");
+          }
+        }
+      } catch (e) {
+        console.warn("[complete] busca de passo finalizar_cadastro falhou:", (e as Error).message);
+      }
+      reply = parabens;
       break;
     }
 
