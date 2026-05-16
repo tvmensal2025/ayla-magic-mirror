@@ -401,6 +401,8 @@ export default function FluxoCamila() {
           </Card>
         )}
 
+        <FlowAuditPanel steps={orderedSteps} />
+
         {/* Atalhos */}
         <Card className="p-4 sm:p-5 border-amber-500/30 bg-amber-500/5">
           <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
@@ -969,5 +971,99 @@ function RuleSimulator({ rules, allSteps }: { rules: Transition[]; allSteps: Ste
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FlowAuditPanel — detecta problemas de configuração antes do consultor testar
+// ---------------------------------------------------------------------------
+type Issue = { severity: "high" | "medium" | "low"; step: string; detail: string };
+
+function auditFlow(steps: Step[]): Issue[] {
+  const issues: Issue[] = [];
+  const byId = new Map(steps.map((s) => [s.id, s]));
+  const active = steps.filter((s) => s.is_active);
+
+  if (active.length === 0) {
+    issues.push({ severity: "high", step: "—", detail: "Nenhum passo ativo. O bot não tem o que enviar." });
+    return issues;
+  }
+
+  for (const s of active) {
+    const label = `${s.position}. ${s.title || s.step_key || s.id.slice(0, 6)}`;
+    const hasText = !!(s.message_text && s.message_text.trim());
+
+    // Passo sem texto e sem mídia configurada (slot_key vazio) é silencioso
+    if (!hasText && !s.slot_key) {
+      issues.push({ severity: "high", step: label, detail: "Sem texto nem mídia (slot vazio). O passo não envia nada." });
+    }
+
+    // Plano B aponta para passo inexistente/inativo
+    const fb = s.fallback;
+    if (fb?.mode === "goto" && fb.goto_step_id) {
+      const target = byId.get(fb.goto_step_id);
+      if (!target) {
+        issues.push({ severity: "high", step: label, detail: "Plano B aponta para um passo que não existe mais." });
+      } else if (!target.is_active) {
+        issues.push({ severity: "high", step: label, detail: `Plano B aponta para "${target.title}" que está inativo.` });
+      }
+    }
+
+    // Passos cascata (wait_for=none) sem Plano B → conversa pode travar
+    // (apenas alerta se o passo tem captura: aí pode parar mesmo)
+    if (s.captures.some((c) => c.enabled)) {
+      const hasGoto = fb?.mode === "goto" && !!fb.goto_step_id;
+      const hasTransition = s.transitions.some((t) => !!t.goto_step_id || !!t.goto_special);
+      if (!hasGoto && !hasTransition) {
+        issues.push({ severity: "medium", step: label, detail: "Captura dados mas não tem para onde ir depois (sem regra nem Plano B)." });
+      }
+    }
+
+    // Transições apontando para passo inexistente
+    for (const t of s.transitions) {
+      if (t.goto_step_id && !byId.get(t.goto_step_id)) {
+        issues.push({ severity: "medium", step: label, detail: `Regra "${t.trigger_intent}" aponta para um passo apagado.` });
+      }
+    }
+  }
+
+  return issues;
+}
+
+function FlowAuditPanel({ steps }: { steps: Step[] }) {
+  const issues = useMemo(() => auditFlow(steps), [steps]);
+  if (issues.length === 0) {
+    return (
+      <Card className="p-3 sm:p-4 border-emerald-500/30 bg-emerald-500/5 flex items-center gap-3">
+        <div className="h-8 w-8 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center text-sm">✓</div>
+        <div className="text-sm">
+          <div className="font-semibold">Fluxo pronto para teste</div>
+          <div className="text-muted-foreground text-xs">Nenhum problema de configuração detectado.</div>
+        </div>
+      </Card>
+    );
+  }
+  const high = issues.filter((i) => i.severity === "high").length;
+  return (
+    <Card className="p-3 sm:p-4 border-amber-500/40 bg-amber-500/5">
+      <div className="flex items-center gap-2 mb-2">
+        <AlertTriangle className="h-4 w-4 text-amber-600" />
+        <span className="text-sm font-semibold">
+          {issues.length} problema(s) detectado(s){high > 0 ? ` — ${high} crítico(s)` : ""}
+        </span>
+      </div>
+      <ul className="space-y-1.5 text-xs">
+        {issues.map((i, idx) => (
+          <li key={idx} className="flex items-start gap-2">
+            <span className={
+              i.severity === "high"
+                ? "mt-0.5 inline-block h-2 w-2 rounded-full bg-red-500 shrink-0"
+                : "mt-0.5 inline-block h-2 w-2 rounded-full bg-amber-500 shrink-0"
+            } />
+            <span><strong>{i.step}:</strong> {i.detail}</span>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }

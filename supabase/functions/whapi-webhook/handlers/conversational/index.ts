@@ -669,13 +669,20 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     st: DbStep,
     asReply: boolean,
   ): Promise<{ replyText: string; inlineSent: boolean }> => {
-    const mediaSent = await sendStepMedia(ctx, st, consultantId, false);
+    let mediaSent: boolean | null = false;
+    try {
+      mediaSent = await sendStepMedia(ctx, st, consultantId, false);
+    } catch (e) {
+      console.error(`[conversational] sendStepMedia threw em step=${st.step_key}:`, (e as Error)?.message || e);
+      mediaSent = null;
+    }
     // mediaSent: true = enviou; false = não tem mídia; null = tentou e falhou
     const text = renderStepText(st);
     const inlineMedia = mediaSent === true;
+    console.log(`[conversational] emitStep step=${st.step_key} asReply=${asReply} media=${mediaSent} hasText=${!!text}`);
     if (!text) {
       if (mediaSent === null) {
-        console.warn(`[conversational] step=${st.step_key}: mídia falhou e sem texto fallback`);
+        console.warn(`[conversational] ⚠️ step=${st.step_key}: mídia falhou e sem texto fallback — continuando cascata`);
       }
       return { replyText: "", inlineSent: inlineMedia };
     }
@@ -683,7 +690,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       return { replyText: text, inlineSent: inlineMedia };
     }
     // Cascade: envia o texto inline como mensagem separada (mídia já foi inline).
-    try { await ctx.sender.sendText(ctx.remoteJid, text); } catch (_) {}
+    try {
+      await ctx.sender.sendText(ctx.remoteJid, text);
+    } catch (e) {
+      console.error(`[conversational] cascade sendText falhou step=${st.step_key}:`, (e as Error)?.message || e);
+    }
     return { replyText: "", inlineSent: true };
   };
 
@@ -704,11 +715,17 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     let inlineSent = first.inlineSent;
 
     let cursor: DbStep | null = cadastroStep ? null : s;
-    for (let guard = 0; cursor?.wait_for === "none" && guard < 4; guard++) {
+    for (let guard = 0; cursor?.wait_for === "none" && guard < 6; guard++) {
       const nextId = cursor.fallback?.mode === "goto" ? cursor.fallback.goto_step_id : null;
-      if (!nextId) break;
+      if (!nextId) {
+        console.log(`[conversational] cascade parou em step=${cursor.step_key} (sem fallback.goto)`);
+        break;
+      }
       const nextStep = dbSteps.find((step) => step.id === nextId && step.is_active);
-      if (!nextStep || nextStep.id === cursor.id) break;
+      if (!nextStep || nextStep.id === cursor.id) {
+        console.warn(`[conversational] cascade quebrada step=${cursor.step_key} aponta para ${nextId} (inativo/inexistente/self)`);
+        break;
+      }
 
       const cascadeDelay = Math.max(0, Math.min(60000, nextStep.text_delay_ms ?? 1500));
       if (cascadeDelay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, cascadeDelay));
@@ -720,7 +737,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       if (emit.replyText) replyText = emit.replyText;
       inlineSent = inlineSent || emit.inlineSent;
       nextConversationStep = cascadeCadastroStep || nextStep.id;
-      console.log(`[conversational] auto-cascade ${cursor.step_key} → ${nextStep.step_key} (wait_for=none)`);
+      console.log(`[conversational] auto-cascade ${cursor.step_key} → ${nextStep.step_key} (wait_for=${nextStep.wait_for})`);
       if (cascadeCadastroStep) break;
       cursor = nextStep;
     }
@@ -769,13 +786,19 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   if (transition) return _finalize(stepKey, await resolveTransition(transition));
 
 
-  // 1.5) Captura sem transição configurada → auto-advance para o próximo passo ativo
-  // (corrige o caso "lead respondeu '300 reais' mas o passo não tinha rota informou_valor").
+  // 1.5) Captura sem transição configurada → segue o Plano B configurado
+  // (PREFERE fallback.goto_step_id — é o que o consultor configurou em /admin/fluxos).
+  // Só cai pra próximo por posição como último recurso.
   if (hasCapture) {
-    const nextByPosition = dbSteps.find((s) => s.is_active && s.position > currentStep.position);
-    if (nextByPosition) {
-      console.log(`[conversational] auto-advance por captura ${currentStep.step_key} → ${nextByPosition.step_key} (intents=${captureIntents.join(",")})`);
-      if (nextByPosition.step_key === "cadastro" || CADASTRO_STEPS.has(nextByPosition.step_key)) {
+    let nextByConfig: DbStep | undefined;
+    const fbId = currentStep.fallback?.mode === "goto" ? currentStep.fallback.goto_step_id : null;
+    if (fbId) nextByConfig = dbSteps.find((s) => s.is_active && s.id === fbId);
+    if (!nextByConfig) {
+      nextByConfig = dbSteps.find((s) => s.is_active && s.position > currentStep.position);
+    }
+    if (nextByConfig) {
+      console.log(`[conversational] auto-advance por captura ${currentStep.step_key} → ${nextByConfig.step_key} (intents=${captureIntents.join(",")}, source=${fbId ? "fallback.goto" : "position"})`);
+      if (nextByConfig.step_key === "cadastro" || CADASTRO_STEPS.has(nextByConfig.step_key)) {
         const docStep = findActiveByType("capture_documento");
         if (docStep) return _finalize(stepKey, await goToStep(docStep, restoreDetourUpdates));
         return _finalize(stepKey, {
@@ -783,7 +806,16 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
           updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
         });
       }
-      return _finalize(stepKey, await goToStep(nextByPosition, restoreDetourUpdates));
+      try {
+        return _finalize(stepKey, await goToStep(nextByConfig, restoreDetourUpdates));
+      } catch (e) {
+        console.error(`[conversational] 💥 goToStep falhou para ${nextByConfig.step_key}:`, (e as Error)?.message || e);
+        // Salva pelo menos o avanço de step para não travar o lead no passo anterior.
+        return _finalize(stepKey, {
+          reply: "",
+          updates: { conversation_step: nextByConfig.id, __inline_sent: true, ...captureUpdates, ...restoreDetourUpdates },
+        });
+      }
     }
   }
 
