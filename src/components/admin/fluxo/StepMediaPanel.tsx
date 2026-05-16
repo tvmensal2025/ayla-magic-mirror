@@ -138,17 +138,26 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
       return;
     }
     (async () => {
-      const { data, error } = await supabase
-        .from("ai_media_library")
-        .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, original_size_bytes, final_size_bytes")
-        .eq("consultant_id", consultantId)
-        .eq("active", true)
-        .in("slot_key", slotKeys)
-        .order("send_order", { ascending: true });
+      const [{ data, error }, { data: cons }] = await Promise.all([
+        supabase
+          .from("ai_media_library")
+          .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, original_size_bytes, final_size_bytes")
+          .eq("consultant_id", consultantId)
+          .eq("active", true)
+          .in("slot_key", slotKeys)
+          .order("send_order", { ascending: true }),
+        supabase.from("consultants").select("flow_step_media_order").eq("id", consultantId).maybeSingle(),
+      ]);
       if (!error) setItems((data as Media[]) ?? []);
+      // Carrega ordem salva da UI (consultants.flow_step_media_order[stepKey]) — sem isso, o painel sempre mostra o default.
+      const map = (cons?.flow_step_media_order as Record<string, string[]> | null) ?? {};
+      const saved = map?.[stepKey];
+      if (Array.isArray(saved) && saved.length === 4) {
+        setOrder(saved as ("audio" | "image" | "video" | "text")[]);
+      }
       setLoading(false);
     })();
-  }, [consultantId, slotKeys.join("|")]);
+  }, [consultantId, stepKey, slotKeys.join("|")]);
 
   function group(kind: Kind) {
     return items.filter(i => i.kind === kind);
