@@ -1831,6 +1831,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           // C: validação anti-alucinação no nome OCR da conta
           {
             const ocrName = (d.nome || "").trim();
+            // Sempre grava o nome bruto da conta para auditoria/conferência
+            if (ocrName) updates.bill_holder_name = ocrName;
             const safe = safeAssignName(customer.name, (customer as any).name_source, ocrName);
             if (safe) {
               updates.name = safe;
