@@ -190,3 +190,80 @@ export async function resetLeadIdentity(
   if (!opts.keepStep) patch.conversation_step = "welcome";
   await supabase.from("customers").update(patch).eq("id", customerId);
 }
+
+// ─── shouldSkipAsk ──────────────────────────────────────────────────────
+// Helper aditivo: indica se um step "ask_*" pode ser pulado porque o dado
+// associado já existe e é válido. Usado como guarda extra antes de
+// enviar perguntas — evita repergunta quando o cliente já informou o dado
+// antes (ex: "Oi, sou João" no welcome → ao chegar em ask_name, pula).
+// NÃO altera nenhum comportamento existente; é só um utilitário.
+//
+// IMPORTANTE: para "name", só considera "preenchido" quando a fonte é
+// confiável — caso contrário, mantém o comportamento de perguntar.
+export type AskField =
+  | "name"
+  | "cpf"
+  | "rg"
+  | "data_nascimento"
+  | "phone_landline"
+  | "email"
+  | "cep"
+  | "electricity_bill_value";
+
+export function shouldSkipAsk(field: AskField, customer: any): boolean {
+  if (!customer) return false;
+  switch (field) {
+    case "name": {
+      const v = String(customer.name || "").trim();
+      if (v.length < 2) return false;
+      const src = String(customer.name_source || "");
+      // Só pula se a fonte for confiável (evita pular por nome herdado/lixo).
+      return TRUSTED_NAME_SOURCES.has(src) || src === "manual";
+    }
+    case "cpf": {
+      const v = String(customer.cpf || "").replace(/\D/g, "");
+      return v.length === 11 && validarCPFDigitos(v);
+    }
+    case "rg": {
+      const v = normalizarRG(customer.rg);
+      return v.length >= 7;
+    }
+    case "data_nascimento": {
+      const v = validarDataNascimento(String(customer.data_nascimento || ""));
+      return !!v && !/^2000-01-01/.test(String(customer.data_nascimento || ""));
+    }
+    case "phone_landline":
+      return !!customer.phone_landline && customer.phone_contact_confirmed === true;
+    case "email": {
+      const v = String(customer.email || "");
+      if (!v) return false;
+      if (/@lead\.igreen$/i.test(v)) return false;
+      if (/^(tvmensal|teste@|sem_email|noreply@)/i.test(v)) return false;
+      if (/@teste/i.test(v)) return false;
+      return /@.+\./.test(v);
+    }
+    case "cep": {
+      const v = String(customer.cep || "").replace(/\D/g, "");
+      return v.length === 8 && !/000$/.test(v);
+    }
+    case "electricity_bill_value": {
+      const v = Number(customer.electricity_bill_value || 0);
+      return v >= 30;
+    }
+    default:
+      return false;
+  }
+}
+
+// ─── detectQuestionIntent ───────────────────────────────────────────────
+// Heurística leve para "isso parece uma pergunta?". Usada pelo midflow QA
+// para decidir se vale tentar casar uma FAQ no meio do cadastro.
+const RE_MIDFLOW_QUESTION =
+  /\?|\b(quanto|como|porqu[eê]|por\s*qu[eê]|seguro|golpe|funciona|tem\s+taxa|cobra|paga|vou\s+pagar|fatura|conta|garant|cancelar|desisti|prazo|demora|quando|preço|valor\s+da|d[uú]vida)\b/i;
+
+export function detectQuestionIntent(text: string): boolean {
+  if (!text) return false;
+  const t = String(text).trim();
+  if (t.length < 3) return false;
+  return RE_MIDFLOW_QUESTION.test(t);
+}
