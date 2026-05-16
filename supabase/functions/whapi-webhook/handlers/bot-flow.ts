@@ -21,6 +21,7 @@ import {
   logStructured,
 } from "../../_shared/utils.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../_shared/step-media-order.ts";
+import { canSendMediaOnce } from "../../_shared/media-dedupe.ts";
 import {
   getReplyForStep,
   getNextMissingStep,
@@ -609,6 +610,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const m = it.mediaRef;
       if (!m) continue;
       let url: string | null = null;
+      let resolvedMediaId: string | null = m.media_id || null;
       let kind = it.kind === "audio" ? "audio" : it.kind === "video" ? "video" : it.kind === "image" ? "image" : "document";
       let durationSec: number | null = null;
       if (m.media_id) {
@@ -622,26 +624,32 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       if (!url && m.slot_key) {
         const { data: personal } = await supabase
           .from("ai_media_library")
-          .select("url, duration_sec")
+          .select("id, url, duration_sec")
           .eq("consultant_id", customer.consultant_id)
           .eq("slot_key", m.slot_key)
           .eq("active", true).eq("is_draft", false)
           .order("send_order", { ascending: true })
           .limit(1).maybeSingle();
-        if (personal?.url) { url = personal.url; durationSec = Number((personal as any).duration_sec || 0) || null; }
+        if (personal?.url) { url = personal.url; resolvedMediaId = (personal as any).id || resolvedMediaId; durationSec = Number((personal as any).duration_sec || 0) || null; }
         else {
           const { data: pub } = await supabase
             .from("ai_media_library")
-            .select("url, duration_sec")
+            .select("id, url, duration_sec")
             .eq("is_public", true)
             .eq("slot_key", m.slot_key)
             .eq("active", true)
             .order("send_order", { ascending: true })
             .limit(1).maybeSingle();
-          if (pub?.url) { url = pub.url; durationSec = Number((pub as any).duration_sec || 0) || null; }
+          if (pub?.url) { url = pub.url; resolvedMediaId = (pub as any).id || resolvedMediaId; durationSec = Number((pub as any).duration_sec || 0) || null; }
         }
       }
       if (!url) continue;
+      // 🚫 Regra: nunca repetir áudio/vídeo para o mesmo cliente
+      const canSend = await canSendMediaOnce(supabase, {
+        consultantId: customer.consultant_id, customerId: customer.id,
+        mediaId: resolvedMediaId, slotKey: m.slot_key, kind,
+      });
+      if (!canSend) continue;
       await sendMedia(remoteJid, url, "", kind);
       sentSomething = true;
       await supabase.from("conversations").insert({
@@ -738,6 +746,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             for (let oi = 0; oi < orderedMedia.length; oi++) {
               const m = orderedMedia[oi];
               let url: string | null = null;
+              let resolvedMediaId: string | null = m.media_id || null;
               let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
               let durationSec: number | null = null;
 
@@ -759,7 +768,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (!url && m.slot_key) {
                 const { data: personal } = await supabase
                   .from("ai_media_library")
-                  .select("url, duration_sec")
+                  .select("id, url, duration_sec")
                   .eq("consultant_id", customer.consultant_id)
                   .eq("slot_key", m.slot_key)
                   .eq("active", true)
@@ -769,11 +778,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   .maybeSingle();
                 if (personal?.url) {
                   url = personal.url;
+                  resolvedMediaId = (personal as any).id || resolvedMediaId;
                   durationSec = Number((personal as any).duration_sec || 0) || null;
                 } else {
                   const { data: pub } = await supabase
                     .from("ai_media_library")
-                    .select("url, duration_sec")
+                    .select("id, url, duration_sec")
                     .eq("is_public", true)
                     .eq("slot_key", m.slot_key)
                     .eq("active", true)
@@ -782,12 +792,20 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                     .maybeSingle();
                   if (pub?.url) {
                     url = pub.url;
+                    resolvedMediaId = (pub as any).id || resolvedMediaId;
                     durationSec = Number((pub as any).duration_sec || 0) || null;
                   }
                 }
               }
 
               if (!url) continue;
+
+              // 🚫 Regra: nunca repetir áudio/vídeo para o mesmo cliente
+              const canSend = await canSendMediaOnce(supabase, {
+                consultantId: customer.consultant_id, customerId: customer.id,
+                mediaId: resolvedMediaId, slotKey: m.slot_key, kind,
+              });
+              if (!canSend) continue;
 
               try {
                 const ok = await sendMedia(remoteJid, url, "", kind);
@@ -1245,6 +1263,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               const m = ordered[i];
               const k = ["audio", "video", "image"].includes(m.kind) ? m.kind : "document";
               const cap = i === 0 ? (args.caption || "") : "";
+              // 🚫 Regra: nunca repetir áudio/vídeo para o mesmo cliente
+              const canSend = await canSendMediaOnce(supabase, {
+                consultantId: customer.consultant_id, customerId: customer.id,
+                mediaId: (m as any).id || null, slotKey: (m as any).slot_key || null, kind: k,
+              });
+              if (!canSend) continue;
               try {
                 await sendMedia(remoteJid, m.url, cap, k);
                 if (i < ordered.length - 1 && !isTestMode()) await new Promise((r) => setTimeout(r, 1500));
@@ -1757,10 +1781,11 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         // Busca o vídeo do Conexão Club: personal → público
         let clubUrl: string | null = null;
         let clubDur: number | null = null;
+        let clubMediaId: string | null = null;
         try {
           const { data: personal } = await supabase
             .from("ai_media_library")
-            .select("url, duration_sec")
+            .select("id, url, duration_sec")
             .eq("consultant_id", customer.consultant_id)
             .eq("slot_key", "conexao_club")
             .eq("active", true)
@@ -1768,32 +1793,41 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             .order("send_order", { ascending: true })
             .limit(1)
             .maybeSingle();
-          if (personal?.url) { clubUrl = personal.url; clubDur = Number((personal as any).duration_sec || 0) || null; }
+          if (personal?.url) { clubUrl = personal.url; clubMediaId = (personal as any).id || null; clubDur = Number((personal as any).duration_sec || 0) || null; }
           if (!clubUrl) {
             const { data: pub } = await supabase
               .from("ai_media_library")
-              .select("url, duration_sec")
+              .select("id, url, duration_sec")
               .eq("is_public", true)
               .eq("slot_key", "conexao_club")
               .eq("active", true)
               .order("send_order", { ascending: true })
               .limit(1)
               .maybeSingle();
-            if (pub?.url) { clubUrl = pub.url; clubDur = Number((pub as any).duration_sec || 0) || null; }
+            if (pub?.url) { clubUrl = pub.url; clubMediaId = (pub as any).id || null; clubDur = Number((pub as any).duration_sec || 0) || null; }
           }
         } catch (e) { console.warn("[pitch] busca slot conexao_club falhou:", (e as any)?.message); }
 
         if (clubUrl) {
-          try {
-            await sendMedia(remoteJid, clubUrl, "", "video");
-            await supabase.from("conversations").insert({
-              customer_id: customer.id, message_direction: "outbound",
-              message_text: `[video:conexao_club]`, message_type: "video",
-              conversation_step: "pitch_conexao_club",
-            });
-            // Espera o vídeo terminar (proporcional) antes do CTA final
-            await sleepForMedia("video", clubDur);
-          } catch (e) { console.warn("[pitch] envio do vídeo conexao_club falhou:", (e as any)?.message); }
+          // 🚫 Regra: nunca repetir vídeo para o mesmo cliente
+          const canSend = await canSendMediaOnce(supabase, {
+            consultantId: customer.consultant_id, customerId: customer.id,
+            mediaId: clubMediaId, slotKey: "conexao_club", kind: "video",
+          });
+          if (canSend) {
+            try {
+              await sendMedia(remoteJid, clubUrl, "", "video");
+              await supabase.from("conversations").insert({
+                customer_id: customer.id, message_direction: "outbound",
+                message_text: `[video:conexao_club]`, message_type: "video",
+                conversation_step: "pitch_conexao_club",
+              });
+              // Espera o vídeo terminar (proporcional) antes do CTA final
+              await sleepForMedia("video", clubDur);
+            } catch (e) { console.warn("[pitch] envio do vídeo conexao_club falhou:", (e as any)?.message); }
+          } else {
+            console.log("[pitch] vídeo conexao_club já enviado anteriormente — pulando");
+          }
         }
 
         // Pergunta se ficou alguma dúvida ANTES de pedir o documento.
