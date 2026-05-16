@@ -502,6 +502,7 @@ export default function FluxoCamila() {
               total={orderedSteps.length}
               consultantId={userId!}
               allSteps={orderedSteps}
+              mediaCounts={mediaCounts}
               onPatch={(p) => patchStep(step.id, p)}
               onMoveUp={() => moveStep(step.id, -1)}
               onMoveDown={() => moveStep(step.id, +1)}
