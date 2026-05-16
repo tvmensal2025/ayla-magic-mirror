@@ -831,7 +831,86 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: inlineSent || undefined, ...extra },
     };
   };
-  const repeatCurrent = () => goToStep(currentStep, restoreDetourUpdates);
+  // Repeat inteligente: se a MESMA pergunta já foi enviada nos últimos 90s,
+  // manda uma reformulação curta em vez de repetir literal (sem reenviar mídia).
+  // Isso evita o "disco riscado" que o lead vê quando responde algo fora do esperado.
+  const repeatCurrent = async (): Promise<BotResult> => {
+    try {
+      const since = new Date(Date.now() - 90_000).toISOString();
+      const { data: recent } = await ctx.supabase
+        .from("conversations")
+        .select("message_text, message_type, created_at")
+        .eq("customer_id", ctx.customer.id)
+        .eq("message_direction", "outbound")
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit: undefined as any;
+      // (limit chain workaround abaixo)
+    } catch (_) { /* ignore, segue repeat normal */ }
+    return _smartRepeat();
+  };
+  const _smartRepeat = async (): Promise<BotResult> => {
+    const baseText = renderStepText(currentStep);
+    if (!baseText) return goToStep(currentStep, restoreDetourUpdates);
+    let lastSameTextCount = 0;
+    try {
+      const since = new Date(Date.now() - 90_000).toISOString();
+      const { data: recent } = await ctx.supabase
+        .from("conversations")
+        .select("message_text, message_type")
+        .eq("customer_id", ctx.customer.id)
+        .eq("message_direction", "outbound")
+        .eq("message_type", "text")
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      lastSameTextCount = ((recent as any[]) || []).filter(
+        (r) => (r.message_text || "").trim() === baseText.trim(),
+      ).length;
+    } catch (_) { /* segue normal */ }
+
+    if (lastSameTextCount === 0) {
+      return goToStep(currentStep, restoreDetourUpdates);
+    }
+
+    // Já mandou esse texto nos últimos 90s → reformula, SEM reenviar mídia.
+    const userName = vars.nome || ctx.customer.name || "";
+    const reformVariants: Record<string, string[]> = {
+      default: [
+        "Pode me responder, por favor? 🙂",
+        "Tô aqui esperando sua resposta 😉",
+        "Me conta aí, posso te ajudar!",
+      ],
+      valor: [
+        userName ? `${userName}, me passa só o valor médio da conta de luz, por favor? Pode ser aproximado 😉` : "Me passa só o valor médio da conta de luz, por favor? Pode ser aproximado 😉",
+        "Quanto vem em média sua conta de luz? Tipo R$ 200, R$ 400...",
+        "Pode mandar só o número mesmo, ex: 350 🙏",
+      ],
+      nome: [
+        "Como posso te chamar? Só seu primeiro nome já tá ótimo 😊",
+        "Me conta seu nome, por favor 🙂",
+      ],
+    };
+    const stepKeyLower = (currentStep.title || currentStep.step_key || "").toLowerCase();
+    const variantKey = /valor|conta/.test(stepKeyLower)
+      ? "valor"
+      : /nome|chama/.test(stepKeyLower)
+      ? "nome"
+      : "default";
+    const pool = reformVariants[variantKey];
+    const reform = pool[Math.min(lastSameTextCount - 1, pool.length - 1)];
+
+    return {
+      reply: reform,
+      updates: {
+        conversation_step: currentStep.id,
+        __intent: cls.intent,
+        __confidence: cls.confidence,
+        ...captureUpdates,
+        ...restoreDetourUpdates,
+      },
+    };
+  };
 
   // Resolve a transition (special or step) — sempre propaga restoreDetourUpdates
   // para limpar flags de detour quando o lead seguir o fluxo normal.
