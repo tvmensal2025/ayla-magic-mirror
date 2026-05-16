@@ -1,76 +1,37 @@
-## Auditoria do problema
+Diagnóstico da auditoria
 
-O fluxo não está quebrando por falta de reset do lead. O estado atual mostra que o lead `5511989000650` ficou no primeiro passo real do fluxo (`flow:6226...`), mas a mídia de boas-vindas falhou antes de ser entregue.
+- O envio de texto está funcionando; a falha é restrita à mídia de áudio.
+- O arquivo que falha é `audio/webm`, container WebM/Matroska com codec Opus, gerado pelo Chrome.
+- A Whapi retorna `500 Internal Error` em três caminhos: JSON com URL, multipart em `/messages/voice` e multipart em `/messages/audio`.
+- O erro anterior de `no_cache must be boolean` já saiu; agora o problema persistente é a Whapi engasgando no arquivo WebM/Opus.
+- A Lovable AI analisou o caso e recomendou remover dependência de URL/multipart e enviar o áudio como Base64 em JSON limpo.
 
-### Evidências encontradas
+Plano de correção
 
-- O webhook recebeu `oi` e reiniciou corretamente no primeiro passo ativo:
-  - `unknown step="welcome" → restart at firstActive=6226...`
-- A mídia do primeiro passo foi tentada:
-  - `sendMedia -> ... (audio)`
-- A Whapi retornou erro ao enviar o áudio:
-  - `whapi_send_media_failed status=500 Internal Error`
-- Como a mídia falhou, o sistema caiu no texto fallback:
-  - `Oi! 👋 Qual é o seu nome?`
-- O lead ficou no passo correto, sem pular para a pergunta da conta:
-  - `conversation_step = flow:6226...`
-- Os arquivos no Storage estão acessíveis e públicos:
-  - `boas_vindas.webm` retorna `200 audio/webm`
-  - vídeos MP4 também retornam `200 video/mp4`
+1. Corrigir o helper central da Whapi
+   - Em `supabase/functions/_shared/whapi-api.ts`, criar um fallback específico para áudio:
+     - baixar a mídia dentro da Edge Function;
+     - converter para Base64;
+     - enviar como `media: data:audio/webm;base64,...` em JSON limpo;
+     - sem `no_cache`, sem `recording_time`, sem `mime_type` no primeiro fallback Base64.
+   - Se ainda falhar, tentar um segundo fallback Base64 declarando `data:audio/ogg;codecs=opus;base64,...`, já que o codec interno é Opus.
+   - Só depois tentar multipart como último recurso, sem parâmetros booleanos em FormData.
 
-### Causa principal provável
+2. Padronizar o proxy manual
+   - Aplicar a mesma estratégia em `supabase/functions/whapi-proxy/index.ts` para envios manuais pelo CRM/admin não seguirem uma lógica diferente.
+   - Para áudio, incluir `seconds` quando conhecido ou quando for seguro inferir, mas não bloquear envio por isso.
 
-A regressão está no envio de áudio pela Whapi. O helper direto `supabase/functions/_shared/whapi-api.ts` está enviando mídias `kind='audio'` para o endpoint:
+3. Melhorar logs de auditoria
+   - Logar caminho tentado: `json_url`, `json_base64_webm`, `json_base64_ogg_alias`, `multipart_voice`, `multipart_audio`.
+   - Logar status e corpo de erro de cada tentativa, sem expor token.
+   - Logar tamanho do arquivo baixado e content-type real.
 
-```text
-/messages/audio
-```
+4. Ajustar fluxo conversacional
+   - Garantir que o texto só venha depois da falha definitiva da mídia obrigatória.
+   - Manter a remoção de dedupe quando falhar, para poder retestar o mesmo lead sem reset manual.
 
-Mas o proxy Whapi já existente no projeto usa:
-
-```text
-/messages/voice
-```
-
-para áudio. Isso indica divergência entre dois caminhos de envio do mesmo projeto. O erro atual acontece exatamente em arquivo `.webm` (`audio/webm`), formato gravado pelo painel.
-
-### Risco adicional encontrado
-
-A correção anterior passou a bloquear o avanço quando a mídia falha. Isso evita pular etapas, mas cria outro problema operacional: se a Whapi falhar em um áudio, o lead fica preso no passo e recebe apenas texto fallback. Como o primeiro passo é `wait_for='reply'`, isso parece para o usuário como “não enviou mídia e não seguiu o fluxo”.
-
-## Plano de correção
-
-1. **Unificar envio de áudio da Whapi**
-   - Ajustar `supabase/functions/_shared/whapi-api.ts` para áudio usar `/messages/voice`, igual ao `whapi-proxy`.
-   - Para `audio/webm`, enviar o payload simples `{ to, media, caption }`, sem forçar `mime_type: audio/ogg`.
-   - Manter timeout de 60s e 3 tentativas.
-
-2. **Tratar falha de áudio sem quebrar todo o fluxo**
-   - Manter a regra: não avançar automaticamente quando mídia obrigatória falhar.
-   - Mas registrar log mais claro com `step_key`, `slot_key`, `media_id`, `kind`, endpoint usado e URL parcial.
-   - Evitar marcar mídia como enviada no dedupe se a Whapi retornou erro, mantendo retry possível.
-
-3. **Auditar os pontos paralelos que ainda enviam mídia**
-   - Revisar os envios de mídia por Q&A e regras globais dentro do mesmo handler, porque hoje eles tentam enviar mídia e ignoram erro silenciosamente.
-   - Padronizar para não registrar dedupe como enviado quando o envio falha.
-
-4. **Criar teste de regressão da lógica de mídia**
-   - Adicionar teste leve para garantir que `audio` no helper Whapi resolve para `/messages/voice`.
-   - Testar que falha de mídia retorna bloqueio (`null`) no passo, sem avançar para o próximo.
-
-5. **Deploy e validação**
-   - Deploy da Edge Function `whapi-webhook`.
-   - Conferir logs após novo “oi”:
-     - precisa aparecer envio por `voice`;
-     - não pode aparecer `/messages/audio` para `.webm`;
-     - se Whapi aceitar, deve registrar `[flow-step:...:audio]` e o lead continuar aguardando nome.
-
-6. **Resetar novamente os dois leads de teste**
-   - Após a correção, resetar:
-     - `5511971254913`
-     - `5511989000650`
-   - Limpar conversas, dedupe de mídia, buffers e deixar `conversation_step='welcome'` para teste limpo.
-
-## Resultado esperado
-
-Quando o lead mandar “oi”, o bot deve enviar o áudio de boas-vindas real do slot `boas_vindas` e permanecer no primeiro passo aguardando o nome. Depois, ao informar o nome e valor da conta, o fluxo deve seguir pelos passos configurados e entregar as mídias dos slots `como_funciona` e `fazenda_solar` na ordem definida.
+5. Validar depois da implementação
+   - Deploy de `whapi-webhook` e `whapi-proxy`.
+   - Acionar novo `oi` no número de teste.
+   - Conferir logs recentes procurando sucesso em `json_base64_webm` ou `json_base64_ogg_alias`.
+   - Se a Whapi ainda retornar 500 em Base64, o próximo passo será converter os áudios cadastrados para `.ogg`/Opus fora da Edge Runtime e atualizar `ai_media_library` para apontar para os `.ogg` reais.

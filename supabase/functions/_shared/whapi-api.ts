@@ -154,37 +154,42 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
       : mediatype === "image" ? "image/jpeg"
       : "application/octet-stream";
 
-    const sendMultipart = async (path: string): Promise<boolean> => {
+    // Baixa a mídia uma única vez e devolve {bytes, mime}; usado para Base64 e multipart.
+    let cachedDownload: { bytes: Uint8Array; mime: string } | null = null;
+    const downloadMediaBytes = async (): Promise<{ bytes: Uint8Array; mime: string } | null> => {
+      if (cachedDownload) return cachedDownload;
       try {
         const mediaRes = await fetchWithTimeout(mediaUrl, { method: "GET", timeout: 30_000 });
         if (!mediaRes.ok) {
           console.warn(`⚠️ [whapi:sendMedia] download da mídia falhou (${mediaRes.status})`);
-          return false;
+          return null;
         }
-        const blob = new Blob([await mediaRes.arrayBuffer()], { type: mediaRes.headers.get("content-type") || contentType });
-        const form = new FormData();
-        form.append("to", to);
-        form.append("media", blob, fileName);
-        if (caption && !isAudio) form.append("caption", caption);
-        if (isAudio) {
-          form.append("mime_type", blob.type || "audio/webm");
-        }
-        console.log(`📤 [whapi:sendMedia] fallback multipart -> ${to} (${mediatype} via ${path}, ${blob.size} bytes, ${blob.type})`);
-        return await sendWithRetry("send_media_multipart", () =>
-          fetchWithTimeout(`${url}/${path}`, {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${apiToken}` },
-            body: form,
-            timeout: 90_000,
-          }),
-        );
+        const bytes = new Uint8Array(await mediaRes.arrayBuffer());
+        const mime = mediaRes.headers.get("content-type") || contentType;
+        console.log(`📥 [whapi:sendMedia] mídia baixada (${bytes.byteLength} bytes, ${mime})`);
+        cachedDownload = { bytes, mime };
+        return cachedDownload;
       } catch (e: any) {
-        console.warn(`⚠️ [whapi:sendMedia] fallback multipart falhou: ${e?.message || e}`);
-        return false;
+        console.warn(`⚠️ [whapi:sendMedia] download falhou: ${e?.message || e}`);
+        return null;
       }
     };
 
-    const tryJsonSend = async (path: string, jsonBody: Record<string, unknown>): Promise<boolean> => {
+    // base64 sem estouro de stack (chunks)
+    const bytesToBase64 = (bytes: Uint8Array): string => {
+      let bin = "";
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+      }
+      return btoa(bin);
+    };
+
+    const tryJsonSend = async (
+      label: string,
+      path: string,
+      jsonBody: Record<string, unknown>,
+    ): Promise<boolean> => {
       let last = "";
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
@@ -202,34 +207,93 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
         }
         if (attempt < 3) await new Promise((r) => setTimeout(r, 300 * Math.pow(3, attempt - 1)));
       }
-      console.warn(`⚠️ [whapi:sendMedia] JSON falhou (${mediatype} via ${path}); tentando multipart. Último erro: ${last}`);
+      logStructured("warn", "whapi_send_media_attempt_failed", {
+        path, label, mediatype, last_error: last,
+      });
+      console.warn(`⚠️ [whapi:sendMedia] ${label} falhou (${mediatype} via ${path}). Último erro: ${last}`);
       return false;
+    };
+
+    const sendJsonBase64 = async (
+      path: string,
+      dataUriMime: string,
+      label: string,
+    ): Promise<boolean> => {
+      const dl = await downloadMediaBytes();
+      if (!dl) return false;
+      const b64 = bytesToBase64(dl.bytes);
+      const dataUri = `data:${dataUriMime};base64,${b64}`;
+      console.log(`📤 [whapi:sendMedia] ${label} -> ${to} (${mediatype} via ${path}, ${dl.bytes.byteLength} bytes, declarado=${dataUriMime})`);
+      const body: Record<string, unknown> = isAudio
+        ? { to, media: dataUri }
+        : { to, media: dataUri, caption };
+      return await tryJsonSend(label, path, body);
+    };
+
+    const sendMultipart = async (path: string): Promise<boolean> => {
+      const dl = await downloadMediaBytes();
+      if (!dl) return false;
+      try {
+        const blob = new Blob([dl.bytes], { type: dl.mime });
+        const form = new FormData();
+        form.append("to", to);
+        form.append("media", blob, fileName);
+        if (caption && !isAudio) form.append("caption", caption);
+        console.log(`📤 [whapi:sendMedia] multipart -> ${to} (${mediatype} via ${path}, ${blob.size} bytes, ${blob.type})`);
+        return await sendWithRetry("send_media_multipart", () =>
+          fetchWithTimeout(`${url}/${path}`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${apiToken}` },
+            body: form,
+            timeout: 90_000,
+          }),
+        );
+      } catch (e: any) {
+        console.warn(`⚠️ [whapi:sendMedia] multipart falhou: ${e?.message || e}`);
+        return false;
+      }
     };
 
     sendPresence(remoteJid, isAudio ? "recording" : "typing", 3).catch(() => {});
 
     console.log(`📤 [whapi:sendMedia] -> ${to} (${mediatype} via ${endpoint}) url=…${urlPreview}`);
-    const body: Record<string, unknown> = isAudio
-      ? { to, media: mediaUrl, mime_type: contentType, no_cache: true, recording_time: 1 }
+
+    // 1ª tentativa: JSON com URL (rápido quando funciona)
+    const initialBody: Record<string, unknown> = isAudio
+      ? { to, media: mediaUrl }
       : { to, media: mediaUrl, caption };
-    const ok = await tryJsonSend(endpoint, body);
-    if (ok) {
-      console.log(`✅ [whapi:sendMedia] resultado=true (${mediatype} via ${endpoint})`);
+    if (await tryJsonSend("json_url", endpoint, initialBody)) {
+      console.log(`✅ [whapi:sendMedia] ok via json_url (${mediatype} ${endpoint})`);
       return true;
     }
 
-    const multipartOk = await sendMultipart(endpoint);
-    if (multipartOk) {
-      console.log(`✅ [whapi:sendMedia] resultado=true (${mediatype} via ${endpoint}, multipart)`);
+    // 2ª: JSON Base64 declarando o mime real
+    const realMime = isAudio ? "audio/webm" : contentType;
+    if (await sendJsonBase64(endpoint, realMime, "json_base64_real")) {
+      console.log(`✅ [whapi:sendMedia] ok via json_base64_real (${mediatype} ${endpoint})`);
       return true;
     }
 
-    if (isAudio && endpoint !== "messages/audio") {
-      const audioEndpointOk = await sendMultipart("messages/audio");
-      if (audioEndpointOk) {
-        console.log(`✅ [whapi:sendMedia] resultado=true (${mediatype} via messages/audio, multipart)`);
+    // 3ª: Para áudio WebM/Opus → tentar alias OGG/Opus (mesmo codec, container aceito pelo WhatsApp)
+    if (isAudio) {
+      if (await sendJsonBase64(endpoint, "audio/ogg; codecs=opus", "json_base64_ogg_alias")) {
+        console.log(`✅ [whapi:sendMedia] ok via json_base64_ogg_alias (${mediatype} ${endpoint})`);
         return true;
       }
+      if (endpoint !== "messages/audio" && await sendJsonBase64("messages/audio", "audio/ogg; codecs=opus", "json_base64_ogg_audio_endpoint")) {
+        console.log(`✅ [whapi:sendMedia] ok via json_base64_ogg_alias (messages/audio)`);
+        return true;
+      }
+    }
+
+    // 4ª: multipart como último recurso
+    if (await sendMultipart(endpoint)) {
+      console.log(`✅ [whapi:sendMedia] ok via multipart (${mediatype} ${endpoint})`);
+      return true;
+    }
+    if (isAudio && endpoint !== "messages/audio" && await sendMultipart("messages/audio")) {
+      console.log(`✅ [whapi:sendMedia] ok via multipart messages/audio`);
+      return true;
     }
 
     console.log(`❌ [whapi:sendMedia] resultado=false (${mediatype} via ${endpoint})`);
