@@ -30,7 +30,8 @@ function fmtValor(v: number | string | null | undefined): string {
 }
 
 export function renderTemplate(tpl: string, vars: TemplateVars): string {
-  const nome = (vars.nome || "").split(" ")[0] || "amigo";
+  // Sem nome conhecido: deixa vazio (template deve omitir vírgula/saudação sozinho)
+  const nome = (vars.nome || "").split(" ")[0] || "";
   const rep = vars.representante || "consultor";
   const valor = fmtValor(vars.valor_conta);
   const tel = vars.telefone || "";
@@ -44,6 +45,16 @@ export function renderTemplate(tpl: string, vars: TemplateVars): string {
   out = replaceVar(out, "valor_conta", valor);
   out = replaceVar(out, "telefone", tel);
   out = replaceVar(out, "cpf", cpf);
+  // Limpa artefatos quando uma variável ficou vazia (sem nome conhecido etc):
+  // "Oi , tudo bem" -> "Oi, tudo bem" ; "Olá !" -> "Olá!" ; "  " -> " "
+  out = out
+    .replace(/([,;:])\s*([,;:!?.])/g, "$2")        // ", !" -> "!"
+    .replace(/\s+([,.!?;:])/g, "$1")                // " ," -> ","
+    .replace(/([(\[])\s+/g, "$1")
+    .replace(/\s+([)\]])/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/^[\s,;:]+/gm, (s) => s.replace(/[,;:]/g, ""))
+    .trim();
   return out;
 }
 

@@ -79,18 +79,47 @@ export function extractCPF(text: string): string | null {
 
 const PALAVROES = /\b(merda|porra|caralho|fdp|puta|cu|viado|otario)\b/i;
 
-export function extractNome(text: string): string | null {
-  if (!text) return null;
-  const m = text.match(/(?:sou|me chamo|meu nome [eé]|aqui [eé]?o?\s?|nome:?\s?)\s+([a-zà-ÿ]{2,}(?:\s+[a-zà-ÿ]{2,}){0,3})/i);
-  if (!m) return null;
-  const cleaned = m[1].trim().split(/\s+/).slice(0, 3).join(" ");
-  if (cleaned.length < 2) return null;
-  if (/\d/.test(cleaned)) return null;
-  if (PALAVROES.test(cleaned)) return null;
-  // capitaliza
-  return cleaned.split(" ")
+const STOPWORDS_NOME = new Set([
+  "sim","nao","não","ok","oi","ola","olá","bom","boa","dia","tarde","noite",
+  "obrigado","obrigada","valeu","beleza","blz","claro","talvez","quero","posso",
+  "pode","manda","vamos","bora","entao","então","como","qual","quanto","quem",
+  "que","quê","hein","hum","hmm","ah","ahn","tudo","bem","tbm","tambem","também",
+]);
+
+function capitalizeName(raw: string): string {
+  return raw.trim().split(/\s+/).slice(0, 3)
     .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(" ");
+}
+
+function isValidNameCandidate(cleaned: string): boolean {
+  if (!cleaned || cleaned.length < 2) return false;
+  if (/\d/.test(cleaned)) return false;
+  if (PALAVROES.test(cleaned)) return false;
+  const parts = cleaned.toLowerCase().split(/\s+/);
+  // Rejeita se qualquer palavra for stopword comum
+  if (parts.some(p => STOPWORDS_NOME.has(p))) return false;
+  return true;
+}
+
+export function extractNome(text: string): string | null {
+  if (!text) return null;
+  // 1) Frase estruturada: "sou X", "me chamo X", "meu nome é X"
+  const m = text.match(/(?:sou|me chamo|meu nome [eé]|aqui [eé]?o?\s?|nome:?\s?)\s+([a-zà-ÿ]{2,}(?:\s+[a-zà-ÿ]{2,}){0,3})/i);
+  if (m) {
+    const cleaned = capitalizeName(m[1]);
+    if (isValidNameCandidate(cleaned)) return cleaned;
+  }
+  // 2) Resposta crua à pergunta "qual seu nome?": 1-3 palavras só com letras
+  const trimmed = text.trim().replace(/[.!?,;:]+$/g, "");
+  if (trimmed.length > 0 && trimmed.length <= 60) {
+    const onlyLetters = /^[a-zà-ÿ]+(?:\s+[a-zà-ÿ]+){0,2}$/i.test(trimmed);
+    if (onlyLetters) {
+      const cleaned = capitalizeName(trimmed);
+      if (isValidNameCandidate(cleaned)) return cleaned;
+    }
+  }
+  return null;
 }
 
 // Detecta intents puramente por regex (não dependem de IA).
