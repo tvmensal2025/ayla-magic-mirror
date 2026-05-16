@@ -213,6 +213,27 @@ export default function FluxoCamila() {
         auto_detect_doc_type: r.auto_detect_doc_type !== false,
       })));
     }
+
+    // Conta mídias ativas por slot_key (e por step_tags como fallback)
+    // para mostrar badges "⚠️ sem áudio/vídeo" nos steps.
+    const { data: medias } = await supabase
+      .from("ai_media_library")
+      .select("kind, slot_key, step_tags, active, is_public, consultant_id")
+      .or(`consultant_id.eq.${uid},is_public.eq.true`)
+      .eq("active", true);
+    const counts: Record<string, { audio: number; video: number; image: number }> = {};
+    const bump = (key: string, kind: string) => {
+      if (!key) return;
+      if (!counts[key]) counts[key] = { audio: 0, video: 0, image: 0 };
+      if (kind === "audio" || kind === "video" || kind === "image") {
+        counts[key][kind as "audio" | "video" | "image"]++;
+      }
+    };
+    for (const m of (medias ?? []) as any[]) {
+      if (m.slot_key) bump(String(m.slot_key), String(m.kind));
+      for (const t of (m.step_tags ?? []) as string[]) bump(String(t), String(m.kind));
+    }
+    setMediaCounts(counts);
   }, []);
 
   useEffect(() => {
