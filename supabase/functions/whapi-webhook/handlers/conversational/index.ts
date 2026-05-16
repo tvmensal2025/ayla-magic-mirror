@@ -578,12 +578,91 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // passo configurado de captura de documento, em vez de pular pra conta).
   const findActiveByType = (t: string) => dbSteps.find((s) => s.is_active && s.step_type === t);
 
-  const firstActive = dbSteps.find((s) => s.is_active) || dbSteps[0];
+  const firstActiveRaw = dbSteps.find((s) => s.is_active) || dbSteps[0];
   // Lookup robusto: tenta por id (preferido — estável) e por step_key (compat reversa).
   // O orchestrator passa stepKey já com prefixo strippado; pode ser UUID, "passo_xxx" ou nome canônico.
-  const currentStep =
+  const currentStepRaw =
     dbSteps.find((s) => s.id === stepKey) ||
     dbSteps.find((s) => s.step_key === stepKey);
+
+  // ─── resolveLandingStep ────────────────────────────────────────────────
+  // Se o passo atual existe SÓ pra capturar um dado que já temos (ex: Passo 1
+  // pergunta o nome, mas o cliente já se apresentou no welcome), pula pro
+  // próximo passo ativo por position. Loop limitado a 5 saltos com visited
+  // set pra nunca ciclar. Falha silenciosa: se algo der errado, mantém o
+  // passo original (comportamento atual).
+  const TRUSTED_NAME_SKIP = new Set([
+    "ocr", "ocr_conta", "ocr_doc", "user_confirmed", "self_introduced", "manual",
+  ]);
+  const stepCapturesField = (s: DbStep, field: string): boolean => {
+    if (!Array.isArray(s.captures)) return false;
+    return s.captures.some((c: any) => c?.field === field && c?.enabled !== false);
+  };
+  const isAskOnlyStep = (s: DbStep, field: string): boolean => {
+    // O passo é considerado "pergunta este dado" se tem capture habilitada
+    // pro field OU se título/slot menciona algo relacionado (heurístico já
+    // usado na captura de nome — linhas 665-669).
+    if (stepCapturesField(s, field)) return true;
+    if (field === "name") {
+      return /\bnome\b|\bchama\b/i.test(String((s as any).title || "")) ||
+             /\bnome\b/i.test(String((s as any).slot_key || ""));
+    }
+    return false;
+  };
+  const isFieldAlreadyCaptured = (field: string, c: any): boolean => {
+    if (!c) return false;
+    if (field === "name") {
+      const v = String(c.name || "").trim();
+      if (v.length < 2) return false;
+      return TRUSTED_NAME_SKIP.has(String(c.name_source || ""));
+    }
+    if (field === "electricity_bill_value") {
+      const v = Number(c.electricity_bill_value || 0);
+      return v > 0;
+    }
+    if (field === "cpf") {
+      const v = String(c.cpf || "").replace(/\D/g, "");
+      return v.length === 11;
+    }
+    if (field === "phone_whatsapp") {
+      return !!String(c.phone_whatsapp || "").replace(/\D/g, "");
+    }
+    return false;
+  };
+  const resolveLandingStep = (start: DbStep | undefined): DbStep | undefined => {
+    if (!start) return start;
+    const fields = ["name", "electricity_bill_value", "cpf", "phone_whatsapp"];
+    const visited = new Set<string>();
+    let cur: DbStep | undefined = start;
+    let hops = 0;
+    while (cur && !visited.has(cur.id) && hops < 5) {
+      visited.add(cur.id);
+      // Só pula se TODOS os fields capturados pelo step já estão preenchidos.
+      const captured = fields.filter((f) => isAskOnlyStep(cur!, f));
+      if (captured.length === 0) return cur;
+      const allFilled = captured.every((f) => isFieldAlreadyCaptured(f, ctx.customer));
+      if (!allFilled) return cur;
+      // Se o step tem texto/mídia que não é só pergunta (ex: também envia áudio),
+      // ainda assim pulamos: a UX desejada é não repetir pergunta de dado conhecido.
+      const next = dbSteps.find((s) => s.is_active && s.position > cur!.position);
+      if (!next) return cur;
+      console.log(`[skip-step] from=${cur.step_key} → to=${next.step_key} reason=${captured.join(",")}_already_captured`);
+      cur = next;
+      hops++;
+    }
+    return cur;
+  };
+
+  let firstActive: DbStep;
+  let currentStep: DbStep | undefined;
+  try {
+    firstActive = resolveLandingStep(firstActiveRaw) || firstActiveRaw;
+    currentStep = resolveLandingStep(currentStepRaw) || currentStepRaw;
+  } catch (e) {
+    console.error("[skip-step] failed, falling back to raw steps", e);
+    firstActive = firstActiveRaw;
+    currentStep = currentStepRaw;
+  }
   if (!currentStep) {
     // Unknown/legacy step → restart no primeiro step ativo.
     // REGRA DE OURO: SEMPRE seguir o /admin/fluxos. NUNCA inventar texto.
