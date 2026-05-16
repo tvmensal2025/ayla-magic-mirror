@@ -891,15 +891,7 @@ export type Database = {
           updated_at?: string
           url?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "ai_media_library_slot_key_fkey"
-            columns: ["slot_key"]
-            isOneToOne: false
-            referencedRelation: "ai_agent_slots"
-            referencedColumns: ["slot_key"]
-          },
-        ]
+        Relationships: []
       }
       ai_slot_dispatch_log: {
         Row: {
