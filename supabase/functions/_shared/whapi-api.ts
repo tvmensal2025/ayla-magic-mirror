@@ -282,8 +282,14 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
     const initialBody: Record<string, unknown> = isAudio
       ? { to, media: mediaUrl }
       : { to, media: mediaUrl, caption };
-    if (await tryJsonSend("json_url", endpoint, initialBody)) {
+    const firstAttempt = await tryJsonSend("json_url", endpoint, initialBody);
+    if (firstAttempt === true) {
       console.log(`✅ [whapi:sendMedia] ok via json_url (${mediatype} ${endpoint})`);
+      return true;
+    }
+    if (firstAttempt === "timeout_optimistic") {
+      // Não tentar fallback: o Whapi provavelmente entregou e um 2º envio duplicaria.
+      console.log(`✅ [whapi:sendMedia] assumido entregue após timeout (${mediatype} ${endpoint})`);
       return true;
     }
 
