@@ -160,9 +160,9 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
         method: "POST",
         headers,
         body: JSON.stringify(body),
-        timeout: 25_000,
+        timeout: 60_000,
       })
-      , 1
+      , 3
     );
     console.log(`${ok ? "✅" : "❌"} [whapi:sendMedia] resultado=${ok} (${mediatype})`);
     return ok;
