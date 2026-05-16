@@ -513,7 +513,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   }
 
 
-
+  // ═══════════════════════════════════════════════════════════════════
+  // HELPER: Envia opções como TEXTO (botões não funcionam na Evolution API atual)
   // Formato: mensagem + opções numeradas
   // ═══════════════════════════════════════════════════════════════════
   async function sendOptions(jid: string, msg: string, options: { id: string; title: string }[]): Promise<boolean> {
