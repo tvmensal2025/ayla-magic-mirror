@@ -117,6 +117,7 @@ export interface EvaluateArgs {
   messageText: string;
   lastRuleFireAt?: string | null;
   lastRuleId?: string | null;
+  hasCapture?: boolean;          // mensagem produziu uma captura (valor/nome/telefone) — pula regras globais
 }
 
 /**
@@ -124,7 +125,7 @@ export interface EvaluateArgs {
  * Applies cooldown and max_fires_per_conversation guards.
  */
 export async function evaluateRules(args: EvaluateArgs): Promise<RuleMatchResult | null> {
-  const { supabase, flowId, consultantId, customerId, currentStepId, messageText } = args;
+  const { supabase, flowId, consultantId, customerId, currentStepId, messageText, hasCapture } = args;
   if (!messageText || messageText.trim().length < 2) return null;
 
   let rules: BotFlowRule[] = [];
