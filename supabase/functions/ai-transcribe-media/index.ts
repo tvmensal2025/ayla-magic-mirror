@@ -14,14 +14,19 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    // Auth: usuário autenticado
-    const authHeader = req.headers.get("Authorization");
+    // Auth: aceita JWT de usuário OU SERVICE_ROLE_KEY (chamadas internas: whapi-webhook, evolution-webhook, etc.)
+    const authHeader = req.headers.get("Authorization") || "";
     if (!authHeader) return new Response(JSON.stringify({ error: "no auth" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const isServiceCall = serviceKey && bearer === serviceKey;
+    if (!isServiceCall) {
+      const supabaseUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user } } = await supabaseUser.auth.getUser();
+      if (!user) return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     const { base64, mimeType, kind = "audio", language = "pt-BR" } = await req.json();
     if (!base64 || !mimeType) {
