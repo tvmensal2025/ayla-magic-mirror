@@ -2034,14 +2034,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "confirmando_dados_conta": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
       if (resp === "sim_conta" || resp === "sim" || resp === "s" || resp === "1" || resp === "ok" || resp === "correto" || resp === "✅") {
-        // Usuário confirmou os dados (incluindo nome) — blindar contra OCR de doc futuro
-        if (customer.name) updates.name_source = "user_confirmed";
-        // Vai para o pitch do Conexão Club ANTES de pedir RG/CNH
-        updates.conversation_step = "pitch_conexao_club";
+        // FIX 2: garantir que o nome confirmado é o do TITULAR DA CONTA (OCR),
+        // não o nome digitado pelo lead no boas-vindas.
+        const _billHolder = String((customer as any).bill_holder_name || (updates as any).bill_holder_name || "").trim();
+        const _curSrc = String((customer as any).name_source || "");
+        if (_billHolder && _billHolder.length >= 5 && _curSrc !== "ocr_conta" && _curSrc !== "ocr_doc") {
+          updates.name = _billHolder;
+          updates.name_source = "ocr_conta";
+          console.log(`[name-override] SIM da conta → name="${_billHolder}" (era src=${_curSrc})`);
+        }
+        // Usuário confirmou os dados → blindar contra OCR de doc futuro
+        if (updates.name || customer.name) updates.name_source = "user_confirmed";
 
-        // 🎯 Envia EXATAMENTE o que o consultor configurou em /admin/fluxos
-        // no step "pitch_conexao_club" (texto + mídias na ordem definida —
-        // padrão text → audio → video → image). Nada é hardcoded aqui.
         const _valor = Number((customer as any).electricity_bill_value || 0);
         const _fmtBRL = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const _vars = {
@@ -2052,12 +2056,29 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           "{economia_anual}": _fmtBRL(_valor * 0.20 * 12),
           "{{economia_anual}}": _fmtBRL(_valor * 0.20 * 12),
         };
-        await dispatchStepFromFlow("pitch_conexao_club", _vars);
 
-        // Em seguida, dispara o step "duvidas_pos_club" também via fluxo configurado.
-        await dispatchStepFromFlow("duvidas_pos_club", _vars);
-
-        updates.conversation_step = "duvidas_pos_club";
+        // FIX 1: se o consultor tem fluxo customizado, pula direto pro próximo
+        // step de capture_documento (ou finalizar). Evita parar em "duvidas_pos_club"
+        // que pode não existir no fluxo dele e causar reset no Passo 1.
+        const nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {
+          stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
+        });
+        if (nextCustom) {
+          console.log(`[post-confirm-conta] next=${nextCustom.step_key} type=${nextCustom.step_type} reason=customflow`);
+          await dispatchStepFromFlow(nextCustom.step_key, _vars);
+          if (nextCustom.step_type === "capture_documento" || nextCustom.step_type === "capture_doc") {
+            updates.conversation_step = "aguardando_doc_auto";
+          } else if (nextCustom.step_type === "finalizar_cadastro") {
+            updates.conversation_step = "finalizar_cadastro";
+          } else {
+            updates.conversation_step = nextCustom.id;
+          }
+        } else {
+          console.log(`[post-confirm-conta] reason=legacy (sem fluxo custom)`);
+          await dispatchStepFromFlow("pitch_conexao_club", _vars);
+          await dispatchStepFromFlow("duvidas_pos_club", _vars);
+          updates.conversation_step = "duvidas_pos_club";
+        }
         (updates as any).__inline_sent = true;
         reply = "";
       } else if (resp === "nao_conta" || resp === "nao" || resp === "não" || resp === "n" || resp === "2" || resp === "errado" || resp === "❌") {
