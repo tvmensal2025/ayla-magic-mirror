@@ -32,7 +32,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({ instanceName, chat, templates, consultantId, initialMessage, isWhapi = false }: ChatViewProps) {
-  const { messages, isLoading, sendMessage, loadMedia, resolveSendTargetJid } = useMessages(
+  const { messages, isLoading, sendMessage, loadMedia, resolveSendTargetJid, refetch } = useMessages(
     instanceName,
     chat?.remoteJid || null,
     chat?.sendTargetJid || null,
