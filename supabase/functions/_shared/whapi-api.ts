@@ -150,9 +150,32 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
     sendPresence(remoteJid, isAudio ? "recording" : "typing", 3).catch(() => {});
 
     const urlPreview = String(mediaUrl || "").slice(-60);
+
+    // Whapi /messages/voice exige audio/ogg(opus). Se a fonte é .webm (audio/webm),
+    // baixamos e re-enviamos como data URI audio/ogg;codecs=opus (mesmo codec, container compatível).
+    let mediaPayload: string = mediaUrl;
+    if (isAudio && /\.webm(\?|$)/i.test(mediaUrl)) {
+      try {
+        const r = await fetchWithTimeout(mediaUrl, { method: "GET", timeout: 30_000 });
+        if (r.ok) {
+          const buf = new Uint8Array(await r.arrayBuffer());
+          // base64 encode
+          let bin = "";
+          for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+          const b64 = btoa(bin);
+          mediaPayload = `data:audio/ogg;codecs=opus;base64,${b64}`;
+          console.log(`🔄 [whapi:sendMedia] webm→data:audio/ogg (${buf.length} bytes)`);
+        } else {
+          console.warn(`⚠️ [whapi:sendMedia] falha ao baixar webm (${r.status}); enviando URL original`);
+        }
+      } catch (e: any) {
+        console.warn(`⚠️ [whapi:sendMedia] erro ao converter webm: ${e?.message || e}`);
+      }
+    }
+
     console.log(`📤 [whapi:sendMedia] -> ${to} (${mediatype} via ${endpoint}) url=…${urlPreview}`);
     const body: Record<string, unknown> = isAudio
-      ? { to, media: mediaUrl }
+      ? { to, media: mediaPayload }
       : { to, media: mediaUrl, caption };
     const ok = await sendWithRetry("send_media", () =>
       fetchWithTimeout(`${url}/${endpoint}`, {
