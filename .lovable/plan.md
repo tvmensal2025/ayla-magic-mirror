@@ -1,82 +1,44 @@
-# Por que aparece "gravando áudio" e para no meio
+## Problema
 
-## Diagnóstico (confirmado nos logs)
+O bot não está "pulando" o áudio do passo 1 por bug — ele está **respeitando** o `customer.conversation_step` salvo de sessões anteriores. Quando o lead Rafael Ferreira Dias mandou "Oi" às 14:44, seu `conversation_step` já estava em `flow:80188e5f` (Passo 3 — `como_funciona`), porque ele já tinha passado pelos passos 1 e 2 em sessões anteriores hoje. Por isso o bot **resumiu** a partir do passo 3 (mandou áudio + vídeo de `como_funciona` e `fazenda_solar`) e parou no Passo 6 ("Deu para entender?"). O áudio "Boas-vindas" do Passo 1 e a pergunta "Qual o valor médio…" do Passo 2 não foram reenviados.
 
-Quando o bot tenta enviar o áudio `como_funciona.webm` o Whapi responde com erro em TODAS as variantes que tentamos:
+Você quer que o fluxo **comece sempre do passo 1**, executando todos os passos em ordem.
 
-```
-messages/voice  (json_url)              -> 500 Internal Error
-messages/voice  (json_base64_real)      -> 500 Internal Error
-messages/voice  (json_base64_ogg_alias) -> 404 media not found
-messages/audio  (json_base64_ogg_audio) -> 404 media not found
-messages/voice  (multipart)             -> 500 Internal Error
-messages/audio  (multipart)             -> 500 Internal Error
-```
+## Solução
 
-Resultado no WhatsApp do cliente: o ícone "gravando áudio…" aparece (Whapi inicia o envio do voice note) mas o arquivo nunca é aceito de fato, então o áudio para no meio / não toca até o fim.
+Adicionar uma regra de **restart por saudação** no engine conversacional: sempre que o classificador detectar `intent="saudacao"` (ou regex pegar `oi|olá|ola|bom dia|boa tarde|boa noite|opa|e aí`) e o lead estiver em **qualquer step que não seja o primeiro ativo do fluxo**, o bot reinicia em `firstActive` (Passo 1) e executa a cascade normal a partir dali — respeitando os `wait_for=reply` configurados (então ele vai parar no Passo 1 esperando resposta, depois Passo 2, etc., e só cascateará a partir do Passo 3 que tem `wait_for=none`).
 
-**Causa raiz**: o arquivo está em **container `.webm**` (gravação direta do navegador `MediaRecorder`). O Whapi exige `**.ogg` com codec opus** para `messages/voice`. Renomear/relabelar o mime type não resolve — o container precisa ser OGG de verdade. Existem 10 áudios da biblioteca em `.webm` hoje, todos quebrados pela mesma razão.
+Mantém o comportamento atual para qualquer outra intent (não-saudação) — assim leads no meio do funil continuam de onde pararam quando respondem perguntas reais.
 
-## Plano de correção
+### Detalhes técnicos
 
-### 1. Converter os 10 áudios `.webm` da biblioteca para `.ogg/opus`
+Arquivo: `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (perto da linha 620, logo após `classifyIntent` e antes do bloco `quer_cadastrar` / `quer_humano`).
 
-Rodar localmente um script com `ffmpeg`:
+Pseudo:
 
-```bash
-ffmpeg -i como_funciona.webm -c:a libopus -b:a 32k -application voip como_funciona.ogg
-```
-
-Fazer upload dos `.ogg` resultantes para o bucket `ai-agent-media` (mesmo path, extensão `.ogg`) e atualizar `ai_media_library.url` para apontar para `.ogg`.
-
-Áudios afetados (todos do consultor Camila):
-
-- boas_vindas.webm (×2 entradas)
-- como_funciona.webm (×3 entradas)
-- fazenda_solar.webm
-- objecao_preco.webm
-- objecao_distribuidora.webm
-- prova_social.webm
-- 1 gravação avulsa em `0c2711ad…/como_funciona/`
-
-### 2. Corrigir o upload futuro para nunca mais gravar `.webm`
-
-Hoje `useAudioRecorder.ts` grava `audio/webm;codecs=opus` e salva direto. Mudar o fluxo:
-
-- **Opção A (rápida)**: no client, manter gravação `.webm` mas adicionar uma Edge Function `convert-audio-webm-to-ogg` que recebe o blob, roda conversão via `ffmpeg.wasm` ou via API externa (CloudConvert / Whapi `/media` upload) e devolve a URL `.ogg`. O `MessageComposer` chama essa função antes de salvar na biblioteca.
-- **Opção B (mais simples)**: bloquear `.webm` no painel `/admin/fluxos` + `StepMediaPanel` — só aceitar upload de `.ogg` ou `.mp3`. Para gravações novas no microfone do navegador, fazer o re-encode com `ffmpeg.wasm` (browser-side) antes do upload.
-
-Recomendo **Opção A** porque o `ffmpeg.wasm` no browser pesa ~25MB e atrasa o app; uma Edge Function dedicada (chamando o endpoint `POST /media` do próprio Whapi, que já converte) resolve sem dependência extra.
-
-### 3. Validar com teste real
-
-Após conversão + redeploy:
-
-- Mandar "oi" no fluxo Camila
-- Conferir nos logs Whapi: `whapi_send_media_success` em vez de `attempt_failed`
-- Conferir no WhatsApp: o áudio toca do início ao fim, indicador "gravando" some no momento certo
-- Conferir Step 2 → Step 3 cascade completa
-
-## Detalhes técnicos
-
-**Arquivos a alterar**:
-
-- `src/hooks/useAudioRecorder.ts` — interceptar `onstop` e enviar blob para nova função de conversão antes de devolver base64 ao consumidor.
-- `src/components/whatsapp/MessageComposer.tsx` — quando recebe `audio/webm`, marcar `pending conversion`.
-- `src/components/admin/fluxo/StepMediaPanel.tsx` — validar extensão no upload e bloquear `.webm`.
-- Nova Edge Function `supabase/functions/convert-audio-to-ogg/index.ts` — recebe `{ audioBase64 }`, faz POST para Whapi `/media`, devolve `{ url, mediaId }`.
-- Migration: `UPDATE ai_media_library SET url = REPLACE(url, '.webm', '.ogg') WHERE url ILIKE '%.webm%'` (executar depois de subir os arquivos `.ogg` no storage).
-
-**Script local de conversão em lote** (você roda uma vez):
-
-```bash
-for f in *.webm; do
-  ffmpeg -i "$f" -c:a libopus -b:a 32k -application voip "${f%.webm}.ogg"
-done
+```text
+if (cls.intent === "saudacao" || /\b(oi|ola|olá|bom dia|boa tarde|boa noite|opa|e aí|eai)\b/i.test(messageText)) {
+  if (currentStep.id !== firstActive.id) {
+    // força restart: reusa o branch de "unknown step" que já cascata a partir do firstActive
+    log("[conversational] saudação detectada → restart no Passo 1 (era %s)", currentStep.step_key);
+    stepKey = "__restart__";  // força a fallback path
+    // OU melhor: replicar o bloco do "if (!currentStep)" diretamente aqui
+  }
+}
 ```
 
-Posso seguir com a implementação? Se sim, prefere Opção A (Edge Function chamando Whapi `/media`) ou Opção B (só bloquear `.webm` e te entregar instruções de re-upload manual)?  
-  
-AJUSTE TODOS OS QUE ESTAO AI A NGRAVE CORRETAMENTE PARA O FUTURO, AJUSTE PARA NAO DAR ERRO MAIS
+Reutiliza o bloco de restart já existente nas linhas 500–554 (que já sabe cascatear corretamente, parar em `wait_for=reply` e gravar `conversation_step` no passo certo). Vou extrair esse bloco para uma função `restartAtStep(firstActive)` e chamar nos dois lugares.
 
-  
+### Verificação
+
+1. Resetar manualmente o `conversation_step` do Rafael (5511971254913) para `null` no DB.
+2. Mandar "Oi" → deve receber só o áudio de Boas-vindas e parar (passo 1 tem `wait_for=reply`).
+3. Mandar qualquer texto → deve receber pergunta do valor da conta (Passo 2).
+4. Mandar "900" → deve cascatear Passo 3 (áudio + vídeo como_funciona) → Passo 4 (áudio + vídeo + texto) → Passo 6 ("Deu para entender?") e parar.
+5. Mandar "Oi" de novo no meio do funil → deve **reiniciar no Passo 1** (comportamento novo).
+6. Mandar "SIM" no Passo 6 → segue para Passo 11 (cadastro), sem reiniciar.
+
+## Fora do escopo
+
+- Não vou preencher conteúdo dos Passos 11/12/14 (você decidiu antes que prefere ajustar manualmente em `/admin/fluxos`).
+- Não vou alterar a lógica de transições do Passo 6 → 11.
