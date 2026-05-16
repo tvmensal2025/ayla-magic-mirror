@@ -1,77 +1,65 @@
+# Plano — Fases 5 e 6
 
-# Por que o fluxo não está perfeito — diagnóstico
+## Fase 5 — Testes Deno do fluxo conversacional
 
-Olhando o webhook real (cliente respondeu "trezentos reais" no passo `qualificacao` e o bot **repetiu o vídeo "Como funciona"** em vez de avançar):
+Criar `supabase/functions/whapi-webhook/handlers/conversational/index_test.ts` cobrindo os bugs corrigidos. Usar `Deno.test` + mocks leves do Supabase client (stub das chamadas `.from().select()/.insert()/.update()` e do RPC de dedupe).
 
-1. **Captura de valor não dispara transição.**
-   Hoje, em `conversational/index.ts`, quando `extractValor` retorna 300, salvamos `electricity_bill_value=300` no customer, mas a transição só olha intents do classifier (`ja_assistiu_video`) e `trigger_phrases`. Como o passo `qualificacao` semeado pela Camila só tem rota para `ja_assistiu_video`, o lead que informa o valor cai em **REPEAT** → recebe o mesmo vídeo de novo. É o sintoma que aparece no log.
+Cenários (8):
 
-2. **Rules-engine roda ANTES das capturas e ANTES das transições.**
-   Se o consultor cadastrar uma regra global tipo `keywords=["valor","conta"]`, ela vai **sequestrar respostas legítimas** do lead. O motor precisa rodar só depois de tentar capturar + transição normal — só intercepta quando seria fallback.
+1. **Idempotência** — mesmo `messageId` processado 2x → segunda chamada retorna early sem efeitos colaterais (sem update de step, sem rule fire).
+2. **Captura + auto-advance** — lead em `qualificacao`, manda "300 reais" → `electricity_bill_value=300` setado, step avança para `checkin_pos_video` por position.
+3. **Captura bloqueia QA** — mesma "300 reais" com FAQ ativa contendo "reais" como keyword → QA NÃO casa, captura processa, auto-advance ocorre.
+4. **Captura bloqueia regra global** — regra global com keyword "valor" + lead informa valor → regra suprimida com `suppressed_reason='capture_priority'`, fluxo segue.
+5. **Detour + restauração** — lead em `welcome`, regra FAQ dispara `goto_step=faq_como_funciona` com `return_behavior='goto_step'` → próximo turno restaura `welcome`, zera `previous_conversation_step` e `last_rule_id`.
+6. **Max fires por conversa** — regra com `max_fires_per_conversation=null` (default 10) dispara 10x, 11ª é suprimida com `suppressed_reason='max_fires'`.
+7. **Rate limit por cliente** — 6 regras gatilháveis em 60s → 6ª é suprimida com `suppressed_reason='rate_limit'`.
+8. **Empty reply guard** — passo com `return_behavior='stay'` sem `response_text` e sem mídia → `_finalize` retorna `reply: ""` + `__inline_sent: true` (não dispara mensagem fantasma).
 
-3. **`return_behavior='stay'` sem `response_text` retorna `reply: ""`.**
-   O orchestrator pode acabar enviando string vazia. Falta guard: se não há texto nem mídia, marca como já enviado para não disparar mensagem fantasma.
+Rodar via `supabase--test_edge_functions` com `functions: ["whapi-webhook"]`.
 
-4. **`previous_conversation_step` nunca é restaurado.**
-   Salvamos quando a regra faz `goto_step`, mas nenhum lugar volta o lead para o passo original depois da resposta. Hoje o lead fica preso no detour.
+## Fase 6 — Painel de observabilidade
 
-# O que muda
+### 6.1 Hook `src/hooks/useSuppressedRules.ts` (novo)
 
-### Backend — `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
+Consulta `bot_flow_rule_fires` agregando por `suppressed_reason` nos últimos N dias (default 7). RPC ou query direta com `group by`.
 
-**A. Auto-transição quando uma captura ocorre (corrige o sintoma real do log).**
-Depois da fase de captures, antes de chamar `matchTransition`:
-- Se `captureUpdates.electricity_bill_value` foi setado → injeta intent virtual `informou_valor` e `valor_brl` no `candidateIntents`.
-- Se `captureUpdates.name` → injeta `informou_nome`.
-- Se `captureUpdates.phone_whatsapp` → injeta `informou_telefone`.
-- Se nenhuma transição do passo casar com esses intents virtuais E `currentStep.captures` indicava esse campo como esperado, fazer **auto-advance pelo `position`** para o próximo passo ativo (em vez de repetir).
-
-Isso resolve o caso `qualificacao` → `checkin_pos_video` sem precisar reconfigurar o seed.
-
-**B. Reordenar a rules-engine para rodar como fallback inteligente, não como primeiro filtro.**
-Mover o bloco `evaluateRules` (linhas 453–554) para **depois** do `matchTransition` e **antes** do fallback `fb`. Ordem nova:
-1. Capturas
-2. Overrides globais hardcoded (`quer_cadastrar`, `quer_humano`)
-3. `matchTransition` do passo atual ← se casar, segue o fluxo, regra global **não** intercepta
-4. **`evaluateRules`** ← só atua quando o passo normal não soube responder
-5. QA (mantém)
-6. Fallback (`repeat`/`goto`/`ai`)
-
-Assim a regra "como funciona?" responde a dúvida solta, mas nunca atropela uma resposta esperada.
-
-**C. Guard de reply vazio na rules-engine.**
-No bloco do `ruleHit`:
-```ts
-const hasReply = (reply && reply.trim().length > 0);
-const inlineSent = hasReply || !!rule.media_id;
-return { reply: hasReply ? reply : "", updates: { ..., __inline_sent: inlineSent || undefined } };
+```typescript
+useSuppressedRules(days) → { reason, count, last_at, top_rules: [{rule_id, name, count}] }[]
 ```
 
-**D. Restaurar `previous_conversation_step` após detour.**
-No início do handler, antes de tudo: se `ctx.customer.previous_conversation_step` está setado E o passo atual é o destino de uma regra `goto_step` recente (checa `last_rule_id` + a regra teve `return_behavior='goto_step'`), no **próximo turno** restaura `conversation_step = previous_conversation_step` e zera ambos `previous_conversation_step` e `last_rule_id`. Mantém o lead no lugar que estava antes da pergunta solta.
+### 6.2 Componente `src/components/superadmin/SuppressedRulesPanel.tsx` (novo)
 
-### Engine — `supabase/functions/whapi-webhook/handlers/conversational/rules-engine.ts`
+Card no estilo de `BotFunnelPanel.tsx`:
+- Cabeçalho com ícone `ShieldOff` + dropdown 24h/7d/30d
+- Lista barras horizontais por motivo (`capture_priority`, `max_fires`, `rate_limit`, `cooldown`, `step_scope_mismatch`)
+- Labels traduzidos em PT-BR (mapa `REASON_LABELS`)
+- Expandir motivo mostra top 5 regras suprimidas com nome + contagem
+- Empty state quando 0 supressões
 
-**E. Comprimento mínimo de keyword.**
-Hoje uma keyword de 1 caractere (ex.: "a") casaria em qualquer mensagem. Adicionar `if (kw.length < 2) continue;` no loop de keywords.
+### 6.3 Integração
 
-**F. Não casar regra quando a mensagem é claramente uma captura.**
-Recebe `hasCapture: boolean` em `EvaluateArgs`. Se `true`, pula regras com `scope='global'` (mantém só as `scope='step'` explicitamente escopadas no passo). Evita que "300 reais" dispare uma regra com keyword "reais".
+Adicionar `<SuppressedRulesPanel />` no `src/pages/SuperAdmin.tsx`, próximo ao `BotFunnelPanel`. Sem mudanças de rota.
 
-# Validação
+## Arquivos
 
-- Rebobinar o cenário do log: cliente em `qualificacao`, manda áudio "trezentos reais" → `extractValor=300` → injeta `valor_brl` → como o passo não tem essa transição mas teve captura, **auto-advance para `checkin_pos_video`** (s3). Bot manda "Que ótimo {nome}! 🙌 Com uma conta de R$ 300..." — comportamento certo.
-- Lead em `welcome` manda "como funciona?" com regra global de FAQ cadastrada → `matchTransition` não casa, `evaluateRules` casa, responde, fica em `welcome`.
-- Lead em `qualificacao` manda "300 reais" com uma regra global ruim de keyword "reais" → `hasCapture=true`, regra global é pulada, captura processa, auto-advance funciona.
+**Novos:**
+- `supabase/functions/whapi-webhook/handlers/conversational/index_test.ts`
+- `src/hooks/useSuppressedRules.ts`
+- `src/components/superadmin/SuppressedRulesPanel.tsx`
 
-# Riscos / não-objetivos
+**Editados:**
+- `src/pages/SuperAdmin.tsx` — mount do painel
 
-- Não mexe na tabela `bot_flow_rules` nem nas migrations (estrutura está OK).
-- Não mexe no legacy `runLegacyConversational`.
-- Não toca em mídia/áudio/whapi-proxy (problema separado: `whapi:sendMedia` está retornando 500 — fora do escopo desse fix).
+**Sem migrations.** A coluna `suppressed_reason` já existe (criada na fase 1).
 
-# Ordem de entrega
+## Ordem
 
-1. Editar `rules-engine.ts` (itens E, F).
-2. Editar `conversational/index.ts` (itens A, B, C, D).
-3. Deploy `whapi-webhook` e validar com `supabase--edge_function_logs`.
+1. Painel (6.1 → 6.2 → 6.3) — valor visível imediato
+2. Testes Deno (Fase 5) — protege regressões
+3. Rodar `supabase--test_edge_functions` e validar verde
+
+## Não inclui
+
+- Fase 7 (`whapi:sendMedia` 500 com retry) — fica para próximo ciclo
+- Alertas/notificações em cima do painel
+- Export CSV das supressões
