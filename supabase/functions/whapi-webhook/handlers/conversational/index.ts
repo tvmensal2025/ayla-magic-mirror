@@ -771,7 +771,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         if (mr?.url) {
           const kind = ["audio","video","image"].includes(String(mr.kind)) ? String(mr.kind) : "document";
           let canSend = true;
-          if (kind === "audio" || kind === "video") {
+          if (kind === "audio" || kind === "video" || kind === "image") {
             const { data } = await ctx.supabase.rpc("try_log_media_send", {
               _consultant_id: consultantId, _customer_id: ctx.customer.id,
               _media_id: rule.media_id, _slot_key: null, _kind: kind,
