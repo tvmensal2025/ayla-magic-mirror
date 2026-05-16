@@ -1900,91 +1900,25 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         if (customer.name) updates.name_source = "user_confirmed";
         // Vai para o pitch do Conexão Club ANTES de pedir RG/CNH
         updates.conversation_step = "pitch_conexao_club";
-        // O case pitch_conexao_club abaixo vai ser disparado via re-entrada,
-        // mas para já enviar a mensagem agora, executamos inline aqui:
-        const first = ((customer as any).name || "").split(/\s+/)[0];
-        const v = first ? `${first}, ` : "";
-        const valor = Number((customer as any).electricity_bill_value || 0);
+
+        // 🎯 Envia EXATAMENTE o que o consultor configurou em /admin/fluxos
+        // no step "pitch_conexao_club" (texto + mídias na ordem definida —
+        // padrão text → audio → video → image). Nada é hardcoded aqui.
+        const _valor = Number((customer as any).electricity_bill_value || 0);
         const _fmtBRL = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const _mensal = valor * 0.20;
-        const _anual = _mensal * 12;
-        const economiaMsg = valor >= 30
-          ? `Show, ${v.trim().replace(/,$/, "")}! 💚\n\nSua conta de *R$ ${_fmtBRL(valor)}/mês* cabe certinho na economia:\n→ até *R$ ${_fmtBRL(_mensal)}* por mês no seu bolso\n→ até *R$ ${_fmtBRL(_anual)}* por ano (desconto de até 20%)\n\nE ainda entra no *Conexão Club* — até 70% de desconto em farmácia, mercado, posto e várias parceiras. Minha mãe usa direto kkk`
-          : `Show, ${v}dados confirmados! 💚\n\nVocê garante *desconto de até 20%* na sua luz e ainda entra no *Conexão Club* — até 70% de desconto em farmácia, mercado, posto e várias parceiras.`;
-        try {
-          await sendText(remoteJid, economiaMsg);
-          await supabase.from("conversations").insert({
-            customer_id: customer.id, message_direction: "outbound",
-            message_text: economiaMsg, message_type: "text",
-            conversation_step: "pitch_conexao_club",
-          });
-        } catch (e) { console.warn("[pitch] texto inicial falhou:", (e as any)?.message); }
+        const _vars = {
+          "{valor}": _fmtBRL(_valor),
+          "{{valor}}": _fmtBRL(_valor),
+          "{economia_mensal}": _fmtBRL(_valor * 0.20),
+          "{{economia_mensal}}": _fmtBRL(_valor * 0.20),
+          "{economia_anual}": _fmtBRL(_valor * 0.20 * 12),
+          "{{economia_anual}}": _fmtBRL(_valor * 0.20 * 12),
+        };
+        await dispatchStepFromFlow("pitch_conexao_club", _vars);
 
-        // Busca o vídeo do Conexão Club: personal → público
-        let clubUrl: string | null = null;
-        let clubDur: number | null = null;
-        let clubMediaId: string | null = null;
-        try {
-          const { data: personal } = await supabase
-            .from("ai_media_library")
-            .select("id, url, duration_sec")
-            .eq("consultant_id", customer.consultant_id)
-            .eq("slot_key", "conexao_club")
-            .eq("active", true)
-            .eq("is_draft", false)
-            .order("send_order", { ascending: true })
-            .limit(1)
-            .maybeSingle();
-          if (personal?.url) { clubUrl = personal.url; clubMediaId = (personal as any).id || null; clubDur = Number((personal as any).duration_sec || 0) || null; }
-          if (!clubUrl) {
-            const { data: pub } = await supabase
-              .from("ai_media_library")
-              .select("id, url, duration_sec")
-              .eq("is_public", true)
-              .eq("slot_key", "conexao_club")
-              .eq("active", true)
-              .order("send_order", { ascending: true })
-              .limit(1)
-              .maybeSingle();
-            if (pub?.url) { clubUrl = pub.url; clubMediaId = (pub as any).id || null; clubDur = Number((pub as any).duration_sec || 0) || null; }
-          }
-        } catch (e) { console.warn("[pitch] busca slot conexao_club falhou:", (e as any)?.message); }
+        // Em seguida, dispara o step "duvidas_pos_club" também via fluxo configurado.
+        await dispatchStepFromFlow("duvidas_pos_club", _vars);
 
-        if (clubUrl) {
-          // 🚫 Regra: nunca repetir vídeo para o mesmo cliente
-          const canSend = await canSendMediaOnce(supabase, {
-            consultantId: customer.consultant_id, customerId: customer.id,
-            mediaId: clubMediaId, slotKey: "conexao_club", kind: "video",
-          });
-          if (canSend) {
-            try {
-              await sendMedia(remoteJid, clubUrl, "", "video");
-              await supabase.from("conversations").insert({
-                customer_id: customer.id, message_direction: "outbound",
-                message_text: `[video:conexao_club]`, message_type: "video",
-                conversation_step: "pitch_conexao_club",
-              });
-              // Espera o vídeo terminar (proporcional) antes do CTA final
-              await sleepForMedia("video", clubDur);
-            } catch (e) { console.warn("[pitch] envio do vídeo conexao_club falhou:", (e as any)?.message); }
-          } else {
-            console.log("[pitch] vídeo conexao_club já enviado anteriormente — pulando");
-          }
-        }
-
-        // Pergunta se ficou alguma dúvida ANTES de pedir o documento.
-        // A IA responde dúvidas livremente; quando o lead confirmar (sim/pode seguir/não tenho dúvida),
-        // o step duvidas_pos_club dispara os botões de RG/CNH.
-        const firstNm = ((customer as any).name || "").split(/\s+/)[0];
-        const duvidaMsg = firstNm
-          ? `${firstNm}, ficou alguma dúvida sobre o Conexão Club ou sobre como funciona? Pode mandar aqui que eu te explico 😊\n\nSe estiver tudo certo, é só me dizer *"pode seguir"* que a gente já avança pro cadastro.`
-          : `Ficou alguma dúvida sobre o Conexão Club ou sobre como funciona? Pode mandar aqui que eu te explico 😊\n\nSe estiver tudo certo, é só me dizer *"pode seguir"* que a gente já avança pro cadastro.`;
-        await sendText(remoteJid, duvidaMsg);
-        await supabase.from("conversations").insert({
-          customer_id: customer.id, message_direction: "outbound",
-          message_text: duvidaMsg, message_type: "text",
-          conversation_step: "duvidas_pos_club",
-        });
         updates.conversation_step = "duvidas_pos_club";
         (updates as any).__inline_sent = true;
         reply = "";
