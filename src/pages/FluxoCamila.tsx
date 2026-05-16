@@ -18,6 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
 import { simulateMatch, detectRuleConflicts } from "@/lib/flowSimulator";
@@ -330,6 +331,25 @@ export default function FluxoCamila() {
     setTestCount(0);
   }
 
+  const [wipeConfirm, setWipeConfirm] = useState("");
+  const [wipeBusy, setWipeBusy] = useState(false);
+  async function wipeAllConversations() {
+    if (!userId) return;
+    setWipeBusy(true);
+    try {
+      const { data, error } = await supabase.rpc("reset_all_consultant_conversations", { _consultant_id: userId });
+      if (error) throw error;
+      const d = (data as any)?.deleted ?? {};
+      toast.success(`Tudo limpo! ${d.customers ?? 0} leads, ${d.conversations ?? 0} mensagens, ${d.crm_deals ?? 0} deals apagados.`);
+      setTestCount(0);
+      setWipeConfirm("");
+    } catch (e: any) {
+      toast.error(e?.message || "Erro ao apagar");
+    } finally {
+      setWipeBusy(false);
+    }
+  }
+
   const orderedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
 
   if (loading) {
@@ -375,6 +395,35 @@ export default function FluxoCamila() {
                 </Button>
               )}
               <Button variant="outline" size="sm" onClick={() => setTestOpen(true)}>Testar com 1 número</Button>
+              <AlertDialog onOpenChange={(o) => !o && setWipeConfirm("")}>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" size="sm">
+                    <Trash2 className="h-4 w-4 mr-1" /> Apagar TUDO
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Apagar TUDO e começar do zero?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Isto vai apagar <strong>todos os seus leads</strong>, conversas, deals do CRM, memória da IA e mensagens agendadas.
+                      O fluxo, as mídias e os passos continuam intactos. Qualquer número que mandar mensagem depois vai começar do Passo 1 como lead novo.
+                      <br /><br />
+                      Para confirmar, digite <code className="px-1 bg-muted rounded">APAGAR</code> abaixo:
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <Input value={wipeConfirm} onChange={(e) => setWipeConfirm(e.target.value)} placeholder="APAGAR" autoFocus />
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      disabled={wipeConfirm !== "APAGAR" || wipeBusy}
+                      onClick={wipeAllConversations}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      {wipeBusy ? "Apagando…" : "Apagar TUDO"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           </div>
         </Card>
