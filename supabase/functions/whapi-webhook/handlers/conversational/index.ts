@@ -366,8 +366,8 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
     const m = medias[i];
     const kind = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) : "document";
 
-    // 🚫 REGRA: nunca repetir o mesmo áudio/vídeo para o mesmo cliente
-    if ((kind === "audio" || kind === "video") && m.id) {
+    // 🚫 REGRA: nunca repetir a mesma mídia (áudio/vídeo/imagem) para o mesmo cliente
+    if ((kind === "audio" || kind === "video" || kind === "image") && m.id) {
       const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
         _consultant_id: consultantId,
         _customer_id: ctx.customer.id,
@@ -396,14 +396,10 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
       });
     } else {
       failed = true;
-      if ((kind === "audio" || kind === "video") && m.id && ctx.customer.id) {
-      await ctx.supabase
-        .from("ai_slot_dispatch_log")
-        .delete()
-        .eq("customer_id", ctx.customer.id)
-        .eq("media_id", m.id);
-      console.warn(`[conversational] mídia ${kind} falhou; dedupe removido para retry (media_id=${m.id})`);
-      }
+      // ⚠️ NÃO remover dedupe em caso de falha: evita loop de reenvio de mídia que
+      // está dando erro 500 no provedor (ex: áudio webm). Mídia fica marcada como
+      // já tentada e o fluxo segue sem repetir para o mesmo número.
+      console.warn(`[conversational] mídia ${kind} falhou; dedupe MANTIDO para não repetir (media_id=${m.id})`);
     }
     if (i < medias.length - 1) await sleepForMedia(kind, Number(m.duration_sec || 0) || null, Number(m.delay_before_ms || 0) || null);
   }
@@ -572,7 +568,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   if (qaHit) {
     console.log(`[conversational] QA hit at step="${stepKey}"`);
     for (const m of qaHit.mediaUrls) {
-      if ((m.kind === "audio" || m.kind === "video") && m.mediaId) {
+      if ((m.kind === "audio" || m.kind === "video" || m.kind === "image") && m.mediaId) {
         const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
           _consultant_id: consultantId,
           _customer_id: ctx.customer.id,
@@ -775,7 +771,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         if (mr?.url) {
           const kind = ["audio","video","image"].includes(String(mr.kind)) ? String(mr.kind) : "document";
           let canSend = true;
-          if (kind === "audio" || kind === "video") {
+          if (kind === "audio" || kind === "video" || kind === "image") {
             const { data } = await ctx.supabase.rpc("try_log_media_send", {
               _consultant_id: consultantId, _customer_id: ctx.customer.id,
               _media_id: rule.media_id, _slot_key: null, _kind: kind,
