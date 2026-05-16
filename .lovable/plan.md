@@ -1,43 +1,76 @@
-## Diagnóstico
+## Auditoria do problema
 
-O reset anterior limpou os registros, mas o problema não é só o estado do lead.
+O fluxo não está quebrando por falta de reset do lead. O estado atual mostra que o lead `5511989000650` ficou no primeiro passo real do fluxo (`flow:6226...`), mas a mídia de boas-vindas falhou antes de ser entregue.
 
-Nos logs, quando o cliente manda “Oi”, o webhook faz isto:
+### Evidências encontradas
+
+- O webhook recebeu `oi` e reiniciou corretamente no primeiro passo ativo:
+  - `unknown step="welcome" → restart at firstActive=6226...`
+- A mídia do primeiro passo foi tentada:
+  - `sendMedia -> ... (audio)`
+- A Whapi retornou erro ao enviar o áudio:
+  - `whapi_send_media_failed status=500 Internal Error`
+- Como a mídia falhou, o sistema caiu no texto fallback:
+  - `Oi! 👋 Qual é o seu nome?`
+- O lead ficou no passo correto, sem pular para a pergunta da conta:
+  - `conversation_step = flow:6226...`
+- Os arquivos no Storage estão acessíveis e públicos:
+  - `boas_vindas.webm` retorna `200 audio/webm`
+  - vídeos MP4 também retornam `200 video/mp4`
+
+### Causa principal provável
+
+A regressão está no envio de áudio pela Whapi. O helper direto `supabase/functions/_shared/whapi-api.ts` está enviando mídias `kind='audio'` para o endpoint:
 
 ```text
-step legado="welcome"
-unknown step="welcome" → restart at firstActive=6226...
-mídia audio não bloqueante ignorada
-start cascade 6226... → 3e7...
-envia: "qual o valor médio da sua conta de luz?"
-grava conversation_step = flow:3e7...
+/messages/audio
 ```
 
-Ou seja: o fluxo reinicia, mas o primeiro passo é tratado como mídia “não bloqueante”, não envia o áudio/imagem do passo inicial, e ainda faz cascade automático para o segundo passo. Por isso o cliente já cai na pergunta da conta e parece que “não resetou”.
+Mas o proxy Whapi já existente no projeto usa:
 
-## Plano de implementação
+```text
+/messages/voice
+```
 
-1. **Corrigir o início do fluxo dinâmico**
-   - No handler `supabase/functions/whapi-webhook/handlers/conversational/index.ts`, ajustar o bloco de `unknown step="welcome"`.
-   - Ao reiniciar no primeiro passo ativo, enviar mídia de forma normal/bloqueante em vez de marcar como `skipped_nonblocking`.
-   - Não avançar automaticamente para o fallback do primeiro passo quando esse primeiro passo está configurado para aguardar resposta (`wait_for='reply'`).
-   - Persistir `conversation_step` no primeiro passo (`flow:6226...`) para a próxima mensagem do usuário ser processada ali.
+para áudio. Isso indica divergência entre dois caminhos de envio do mesmo projeto. O erro atual acontece exatamente em arquivo `.webm` (`audio/webm`), formato gravado pelo painel.
 
-2. **Preservar auto-cascade apenas onde faz sentido**
-   - Manter cascade automático somente para passos que não aguardam resposta (`wait_for='none'`) ou quando a própria configuração indicar etapa sem interação.
-   - Evitar que o fallback do primeiro passo funcione como “próximo passo imediato” durante o start.
+### Risco adicional encontrado
 
-3. **Resetar novamente os dois números depois da correção**
-   - Aplicar uma migração de reset para os leads:
+A correção anterior passou a bloquear o avanço quando a mídia falha. Isso evita pular etapas, mas cria outro problema operacional: se a Whapi falhar em um áudio, o lead fica preso no passo e recebe apenas texto fallback. Como o primeiro passo é `wait_for='reply'`, isso parece para o usuário como “não enviou mídia e não seguiu o fluxo”.
+
+## Plano de correção
+
+1. **Unificar envio de áudio da Whapi**
+   - Ajustar `supabase/functions/_shared/whapi-api.ts` para áudio usar `/messages/voice`, igual ao `whapi-proxy`.
+   - Para `audio/webm`, enviar o payload simples `{ to, media, caption }`, sem forçar `mime_type: audio/ogg`.
+   - Manter timeout de 60s e 3 tentativas.
+
+2. **Tratar falha de áudio sem quebrar todo o fluxo**
+   - Manter a regra: não avançar automaticamente quando mídia obrigatória falhar.
+   - Mas registrar log mais claro com `step_key`, `slot_key`, `media_id`, `kind`, endpoint usado e URL parcial.
+   - Evitar marcar mídia como enviada no dedupe se a Whapi retornou erro, mantendo retry possível.
+
+3. **Auditar os pontos paralelos que ainda enviam mídia**
+   - Revisar os envios de mídia por Q&A e regras globais dentro do mesmo handler, porque hoje eles tentam enviar mídia e ignoram erro silenciosamente.
+   - Padronizar para não registrar dedupe como enviado quando o envio falha.
+
+4. **Criar teste de regressão da lógica de mídia**
+   - Adicionar teste leve para garantir que `audio` no helper Whapi resolve para `/messages/voice`.
+   - Testar que falha de mídia retorna bloqueio (`null`) no passo, sem avançar para o próximo.
+
+5. **Deploy e validação**
+   - Deploy da Edge Function `whapi-webhook`.
+   - Conferir logs após novo “oi”:
+     - precisa aparecer envio por `voice`;
+     - não pode aparecer `/messages/audio` para `.webm`;
+     - se Whapi aceitar, deve registrar `[flow-step:...:audio]` e o lead continuar aguardando nome.
+
+6. **Resetar novamente os dois leads de teste**
+   - Após a correção, resetar:
      - `5511971254913`
      - `5511989000650`
-   - Limpar conversas, logs, buffers, agendamentos e estado do cliente.
-   - Deixar `conversation_step='welcome'`, `status='pending'`, sem memória residual.
-
-4. **Validar nos logs**
-   - Conferir que após enviar “Oi”, o log fique no primeiro passo ativo em vez de pular para `3e7...`.
-   - Verificar que a resposta enviada corresponde ao primeiro passo do fluxo, não à pergunta “qual o valor médio...”.
+   - Limpar conversas, dedupe de mídia, buffers e deixar `conversation_step='welcome'` para teste limpo.
 
 ## Resultado esperado
 
-Depois de implementado, quando um desses números mandar “Oi”, o bot deverá começar do primeiro passo real do fluxo e aguardar a resposta antes de avançar para a pergunta do valor da conta.
+Quando o lead mandar “oi”, o bot deve enviar o áudio de boas-vindas real do slot `boas_vindas` e permanecer no primeiro passo aguardando o nome. Depois, ao informar o nome e valor da conta, o fluxo deve seguir pelos passos configurados e entregar as mídias dos slots `como_funciona` e `fazenda_solar` na ordem definida.
