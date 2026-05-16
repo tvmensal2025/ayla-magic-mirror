@@ -746,7 +746,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     while (cursor && !visited.has(cursor.id)) {
       visited.add(cursor.id);
       landingStepId = cursor.id;
-      const mediaSent = await sendStepMedia(ctx, cursor, consultantId, true);
+      const { mediaSent } = await sendStepMedia(ctx, cursor, consultantId, true);
       if (mediaSent === true) anyMediaSent = true;
       const tpl = (cursor.message_text || "").trim();
       if (tpl) parts.push(renderTemplate(tpl, restartVars));
