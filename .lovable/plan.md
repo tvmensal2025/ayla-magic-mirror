@@ -1,265 +1,105 @@
-## Conclusão direta
+##   
+ANALISE OQUE MAIS PODE SER FEITO E  FACA UMA AUDITORIA PARA NAO DAR ERRO E APLICAR 100% CERTO
 
-Sim: o fluxo profissional já foi criado no banco. O problema não é falta de plano nem falta de estrutura. O erro principal é que o WhatsApp ainda está executando o motor legado (`bot-flow.ts`) em vez de executar o motor dinâmico do `Fluxo da Camila` (`bot_flow_steps`).
+##   
+  
+Resumo da auditoria das 2 conversas (Viviane + Paulo)
 
-Resultado: a UI mostra um fluxo perfeito, mas o lead recebe mensagens hardcoded antigas como `checkin_pos_video`, `qualificacao`, `aguardando_conta`.
 
-## Auditoria realizada
+| #   | Problema observado nas mensagens                                                              | Causa real                                                                                                            |
+| --- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 1   | "1️⃣ Sim / 2️⃣ Outro" como texto em `ask_phone_confirm`, `ask_finalizar`, `ask_complement`    | Steps legados mandam string — Whapi suporta botões mas não é usado                                                    |
+| 2   | "Campo Seu Código" pedido pra cliente CPFL (rótulo é Light/Enel)                              | Texto fixo em `ask_installation_number`, sem mapa por distribuidora; OCR já tinha rodado mas fallback pergunta sempre |
+| 3   | Cliente mandou CNH e bot pediu "verso do RG"                                                  | `detectDocumentType` retorna `rg_antigo` como fallback silencioso quando Gemini falha/ambíguo                         |
+| 4   | Mensagens repetidas 2x ("qual valor da conta", "Deu para entender", etc)                      | Engine re-executa o step quando inbound chega antes da transição persistir                                            |
+| 5   | Nome "Lucas" salvo, depois sobrescrito                                                        | Capture aceita qualquer string nova sem checar nome já confirmado                                                     |
+| 6   | A partir de `aguardando_doc_*` o bot vira hardcoded (`ask_email`, `ask_cep`, `ask_number`...) | Esses steps não existem no Flow Builder, são do `bot-flow.ts` legado                                                  |
 
-Verifiquei quatro camadas:
 
-1. Banco de dados do fluxo ativo
-2. Mídias vinculadas aos passos
-3. Runtime do webhook `whapi-webhook`
-4. Conversa real do Lucas no WhatsApp
+## Plano de correção (ajustado ao seu feedback)
 
-## Evidências encontradas
+### Fix A — Tom humano para perguntas (sem botões)
 
-### 1. O fluxo ativo existe e está correto como conceito
+Você pediu pra **não usar botões** no passo de documento: tornar mais humano.
 
-Para o consultor `0c2711ad-4836-41e6-afba-edd94f698ae3`:
+- Substituir `ask_tipo_documento` por uma **mensagem única** sem opções:
+  ```
+  Pra finalizar, me manda só uma foto da frente do seu documento 📄
+  Pode ser RG ou CNH, o que for mais fácil pra você.
+  ```
+- **Não perguntar "novo ou antigo"** em hipótese nenhuma — o bot detecta sozinho.
+- Manter os outros prompts (`ask_phone_confirm`, `ask_finalizar`, `ask_complement`) em texto humano também, sem "1/2":
+  ```
+  Esse número é o seu WhatsApp principal? Se sim, é só responder "sim".
+  Se não, me manda o número certo.
+  ```
 
-```text
-bot_flows.id = 66a19db4-b061-4f3f-921f-c13e9fb6f730
-name = Fluxo Padrão
-is_active = true
-strict_mode = true
-consultant.conversational_flow_enabled = true
+### Fix B — Auto-detecção robusta de documento (CNH x RG novo x RG antigo)
+
+O cliente nunca escolhe. O bot decide pela foto.
+
+1. Após receber a 1ª foto, rodar `detectDocumentType` (Gemini Vision) com prompt JSON estruturado e score de confiança.
+2. Se confiança ≥ 0.7 → segue:
+  - `cnh` → pede só **uma** foto (CNH digital é frente+verso na mesma página). Não pede verso.
+  - `rg_novo` ou `rg_antigo` → pede o **verso**.
+3. Se confiança < 0.7 → **roda 2ª passada** com prompt mais detalhado em vez de assumir RG antigo.
+4. Se ainda incerto → assume `rg_antigo` (mais seguro: pede verso). Loga em `ai_decisions`.
+5. Remover o fallback silencioso atual no `normalizeDocumentType` que sempre retorna `rg_antigo` quando vazio.
+
+Mensagens humanizadas após detecção:
+
+```
+cnh:        "Recebi sua CNH! Já tenho tudo dela, vamos pro próximo passo."
+rg_novo:    "Recebi a frente. Agora me manda o verso, por favor."
+rg_antigo:  "Recebi a frente. Agora me manda o verso, por favor."
+
+( AQUI TEM QUE TER OS DADOS E OS BOTOES PARA CONFIRMAR OS DOS DO CLIENTE DO RG OU CNH ) IGUAL JA FAZIA ANTES PARA CONFIRMAR 
 ```
 
-Passos encontrados:
+### Fix C — Número de instalação inteligente ( ESSE JA TEM NA CONTA, TEM QUE PEDIR A CONTA DE ENERGIA )
 
-```text
-1  Boas Vindas e Nome        step_type=message            captura name
-2  Qual o valor da conta     step_type=message            captura electricity_bill_value
-3  Valor da conta            step_type=message
-4  Como funciona             step_type=message            áudio + vídeo
-6  Deu para entender?        step_type=message            SIM -> cadastro
-11 Conta de energia          step_type=message
-12 Cadastro                  step_type=capture_documento
-13 Conta de luz              step_type=capture_conta
-14 Confirmação               step_type=finalizar_cadastro
-```
+- Antes de enviar `ask_installation_number`, checar `customers.numero_instalacao`. Se OCR já preencheu, **pular o step**.
+- Se precisar perguntar, mapa por distribuidora:
+  ```
+  CPFL/RGE  → "Nº da Instalação"
+  Light/Enel → "Seu Código / Nº do Cliente"
+  Equatorial/Energisa/Cemig → "Nº da Instalação / Conta Contrato"
+  default    → "Nº da Instalação"
+  ```
 
-### 2. As mídias principais existem
+### Fix D — Eliminar mensagens duplicadas
 
-```text
-boas_vindas     -> áudio pessoal do Rafael, 7s
-fazenda_solar   -> áudio Como funciona, 123s
-fazenda_solar   -> vídeo Conexão Green, 60s
-```
+- Lock por `customer_id` em `runConversationalFlow` usando `webhook_message_dedup` (tabela já existe) com TTL 8s.
+- Consumir `whatsapp_message_buffer` em batch de 1.5s antes de rodar o step (já existe a tabela, falta o consumidor).
 
-Isso confirma que a ideia da UI é válida: áudio de boas-vindas, coleta de nome, valor, explicação, entendimento e cadastro.
+### Fix E — Captura de nome com guarda
 
-### 3. O runtime atual não está percorrendo esse fluxo
+- No capture de `name`: se `name_source='ocr'` (veio da CNH/conta) → não sobrescreve.
+- Se ainda não tem: aceita primeira resposta `^[A-Za-zÀ-ÿ ]{2,40}$`. Correções posteriores só se o cliente disser "meu nome é X".
 
-O `whapi-webhook/index.ts` só chama o motor dinâmico quando `conversation_step` começa com `flow:` ou parece UUID/`passo_`.
+### Fix F — Seguir o fluxo correto até o fim
 
-Mas os leads atuais estão assim:
+Hoje o Flow Builder controla só até o documento. Depois vira código legado e fica fora da sua tela.
 
-```text
-flow_prefixed = 0
-legacy_conversational = 13
-raw_uuid_steps = 0
-```
+- Criar no `bot_flow_steps` os passos que faltam: `ask_email`, `ask_cep`, `ask_number`, `ask_complement`, `pitch_conexao_club`, `duvidas_pos_club`, `ask_finalizar`.
+- Cada um com `step_type=message` + `captures` apontando pro campo correto em `customers`.
+- No `bot-flow.ts`, marcar os blocos legados como deprecated — só rodam quando o consultor **não tem** flow ativo.
+- Migration: leads atuais em `ask_email`, `ask_cep`, etc são re-mapeados para o `flow:<novo_step_id>` equivalente automaticamente na próxima mensagem.
 
-Ou seja: nenhum lead do consultor está entrando no motor novo. Todos continuam em estados legados.
+Resultado: 100% do funil editável pela tela "Fluxo da Camila", sem texto hardcoded.
 
-### 4. A conversa real prova isso
+## Ordem de execução
 
-Conversa do Lucas:
+1. **Fix B + Fix C** — corrige os 2 erros que o cliente viu na hora (~30 min)
+2. **Fix A** — humaniza prompts de documento e confirmação (~20 min)
+3. **Fix D** — estanca duplicação (~20 min)
+4. **Fix E** — guard de nome (~15 min)
+5. **Fix F** — migração dos steps pós-documento pro Flow Builder (~1h)
 
-```text
-inbound:  Oi
-outbound: texto de boas-vindas antigo via bot_flow_qa
-outbound: Deu pra entender? Posso te explicar melhor se precisar
-outbound: Lucas! Tudo bem?
-inbound:  Tudo bem sim
-outbound: Que bom, Lucas! Me diz uma coisa, quanto costuma vir sua conta de luz...
-```
+## Riscos
 
-Essas mensagens não vêm do `bot_flow_steps` profissional. Elas vêm do motor legado.
+- Fix B pode aumentar latência em ~1s nos casos ambíguos (2ª passada do Gemini) — aceitável.
+- Fix F vai exigir testar leads que já estão em `ask_email`/`ask_cep` no momento do deploy; o re-mapeamento é automático mas requer validação.
+- Nenhuma mudança altera dados existentes; só código + 1 migration de steps novos.
 
-## Causas raiz
-
-### Causa 1 — Entrada inicial cai em `sys`, não em `flow`
-
-Quando `conversation_step` está nulo ou `welcome`, `routeEngine()` retorna `sys`. Então o bot entra no `bot-flow.ts`, que tem textos e regras antigas.
-
-Mesmo com `consultants.conversational_flow_enabled=true`, o primeiro contato não é forçado para o `flow:`.
-
-### Causa 2 — Existe um motor dinâmico, mas ele está quase isolado
-
-O arquivo `supabase/functions/whapi-webhook/handlers/conversational/index.ts` já carrega `bot_flow_steps`, captura campos, avalia transições e envia mídias.
-
-Mas ele só roda quando o `conversation_step` já está em formato `flow:<step_id>`.
-
-Como a primeira mensagem nunca grava `flow:<primeiro_passo>`, o motor novo não assume.
-
-### Causa 3 — O motor legado ainda usa `bot_flow_qa` como abertura
-
-O bloco `opening-flow` em `bot-flow.ts` usa `bot_flow_qa.is_opening=true`, não `bot_flow_steps.position=1`.
-
-Por isso a mensagem enviada foi:
-
-```text
-Olá! Sou a Camila...
-Me envia a foto da sua conta de luz...
-```
-
-Mas o passo 1 da UI é:
-
-```text
-Boas Vindas e Nome
-áudio boas_vindas
-captura name
-```
-
-São duas fontes de verdade brigando.
-
-### Causa 4 — Variáveis do fluxo não são renderizadas por completo
-
-O renderer atual só substitui:
-
-```text
-{{nome}}
-{{representante}}
-```
-
-Mas seu fluxo também usa ou pode usar:
-
-```text
-{{valor_conta}}
-{{telefone}}
-{{cpf}}
-```
-
-Além disso há um passo com `{{ nome }}` com espaços, que hoje não é substituído. Isso pode aparecer para o cliente literalmente.
-
-### Causa 5 — Destino `goto_special=cadastro` está mapeado para conta de luz, não para documento
-
-No passo “Deu para entender?”, o fluxo tem:
-
-```text
-afirmacao -> goto_special=cadastro
-```
-
-Mas no motor dinâmico atual `goto_special=cadastro` envia para `aguardando_conta`.
-
-No seu fluxo visual, após “Vamos fazer seu cadastro?” o esperado parece ser ir para documento/cadastro, não repetir conta.
-
-Essa regra precisa ser alinhada com o desenho real.
-
-## Riscos se não corrigir
-
-1. O bot continuará parecendo alucinar, porque mistura UI nova com textos antigos.
-2. O lead pode receber pergunta fora de ordem.
-3. A IA/sales-agent ainda pode assumir em etapas onde o fluxo deveria ser estrito.
-4. O passo com `{{ nome }}` pode sair quebrado.
-5. O fluxo visual nunca será a fonte única de verdade.
-
-## Correção que resolve de verdade
-
-Não é criar outro plano enorme. É fazer uma integração cirúrgica: quando o consultor tem `conversational_flow_enabled=true` e fluxo ativo, o primeiro contato deve entrar no primeiro `bot_flow_steps` com prefixo `flow:`.
-
-```text
-lead manda Oi
-  -> whapi-webhook vê consultor com fluxo ativo
-  -> grava conversation_step = flow:<id_do_passo_1>
-  -> executa runConversationalFlow
-  -> envia mídia/texto do passo 1
-  -> próxima resposta do lead continua no motor dinâmico
-```
-
-## Plano de implementação mínimo e seguro
-
-### 1. Corrigir roteamento inicial
-
-No `whapi-webhook/index.ts`, antes de escolher `sys` ou `flow`:
-
-- Se o consultor tem `conversational_flow_enabled=true`
-- E o lead não tem override `conversational_flow_enabled=false`
-- E o step atual é `null`, `welcome`, `checkin_pos_video`, `qualificacao`, `menu_inicial` ou `pos_video`
-- E existe `bot_flows.is_active=true`
-
-Então rotear para `flow` e deixar `runConversationalFlow` iniciar no primeiro passo ativo.
-
-### 2. Remover a abertura legada para consultores com fluxo ativo
-
-No `bot-flow.ts`, o bloco `opening-flow` não deve rodar para o consultor que usa `Fluxo da Camila` ativo.
-
-Ele só fica como fallback para consultores sem flow dinâmico.
-
-### 3. Melhorar o renderer de variáveis
-
-Atualizar `renderTemplate()` para aceitar:
-
-```text
-{{nome}} e {{ nome }}
-{{representante}} e {{ representante }}
-{{valor_conta}} e {{ valor_conta }}
-{{telefone}} e {{ telefone }}
-{{cpf}} e {{ cpf }}
-```
-
-### 4. Ajustar destino de `goto_special=cadastro`
-
-Alinhar o significado de `cadastro` com seu fluxo profissional:
-
-- Se existir step ativo `step_type='capture_documento'`, ir para esse step.
-- Senão, cair no comportamento antigo `aguardando_conta`.
-
-Assim o botão/regra “SIM, vamos cadastrar” segue o desenho do Flow Builder.
-
-### 5. Travar IA fora do caminho principal
-
-Para `strict_mode=true`, o motor não deve chamar fallback IA para escolher próximo passo se houver fallback determinístico (`repeat` ou `goto`).
-
-A IA pode responder Q&A, mas não deve mudar o caminho principal do fluxo estrito.
-
-### 6. Realinhar leads presos em estados legados
-
-Para o consultor Rafael:
-
-```text
-checkin_pos_video / welcome / qualificacao / menu_inicial / pos_video
-```
-
-devem ser realinhados automaticamente para o flow na próxima mensagem, sem migration agressiva em massa.
-
-### 7. Teste profissional antes de considerar pronto
-
-Criar teste do webhook/engine cobrindo:
-
-```text
-Oi -> envia Passo 1
-Lucas -> captura nome e envia Passo 2
-350 -> captura valor e envia Passo 3
-como funciona -> envia Passo 4 com mídia
-sim -> segue para Cadastro/Documento conforme flow
-foto documento -> entra no OCR de documento
-foto conta -> entra no OCR de conta
-finalização -> usa portal/OTP
-```
-
-## Resposta à sua pergunta
-
-O plano anterior resolveria, mas era grande demais e repetia trabalho já feito. A correção real é menor: ligar o fluxo que já existe ao WhatsApp como fonte principal e impedir o motor antigo/IA de atropelar.
-
-Depois disso o fluxo passa a seguir o que você criou na tela, e não mais mensagens hardcoded antigas.
-
-## Resultado esperado após implementar
-
-No próximo teste real, o Lucas deve ver:
-
-```text
-Oi
--> áudio Boas-vindas
--> texto do Passo 1, se houver
-Lucas
--> pergunta do Passo 2: valor médio da conta
-350
--> Passo 3/4 conforme fallback/regra configurada
-```
-
-Sem `Deu pra entender?` fora de hora, sem `checkin_pos_video` legado, sem IA inventando caminho.
+Posso seguir nessa ordem?
