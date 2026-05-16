@@ -129,9 +129,24 @@ export function useMessages(
 
     try {
       setIsLoading((prev) => (!prev ? true : prev));
-      const raw = isWhapi
-        ? await whapiListMessages(remoteJid, 50)
-        : await findMessages(instanceName!, remoteJid, 50);
+      const phone = remoteJid.split("@")[0];
+      const [raw, clearedRow] = await Promise.all([
+        isWhapi
+          ? whapiListMessages(remoteJid, 50)
+          : findMessages(instanceName!, remoteJid, 50),
+        supabase
+          .from("customers")
+          .select("chat_cleared_at")
+          .eq("phone_whatsapp", phone)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      const clearedAtMs = clearedRow.data?.chat_cleared_at
+        ? new Date(clearedRow.data.chat_cleared_at).getTime()
+        : 0;
+      clearedAtRef.current = clearedAtMs;
 
       // Deduplicate by message id
       const seen = new Set<string>();
@@ -144,6 +159,7 @@ export function useMessages(
 
       const mapped = unique
         .map(mapMessage)
+        .filter((m) => clearedAtMs === 0 || m.timestamp * 1000 >= clearedAtMs)
         .sort((a, b) => a.timestamp - b.timestamp);
       setMessages(mapped);
 
