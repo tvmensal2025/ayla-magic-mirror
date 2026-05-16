@@ -382,8 +382,11 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
       }
     }
 
-    // ⏱️ ESPERA ANTES DE ENVIAR — respeita delay_before_ms desta mídia.
-    // Se não houver delay configurado, aplica pausa curta apenas entre mídias consecutivas (não antes da primeira).
+    // ⏱️ ESPERA ANTES DE ENVIAR — sincronia natural:
+    // - Se há delay_before_ms configurado, respeita.
+    // - Se a mídia anterior é áudio/vídeo, aguarda ~duração dela (cap 8s) para o
+    //   lead ter tempo de ouvir/assistir antes da próxima entrar.
+    // - Caso contrário, pausa curta (600ms) para parecer envio rapidíssimo.
     const configuredDelay = Number(m.delay_before_ms || 0);
     if (!isTestMode()) {
       if (configuredDelay > 0) {
@@ -391,7 +394,13 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
         console.log(`[conversational] ⏱️ aguardando ${wait}ms antes de enviar ${kind} (media_id=${m.id})`);
         await new Promise((r) => setTimeout(r, wait));
       } else if (i > 0) {
-        const pause = kind === "audio" || kind === "video" ? 2000 : 800;
+        const prev = medias[i - 1];
+        const prevKind = String(prev?.kind || "");
+        const prevDur = Number(prev?.duration_sec || 0);
+        let pause = 600; // padrão super rápido
+        if ((prevKind === "audio" || prevKind === "video") && prevDur > 0) {
+          pause = Math.min(prevDur * 1000, 8000);
+        }
         await new Promise((r) => setTimeout(r, pause));
       }
     }
