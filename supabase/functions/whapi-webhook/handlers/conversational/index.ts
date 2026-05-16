@@ -689,11 +689,18 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       const cascadeDelay = Math.max(0, Math.min(60000, nextStep.text_delay_ms ?? 1500));
       if (cascadeDelay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, cascadeDelay));
       const cascadeMediaSent = await sendStepMedia(ctx, nextStep, consultantId, false);
+      const cascadeHasText = !!(nextStep.message_text || "").trim();
       if (cascadeMediaSent === null) {
-        console.warn(`[conversational] cascade bloqueado: mídia obrigatória falhou no step=${nextStep.step_key}`);
+        if (cascadeHasText) {
+          console.warn(`[conversational] cascade bloqueado: mídia obrigatória falhou no step=${nextStep.step_key} (tem texto)`);
+          nextConversationStep = nextStep.id;
+          inlineSent = inlineSent || replyParts.length === 0;
+          break;
+        }
+        console.warn(`[conversational] cascade: mídia falhou em step só-mídia=${nextStep.step_key} → seguindo cascata`);
         nextConversationStep = nextStep.id;
-        inlineSent = inlineSent || replyParts.length === 0;
-        break;
+        cursor = nextStep;
+        continue;
       }
       const cascadeText = renderTemplate(nextStep.message_text || "", vars).trim();
       if (cascadeText) replyParts.push(cascadeText);
