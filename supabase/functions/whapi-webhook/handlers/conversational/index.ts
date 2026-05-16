@@ -823,37 +823,69 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   const renderStepText = (st: DbStep): string =>
     renderTemplate(st.message_text || "", vars).trim();
 
-  // Envia um step (mídia SEMPRE + texto SEMPRE quando existem).
+  // Envia um step (mídia SEMPRE + texto SEMPRE quando existem), respeitando a ordem configurada.
   const emitStep = async (
     st: DbStep,
     asReply: boolean,
   ): Promise<{ replyText: string; inlineSent: boolean }> => {
-    let mediaSent: boolean | null = false;
+    const text = renderStepText(st);
+    const textDelay = Math.max(0, Math.min(60000, st.text_delay_ms ?? 1500));
+
+    // Quando é reply final, o texto vai como reply (não inline). Quando é cascade
+    // ou quando o consultor pediu texto antes da mídia, mandamos tudo inline aqui.
+    const slotKey = st.slot_key || st.step_key || st.id;
+    const uiOrder = await getStepMediaOrder(ctx.supabase, consultantId, slotKey);
+    const stepOrder = Array.isArray(st.media_order) && st.media_order.length > 0
+      ? st.media_order.map((k) => String(k).toLowerCase())
+      : null;
+    const configuredOrder = uiOrder || stepOrder;
+    const textComesBeforeAllMedia = !!text && Array.isArray(configuredOrder)
+      && configuredOrder.length > 0
+      && configuredOrder.indexOf("text") >= 0
+      && configuredOrder.every((k, i) => k !== "text" ? configuredOrder.indexOf("text") < i : true);
+
+    // Texto entra inline (na posição certa) em qualquer caso, EXCETO quando:
+    // - é o reply final E não há ordem configurada (mantém comportamento legado: texto vira reply)
+    // - é o reply final E a ordem termina em "text" (texto fica por último → vira reply)
+    const orderEndsWithText = Array.isArray(configuredOrder) && configuredOrder.length > 0
+      && configuredOrder[configuredOrder.length - 1] === "text";
+    const sendTextInline = !!text && (!asReply || !orderEndsWithText && !!configuredOrder);
+
+    let mediaResult: { mediaSent: boolean | null; textSentInline: boolean } =
+      { mediaSent: false, textSentInline: false };
     try {
-      mediaSent = await sendStepMedia(ctx, st, consultantId, false);
+      mediaResult = await sendStepMedia(
+        ctx, st, consultantId, false,
+        sendTextInline ? { text, delayMs: textDelay } : null,
+      );
     } catch (e) {
       console.error(`[conversational] sendStepMedia threw em step=${st.step_key}:`, (e as Error)?.message || e);
-      mediaSent = null;
+      mediaResult = { mediaSent: null, textSentInline: false };
     }
-    // mediaSent: true = enviou; false = não tem mídia; null = tentou e falhou
-    const text = renderStepText(st);
+    const mediaSent = mediaResult.mediaSent;
     const inlineMedia = mediaSent === true;
-    console.log(`[conversational] emitStep step=${st.step_key} asReply=${asReply} media=${mediaSent} hasText=${!!text}`);
+    console.log(`[conversational] emitStep step=${st.step_key} asReply=${asReply} media=${mediaSent} hasText=${!!text} textInline=${mediaResult.textSentInline} order=${JSON.stringify(configuredOrder)}`);
+
     if (!text) {
       if (mediaSent === null) {
         console.warn(`[conversational] ⚠️ step=${st.step_key}: mídia falhou e sem texto fallback — continuando cascata`);
       }
       return { replyText: "", inlineSent: inlineMedia };
     }
-    // ⏱️ text_delay_ms = aguardar ANTES do TEXTO (depois da mídia). É o que a UI promete.
-    const textDelay = Math.max(0, Math.min(60000, st.text_delay_ms ?? 1500));
+
+    // Se o texto já foi enviado inline na posição configurada, não devolve replyText.
+    if (mediaResult.textSentInline) {
+      return { replyText: "", inlineSent: true };
+    }
+
+    // Texto ainda não enviado: aplica text_delay e devolve como reply (asReply)
+    // ou envia inline como cascade (último recurso, sem ordem configurada).
     if (textDelay > 0 && !isTestMode()) {
       await new Promise((r) => setTimeout(r, textDelay));
     }
     if (asReply) {
       return { replyText: text, inlineSent: inlineMedia };
     }
-    // Cascade: envia o texto inline como mensagem separada (mídia já foi inline).
     try {
       await ctx.sender.sendText(ctx.remoteJid, text);
     } catch (e) {
