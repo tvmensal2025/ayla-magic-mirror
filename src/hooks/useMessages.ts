@@ -108,6 +108,7 @@ export function useMessages(
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fetchingRef = useRef(false);
   const lastReadIdRef = useRef<string | null>(null);
+  const clearedAtRef = useRef<number>(0);
 
   useEffect(() => {
     setResolvedSendTargetJid(preferredSendTargetJid || null);
@@ -116,6 +117,7 @@ export function useMessages(
   // Reset lastReadId when chat changes
   useEffect(() => {
     lastReadIdRef.current = null;
+    clearedAtRef.current = 0;
   }, [remoteJid]);
 
   const fetchMessages = useCallback(async () => {
