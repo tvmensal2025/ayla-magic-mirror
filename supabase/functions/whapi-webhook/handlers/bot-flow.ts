@@ -339,7 +339,7 @@ function getReentryPromptForStep(step: string, customer: any): string {
 const NO_QA_STEPS = new Set([
   "aguardando_conta", "processando_ocr_conta", "confirmando_dados_conta",
   "aguardando_doc_auto", "aguardando_doc_frente", "aguardando_doc_verso",
-  "confirmando_dados_doc", "ask_tipo_documento",
+  "confirmando_dados_doc", "confirmar_titularidade", "ask_tipo_documento",
   "ask_name", "ask_cpf", "ask_rg", "ask_birth_date", "ask_phone", "ask_phone_confirm",
   "ask_email", "ask_cep", "ask_number", "ask_complement",
   "ask_installation_number", "ask_bill_value",
