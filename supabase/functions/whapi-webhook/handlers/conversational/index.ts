@@ -363,7 +363,6 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
     const kind = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) : "document";
 
     // 🚫 REGRA: nunca repetir a mesma mídia já ENTREGUE para o mesmo cliente.
-    // Checagem prévia: se já existe registro de envio bem-sucedido, pula.
     if ((kind === "audio" || kind === "video" || kind === "image") && m.id && ctx.customer?.id) {
       const { data: already } = await ctx.supabase
         .from("ai_slot_dispatch_log")
@@ -379,13 +378,26 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
       }
     }
 
+    // ⏱️ ESPERA ANTES DE ENVIAR — respeita delay_before_ms desta mídia.
+    // Se não houver delay configurado, aplica pausa curta apenas entre mídias consecutivas (não antes da primeira).
+    const configuredDelay = Number(m.delay_before_ms || 0);
+    if (!isTestMode()) {
+      if (configuredDelay > 0) {
+        const wait = Math.min(configuredDelay, 10_000);
+        console.log(`[conversational] ⏱️ aguardando ${wait}ms antes de enviar ${kind} (media_id=${m.id})`);
+        await new Promise((r) => setTimeout(r, wait));
+      } else if (i > 0) {
+        const pause = kind === "audio" ? 1500 : kind === "video" ? 2000 : 800;
+        await new Promise((r) => setTimeout(r, pause));
+      }
+    }
+
     if (!waitForSend) console.log(`[conversational] envio de mídia em cascata (${kind}, media_id=${m.id})`);
 
     attempted = true;
     const ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
     if (ok !== false) {
       sent = true;
-      // ✅ Só registra dedupe DEPOIS do sucesso real, não antes.
       if (m.id && ctx.customer?.id) {
         await ctx.supabase.rpc("try_log_media_send", {
           _consultant_id: consultantId,
@@ -406,7 +418,6 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
       failed = true;
       console.warn(`[conversational] mídia ${kind} falhou (media_id=${m.id}); SEM dedupe → tentaremos de novo no próximo gatilho`);
     }
-    if (i < medias.length - 1) await sleepForMedia(kind, Number(m.duration_sec || 0) || null, Number(m.delay_before_ms || 0) || null);
   }
   if (attempted && failed && !sent) return null;
   return sent;
