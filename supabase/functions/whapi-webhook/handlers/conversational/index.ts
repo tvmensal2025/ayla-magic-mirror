@@ -493,7 +493,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   if (!currentStep) {
     // Unknown/legacy step → restart at the first active dynamic step.
     console.log(`[conversational] unknown step="${stepKey}" → restart at firstActive=${firstActive?.id} (steps=${dbSteps.length})`);
-    const mediaSent = await sendStepMedia(ctx, firstActive, consultantId);
+    const mediaSent = await sendStepMedia(ctx, firstActive, consultantId, false);
     const tpl = (firstActive.message_text || "").trim();
     const vars = {
       nome: ctx.customer.name,
@@ -510,7 +510,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     let reply = firstReply;
     let nextConversationStep = firstActive.id;
     if (nextOnStart?.message_text) {
-      const nextMediaSent = await sendStepMedia(ctx, nextOnStart, consultantId);
+      const nextMediaSent = await sendStepMedia(ctx, nextOnStart, consultantId, false);
       const nextReply = renderTemplate(nextOnStart.message_text || "", vars).trim();
       reply = [firstReply, nextReply].filter((part) => part && part.trim()).join("\n\n");
       nextConversationStep = nextOnStart.id;
@@ -633,7 +633,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   const goToStep = async (s: DbStep, extra: Record<string, any> = {}) => {
     const delay = Math.max(0, Math.min(60000, s.text_delay_ms ?? 1500));
     if (delay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, delay));
-    const mediaSent = await sendStepMedia(ctx, s, consultantId);
+    const mediaSent = await sendStepMedia(ctx, s, consultantId, false);
     const cadastroStep = stepTypeToCadastro(s.step_type);
     let nextConversationStep = cadastroStep || s.id;
     let inlineSent = mediaSent;
