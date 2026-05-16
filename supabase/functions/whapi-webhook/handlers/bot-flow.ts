@@ -282,7 +282,7 @@ function getReentryPromptForStep(step: string, customer: any): string {
     "ask_complement": `${v}tem *complemento*? (apto, bloco) — ou diga "não".`,
     "ask_installation_number": `${v}qual o *número da instalação* da conta?`,
     "ask_bill_value": `${v}qual a *média* da sua conta de luz? (ex: 350,50)`,
-    "ask_tipo_documento": `Pra seguir: qual documento vai enviar? *RG Novo*, *RG Antigo* ou *CNH*?`,
+    "ask_tipo_documento": `Me manda só uma foto da *frente do seu documento* (RG ou CNH — eu identifico sozinho).`,
     "aguardando_conta": `${v}me envia uma *foto ou PDF da conta de luz* pra eu seguir 📸`,
     "aguardando_doc_frente": `${v}me envia a *frente* do seu documento 🪪`,
     "aguardando_doc_verso": `${v}me envia o *verso* do seu documento 🪪`,
