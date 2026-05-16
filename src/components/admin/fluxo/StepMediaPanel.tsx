@@ -314,7 +314,19 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
             <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
             <div className="min-w-0">
               <div className="text-xs font-medium truncate">{m.label}</div>
-              <div className="text-[10px] text-muted-foreground">ordem: {m.send_order}</div>
+              <div className="text-[10px] text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                <span>ordem: {m.send_order}</span>
+                {m.duration_sec ? <span>· {m.duration_sec}s</span> : null}
+                {m.final_size_bytes ? (
+                  m.original_size_bytes && m.original_size_bytes > m.final_size_bytes ? (
+                    <Badge variant="secondary" className="h-4 px-1 text-[9px] font-normal">
+                      {formatBytes(m.original_size_bytes)} → {formatBytes(m.final_size_bytes)} ({Math.round((1 - m.final_size_bytes / m.original_size_bytes) * 100)}% menor)
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="h-4 px-1 text-[9px] font-normal">{formatBytes(m.final_size_bytes)}</Badge>
+                  )
+                ) : null}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-0.5">
