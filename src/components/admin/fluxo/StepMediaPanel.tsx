@@ -184,6 +184,8 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     let finalUrl: string | null = null;
     let storagePath: string | null = null;
     let durationSec: number | null = null;
+    let originalSize: number | null = file.size;
+    let finalSize: number | null = file.size;
 
     // === Vídeo: tenta comprimir via compress-worker (Easypanel) antes de salvar ===
     const compressUrl = import.meta.env.VITE_COMPRESS_WORKER_URL as string | undefined;
@@ -205,6 +207,8 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
         if (!j?.url) throw new Error("resposta sem url");
         finalUrl = j.url as string;
         durationSec = typeof j.duration_sec === "number" ? Math.round(j.duration_sec) : null;
+        if (typeof j.original_size === "number") originalSize = j.original_size;
+        if (typeof j.final_size === "number") finalSize = j.final_size;
         const ratio = j.compression_ratio ? ` (${Math.round((1 - j.compression_ratio) * 100)}% menor)` : "";
         toast.success(`Vídeo comprimido e enviado ao MinIO${ratio}`);
       } catch (e) {
@@ -244,6 +248,8 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
         active: true,
         send_order: 100 + items.length,
         delay_before_ms: 1500,
+        original_size_bytes: originalSize,
+        final_size_bytes: finalSize,
         ...(durationSec ? { duration_sec: durationSec } : {}),
       })
       .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, original_size_bytes, final_size_bytes")
