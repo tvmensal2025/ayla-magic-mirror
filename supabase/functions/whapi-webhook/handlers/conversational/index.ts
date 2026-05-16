@@ -765,7 +765,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   const fb = currentStep.fallback || { mode: "repeat" };
   if (fb.mode === "goto" && fb.goto_step_id) {
     const nextStep = dbSteps.find((s) => s.id === fb.goto_step_id);
-    if (nextStep && nextStep.is_active) {
+      if (nextStep && nextStep.is_active) {
+        const nextIsMediaOnly = !String(nextStep.message_text || "").trim();
+        if (currentStep.captures?.some((c) => c.enabled !== false) && !hasCapture && nextIsMediaOnly) {
+          console.log(`[conversational] fallback goto bloqueado: step=${stepKey} exige captura antes de ${nextStep.step_key}`);
+          return _finalize(stepKey, await repeatCurrent());
+        }
       if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
         return _finalize(stepKey, {
           reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
