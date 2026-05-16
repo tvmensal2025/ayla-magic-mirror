@@ -492,7 +492,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   if (!currentStep) {
     // Unknown/legacy step → restart at the first active dynamic step.
     console.log(`[conversational] unknown step="${stepKey}" → restart at firstActive=${firstActive?.id} (steps=${dbSteps.length})`);
-    const mediaSent = await sendStepMedia(ctx, firstActive, consultantId, false);
+    const mediaSent = await sendStepMedia(ctx, firstActive, consultantId, true);
     const tpl = (firstActive.message_text || "").trim();
     const vars = {
       nome: ctx.customer.name,
@@ -503,13 +503,14 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     };
     const fallbackGreeting = mediaSent ? "" : `Oi${ctx.customer.name ? " " + String(ctx.customer.name).split(" ")[0] : ""}! 👋`;
     const firstReply = tpl ? renderTemplate(tpl, vars) : fallbackGreeting;
-    const nextOnStart = firstActive.fallback?.mode === "goto" && firstActive.fallback.goto_step_id
+    const canCascadeOnStart = firstActive.wait_for === "none";
+    const nextOnStart = canCascadeOnStart && firstActive.fallback?.mode === "goto" && firstActive.fallback.goto_step_id
       ? dbSteps.find((s) => s.id === firstActive.fallback?.goto_step_id && s.is_active)
       : null;
     let reply = firstReply;
     let nextConversationStep = firstActive.id;
     if (nextOnStart?.message_text) {
-      const nextMediaSent = await sendStepMedia(ctx, nextOnStart, consultantId, false);
+      const nextMediaSent = await sendStepMedia(ctx, nextOnStart, consultantId, true);
       const nextReply = renderTemplate(nextOnStart.message_text || "", vars).trim();
       reply = [firstReply, nextReply].filter((part) => part && part.trim()).join("\n\n");
       nextConversationStep = nextOnStart.id;
