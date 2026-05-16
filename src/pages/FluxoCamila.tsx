@@ -395,6 +395,35 @@ export default function FluxoCamila() {
                 </Button>
               )}
               <Button variant="outline" size="sm" onClick={() => setTestOpen(true)}>Testar com 1 número</Button>
+              <AlertDialog onOpenChange={(o) => !o && setWipeConfirm("")}>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" size="sm">
+                    <Trash2 className="h-4 w-4 mr-1" /> Apagar TUDO
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Apagar TUDO e começar do zero?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Isto vai apagar <strong>todos os seus leads</strong>, conversas, deals do CRM, memória da IA e mensagens agendadas.
+                      O fluxo, as mídias e os passos continuam intactos. Qualquer número que mandar mensagem depois vai começar do Passo 1 como lead novo.
+                      <br /><br />
+                      Para confirmar, digite <code className="px-1 bg-muted rounded">APAGAR</code> abaixo:
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <Input value={wipeConfirm} onChange={(e) => setWipeConfirm(e.target.value)} placeholder="APAGAR" autoFocus />
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      disabled={wipeConfirm !== "APAGAR" || wipeBusy}
+                      onClick={wipeAllConversations}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      {wipeBusy ? "Apagando…" : "Apagar TUDO"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           </div>
         </Card>
