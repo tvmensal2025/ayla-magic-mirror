@@ -9,6 +9,14 @@ import { uploadMedia, getAcceptString, formatFileSize } from "@/services/minioUp
 import { toast } from "sonner";
 import { MEDIA_TYPES, formatRecordingTime } from "./templateUtils";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type OpusRecorderClass = any;
+let RecorderPromise: Promise<OpusRecorderClass> | null = null;
+async function loadRecorder(): Promise<OpusRecorderClass> {
+  if (!RecorderPromise) RecorderPromise = import("opus-recorder").then((m) => (m as { default: OpusRecorderClass }).default || m);
+  return RecorderPromise;
+}
+
 interface Props {
   onCreateTemplate: (name: string, content: string, mediaType?: string, mediaUrl?: string | null, imageUrl?: string | null) => Promise<void>;
 }
@@ -36,26 +44,17 @@ export function TemplateCreateForm({ onCreateTemplate }: Props) {
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recorderRef = useRef<any>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const startRecording = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : "audio/webm",
-      });
-      chunksRef.current = [];
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        const file = Object.assign(blob, { name: `gravacao_${Date.now()}.webm`, lastModified: Date.now() }) as unknown as File;
+      const Recorder = await loadRecorder();
+      const recorder = new Recorder({ encoderPath: "/opus/encoderWorker.min.js", encoderApplication: 2048, encoderSampleRate: 16000, encoderFrameSize: 20, numberOfChannels: 1, streamPages: false, rawOpus: false });
+      recorder.ondataavailable = async (arrayBuffer: ArrayBuffer) => {
+        const blob = new Blob([arrayBuffer], { type: "audio/ogg" });
+        const file = Object.assign(blob, { name: `gravacao_${Date.now()}.ogg`, lastModified: Date.now() }) as unknown as File;
         setIsUploading(true);
         setUploadProgress(0);
         setUploadedFileName(file.name);
@@ -70,8 +69,8 @@ export function TemplateCreateForm({ onCreateTemplate }: Props) {
           setIsUploading(false);
         }
       };
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start();
+      recorderRef.current = recorder;
+      await recorder.start();
       setIsRecording(true);
       setRecordingTime(0);
       timerRef.current = setInterval(() => setRecordingTime((p) => p + 1), 1000);
@@ -81,19 +80,14 @@ export function TemplateCreateForm({ onCreateTemplate }: Props) {
   }, []);
 
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop();
+    if (recorderRef.current) { try { recorderRef.current.stop(); } catch {} }
     setIsRecording(false);
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   }, []);
 
   const cancelRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === "recording") {
-      mediaRecorderRef.current.ondataavailable = null;
-      mediaRecorderRef.current.onstop = null;
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream?.getTracks().forEach((t) => t.stop());
-    }
-    chunksRef.current = [];
+    if (recorderRef.current) { try { recorderRef.current.ondataavailable = null; recorderRef.current.stop(); } catch {} }
+    recorderRef.current = null;
     setIsRecording(false);
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   }, []);
