@@ -589,7 +589,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: mediaSent || undefined, ...extra },
     };
   };
-  const repeatCurrent = () => goToStep(currentStep);
+  const repeatCurrent = () => goToStep(currentStep, restoreDetourUpdates);
 
   // Resolve a transition (special or step) to a BotResult
   const resolveTransition = async (t: DbTransition): Promise<BotResult> => {
