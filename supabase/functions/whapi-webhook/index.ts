@@ -207,6 +207,7 @@ Deno.serve(async (req) => {
     }
 
     if (!customer) {
+      const pushedName = cleanPushName(fromName);
       const { data: newCustomer, error } = await supabase
         .from("customers")
         .insert({
@@ -214,6 +215,7 @@ Deno.serve(async (req) => {
           consultant_id: superAdminConsultantId,
           status: "pending",
           conversation_step: "welcome",
+          ...(pushedName ? { name: pushedName, name_source: "whatsapp_profile" } : {}),
         })
         .select().single();
       if (error) {
@@ -239,6 +241,18 @@ Deno.serve(async (req) => {
         }
       } else {
         customer = newCustomer;
+      }
+    }
+
+    // ─── Backfill: se o customer existe mas ainda não tem nome, usa o pushName do WhatsApp ─
+    if (customer && !customer.name) {
+      const pushedName = cleanPushName(fromName);
+      if (pushedName) {
+        await supabase.from("customers")
+          .update({ name: pushedName, name_source: "whatsapp_profile" })
+          .eq("id", customer.id);
+        customer.name = pushedName;
+        (customer as any).name_source = "whatsapp_profile";
       }
     }
 
