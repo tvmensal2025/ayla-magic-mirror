@@ -49,6 +49,7 @@ interface DbStep {
   step_key: string;
   step_type: string | null;
   message_text: string | null;
+  wait_for: string | null;
   text_delay_ms: number | null;
   slot_key: string | null;
   is_active: boolean;
@@ -97,7 +98,7 @@ async function loadFlow(supabase: any, consultantId: string): Promise<LoadedFlow
 
     const { data: steps, error: stepsErr } = await supabase
       .from("bot_flow_steps")
-      .select("id, step_key, step_type, message_text, text_delay_ms, slot_key, is_active, position, transitions, captures, fallback, auto_detect_doc_type, media_order")
+      .select("id, step_key, step_type, message_text, wait_for, text_delay_ms, slot_key, is_active, position, transitions, captures, fallback, auto_detect_doc_type, media_order")
       .eq("flow_id", flow.id)
       .order("position", { ascending: true });
     if (stepsErr) {
@@ -338,7 +339,7 @@ Responda em JSON: {"next_step_key": "<um_dos_passos_válidos>", "reason": "breve
   return await callOnce(3000);
 }
 
-async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string): Promise<boolean> {
+async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string, waitForSend = true): Promise<boolean> {
   const slotKey = step.slot_key || step.step_key || step.id;
   if (!slotKey) return false;
 
@@ -376,6 +377,19 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
         console.log(`[conversational] ⏭️ pulando ${kind} já enviado (media_id=${m.id}) para customer=${ctx.customer.id}`);
         continue;
       }
+    }
+
+    if (!waitForSend) {
+      console.log(`[conversational] mídia ${kind} não bloqueante ignorada para preservar avanço do fluxo (media_id=${m.id})`);
+      sent = true;
+      await ctx.supabase.from("conversations").insert({
+        customer_id: ctx.customer.id,
+        message_direction: "outbound",
+        message_text: `[flow-step:${step.step_key}:${kind}:skipped_nonblocking]`,
+        message_type: kind,
+        conversation_step: step.step_key,
+      });
+      continue;
     }
 
     const ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
@@ -478,7 +492,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   if (!currentStep) {
     // Unknown/legacy step → restart at the first active dynamic step.
     console.log(`[conversational] unknown step="${stepKey}" → restart at firstActive=${firstActive?.id} (steps=${dbSteps.length})`);
-    const mediaSent = await sendStepMedia(ctx, firstActive, consultantId);
+    const mediaSent = await sendStepMedia(ctx, firstActive, consultantId, false);
     const tpl = (firstActive.message_text || "").trim();
     const vars = {
       nome: ctx.customer.name,
@@ -495,7 +509,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     let reply = firstReply;
     let nextConversationStep = firstActive.id;
     if (nextOnStart?.message_text) {
-      const nextMediaSent = await sendStepMedia(ctx, nextOnStart, consultantId);
+      const nextMediaSent = await sendStepMedia(ctx, nextOnStart, consultantId, false);
       const nextReply = renderTemplate(nextOnStart.message_text || "", vars).trim();
       reply = [firstReply, nextReply].filter((part) => part && part.trim()).join("\n\n");
       nextConversationStep = nextOnStart.id;
@@ -618,12 +632,36 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   const goToStep = async (s: DbStep, extra: Record<string, any> = {}) => {
     const delay = Math.max(0, Math.min(60000, s.text_delay_ms ?? 1500));
     if (delay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, delay));
-    const mediaSent = await sendStepMedia(ctx, s, consultantId);
+    const mediaSent = await sendStepMedia(ctx, s, consultantId, false);
     const cadastroStep = stepTypeToCadastro(s.step_type);
-    const nextConversationStep = cadastroStep || s.id;
+    let nextConversationStep = cadastroStep || s.id;
+    let inlineSent = mediaSent;
+    const replyParts = [renderTemplate(s.message_text || "", vars).trim()].filter(Boolean);
+
+    let cursor: DbStep | null = cadastroStep ? null : s;
+    for (let guard = 0; cursor?.wait_for === "none" && guard < 4; guard++) {
+      const nextId = cursor.fallback?.mode === "goto" ? cursor.fallback.goto_step_id : null;
+      if (!nextId) break;
+      const nextStep = dbSteps.find((step) => step.id === nextId && step.is_active);
+      if (!nextStep || nextStep.id === cursor.id) break;
+
+      const cascadeDelay = Math.max(0, Math.min(60000, nextStep.text_delay_ms ?? 1500));
+      if (cascadeDelay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, cascadeDelay));
+      const cascadeMediaSent = await sendStepMedia(ctx, nextStep, consultantId, false);
+      const cascadeText = renderTemplate(nextStep.message_text || "", vars).trim();
+      if (cascadeText) replyParts.push(cascadeText);
+
+      inlineSent = inlineSent || cascadeMediaSent;
+      const cascadeCadastroStep = stepTypeToCadastro(nextStep.step_type);
+      nextConversationStep = cascadeCadastroStep || nextStep.id;
+      console.log(`[conversational] auto-cascade ${cursor.step_key} → ${nextStep.step_key} (wait_for=none)`);
+      if (cascadeCadastroStep) break;
+      cursor = nextStep;
+    }
+
     return {
-      reply: renderTemplate(s.message_text || "", vars),
-      updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: mediaSent || undefined, ...extra },
+      reply: replyParts.join("\n\n"),
+      updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: inlineSent || undefined, ...extra },
     };
   };
   const repeatCurrent = () => goToStep(currentStep, restoreDetourUpdates);
