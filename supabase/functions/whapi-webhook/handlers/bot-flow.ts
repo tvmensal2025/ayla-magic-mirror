@@ -746,6 +746,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             for (let oi = 0; oi < orderedMedia.length; oi++) {
               const m = orderedMedia[oi];
               let url: string | null = null;
+              let resolvedMediaId: string | null = m.media_id || null;
               let kind = m.media_kind === "audio" ? "audio" : m.media_kind === "video" ? "video" : m.media_kind === "image" ? "image" : "document";
               let durationSec: number | null = null;
 
@@ -767,7 +768,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (!url && m.slot_key) {
                 const { data: personal } = await supabase
                   .from("ai_media_library")
-                  .select("url, duration_sec")
+                  .select("id, url, duration_sec")
                   .eq("consultant_id", customer.consultant_id)
                   .eq("slot_key", m.slot_key)
                   .eq("active", true)
@@ -777,11 +778,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   .maybeSingle();
                 if (personal?.url) {
                   url = personal.url;
+                  resolvedMediaId = (personal as any).id || resolvedMediaId;
                   durationSec = Number((personal as any).duration_sec || 0) || null;
                 } else {
                   const { data: pub } = await supabase
                     .from("ai_media_library")
-                    .select("url, duration_sec")
+                    .select("id, url, duration_sec")
                     .eq("is_public", true)
                     .eq("slot_key", m.slot_key)
                     .eq("active", true)
@@ -790,12 +792,20 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                     .maybeSingle();
                   if (pub?.url) {
                     url = pub.url;
+                    resolvedMediaId = (pub as any).id || resolvedMediaId;
                     durationSec = Number((pub as any).duration_sec || 0) || null;
                   }
                 }
               }
 
               if (!url) continue;
+
+              // 🚫 Regra: nunca repetir áudio/vídeo para o mesmo cliente
+              const canSend = await canSendMediaOnce(supabase, {
+                consultantId: customer.consultant_id, customerId: customer.id,
+                mediaId: resolvedMediaId, slotKey: m.slot_key, kind,
+              });
+              if (!canSend) continue;
 
               try {
                 const ok = await sendMedia(remoteJid, url, "", kind);
