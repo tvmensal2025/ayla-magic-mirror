@@ -767,6 +767,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       }
       return { replyText: "", inlineSent: inlineMedia };
     }
+    // ⏱️ text_delay_ms = aguardar ANTES do TEXTO (depois da mídia). É o que a UI promete.
+    const textDelay = Math.max(0, Math.min(60000, st.text_delay_ms ?? 1500));
+    if (textDelay > 0 && !isTestMode()) {
+      await new Promise((r) => setTimeout(r, textDelay));
+    }
     if (asReply) {
       return { replyText: text, inlineSent: inlineMedia };
     }
