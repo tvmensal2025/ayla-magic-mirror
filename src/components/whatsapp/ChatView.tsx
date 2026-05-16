@@ -255,8 +255,8 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
           const phone = await getResolvedPhone();
           if (!phone) return;
           try {
-            // Send as base64 data URL with correct webm mimetype
-            const audioDataUrl = `data:audio/webm;base64,${base64}`;
+            // useAudioRecorder já gera OGG/Opus real, formato aceito pelo WhatsApp/Whapi.
+            const audioDataUrl = `data:audio/ogg;base64,${base64}`;
             const result = await sendWhatsAppMessage({
               instanceName, phone, mediaCategory: "audio", mediaUrl: audioDataUrl, isWhapi,
             });
