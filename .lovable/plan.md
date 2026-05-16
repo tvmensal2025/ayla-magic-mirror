@@ -1,128 +1,79 @@
-## Princípio: aditivo e reversível
+## Problema
 
-Não vamos tocar no que já funciona (state machine, templates, OCR, cadastro, FAQ atual). Vamos só **adicionar duas guardas pequenas**, cada uma protegida por uma flag, para que se algo der errado a gente desligue sem deploy.
+Você criou no `/admin/fluxos` um Passo 1 que pergunta o nome e um Passo 2 que não fala do nome. Hoje, mesmo quando o cliente já se apresentou antes (por exemplo "Oi, sou João" no welcome, ou nome veio do OCR da conta), o bot **ainda dispara o Passo 1** e pergunta o nome de novo. Você quer que ele pule direto para o Passo 2.
 
-Cobre exatamente os dois cenários que você levantou:
-1. Cliente fala o nome (ou outro dado) antes da hora.
-2. Cliente faz pergunta no meio do cadastro.
+## Solução (aditiva, sem mexer no resto do fluxo)
 
----
+Uma única função nova `resolveLandingStep(currentStep)` dentro de `supabase/functions/whapi-webhook/handlers/conversational/index.ts` que, ao chegar em qualquer passo, pergunta: *"este passo serve só para capturar um dado que eu já tenho?"*. Se sim → avança para o próximo passo ativo (`position` seguinte) e repete a checagem.
 
-## O que vai ser feito
+Aplica em 2 pontos do mesmo arquivo:
+1. Logo depois do `const currentStep = ...` (linha 584) — cobre o caso normal de transição entre passos.
+2. Dentro do bloco de saudação/restart (linha 732) — cobre o caso "cliente mandou 'oi' de novo e ia voltar pro Passo 1".
 
-### Mudança 1 — Não pedir de novo o que já temos (`shouldSkipAsk`)
+Mesma mudança replicada em `supabase/functions/evolution-webhook/handlers/conversational/index.ts` para paridade.
 
-**Onde:** `_shared/conversation-helpers.ts` (novo helper) e os steps `ask_*` em `bot-flow.ts` (whapi + evolution).
+### Como o passo é identificado como "ask name" (sem precisar de flag nova)
 
-**O que faz:** antes de cada pergunta `ask_name / ask_cpf / ask_email / ask_phone_confirm / ask_cep / ask_bill_value / ask_birth_date / ask_rg`, chama:
+Reaproveita exatamente o heurístico que já existe na linha 665-669:
 
 ```ts
-if (shouldSkipAsk(field, customer)) {
-  const next = getNextMissingStep(customer);   // já existe
-  return dispatchStep(next);                   // pula adiante
-}
+const isAskNameStep = (s) =>
+  /\bnome\b|\bchama\b/i.test(String(s.title || "")) ||
+  /\bnome\b/i.test(String(s.slot_key || "")) ||
+  (Array.isArray(s.captures) &&
+   s.captures.some((c) => c?.field === "name" && c?.enabled !== false));
 ```
 
-`shouldSkipAsk` retorna `true` quando:
-- `customer[field]` está preenchido e válido (reaproveita os validadores que já temos: `validarCPFDigitos`, `validarDataNascimento`, etc.), **e**
-- `name_source`/origem do dado é confiável (`ocr_conta`, `ocr_doc`, `user_confirmed`, `self_introduced`, `manual`).
+### Quando considera o nome "já capturado"
 
-Não inventa nada novo — só evita repergunta.
+Reusa `TRUSTED_NAME_SOURCES` (`_shared/conversation-helpers.ts`): `ocr_conta`, `ocr_doc`, `user_confirmed`, `self_introduced`, `manual`. Se `customer.name` existe **e** `name_source` está nesse set → pula. Se o nome veio de origem desconhecida, **não pula** (mantém pergunta para confirmar, comportamento atual).
 
-### Mudança 2 — Captura de nome também no welcome (sem mexer no resto)
+### Extensão natural (mesmo código serve)
 
-**Onde:** `conversational/index.ts`, único ponto, dentro do bloco `extractCaptures` que já existe (~linha 651).
+A função `resolveLandingStep` aceita uma lista pequena de checagens `{field, isFilled}`:
+- `name` → como acima
+- `electricity_bill_value` → se `customer.electricity_bill_value > 0` e step tem `capture.field === "electricity_bill_value"`
+- `cpf` → se `validarCPFDigitos(customer.cpf)` e step tem `capture.field === "cpf"`
+- `phone_whatsapp` → se já preenchido e step tem `capture.field === "phone_whatsapp"`
 
-**Hoje:** o extractor de nome só grava se o step atual tiver `capture: name` configurado OU se `!customer.name`.
+Isso resolve o seu caso (nome) e já blinda os próximos passos do mesmo tipo, sem precisar voltar aqui.
 
-**Mudança mínima:** quando `currentStep.step_key === "welcome"` e `!customer.name`, permitir gravar `name = extracted.name` + `name_source = "self_introduced"`. Mantém todas as travas existentes (`TRUSTED_LOCK` para OCR continua intacto).
+### Fallback de segurança
 
-Resultado: "Oi, sou João" no welcome → nome salvo → quando chegar em `ask_name`, a Mudança 1 pula.
-
-### Mudança 3 — Dúvida no meio do cadastro (detour leve, sem RAG novo)
-
-**Onde:** topo do `bot-flow.ts` (whapi + evolution), antes do `switch` que decide o que fazer com a mensagem.
-
-**O que faz:** se o lead está em algum step `aguardando_*` / `ask_*` e a mensagem é uma pergunta (heurística: tem `?`, ou casa regex curta tipo `/(quanto|como|seguro|golpe|funciona|fatura|conta|garant)/i`), faz:
-
-1. Chama o `matchQA` **que já existe** no `conversational/index.ts` (vamos exportá-lo). Reutiliza a FAQ que o consultor já cadastrou.
-2. Se encontrou FAQ → envia resposta da FAQ + uma frase fixa de gancho do step atual ("✅ Voltando — me envia agora a foto da conta de luz 📸"). Não muda `conversation_step`.
-3. Se NÃO encontrou FAQ → comportamento atual (responde como sempre fez). Nada quebra.
-4. Conta dúvidas seguidas no mesmo step em `customer.detour_count` (coluna nova, default 0). Ao receber qualquer dado válido, zera. Se chegar a 3 sem resolver → marca `bot_paused = true` com motivo "muitas dúvidas" (handoff que já existe).
-
-Tudo protegido por `customer.tenant_settings.midflow_qa_enabled` (default `true`, mas pode desligar instantaneamente por consultor se der ruim).
-
----
-
-## Como vai ser feito (passos)
-
-1. **Migração mínima** (`supabase/migrations/...`):
-   ```sql
-   alter table customers add column if not exists detour_count int default 0;
-   ```
-   Só isso. Sem RLS nova, sem tabela nova.
-
-2. **`_shared/conversation-helpers.ts`**: adicionar `shouldSkipAsk(field, customer)` (≈30 linhas). Não altera funções existentes.
-
-3. **`conversational/index.ts`**:
-   - Exportar `matchQA` (já existe, só não está exportado).
-   - Adicionar 4 linhas no bloco capture para permitir nome no `welcome`.
-
-4. **`whapi-webhook/handlers/bot-flow.ts`**:
-   - Importar `shouldSkipAsk` e `matchQA`.
-   - Função helper local `tryMidFlowQA(ctx)` (≈40 linhas) chamada no início do tratamento de mensagem de texto durante steps de cadastro.
-   - Em cada `case "ask_*"`, prefixar com `if (shouldSkipAsk(...)) return goNext();`. São ~8 casos, edição de 2 linhas cada.
-
-5. **`evolution-webhook/handlers/bot-flow.ts`**: mesma mudança, paridade.
-
-6. **Feature flag**: ler `process.env.MIDFLOW_QA_ENABLED` (ou coluna na tabela de tenants se preferir) — se `false`, `tryMidFlowQA` retorna `null` e o bot age como hoje.
-
-7. **Deploy faseado**:
-   - Deploy só do whapi-webhook primeiro.
-   - Testar com 1 número (o seu) por 24h.
-   - Depois deploy do evolution-webhook.
-   - Se algo estranho: setar `MIDFLOW_QA_ENABLED=false` e voltamos ao comportamento atual sem rollback de código.
-
----
-
-## Como garantimos que não vai quebrar
-
-- **Zero mudança em state machine, OCR, templates, fluxo de envio de mídia, RLS, schemas de mensagens.** Tudo continua igual.
-- **Toda mudança é "adicionar antes de", não "trocar".** Se o helper novo falhar (try/catch), cai no caminho atual.
-- **Feature flag de kill switch** sem precisar redeploy.
-- **Testes Deno** novos para `shouldSkipAsk` e `tryMidFlowQA` rodam antes do deploy.
-- **Logs**: cada decisão nova loga `[skip-ask] field=...` e `[midflow-qa] hit=true/false` — fácil de auditar.
-
----
+- Loop com `visited Set` para nunca entrar em ciclo.
+- Limite de 5 saltos por dispatch.
+- Se não achar próximo passo ativo → não pula (fica no passo atual, comportamento atual).
+- Se algo falhar (try/catch) → fica no passo atual.
+- Log `[skip-step] from=passo_1 → to=passo_2 reason=name_already_captured`.
 
 ## Resultado esperado
 
 | Situação | Hoje | Depois |
 |---|---|---|
-| "Oi, sou João" no welcome | Salva nome mas depois pergunta de novo | Salva nome e **pula** `ask_name` |
-| "Sou João" depois do OCR já ter pego "MARIA" | OCR vence (TRUSTED_LOCK) | Igual (não muda) |
-| "Quanto custa?" durante `aguardando_conta`, com FAQ cadastrada | Bot ignora a pergunta e repete pedido da conta | Responde a FAQ + repete pedido na mesma mensagem |
-| "Quanto custa?" sem FAQ cadastrada | Bot ignora | **Igual ao hoje** (não inventa) |
-| Cliente faz 3 perguntas seguidas sem resolver | Loop sem fim | Pausa bot e marca para humano |
-| Qualquer outro fluxo (vídeo, club, OCR, cadastro) | Igual | **Igual, sem diferença** |
+| Cliente diz "Oi, sou João" → cai no Passo 1 (pergunta nome) | Bot pergunta nome de novo | Bot pula pro Passo 2 |
+| OCR da conta já pegou nome → cai no Passo 1 | Bot pergunta nome | Bot pula pro Passo 2 |
+| Cliente chega sem nome → cai no Passo 1 | Bot pergunta nome | **Igual** (não pula) |
+| Cliente chega com nome de origem `unknown` | Bot pergunta nome | **Igual** (não pula, mantém confirmação) |
+| Passo 1 não é sobre nome (ex: vídeo de boas-vindas) | Roda normal | **Igual** (heurístico não casa, não pula) |
 
----
+## O que NÃO muda
 
-## O que NÃO vai mudar
+- Estrutura do fluxo no `/admin/fluxos`, `bot_flow_steps`, `transitions`, `captures`, `fallback`.
+- Captura de nome (já implementada e funcionando).
+- Lógica de OCR, mídia, templates, RLS, schemas.
+- `shouldSkipAsk` legado do `bot-flow.ts` (continua existindo para os steps `ask_*` antigos).
 
-- State machine conversational (`state-machine.ts`)
-- Lógica de OCR de conta/documento
-- Templates do consultor / builder de fluxo
-- Envio de mídia (áudio/vídeo/imagem) e ordem
-- RLS, schemas, autenticação
-- Captura de telefone, CPF, valor (continua só onde já configurado)
+## Arquivos editados
 
----
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` — adiciona `resolveLandingStep` + 2 pontos de chamada.
+- `supabase/functions/evolution-webhook/handlers/conversational/index.ts` — paridade.
+- `supabase/functions/_shared/conversation-helpers.ts` — pequena export auxiliar `isStepAskField(step, field)` para reuso e testabilidade.
 
 ## Critério de sucesso
 
-1. Os 6 cenários da tabela acima passam manualmente no seu número.
-2. Nenhum lead atualmente em cadastro recebe mensagem diferente do que receberia hoje (verificado por log comparativo de 24h).
-3. Conseguimos desligar tudo com 1 env var sem deploy.
+1. No seu fluxo atual, cliente que já tem nome cai direto no Passo 2.
+2. Cliente sem nome continua sendo perguntado no Passo 1.
+3. Logs `[skip-step]` aparecem na Edge Function quando pula.
+4. Nenhum outro fluxo muda comportamento.
 
-Se você aprovar, eu sigo nessa ordem: migração → helper → exportar matchQA → edits no bot-flow do whapi → testes → deploy whapi → 24h observando → evolution.
+Se aprovar, faço primeiro no whapi-webhook, observamos 1-2 leads reais, depois replico no evolution-webhook.
