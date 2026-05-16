@@ -665,11 +665,18 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const replyParts = [renderTemplate(s.message_text || "", vars).trim()].filter(Boolean);
 
     if (mediaSent === null) {
-      console.warn(`[conversational] avanço bloqueado: mídia obrigatória falhou no step=${s.step_key}`);
-      return {
-        reply: replyParts.join("\n\n"),
-        updates: { conversation_step: s.id, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: replyParts.length === 0 || undefined, ...extra },
-      };
+      const hasOwnText = replyParts.some((p) => p && p.trim());
+      // Só bloqueia se o step tem TEXTO próprio (texto sem mídia fica incompleto).
+      // Se o step é só-mídia e a mídia falhou, NÃO trava o lead — cascateia para o próximo.
+      if (hasOwnText) {
+        console.warn(`[conversational] avanço bloqueado: mídia obrigatória falhou no step=${s.step_key} (tem texto)`);
+        return {
+          reply: replyParts.join("\n\n"),
+          updates: { conversation_step: s.id, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...extra },
+        };
+      }
+      console.warn(`[conversational] mídia falhou em step só-mídia=${s.step_key} → cascateando para próximo`);
+      // cai no loop abaixo para cascatear; nextConversationStep começa em s.id e avança naturalmente.
     }
 
     let cursor: DbStep | null = cadastroStep ? null : s;
@@ -682,11 +689,18 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       const cascadeDelay = Math.max(0, Math.min(60000, nextStep.text_delay_ms ?? 1500));
       if (cascadeDelay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, cascadeDelay));
       const cascadeMediaSent = await sendStepMedia(ctx, nextStep, consultantId, false);
+      const cascadeHasText = !!(nextStep.message_text || "").trim();
       if (cascadeMediaSent === null) {
-        console.warn(`[conversational] cascade bloqueado: mídia obrigatória falhou no step=${nextStep.step_key}`);
+        if (cascadeHasText) {
+          console.warn(`[conversational] cascade bloqueado: mídia obrigatória falhou no step=${nextStep.step_key} (tem texto)`);
+          nextConversationStep = nextStep.id;
+          inlineSent = inlineSent || replyParts.length === 0;
+          break;
+        }
+        console.warn(`[conversational] cascade: mídia falhou em step só-mídia=${nextStep.step_key} → seguindo cascata`);
         nextConversationStep = nextStep.id;
-        inlineSent = inlineSent || replyParts.length === 0;
-        break;
+        cursor = nextStep;
+        continue;
       }
       const cascadeText = renderTemplate(nextStep.message_text || "", vars).trim();
       if (cascadeText) replyParts.push(cascadeText);
