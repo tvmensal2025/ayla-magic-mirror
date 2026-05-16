@@ -407,14 +407,9 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
   return sent;
 }
 
-function fallbackTextForStep(step: DbStep, customerName?: string | null): string {
-  const fields = new Set((step.captures || []).filter((c) => c.enabled !== false).map((c) => c.field));
-  if (fields.has("name")) return `Oi${customerName ? " " + String(customerName).split(" ")[0] : ""}! 👋 Qual é o seu nome?`;
-  if (fields.has("electricity_bill_value")) return `${customerName ? String(customerName).split(" ")[0] + ", " : ""}qual o valor médio da sua conta de luz?`;
-  if (fields.has("phone_whatsapp")) return "Qual é o melhor WhatsApp para contato?";
-  if (fields.has("cpf")) return "Me envie seu CPF, por favor.";
-  return `Oi${customerName ? " " + String(customerName).split(" ")[0] : ""}! 👋`;
-}
+// 🚫 REMOVIDO: fallbackTextForStep — inventava texto fora do /admin/fluxos.
+// Regra de ouro: o bot só envia o que o consultor configurou. Se não há
+// message_text nem mídia válida, cascateia pelo fallback.goto_step_id.
 
 // Wrapper de segurança — bloqueia replies vazios sem mídia (evita mensagens fantasma).
 function _finalize(stepKey: string, r: BotResult): BotResult {
