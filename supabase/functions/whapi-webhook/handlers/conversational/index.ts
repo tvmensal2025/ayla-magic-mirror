@@ -655,36 +655,34 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   };
 
   // Helper — render and return a step (respeita text_delay_ms configurado no passo)
-  // 📐 REGRA DE OURO: cada step envia APENAS mídia OU APENAS texto — nunca os dois.
-  //   - Se o step tem mídia configurada e ela foi enviada → texto suprimido.
-  //   - Se a mídia falhou → cai no texto do step como fallback.
-  //   - Se não há mídia (slot vazio) → envia o texto.
-  // Durante cascade (wait_for=none), cada step é enviado como MENSAGEM SEPARADA
-  // via ctx.sender (mídia OU texto), e o último step vira o `reply` retornado.
+  // 📐 REGRA: SEMPRE enviar a mídia configurada (áudio/vídeo/imagem) + o texto, se ambos existirem.
+  //   - Mídia nunca é suprimida quando existe texto: as duas coisas vão.
+  //   - Se a mídia falhou e o step tem texto → manda só o texto.
+  //   - Se não tem nem mídia nem texto → cascateia sem inventar nada.
+  // Durante cascade (wait_for=none), cada step intermediário é enviado como
+  // MENSAGEM SEPARADA via ctx.sender (mídia + texto), e o último vira `reply`.
   const renderStepText = (st: DbStep): string =>
     renderTemplate(st.message_text || "", vars).trim();
 
-  // Envia um step segundo a regra "mídia OU texto". Retorna o que foi enviado.
+  // Envia um step (mídia SEMPRE + texto SEMPRE quando existem).
   const emitStep = async (
     st: DbStep,
     asReply: boolean,
   ): Promise<{ replyText: string; inlineSent: boolean }> => {
     const mediaSent = await sendStepMedia(ctx, st, consultantId, false);
     // mediaSent: true = enviou; false = não tem mídia; null = tentou e falhou
-    if (mediaSent === true) {
-      return { replyText: "", inlineSent: true };
-    }
     const text = renderStepText(st);
+    const inlineMedia = mediaSent === true;
     if (!text) {
       if (mediaSent === null) {
         console.warn(`[conversational] step=${st.step_key}: mídia falhou e sem texto fallback`);
       }
-      return { replyText: "", inlineSent: mediaSent === true };
+      return { replyText: "", inlineSent: inlineMedia };
     }
     if (asReply) {
-      return { replyText: text, inlineSent: false };
+      return { replyText: text, inlineSent: inlineMedia };
     }
-    // Cascade: envia inline como mensagem separada (não concatena com próximos).
+    // Cascade: envia o texto inline como mensagem separada (mídia já foi inline).
     try { await ctx.sender.sendText(ctx.remoteJid, text); } catch (_) {}
     return { replyText: "", inlineSent: true };
   };
