@@ -164,6 +164,10 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
       toast.error(`Arquivo grande demais (máx ${MAX_BYTES[kind] / 1024 / 1024}MB)`);
       return;
     }
+    if (kind === "audio" && /\.webm$/i.test(file.name)) {
+      toast.error("Whapi não aceita áudio .webm. Use .ogg, .mp3 ou .m4a — ou grave pelo botão 'Gravar' aqui no painel.");
+      return;
+    }
     setUploading(kind);
     const ext = file.name.split(".").pop() || "bin";
     const path = `${consultantId}/${slotKey}/${crypto.randomUUID()}.${ext}`;
