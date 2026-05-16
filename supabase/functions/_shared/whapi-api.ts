@@ -138,56 +138,104 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
     mediatype: "video" | "image" | "document" | "audio" | "voice" = "video",
   ): Promise<boolean> {
     const to = remoteJid.includes("@") ? remoteJid : `${remoteJid}@s.whatsapp.net`;
-    // Whapi: para qualquer áudio (incluindo .webm gravado no painel) usar /messages/voice
-    // — o endpoint /messages/audio dá 500 com webm. Igualamos ao whapi-proxy.
     const isAudio = mediatype === "audio" || mediatype === "voice";
     const endpoint = mediatype === "video" ? "messages/video"
       : mediatype === "image" ? "messages/image"
       : isAudio ? "messages/voice"
       : "messages/document";
-
-    // Mostra presence apropriada antes da mídia para humanizar.
-    sendPresence(remoteJid, isAudio ? "recording" : "typing", 3).catch(() => {});
-
     const urlPreview = String(mediaUrl || "").slice(-60);
 
-    // Whapi /messages/voice exige audio/ogg(opus). Se a fonte é .webm (audio/webm),
-    // baixamos e re-enviamos como data URI audio/ogg;codecs=opus (mesmo codec, container compatível).
-    let mediaPayload: string = mediaUrl;
-    if (isAudio && /\.webm(\?|$)/i.test(mediaUrl)) {
+    const cleanPath = (() => {
+      try { return new URL(mediaUrl).pathname; } catch (_) { return mediaUrl.split("?")[0] || "media"; }
+    })();
+    const fileName = decodeURIComponent(cleanPath.split("/").pop() || (isAudio ? "audio.webm" : "media"));
+    const contentType = isAudio ? "audio/webm"
+      : mediatype === "video" ? "video/mp4"
+      : mediatype === "image" ? "image/jpeg"
+      : "application/octet-stream";
+
+    const sendMultipart = async (path: string): Promise<boolean> => {
       try {
-        const r = await fetchWithTimeout(mediaUrl, { method: "GET", timeout: 30_000 });
-        if (r.ok) {
-          const buf = new Uint8Array(await r.arrayBuffer());
-          // base64 encode
-          let bin = "";
-          for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
-          const b64 = btoa(bin);
-          mediaPayload = `data:audio/ogg;codecs=opus;base64,${b64}`;
-          console.log(`🔄 [whapi:sendMedia] webm→data:audio/ogg (${buf.length} bytes)`);
-        } else {
-          console.warn(`⚠️ [whapi:sendMedia] falha ao baixar webm (${r.status}); enviando URL original`);
+        const mediaRes = await fetchWithTimeout(mediaUrl, { method: "GET", timeout: 30_000 });
+        if (!mediaRes.ok) {
+          console.warn(`⚠️ [whapi:sendMedia] download da mídia falhou (${mediaRes.status})`);
+          return false;
         }
+        const blob = new Blob([await mediaRes.arrayBuffer()], { type: mediaRes.headers.get("content-type") || contentType });
+        const form = new FormData();
+        form.append("to", to);
+        form.append("media", blob, fileName);
+        if (caption && !isAudio) form.append("caption", caption);
+        if (isAudio) {
+          form.append("mime_type", blob.type || "audio/webm");
+          form.append("no_cache", "true");
+          form.append("recording_time", "1");
+        }
+        console.log(`📤 [whapi:sendMedia] fallback multipart -> ${to} (${mediatype} via ${path}, ${blob.size} bytes, ${blob.type})`);
+        return await sendWithRetry("send_media_multipart", () =>
+          fetchWithTimeout(`${url}/${path}`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${apiToken}` },
+            body: form,
+            timeout: 90_000,
+          }),
+        );
       } catch (e: any) {
-        console.warn(`⚠️ [whapi:sendMedia] erro ao converter webm: ${e?.message || e}`);
+        console.warn(`⚠️ [whapi:sendMedia] fallback multipart falhou: ${e?.message || e}`);
+        return false;
       }
-    }
+    };
+
+    const tryJsonSend = async (path: string, jsonBody: Record<string, unknown>): Promise<boolean> => {
+      let last = "";
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const res = await fetchWithTimeout(`${url}/${path}`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(jsonBody),
+            timeout: 60_000,
+          });
+          if (res.ok) return true;
+          last = `${res.status} ${(await res.text()).substring(0, 180)}`;
+          if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) break;
+        } catch (e: any) {
+          last = e?.message || String(e);
+        }
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 300 * Math.pow(3, attempt - 1)));
+      }
+      console.warn(`⚠️ [whapi:sendMedia] JSON falhou (${mediatype} via ${path}); tentando multipart. Último erro: ${last}`);
+      return false;
+    };
+
+    sendPresence(remoteJid, isAudio ? "recording" : "typing", 3).catch(() => {});
 
     console.log(`📤 [whapi:sendMedia] -> ${to} (${mediatype} via ${endpoint}) url=…${urlPreview}`);
     const body: Record<string, unknown> = isAudio
-      ? { to, media: mediaPayload }
+      ? { to, media: mediaUrl, mime_type: contentType, no_cache: true, recording_time: 1 }
       : { to, media: mediaUrl, caption };
-    const ok = await sendWithRetry("send_media", () =>
-      fetchWithTimeout(`${url}/${endpoint}`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        timeout: 60_000,
-      })
-      , 3
-    );
-    console.log(`${ok ? "✅" : "❌"} [whapi:sendMedia] resultado=${ok} (${mediatype} via ${endpoint})`);
-    return ok;
+    const ok = await tryJsonSend(endpoint, body);
+    if (ok) {
+      console.log(`✅ [whapi:sendMedia] resultado=true (${mediatype} via ${endpoint})`);
+      return true;
+    }
+
+    const multipartOk = await sendMultipart(endpoint);
+    if (multipartOk) {
+      console.log(`✅ [whapi:sendMedia] resultado=true (${mediatype} via ${endpoint}, multipart)`);
+      return true;
+    }
+
+    if (isAudio && endpoint !== "messages/audio") {
+      const audioEndpointOk = await sendMultipart("messages/audio");
+      if (audioEndpointOk) {
+        console.log(`✅ [whapi:sendMedia] resultado=true (${mediatype} via messages/audio, multipart)`);
+        return true;
+      }
+    }
+
+    console.log(`❌ [whapi:sendMedia] resultado=false (${mediatype} via ${endpoint})`);
+    return false;
   }
 
   async function downloadMedia(_key: any, _message: any): Promise<string | null> {

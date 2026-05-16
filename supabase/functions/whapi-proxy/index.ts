@@ -37,6 +37,18 @@ async function whapiFetch(token: string, path: string, init: RequestInit = {}) {
   return { ok: res.ok, status: res.status, data };
 }
 
+async function whapiFetchMultipart(token: string, path: string, form: FormData) {
+  const res = await fetch(`${WHAPI_BASE}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const text = await res.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+  return { ok: res.ok, status: res.status, data };
+}
+
 // Retry com backoff exponencial para erros transitórios (500/502/503/504, network).
 // Usado em send_media para mitigar instabilidades do gate Whapi (Fase 7).
 const RETRYABLE_STATUS = new Set([500, 502, 503, 504]);
@@ -259,10 +271,33 @@ Deno.serve(async (req) => {
         if (caption) sendBody.caption = caption;
         if (fileName) sendBody.file_name = fileName;
 
-        const r = await whapiFetchWithRetry(whapiToken, path, {
+        let r = await whapiFetchWithRetry(whapiToken, path, {
           method: "POST",
           body: JSON.stringify(sendBody),
         }, { maxAttempts: 3, baseDelayMs: 800, label: `send_media:${mediatype}` });
+        if (!r.ok) {
+          try {
+            const mediaRes = await fetch(mediaUrl, { signal: AbortSignal.timeout(30_000) });
+            if (mediaRes.ok) {
+              const cleanPath = (() => { try { return new URL(mediaUrl).pathname; } catch (_) { return mediaUrl.split("?")[0] || "media"; } })();
+              const safeName = fileName || decodeURIComponent(cleanPath.split("/").pop() || (mediatype === "audio" ? "audio.webm" : "media"));
+              const blob = new Blob([await mediaRes.arrayBuffer()], { type: mediaRes.headers.get("content-type") || (mediatype === "audio" ? "audio/webm" : "application/octet-stream") });
+              const form = new FormData();
+              form.append("to", to);
+              form.append("media", blob, safeName);
+              if (caption) form.append("caption", caption);
+              if (mediatype === "audio") {
+                form.append("mime_type", blob.type || "audio/webm");
+                form.append("no_cache", "true");
+                form.append("recording_time", "1");
+              }
+              r = await whapiFetchMultipart(whapiToken, path, form);
+              if (!r.ok && mediatype === "audio") r = await whapiFetchMultipart(whapiToken, "/messages/audio", form);
+            }
+          } catch (e) {
+            console.warn("[whapi-proxy] fallback multipart falhou:", (e as any)?.message || e);
+          }
+        }
         if (!r.ok) return json(r.status, { error: r.data });
         return json(200, { key: { id: r.data?.message?.id || r.data?.id || "" } });
       }
