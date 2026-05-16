@@ -138,23 +138,22 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
     mediatype: "video" | "image" | "document" | "audio" | "voice" = "video",
   ): Promise<boolean> {
     const to = remoteJid.includes("@") ? remoteJid : `${remoteJid}@s.whatsapp.net`;
-    const isVoice = mediatype === "voice";
-    const isAudio = mediatype === "audio" || isVoice;
+    // Whapi: para qualquer áudio (incluindo .webm gravado no painel) usar /messages/voice
+    // — o endpoint /messages/audio dá 500 com webm. Igualamos ao whapi-proxy.
+    const isAudio = mediatype === "audio" || mediatype === "voice";
     const endpoint = mediatype === "video" ? "messages/video"
       : mediatype === "image" ? "messages/image"
-      : isVoice ? "messages/voice"
-      : mediatype === "audio" ? "messages/audio"
+      : isAudio ? "messages/voice"
       : "messages/document";
 
     // Mostra presence apropriada antes da mídia para humanizar.
     sendPresence(remoteJid, isAudio ? "recording" : "typing", 3).catch(() => {});
 
-    console.log(`📤 [whapi:sendMedia] -> ${to} (${mediatype})`);
-    const body: Record<string, unknown> = isVoice
-      ? { to, media: mediaUrl, mime_type: "audio/ogg; codecs=opus", ptt: true }
-      : isAudio
-        ? { to, media: mediaUrl, caption }
-        : { to, media: mediaUrl, caption };
+    const urlPreview = String(mediaUrl || "").slice(-60);
+    console.log(`📤 [whapi:sendMedia] -> ${to} (${mediatype} via ${endpoint}) url=…${urlPreview}`);
+    const body: Record<string, unknown> = isAudio
+      ? { to, media: mediaUrl }
+      : { to, media: mediaUrl, caption };
     const ok = await sendWithRetry("send_media", () =>
       fetchWithTimeout(`${url}/${endpoint}`, {
         method: "POST",
@@ -164,7 +163,7 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
       })
       , 3
     );
-    console.log(`${ok ? "✅" : "❌"} [whapi:sendMedia] resultado=${ok} (${mediatype})`);
+    console.log(`${ok ? "✅" : "❌"} [whapi:sendMedia] resultado=${ok} (${mediatype} via ${endpoint})`);
     return ok;
   }
 
