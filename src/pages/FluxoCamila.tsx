@@ -331,6 +331,25 @@ export default function FluxoCamila() {
     setTestCount(0);
   }
 
+  const [wipeConfirm, setWipeConfirm] = useState("");
+  const [wipeBusy, setWipeBusy] = useState(false);
+  async function wipeAllConversations() {
+    if (!userId) return;
+    setWipeBusy(true);
+    try {
+      const { data, error } = await supabase.rpc("reset_all_consultant_conversations", { _consultant_id: userId });
+      if (error) throw error;
+      const d = (data as any)?.deleted ?? {};
+      toast.success(`Tudo limpo! ${d.customers ?? 0} leads, ${d.conversations ?? 0} mensagens, ${d.crm_deals ?? 0} deals apagados.`);
+      setTestCount(0);
+      setWipeConfirm("");
+    } catch (e: any) {
+      toast.error(e?.message || "Erro ao apagar");
+    } finally {
+      setWipeBusy(false);
+    }
+  }
+
   const orderedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
 
   if (loading) {
