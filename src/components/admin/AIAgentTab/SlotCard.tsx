@@ -44,10 +44,10 @@ export function SlotCard({ userId, slot, defaultMedia, personalMedia, onChange }
   const variantLabel = hasPersonal ? "Meu áudio" : "Padrão (Camila)";
 
   async function uploadAudioBlob(blob: Blob) {
-    const path = `${userId}/slots/${slot.slot_key}.webm`;
+    const path = `${userId}/slots/${slot.slot_key}.ogg`;
     const { error: upErr } = await supabase.storage
       .from("ai-agent-media")
-      .upload(path, blob, { upsert: true, contentType: blob.type || "audio/webm" });
+      .upload(path, blob, { upsert: true, contentType: "audio/ogg" });
     if (upErr) throw upErr;
     const { data } = supabase.storage.from("ai-agent-media").getPublicUrl(path);
     // cache-bust: força navegador/CDN a buscar a nova versão depois de regravar
