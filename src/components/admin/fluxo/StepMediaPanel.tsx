@@ -20,8 +20,10 @@ type Media = {
   delay_before_ms?: number | null;
 };
 
+// Whapi (WhatsApp) rejeita .webm com erro 500 em /messages/voice.
+// Aceitamos só formatos que ele entrega como voice note: .ogg/opus, .mp3 ou .m4a.
 const ACCEPT: Record<Kind, string> = {
-  audio: "audio/*",
+  audio: "audio/ogg,audio/mpeg,audio/mp4,audio/wav,audio/x-m4a,.ogg,.mp3,.m4a,.wav",
   image: "image/*",
   video: "video/*",
 };
@@ -160,6 +162,10 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
   async function handleUpload(kind: Kind, file: File, slotKey: string) {
     if (file.size > MAX_BYTES[kind]) {
       toast.error(`Arquivo grande demais (máx ${MAX_BYTES[kind] / 1024 / 1024}MB)`);
+      return;
+    }
+    if (kind === "audio" && /\.webm$/i.test(file.name)) {
+      toast.error("Whapi não aceita áudio .webm. Use .ogg, .mp3 ou .m4a — ou grave pelo botão 'Gravar' aqui no painel.");
       return;
     }
     setUploading(kind);
@@ -304,7 +310,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
             {kind === "audio" && slotForUpload && (
               <AudioRecorderInline
                 onRecorded={async (blob, durationSec) => {
-                  const file = new File([blob], `gravacao-${Date.now()}.webm`, { type: blob.type || "audio/webm" });
+                  const file = new File([blob], `gravacao-${Date.now()}.ogg`, { type: "audio/ogg" });
                   await handleUpload("audio", file, slotForUpload);
                 }}
               />
