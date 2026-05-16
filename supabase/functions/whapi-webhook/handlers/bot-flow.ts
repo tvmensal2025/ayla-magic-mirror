@@ -460,7 +460,60 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
 
   // ═══════════════════════════════════════════════════════════════════
-  // HELPER: Envia opções como TEXTO (botões não funcionam na Evolution API atual)
+  // 🤔 MIDFLOW QA — cliente faz pergunta no meio do cadastro
+  // Aditivo, gated por env MIDFLOW_QA_ENABLED (default "true").
+  // Se a mensagem parece pergunta e casa com a FAQ do consultor:
+  //   1) responde a FAQ
+  //   2) anexa "gancho" do step atual (não muda conversation_step)
+  //   3) incrementa detour_count; 3+ sem progresso → handoff humano
+  // Se NÃO casa → não faz nada (fluxo segue como hoje, zero efeito).
+  // ═══════════════════════════════════════════════════════════════════
+  try {
+    const midflowEnabled = (Deno.env.get("MIDFLOW_QA_ENABLED") ?? "true").toLowerCase() !== "false";
+    const inCadastro = /^(ask_|aguardando_|editing_|confirm)/.test(String((customer as any).conversation_step || ""));
+    if (
+      midflowEnabled &&
+      inCadastro &&
+      messageText && !isFile && !isButton &&
+      detectQuestionIntent(messageText)
+    ) {
+      const { data: flowRow } = await supabase
+        .from("bot_flows").select("id")
+        .eq("consultant_id", customer.consultant_id)
+        .eq("is_active", true).maybeSingle();
+      if (flowRow?.id) {
+        const qa = await matchQA(supabase, (flowRow as any).id, customer.consultant_id, messageText);
+        if (qa && (qa.text || qa.mediaUrls.length)) {
+          console.log(`[midflow-qa] hit=true step="${(customer as any).conversation_step}" detour=${(customer as any).detour_count || 0}`);
+          // Envia mídias da FAQ (se houver)
+          for (const m of qa.mediaUrls) {
+            try { await sendMedia(remoteJid, m.url, "", m.kind); } catch (_) { /* noop */ }
+          }
+          const stepKey = String((customer as any).conversation_step || "");
+          const reentry = getReentryPromptForStep(stepKey, customer);
+          const text = [qa.text, reentry].filter(Boolean).join("\n\n");
+
+          // Atualiza detour_count; 3+ → pausa para humano
+          const detourNext = Number((customer as any).detour_count || 0) + 1;
+          const patch: Record<string, any> = { detour_count: detourNext };
+          if (detourNext >= 3) {
+            patch.bot_paused = true;
+            patch.bot_paused_reason = "muitas_duvidas";
+            patch.bot_paused_at = new Date().toISOString();
+          }
+          try { await supabase.from("customers").update(patch).eq("id", customer.id); } catch (_) {}
+          return { reply: text, updates: { __inline_sent: qa.mediaUrls.length > 0 || undefined } as any };
+        } else {
+          console.log(`[midflow-qa] hit=false step="${(customer as any).conversation_step}"`);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[midflow-qa] falhou (seguindo fluxo normal):", (e as any)?.message);
+  }
+
+
+
   // Formato: mensagem + opções numeradas
   // ═══════════════════════════════════════════════════════════════════
   async function sendOptions(jid: string, msg: string, options: { id: string; title: string }[]): Promise<boolean> {
