@@ -391,7 +391,7 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
         console.log(`[conversational] ⏱️ aguardando ${wait}ms antes de enviar ${kind} (media_id=${m.id})`);
         await new Promise((r) => setTimeout(r, wait));
       } else if (i > 0) {
-        const pause = kind === "audio" ? 1500 : kind === "video" ? 2000 : 800;
+        const pause = kind === "audio" || kind === "video" ? 2000 : 800;
         await new Promise((r) => setTimeout(r, pause));
       }
     }
