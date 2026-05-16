@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    // Auth: aceita JWT de usuário OU SERVICE_ROLE_KEY (chamadas internas: whapi-webhook, evolution-webhook, etc.)
+    // Auth: aceita JWT de usuário OU SERVICE_ROLE_KEY (chamadas internas)
     const authHeader = req.headers.get("Authorization") || "";
     if (!authHeader) return new Response(JSON.stringify({ error: "no auth" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
@@ -84,20 +84,6 @@ Deno.serve(async (req) => {
 
     const normalizedBase64 = cleanBase64(base64);
     const normalizedMimeType = normalizeMimeType(mimeType);
-
-    if (kind === "audio") {
-      try {
-        const transcript = await transcribeAudioWithOpenAI(normalizedBase64, normalizedMimeType, language);
-        if (transcript) {
-          console.log(`ai-transcribe-media: OpenAI transcreveu áudio (${transcript.length} chars)`);
-          return new Response(JSON.stringify({ transcript }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-      } catch (audioError: any) {
-        console.warn("ai-transcribe-media OpenAI fallback to Gemini:", audioError?.message || audioError);
-      }
-    }
 
     const prompt = kind === "image"
       ? `Descreva detalhadamente o conteúdo desta imagem em ${language}. Se for uma conta de luz, RG, CNH ou documento, identifique o tipo. Seja conciso e factual.`
