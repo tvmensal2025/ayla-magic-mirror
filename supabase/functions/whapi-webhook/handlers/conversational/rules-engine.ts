@@ -42,6 +42,22 @@ export interface RuleMatchResult {
 
 const REGEX_MAX_LEN = 200;     // pattern length cap (defensive)
 const TEXT_MAX_LEN  = 4000;    // message length cap for matching
+const DEFAULT_MAX_FIRES_PER_CONVERSATION = 10; // hard ceiling quando coluna é NULL
+const RATE_LIMIT_PER_CUSTOMER_PER_MIN = 5;     // máx. de regras disparadas/min por cliente
+
+// In-memory rate limit por customer_id (reset implícito a cada restart de função)
+const _customerFireWindow = new Map<string, number[]>();
+export function _consumeCustomerRateLimit(customerId: string): boolean {
+  const now = Date.now();
+  const win = (_customerFireWindow.get(customerId) || []).filter((t) => now - t < 60_000);
+  if (win.length >= RATE_LIMIT_PER_CUSTOMER_PER_MIN) {
+    _customerFireWindow.set(customerId, win);
+    return false;
+  }
+  win.push(now);
+  _customerFireWindow.set(customerId, win);
+  return true;
+}
 
 export function normalize(s: string): string {
   return String(s || "")
@@ -168,15 +184,18 @@ export async function evaluateRules(args: EvaluateArgs): Promise<RuleMatchResult
     const matched = tryMatchRule(rule, messageText);
     if (!matched) continue;
 
-    // Max fires per conversation
-    if (rule.max_fires_per_conversation && rule.max_fires_per_conversation > 0 && customerId) {
+    // Max fires per conversation (com default = 10 quando NULL para evitar loops infinitos)
+    const maxFires = (rule.max_fires_per_conversation && rule.max_fires_per_conversation > 0)
+      ? rule.max_fires_per_conversation
+      : DEFAULT_MAX_FIRES_PER_CONVERSATION;
+    if (customerId) {
       try {
         const { count } = await supabase
           .from("bot_flow_rule_fires")
           .select("id", { count: "exact", head: true })
           .eq("rule_id", rule.id)
           .eq("customer_id", customerId);
-        if ((count || 0) >= rule.max_fires_per_conversation) continue;
+        if ((count || 0) >= maxFires) continue;
       } catch (e) {
         console.error("[rules-engine] count fires failed", e);
       }

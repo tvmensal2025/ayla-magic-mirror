@@ -12,7 +12,7 @@ import {
 } from "../../../_shared/captureExtractors.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
 import { isTestMode } from "../../../_shared/test-mode.ts";
-import { evaluateRules, logRuleFire } from "./rules-engine.ts";
+import { evaluateRules, logRuleFire, _consumeCustomerRateLimit } from "./rules-engine.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
@@ -394,12 +394,47 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
   return sent;
 }
 
+// Wrapper de segurança — bloqueia replies vazios sem mídia (evita mensagens fantasma).
+function _finalize(stepKey: string, r: BotResult): BotResult {
+  const reply = (r.reply || "").trim();
+  const hasMedia = r.updates?.__inline_sent === true;
+  if (!reply && !hasMedia) {
+    console.warn(`[conversational] ⚠️ reply vazio bloqueado em step=${stepKey}`);
+    return { reply: "", updates: { ...r.updates, __inline_sent: true } };
+  }
+  return { reply, updates: r.updates };
+}
+
 export async function runConversationalFlow(ctx: BotContext): Promise<BotResult> {
   let stepKey = (ctx.customer.conversation_step || "welcome") as string;
 
   // Cadastro steps are NEVER handled here — defensive guard
   if (CADASTRO_STEPS.has(stepKey)) {
     return { reply: "", updates: {} };
+  }
+
+  // ─── Dedupe de mensagem (idempotência) ─────────────────────────────────
+  // Whapi às vezes reenvia o mesmo webhook. Sem isso, capturas são processadas
+  // 2x e auto-advance pula passos. Tabela tem TTL de 24h (pg_cron).
+  if (ctx.messageId) {
+    try {
+      const { data: inserted, error: dupErr } = await ctx.supabase
+        .from("webhook_message_dedupe")
+        .insert({ message_id: ctx.messageId, consultant_id: ctx.customer?.consultant_id || null })
+        .select("message_id")
+        .maybeSingle();
+      if (!inserted && !dupErr) {
+        console.log(`[conversational] 🔁 dedupe hit: ${ctx.messageId} já processado`);
+        return { reply: "", updates: { __inline_sent: true } };
+      }
+      // Em caso de conflito (PK violation), o insert retorna erro 23505 — também é dedupe hit.
+      if (dupErr && String((dupErr as any).code) === "23505") {
+        console.log(`[conversational] 🔁 dedupe conflict: ${ctx.messageId}`);
+        return { reply: "", updates: { __inline_sent: true } };
+      }
+    } catch (e) {
+      console.error("[conversational] dedupe check failed (continuando)", e);
+    }
   }
 
   // ─── Detour return: se o lead foi desviado por uma regra goto_step no turno
@@ -465,45 +500,10 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Nota: a avaliação de bot_flow_rules agora roda DEPOIS de matchTransition
   // (como fallback inteligente, não como primeiro filtro) — ver bloco mais abaixo.
 
-  // ─── Q&A FAQ matching ───────────────────────────────────────────────
-  // Antes de classificar intenção, vê se a mensagem casa com uma pergunta
-  // cadastrada no Flow Builder. Se casar, responde e MANTÉM o passo atual.
-  const qaHit = await matchQA(ctx.supabase, flowId, consultantId, ctx.messageText || "");
-  if (qaHit) {
-    console.log(`[conversational] QA hit at step="${stepKey}"`);
-    // Envia mídia inline (se houver) — texto vai pelo retorno padrão
-    for (const m of qaHit.mediaUrls) {
-      if ((m.kind === "audio" || m.kind === "video") && m.mediaId) {
-        const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
-          _consultant_id: consultantId,
-          _customer_id: ctx.customer.id,
-          _media_id: m.mediaId,
-          _slot_key: null,
-          _kind: m.kind,
-        });
-        if (canSend === false) {
-          console.log(`[conversational] ⏭️ QA: pulando ${m.kind} já enviado (media_id=${m.mediaId})`);
-          continue;
-        }
-      }
-      try { await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", m.kind); } catch (_) {}
-    }
-    return {
-      reply: renderTemplate(qaHit.text || "", {
-        nome: ctx.customer.name,
-        representante: ctx.nomeRepresentante,
-        valor_conta: (ctx.customer as any).electricity_bill_value,
-        telefone: ctx.customer.phone_whatsapp,
-        cpf: (ctx.customer as any).cpf,
-      }),
-      updates: { conversation_step: stepKey, __inline_sent: qaHit.mediaUrls.length > 0 || undefined },
-    };
-  }
-
-  const cls = await classifyIntent(ctx.messageText, stepKey as ConversationalStep, ctx.geminiApiKey);
-
   // ---------------------------------------------------------------------------
   // Capture phase — extract data the consultor configured for this step
+  // Roda ANTES do QA e do classifier para que "300 reais" nunca seja roubado
+  // por uma pergunta FAQ com phrase "reais".
   // ---------------------------------------------------------------------------
   const captureUpdates: Record<string, any> = {};
   try {
@@ -520,33 +520,66 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     console.error("[conversational] capture phase failed", e);
   }
 
-  // Global overrides: cadastro / humano keywords win in any step
-  if (cls.intent === "quer_cadastrar") {
-    return {
-      reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_conta", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
-    };
-  }
-  if (cls.intent === "quer_humano") {
-    return {
-      reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
-    };
-  }
-
-  // Intents virtuais derivados das capturas: se o lead INFORMOU um dado, isso
-  // conta como intenção para o motor de transição (evita o lead responder
-  // "300 reais" e o bot repetir o vídeo por falta de transição configurada).
+  // Intents virtuais derivados das capturas (precisamos cedo para suprimir QA/regras).
   const captureIntents: string[] = [];
   if (captureUpdates.electricity_bill_value != null) captureIntents.push("informou_valor", "valor_brl");
   if (captureUpdates.name) captureIntents.push("informou_nome");
   if (captureUpdates.phone_whatsapp) captureIntents.push("informou_telefone");
   if (captureUpdates.cpf) captureIntents.push("informou_cpf");
   const hasCapture = captureIntents.length > 0;
+
+  // ─── Q&A FAQ matching ───────────────────────────────────────────────
+  // Pula se a mensagem produziu captura legítima — captura tem prioridade.
+  const qaHit = hasCapture ? null : await matchQA(ctx.supabase, flowId, consultantId, ctx.messageText || "");
+  if (qaHit) {
+    console.log(`[conversational] QA hit at step="${stepKey}"`);
+    for (const m of qaHit.mediaUrls) {
+      if ((m.kind === "audio" || m.kind === "video") && m.mediaId) {
+        const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
+          _consultant_id: consultantId,
+          _customer_id: ctx.customer.id,
+          _media_id: m.mediaId,
+          _slot_key: "__qa__",
+          _kind: m.kind,
+        });
+        if (canSend === false) {
+          console.log(`[conversational] ⏭️ QA: pulando ${m.kind} já enviado (media_id=${m.mediaId})`);
+          continue;
+        }
+      }
+      try { await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", m.kind); } catch (_) {}
+    }
+    return _finalize(stepKey, {
+      reply: renderTemplate(qaHit.text || "", {
+        nome: ctx.customer.name,
+        representante: ctx.nomeRepresentante,
+        valor_conta: (ctx.customer as any).electricity_bill_value,
+        telefone: ctx.customer.phone_whatsapp,
+        cpf: (ctx.customer as any).cpf,
+      }),
+      updates: { conversation_step: stepKey, __inline_sent: qaHit.mediaUrls.length > 0 || undefined, ...restoreDetourUpdates },
+    });
+  }
+
+  const cls = await classifyIntent(ctx.messageText, stepKey as ConversationalStep, ctx.geminiApiKey);
+
+  // Global overrides: cadastro / humano keywords win in any step
+  if (cls.intent === "quer_cadastrar") {
+    return _finalize(stepKey, {
+      reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
+        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
+      }),
+      updates: { conversation_step: "aguardando_conta", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
+    });
+  }
+  if (cls.intent === "quer_humano") {
+    return _finalize(stepKey, {
+      reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", {
+        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
+      }),
+      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
+    });
+  }
 
   // Build candidate intent list: classifier intent + regex-derived intents + capture intents
   const candidateIntents = [cls.intent, ...detectRegexIntents(ctx.messageText || ""), ...captureIntents];
@@ -561,11 +594,9 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   };
 
   // Mapeia step_type especial → primeiro conversation_step do pipeline de cadastro
-  // (definido em bot-flow.ts). O lead recebe o texto/mídia configurado no passo
-  // E em seguida cai no estado correto para a Camila pedir conta/doc/finalizar.
   const stepTypeToCadastro = (st: string | null | undefined): string | null => {
     if (st === "capture_conta") return "aguardando_conta";
-    if (st === "capture_documento") return "aguardando_doc_auto"; // novo: detecta tipo automaticamente
+    if (st === "capture_documento") return "aguardando_doc_auto";
     if (st === "capture_email") return "ask_email";
     if (st === "confirm_phone") return "ask_phone_confirm";
     if (st === "finalizar_cadastro") return "ask_finalizar";
@@ -578,11 +609,6 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     if (delay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, delay));
     const mediaSent = await sendStepMedia(ctx, s, consultantId);
     const cadastroStep = stepTypeToCadastro(s.step_type);
-    // Se for um passo especial (capture_conta/documento/finalizar), o conversation_step
-    // salvo já é o do pipeline de cadastro — assim a próxima mensagem do lead cai direto
-    // no bot-flow.ts e segue o fluxo de OCR / portal / OTP.
-    // cadastroStep retorna nome canônico (ex.: "aguardando_conta") — orchestrator prefixa "sys:".
-    // Caso contrário, gravamos s.id (estável) em vez de step_key, e orchestrator prefixa "flow:".
     const nextConversationStep = cadastroStep || s.id;
     return {
       reply: renderTemplate(s.message_text || "", vars),
@@ -591,25 +617,23 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   };
   const repeatCurrent = () => goToStep(currentStep, restoreDetourUpdates);
 
-  // Resolve a transition (special or step) to a BotResult
+  // Resolve a transition (special or step) — sempre propaga restoreDetourUpdates
+  // para limpar flags de detour quando o lead seguir o fluxo normal.
   const resolveTransition = async (t: DbTransition): Promise<BotResult> => {
     if (t.goto_special === "cadastro") {
-      // Preferência: se o fluxo do consultor tem um passo de captura de documento
-      // ativo, vamos para ele (segue o desenho da UI). Cai no aguardando_conta
-      // só se realmente não houver passo de cadastro configurado.
       const docStep = findActiveByType("capture_documento");
-      if (docStep) return goToStep(docStep);
+      if (docStep) return goToStep(docStep, restoreDetourUpdates);
       const contaStep = findActiveByType("capture_conta");
-      if (contaStep) return goToStep(contaStep);
+      if (contaStep) return goToStep(contaStep, restoreDetourUpdates);
       return {
         reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
-        updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
+        updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
       };
     }
     if (t.goto_special === "humano") {
       return {
         reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", vars),
-        updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
+        updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
       };
     }
     if (t.goto_special === "repeat" || (!t.goto_step_id && !t.goto_special)) return repeatCurrent();
@@ -617,17 +641,17 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     if (!nextStep || !nextStep.is_active) return repeatCurrent();
     if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
       const docStep = findActiveByType("capture_documento");
-      if (docStep) return goToStep(docStep);
+      if (docStep) return goToStep(docStep, restoreDetourUpdates);
       return {
         reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
-        updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
+        updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
       };
     }
-    return goToStep(nextStep);
+    return goToStep(nextStep, restoreDetourUpdates);
   };
 
   // 1) A regular rule matched
-  if (transition) return resolveTransition(transition);
+  if (transition) return _finalize(stepKey, await resolveTransition(transition));
 
 
   // 1.5) Captura sem transição configurada → auto-advance para o próximo passo ativo
@@ -638,18 +662,22 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       console.log(`[conversational] auto-advance por captura ${currentStep.step_key} → ${nextByPosition.step_key} (intents=${captureIntents.join(",")})`);
       if (nextByPosition.step_key === "cadastro" || CADASTRO_STEPS.has(nextByPosition.step_key)) {
         const docStep = findActiveByType("capture_documento");
-        if (docStep) return goToStep(docStep, restoreDetourUpdates);
-        return {
+        if (docStep) return _finalize(stepKey, await goToStep(docStep, restoreDetourUpdates));
+        return _finalize(stepKey, {
           reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
           updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
-        };
+        });
       }
-      return goToStep(nextByPosition, restoreDetourUpdates);
+      return _finalize(stepKey, await goToStep(nextByPosition, restoreDetourUpdates));
     }
   }
 
-  // 1.75) GLOBAL KEYWORD RULES — fallback inteligente (só roda se o fluxo não soube responder)
-  try {
+  // 1.75) GLOBAL KEYWORD RULES — fallback inteligente, com rate-limit por customer
+  const rateLimitOk = ctx.customer.id ? _consumeCustomerRateLimit(String(ctx.customer.id)) : true;
+  if (!rateLimitOk) {
+    console.warn(`[conversational] ⛔ rate-limit: pulando regras para customer=${ctx.customer.id}`);
+  }
+  if (rateLimitOk) try {
     const ruleHit = await evaluateRules({
       supabase: ctx.supabase,
       flowId,
@@ -707,15 +735,16 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       const replyText = rule.response_text ? renderTemplate(rule.response_text, vars) : "";
       const hasReply = !!(replyText && replyText.trim().length > 0);
       const inlineSent = hasReply || !!rule.media_id;
-      return {
+      return _finalize(stepKey, {
         reply: hasReply ? replyText : "",
         updates: {
           conversation_step: nextStepKey,
           __inline_sent: inlineSent || undefined,
           ...captureUpdates,
           ...extraUpdates,
+          ...restoreDetourUpdates,
         },
-      };
+      });
     }
   } catch (e) {
     console.error("[conversational] rules-engine failed (ignorando)", e);
@@ -727,12 +756,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const nextStep = dbSteps.find((s) => s.id === fb.goto_step_id);
     if (nextStep && nextStep.is_active) {
       if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
-        return {
+        return _finalize(stepKey, {
           reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
-          updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
-        };
+          updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
+        });
       }
-      return goToStep(nextStep);
+      return _finalize(stepKey, await goToStep(nextStep, restoreDetourUpdates));
     }
   }
   if (fb.mode === "ai" && fb.ai_prompt && !strictMode) {
@@ -740,11 +769,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey, consultantId || "global");
     if (choice) {
       const upper = choice.toUpperCase();
-      if (upper === "REPEAT") return repeatCurrent();
-      if (upper === "HUMANO") return resolveTransition({ goto_special: "humano" } as DbTransition);
-      if (upper === "CADASTRO") return resolveTransition({ goto_special: "cadastro" } as DbTransition);
+      if (upper === "REPEAT") return _finalize(stepKey, await repeatCurrent());
+      if (upper === "HUMANO") return _finalize(stepKey, await resolveTransition({ goto_special: "humano" } as DbTransition));
+      if (upper === "CADASTRO") return _finalize(stepKey, await resolveTransition({ goto_special: "cadastro" } as DbTransition));
       const nextStep = dbSteps.find(s => s.step_key === choice);
-      if (nextStep && nextStep.is_active) return goToStep(nextStep);
+      if (nextStep && nextStep.is_active) return _finalize(stepKey, await goToStep(nextStep, restoreDetourUpdates));
     }
   } else if (fb.mode === "ai" && strictMode) {
     console.log(`[conversational] strict_mode=true → fallback IA ignorado, usando repeat`);
@@ -759,18 +788,18 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       console.log(`[conversational] auto-advance ${currentStep.step_key} → ${nextByPosition.step_key} (no transitions, intent=${cls.intent})`);
       if (nextByPosition.step_key === "cadastro" || CADASTRO_STEPS.has(nextByPosition.step_key)) {
         const docStep = findActiveByType("capture_documento");
-        if (docStep) return goToStep(docStep);
-        return {
+        if (docStep) return _finalize(stepKey, await goToStep(docStep, restoreDetourUpdates));
+        return _finalize(stepKey, {
           reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
-          updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
-        };
+          updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
+        });
       }
-      return goToStep(nextByPosition);
+      return _finalize(stepKey, await goToStep(nextByPosition, restoreDetourUpdates));
     }
   }
 
   // Default: repeat
-  return repeatCurrent();
+  return _finalize(stepKey, await repeatCurrent());
 }
 
 // Legacy hardcoded path — preserved for consultants without a custom flow.
