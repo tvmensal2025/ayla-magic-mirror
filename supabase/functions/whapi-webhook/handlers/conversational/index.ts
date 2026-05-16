@@ -351,9 +351,14 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
   const medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
   if (medias.length === 0) return false;
 
-  const configuredOrder = Array.isArray(step.media_order) && step.media_order.length > 0
+  // Precedência: UI (consultants.flow_step_media_order) → step.media_order → default audio-first.
+  // A UI do /admin/fluxos grava em consultants.flow_step_media_order — ela vence o default
+  // de bot_flow_steps.media_order, senão a ordem configurada pelo consultor é ignorada.
+  const uiOrder = await getStepMediaOrder(ctx.supabase, consultantId, slotKey);
+  const stepOrder = Array.isArray(step.media_order) && step.media_order.length > 0
     ? step.media_order.map((k) => String(k).toLowerCase())
-    : await getStepMediaOrder(ctx.supabase, consultantId, slotKey);
+    : null;
+  const configuredOrder = uiOrder || stepOrder;
   if (configuredOrder) medias.sort(makeKindComparator((m: any) => m.kind, configuredOrder));
 
   let sent = false;
