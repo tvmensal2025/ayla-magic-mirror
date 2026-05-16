@@ -30,7 +30,8 @@ function fmtValor(v: number | string | null | undefined): string {
 }
 
 export function renderTemplate(tpl: string, vars: TemplateVars): string {
-  const nome = (vars.nome || "").split(" ")[0] || "amigo";
+  // Sem nome conhecido: deixa vazio (template deve omitir vírgula/saudação sozinho)
+  const nome = (vars.nome || "").split(" ")[0] || "";
   const rep = vars.representante || "consultor";
   const valor = fmtValor(vars.valor_conta);
   const tel = vars.telefone || "";
