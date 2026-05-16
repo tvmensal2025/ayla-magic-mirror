@@ -507,6 +507,15 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           console.log(`[midflow-qa] hit=false step="${(customer as any).conversation_step}"`);
         }
       }
+    } else if (
+      midflowEnabled && inCadastro && messageText && !isFile && !isButton &&
+      Number((customer as any).detour_count || 0) > 0
+    ) {
+      // Mensagem não é pergunta → cliente voltou ao fluxo: zera detour_count.
+      try {
+        await supabase.from("customers").update({ detour_count: 0 }).eq("id", customer.id);
+        (customer as any).detour_count = 0;
+      } catch (_) { /* noop */ }
     }
   } catch (e) {
     console.warn("[midflow-qa] falhou (seguindo fluxo normal):", (e as any)?.message);
