@@ -620,10 +620,34 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     if (delay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, delay));
     const mediaSent = await sendStepMedia(ctx, s, consultantId);
     const cadastroStep = stepTypeToCadastro(s.step_type);
-    const nextConversationStep = cadastroStep || s.id;
+    let nextConversationStep = cadastroStep || s.id;
+    let inlineSent = mediaSent;
+    const replyParts = [renderTemplate(s.message_text || "", vars).trim()].filter(Boolean);
+
+    let cursor: DbStep | null = cadastroStep ? null : s;
+    for (let guard = 0; cursor?.wait_for === "none" && guard < 4; guard++) {
+      const nextId = cursor.fallback?.mode === "goto" ? cursor.fallback.goto_step_id : null;
+      if (!nextId) break;
+      const nextStep = dbSteps.find((step) => step.id === nextId && step.is_active);
+      if (!nextStep || nextStep.id === cursor.id) break;
+
+      const cascadeDelay = Math.max(0, Math.min(60000, nextStep.text_delay_ms ?? 1500));
+      if (cascadeDelay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, cascadeDelay));
+      const cascadeMediaSent = await sendStepMedia(ctx, nextStep, consultantId);
+      const cascadeText = renderTemplate(nextStep.message_text || "", vars).trim();
+      if (cascadeText) replyParts.push(cascadeText);
+
+      inlineSent = inlineSent || cascadeMediaSent;
+      const cascadeCadastroStep = stepTypeToCadastro(nextStep.step_type);
+      nextConversationStep = cascadeCadastroStep || nextStep.id;
+      console.log(`[conversational] auto-cascade ${cursor.step_key} → ${nextStep.step_key} (wait_for=none)`);
+      if (cascadeCadastroStep) break;
+      cursor = nextStep;
+    }
+
     return {
-      reply: renderTemplate(s.message_text || "", vars),
-      updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: mediaSent || undefined, ...extra },
+      reply: replyParts.join("\n\n"),
+      updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: inlineSent || undefined, ...extra },
     };
   };
   const repeatCurrent = () => goToStep(currentStep, restoreDetourUpdates);
