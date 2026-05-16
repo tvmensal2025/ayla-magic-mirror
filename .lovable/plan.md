@@ -1,21 +1,43 @@
-## Objetivo
-Resetar os leads dos números `11971254913` e `11989000650` para limpar histórico, memória, logs e estado do bot, permitindo testar o fluxo da Camila do zero.
+## Diagnóstico
 
-## O que encontrei
-- `11971254913` existe como `5511971254913`, customer `b2fcd7ca-0c82-4644-be9e-3abe3cf5d308`.
-- `11989000650` existe como `5511989000650`, customer `06a07311-6a57-4c2b-8e53-85a4daf9b1a8`.
-- Ambos pertencem ao consultor `0c2711ad-4836-41e6-afba-edd94f698ae3`.
-- Os dois ainda têm `conversation_step` em passos de fluxo, então realmente não estão zerados.
+O reset anterior limpou os registros, mas o problema não é só o estado do lead.
 
-## Plano de execução
-1. Executar o reset usando a RPC existente `reset_lead_conversation` para cada customer encontrado.
-2. Confirmar no banco que os campos de estado foram limpos, principalmente:
-   - `conversation_step`
-   - `bot_paused`
-   - `last_bot_interaction_at`
-   - memória/logs relacionados ao fluxo
-3. Consultar as conversas recentes dos dois leads para confirmar que o histórico anterior foi removido.
-4. Após o reset, testar o início do fluxo enviando uma mensagem simulada ou orientar o teste real no WhatsApp.
+Nos logs, quando o cliente manda “Oi”, o webhook faz isto:
 
-## Observação
-Como estamos em modo de planejamento, ainda não executei nenhuma alteração de dados. Ao aprovar este plano, faço o reset imediatamente.
+```text
+step legado="welcome"
+unknown step="welcome" → restart at firstActive=6226...
+mídia audio não bloqueante ignorada
+start cascade 6226... → 3e7...
+envia: "qual o valor médio da sua conta de luz?"
+grava conversation_step = flow:3e7...
+```
+
+Ou seja: o fluxo reinicia, mas o primeiro passo é tratado como mídia “não bloqueante”, não envia o áudio/imagem do passo inicial, e ainda faz cascade automático para o segundo passo. Por isso o cliente já cai na pergunta da conta e parece que “não resetou”.
+
+## Plano de implementação
+
+1. **Corrigir o início do fluxo dinâmico**
+   - No handler `supabase/functions/whapi-webhook/handlers/conversational/index.ts`, ajustar o bloco de `unknown step="welcome"`.
+   - Ao reiniciar no primeiro passo ativo, enviar mídia de forma normal/bloqueante em vez de marcar como `skipped_nonblocking`.
+   - Não avançar automaticamente para o fallback do primeiro passo quando esse primeiro passo está configurado para aguardar resposta (`wait_for='reply'`).
+   - Persistir `conversation_step` no primeiro passo (`flow:6226...`) para a próxima mensagem do usuário ser processada ali.
+
+2. **Preservar auto-cascade apenas onde faz sentido**
+   - Manter cascade automático somente para passos que não aguardam resposta (`wait_for='none'`) ou quando a própria configuração indicar etapa sem interação.
+   - Evitar que o fallback do primeiro passo funcione como “próximo passo imediato” durante o start.
+
+3. **Resetar novamente os dois números depois da correção**
+   - Aplicar uma migração de reset para os leads:
+     - `5511971254913`
+     - `5511989000650`
+   - Limpar conversas, logs, buffers, agendamentos e estado do cliente.
+   - Deixar `conversation_step='welcome'`, `status='pending'`, sem memória residual.
+
+4. **Validar nos logs**
+   - Conferir que após enviar “Oi”, o log fique no primeiro passo ativo em vez de pular para `3e7...`.
+   - Verificar que a resposta enviada corresponde ao primeiro passo do fluxo, não à pergunta “qual o valor médio...”.
+
+## Resultado esperado
+
+Depois de implementado, quando um desses números mandar “Oi”, o bot deverá começar do primeiro passo real do fluxo e aguardar a resposta antes de avançar para a pergunta do valor da conta.
