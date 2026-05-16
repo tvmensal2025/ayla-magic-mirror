@@ -307,7 +307,11 @@ Deno.serve(async (req) => {
           const buf = await mediaRes.arrayBuffer();
           const bytes = new Uint8Array(buf);
           let binary = "";
-          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          const chunkSize = 8192;
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(i, i + chunkSize);
+            for (let j = 0; j < chunk.length; j++) binary += String.fromCharCode(chunk[j]);
+          }
           fileBase64 = btoa(binary);
           const mime = audioMessage?.mimetype || imageMessage?.mimetype || documentMessage?.mimetype || "application/octet-stream";
           fileUrl = `data:${mime};base64,${fileBase64}`;
