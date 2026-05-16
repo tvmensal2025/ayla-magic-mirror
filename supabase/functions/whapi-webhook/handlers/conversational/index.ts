@@ -629,6 +629,98 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // 1) A regular rule matched
   if (transition) return resolveTransition(transition);
 
+
+  // 1.5) Captura sem transição configurada → auto-advance para o próximo passo ativo
+  // (corrige o caso "lead respondeu '300 reais' mas o passo não tinha rota informou_valor").
+  if (hasCapture) {
+    const nextByPosition = dbSteps.find((s) => s.is_active && s.position > currentStep.position);
+    if (nextByPosition) {
+      console.log(`[conversational] auto-advance por captura ${currentStep.step_key} → ${nextByPosition.step_key} (intents=${captureIntents.join(",")})`);
+      if (nextByPosition.step_key === "cadastro" || CADASTRO_STEPS.has(nextByPosition.step_key)) {
+        const docStep = findActiveByType("capture_documento");
+        if (docStep) return goToStep(docStep, restoreDetourUpdates);
+        return {
+          reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
+          updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
+        };
+      }
+      return goToStep(nextByPosition, restoreDetourUpdates);
+    }
+  }
+
+  // 1.75) GLOBAL KEYWORD RULES — fallback inteligente (só roda se o fluxo não soube responder)
+  try {
+    const ruleHit = await evaluateRules({
+      supabase: ctx.supabase,
+      flowId,
+      consultantId,
+      customerId: ctx.customer.id || null,
+      currentStepId: currentStep.id,
+      messageText: ctx.messageText || "",
+      lastRuleFireAt: (ctx.customer as any).last_rule_fire_at || null,
+      lastRuleId: (ctx.customer as any).last_rule_id || null,
+      hasCapture,
+    });
+    if (ruleHit) {
+      const { rule, matchedKeyword } = ruleHit;
+      console.log(`[conversational] 🎯 rule hit "${rule.name}" (${matchedKeyword}) at step="${stepKey}" → ${rule.return_behavior}`);
+
+      if (rule.media_id) {
+        const { data: mr } = await ctx.supabase
+          .from("ai_media_library").select("url, kind").eq("id", rule.media_id).maybeSingle();
+        if (mr?.url) {
+          const kind = ["audio","video","image"].includes(String(mr.kind)) ? String(mr.kind) : "document";
+          let canSend = true;
+          if (kind === "audio" || kind === "video") {
+            const { data } = await ctx.supabase.rpc("try_log_media_send", {
+              _consultant_id: consultantId, _customer_id: ctx.customer.id,
+              _media_id: rule.media_id, _slot_key: null, _kind: kind,
+            });
+            canSend = data !== false;
+          }
+          if (canSend) { try { await ctx.sender.sendMedia(ctx.remoteJid, mr.url, "", kind); } catch (_) {} }
+        }
+      }
+
+      let nextStepKey: string = stepKey;
+      const extraUpdates: Record<string, any> = {
+        last_rule_id: rule.id, last_rule_fire_at: new Date().toISOString(),
+      };
+      if (rule.return_behavior === "goto_step" && rule.goto_step_id) {
+        const target = dbSteps.find((s) => s.id === rule.goto_step_id);
+        if (target) { nextStepKey = target.id; extraUpdates.previous_conversation_step = stepKey; }
+      } else if (rule.return_behavior === "restart") {
+        nextStepKey = firstActive.id; extraUpdates.previous_conversation_step = null;
+      } else if (rule.return_behavior === "handoff") {
+        nextStepKey = "aguardando_humano";
+        extraUpdates.bot_paused = true;
+        extraUpdates.bot_paused_reason = "rule_handoff";
+        extraUpdates.bot_paused_at = new Date().toISOString();
+      }
+
+      await logRuleFire(ctx.supabase, {
+        ruleId: rule.id, consultantId, customerId: ctx.customer.id || null,
+        matchedKeyword, messageText: ctx.messageText || "",
+        stepBefore: stepKey, stepAfter: nextStepKey, returnBehavior: rule.return_behavior,
+      });
+
+      const replyText = rule.response_text ? renderTemplate(rule.response_text, vars) : "";
+      const hasReply = !!(replyText && replyText.trim().length > 0);
+      const inlineSent = hasReply || !!rule.media_id;
+      return {
+        reply: hasReply ? replyText : "",
+        updates: {
+          conversation_step: nextStepKey,
+          __inline_sent: inlineSent || undefined,
+          ...captureUpdates,
+          ...extraUpdates,
+        },
+      };
+    }
+  } catch (e) {
+    console.error("[conversational] rules-engine failed (ignorando)", e);
+  }
+
   // 2) FALLBACK (Plano B)
   const fb = currentStep.fallback || { mode: "repeat" };
   if (fb.mode === "goto" && fb.goto_step_id) {
