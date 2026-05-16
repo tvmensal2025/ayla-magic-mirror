@@ -304,7 +304,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
             {kind === "audio" && slotForUpload && (
               <AudioRecorderInline
                 onRecorded={async (blob, durationSec) => {
-                  const file = new File([blob], `gravacao-${Date.now()}.webm`, { type: blob.type || "audio/webm" });
+                  const file = new File([blob], `gravacao-${Date.now()}.ogg`, { type: "audio/ogg" });
                   await handleUpload("audio", file, slotForUpload);
                 }}
               />
