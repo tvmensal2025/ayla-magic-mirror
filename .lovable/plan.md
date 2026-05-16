@@ -1,105 +1,74 @@
-##   
-ANALISE OQUE MAIS PODE SER FEITO E  FACA UMA AUDITORIA PARA NAO DAR ERRO E APLICAR 100% CERTO
 
-##   
-  
-Resumo da auditoria das 2 conversas (Viviane + Paulo)
+# Plano: Um único fluxo ativo — Fluxo da Camila (Flow Builder)
 
+Objetivo: parar de misturar os dois engines. Daqui pra frente **todo lead** roda 100% no `bot_flow_steps` editável na tela "Fluxo da Camila". O `bot-flow.ts` legado fica desligado por bloqueio em código (não apaga, só não executa).
 
-| #   | Problema observado nas mensagens                                                              | Causa real                                                                                                            |
-| --- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| 1   | "1️⃣ Sim / 2️⃣ Outro" como texto em `ask_phone_confirm`, `ask_finalizar`, `ask_complement`    | Steps legados mandam string — Whapi suporta botões mas não é usado                                                    |
-| 2   | "Campo Seu Código" pedido pra cliente CPFL (rótulo é Light/Enel)                              | Texto fixo em `ask_installation_number`, sem mapa por distribuidora; OCR já tinha rodado mas fallback pergunta sempre |
-| 3   | Cliente mandou CNH e bot pediu "verso do RG"                                                  | `detectDocumentType` retorna `rg_antigo` como fallback silencioso quando Gemini falha/ambíguo                         |
-| 4   | Mensagens repetidas 2x ("qual valor da conta", "Deu para entender", etc)                      | Engine re-executa o step quando inbound chega antes da transição persistir                                            |
-| 5   | Nome "Lucas" salvo, depois sobrescrito                                                        | Capture aceita qualquer string nova sem checar nome já confirmado                                                     |
-| 6   | A partir de `aguardando_doc_*` o bot vira hardcoded (`ask_email`, `ask_cep`, `ask_number`...) | Esses steps não existem no Flow Builder, são do `bot-flow.ts` legado                                                  |
+## 1. Bloqueio total do fluxo legado
 
+Em `supabase/functions/whapi-webhook/handlers/bot-flow.ts`:
 
-## Plano de correção (ajustado ao seu feedback)
-
-### Fix A — Tom humano para perguntas (sem botões)
-
-Você pediu pra **não usar botões** no passo de documento: tornar mais humano.
-
-- Substituir `ask_tipo_documento` por uma **mensagem única** sem opções:
+- Adicionar guard no topo do `runBotFlow()`:
+  ```ts
+  // HARD KILL: fluxo legado desativado. Só Fluxo da Camila (DB) roda.
+  console.warn("[bot-flow] LEGACY DISABLED — redirect to conversational");
+  return { handled: false, redirectToConversational: true };
   ```
-  Pra finalizar, me manda só uma foto da frente do seu documento 📄
-  Pode ser RG ou CNH, o que for mais fácil pra você.
-  ```
-- **Não perguntar "novo ou antigo"** em hipótese nenhuma — o bot detecta sozinho.
-- Manter os outros prompts (`ask_phone_confirm`, `ask_finalizar`, `ask_complement`) em texto humano também, sem "1/2":
-  ```
-  Esse número é o seu WhatsApp principal? Se sim, é só responder "sim".
-  Se não, me manda o número certo.
-  ```
+- No `index.ts` do webhook, quando receber `redirectToConversational`, garantir reset do `conversation_step` para o primeiro step ativo do flow do consultor e invocar `runConversationalFlow`.
+- Em `step-namespace.ts`, `routeEngine()` passa a retornar sempre `"flow"` (exceto quando consultor não tem nenhum flow ativo — aí responde mensagem de erro humano "estou em manutenção, já te chamo").
 
-### Fix B — Auto-detecção robusta de documento (CNH x RG novo x RG antigo)
+## 2. Garantir cobertura ponta-a-ponta no Flow Builder
 
-O cliente nunca escolhe. O bot decide pela foto.
+Hoje `seed_default_camila_flow` cria 6 steps e para em `cadastro`. Os passos pós-conta (email, cep, número, complemento, doc, confirmar dados, finalização) estavam hardcoded no legado.
 
-1. Após receber a 1ª foto, rodar `detectDocumentType` (Gemini Vision) com prompt JSON estruturado e score de confiança.
-2. Se confiança ≥ 0.7 → segue:
-  - `cnh` → pede só **uma** foto (CNH digital é frente+verso na mesma página). Não pede verso.
-  - `rg_novo` ou `rg_antigo` → pede o **verso**.
-3. Se confiança < 0.7 → **roda 2ª passada** com prompt mais detalhado em vez de assumir RG antigo.
-4. Se ainda incerto → assume `rg_antigo` (mais seguro: pede verso). Loga em `ai_decisions`.
-5. Remover o fallback silencioso atual no `normalizeDocumentType` que sempre retorna `rg_antigo` quando vazio.
+Migration nova:
+- Estender `seed_default_camila_flow` para incluir os steps faltantes como `step_type=message` + `captures`:
+  - `aguardando_conta` (foto/PDF → OCR)
+  - `confirmando_dados_conta` (botões SIM/NÃO/EDITAR — único lugar com botão)
+  - `aguardando_doc_auto` (detecção automática CNH/RG)
+  - `aguardando_doc_verso` (condicional: só se RG)
+  - `confirmando_dados_doc` (botões SIM/NÃO/EDITAR)
+  - `ask_email`, `ask_cep`, `ask_number`, `ask_complement`
+  - `pitch_conexao_club`, `duvidas_pos_club`, `ask_finalizar`
+  - `finalizado` (dispara portal-worker)
+- Rodar `seed` em todos consultores ativos (`UPDATE` idempotente: só adiciona steps que não existem).
 
-Mensagens humanizadas após detecção:
+## 3. Reset de todos os leads em andamento
 
+Migration:
+```sql
+SELECT public.reset_lead_conversation(c.consultant_id, c.id, null)
+FROM customers c
+WHERE c.status NOT IN ('active','approved','cancelled')
+  AND c.conversation_step IS NOT NULL;
 ```
-cnh:        "Recebi sua CNH! Já tenho tudo dela, vamos pro próximo passo."
-rg_novo:    "Recebi a frente. Agora me manda o verso, por favor."
-rg_antigo:  "Recebi a frente. Agora me manda o verso, por favor."
+Todos voltam pro `welcome` do Fluxo da Camila. Próxima mensagem do cliente entra no fluxo único.
 
-( AQUI TEM QUE TER OS DADOS E OS BOTOES PARA CONFIRMAR OS DOS DO CLIENTE DO RG OU CNH ) IGUAL JA FAZIA ANTES PARA CONFIRMAR 
-```
+## 4. Smoke test obrigatório antes de fechar
 
-### Fix C — Número de instalação inteligente ( ESSE JA TEM NA CONTA, TEM QUE PEDIR A CONTA DE ENERGIA )
+- Simular Viviane (5511971073983) e Paulo (5511989000650) com `bot_test_runs`:
+  - welcome → qualificação → conta → OCR → confirmação → doc auto-detect → confirmação → email → cep → número → complemento → club → dúvidas → finalização.
+- Validar via `bot_step_transitions` que **nenhum** step com nome cru do legado (`ask_email`, `aguardando_conta` sem prefixo `flow:`) aparece.
+- Validar `lint_bot_flow_consistency()` retorna 0 linhas `high`.
 
-- Antes de enviar `ask_installation_number`, checar `customers.numero_instalacao`. Se OCR já preencheu, **pular o step**.
-- Se precisar perguntar, mapa por distribuidora:
-  ```
-  CPFL/RGE  → "Nº da Instalação"
-  Light/Enel → "Seu Código / Nº do Cliente"
-  Equatorial/Energisa/Cemig → "Nº da Instalação / Conta Contrato"
-  default    → "Nº da Instalação"
-  ```
+## Detalhes técnicos
 
-### Fix D — Eliminar mensagens duplicadas
-
-- Lock por `customer_id` em `runConversationalFlow` usando `webhook_message_dedup` (tabela já existe) com TTL 8s.
-- Consumir `whatsapp_message_buffer` em batch de 1.5s antes de rodar o step (já existe a tabela, falta o consumidor).
-
-### Fix E — Captura de nome com guarda
-
-- No capture de `name`: se `name_source='ocr'` (veio da CNH/conta) → não sobrescreve.
-- Se ainda não tem: aceita primeira resposta `^[A-Za-zÀ-ÿ ]{2,40}$`. Correções posteriores só se o cliente disser "meu nome é X".
-
-### Fix F — Seguir o fluxo correto até o fim
-
-Hoje o Flow Builder controla só até o documento. Depois vira código legado e fica fora da sua tela.
-
-- Criar no `bot_flow_steps` os passos que faltam: `ask_email`, `ask_cep`, `ask_number`, `ask_complement`, `pitch_conexao_club`, `duvidas_pos_club`, `ask_finalizar`.
-- Cada um com `step_type=message` + `captures` apontando pro campo correto em `customers`.
-- No `bot-flow.ts`, marcar os blocos legados como deprecated — só rodam quando o consultor **não tem** flow ativo.
-- Migration: leads atuais em `ask_email`, `ask_cep`, etc são re-mapeados para o `flow:<novo_step_id>` equivalente automaticamente na próxima mensagem.
-
-Resultado: 100% do funil editável pela tela "Fluxo da Camila", sem texto hardcoded.
-
-## Ordem de execução
-
-1. **Fix B + Fix C** — corrige os 2 erros que o cliente viu na hora (~30 min)
-2. **Fix A** — humaniza prompts de documento e confirmação (~20 min)
-3. **Fix D** — estanca duplicação (~20 min)
-4. **Fix E** — guard de nome (~15 min)
-5. **Fix F** — migração dos steps pós-documento pro Flow Builder (~1h)
+- Não apagamos `bot-flow.ts` (4 outras edge functions ainda importam helpers dele). Só travamos a entrada.
+- `confirmando_dados_*` mantém botões nativos Whapi (única exceção ao "sem botão" pedido antes — confirmação de OCR precisa).
+- `auto_detect_doc_type=true` já existe no schema de `bot_flow_steps` — usar no step `aguardando_doc_auto`.
+- Migration adiciona coluna `is_doc_auto boolean default false` se necessário pra marcar o step que dispara `detectDocumentType`.
 
 ## Riscos
 
-- Fix B pode aumentar latência em ~1s nos casos ambíguos (2ª passada do Gemini) — aceitável.
-- Fix F vai exigir testar leads que já estão em `ask_email`/`ask_cep` no momento do deploy; o re-mapeamento é automático mas requer validação.
-- Nenhuma mudança altera dados existentes; só código + 1 migration de steps novos.
+- Leads em `approved/active` **não** são resetados (já completaram).
+- Workers (`portal-worker`, `ai-followup-cron`, etc) leem `conversation_step` cru — depois do reset todos ficam com `flow:<uuid>`. Validar que esses workers ignoram steps `flow:*` (já fazem via `routeEngine`).
+- Se algum consultor tiver flow customizado faltando steps, fica capenga. Migration força seed completo em todos.
 
-Posso seguir nessa ordem?
+## Ordem
+
+1. Migration (estender seed + reset leads) — pedir aprovação
+2. Bloqueio do `bot-flow.ts` + ajuste do `step-namespace.ts` e `index.ts`
+3. Deploy `whapi-webhook`
+4. Smoke test com `bot_test_runs`
+5. Monitorar logs por 10min e validar com Viviane/Paulo
+
+Posso seguir?
