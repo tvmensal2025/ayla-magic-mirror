@@ -1964,23 +1964,22 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       break;
     }
 
-    // ─── 3b. TIPO DE DOCUMENTO ─────────
+    // ─── 3b. TIPO DE DOCUMENTO (legado) ─────────
+    // Mantido só para retrocompat. Hoje o fluxo redireciona para `aguardando_doc_auto`,
+    // onde o bot detecta RG/CNH automaticamente sem perguntar nada ao cliente.
     case "ask_tipo_documento": {
-      const resp = isButton ? buttonId : messageText.trim().toLowerCase();
-      const rgNovo = resp === "tipo_rg_novo" || resp === "1" || resp === "rg novo";
-      const rgAntigo = resp === "tipo_rg_antigo" || resp === "2" || resp === "rg antigo";
-      const cnh = resp === "tipo_cnh" || resp === "3" || resp === "cnh";
-      if (rgNovo) { updates.document_type = "rg_novo"; updates.conversation_step = "aguardando_doc_frente"; reply = "📄 *RG (Novo)*\n\n📸 Envie a *FRENTE do seu RG*.\n\nFormatos: JPG, PNG ou PDF"; }
-      else if (rgAntigo) { updates.document_type = "rg_antigo"; updates.conversation_step = "aguardando_doc_frente"; reply = "📄 *RG (Antigo)*\n\n📸 Envie a *FRENTE do seu RG*.\n\nFormatos: JPG, PNG ou PDF"; }
-      else if (cnh) { updates.document_type = "cnh"; updates.conversation_step = "aguardando_doc_frente"; reply = "📄 *CNH*\n\n📸 Envie a *FRENTE da sua CNH*.\n\nFormatos: JPG, PNG ou PDF"; }
-      else {
-        const sent = await sendOptions(remoteJid, "📋 Qual documento de identidade você vai enviar?\n\nToque em uma opção:", [
-          { id: "tipo_rg_novo", title: "📄 RG Novo" },
-          { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
-          { id: "tipo_cnh", title: "🪪 CNH" },
-        ]);
-        if (!sent) reply = "Escolha: *1* = RG Novo, *2* = RG Antigo, *3* = CNH";
+      // Se o cliente já mandou a foto, deixa o aguardando_doc_auto processar.
+      if (isFile) {
+        updates.conversation_step = "aguardando_doc_auto";
+        reply = "";
+        // Não dá break — re-emite o evento? Não dá. Mas como acabamos de salvar o step,
+        // o próximo evento (a foto chegou junto) cai em aguardando_doc_auto.
+        // Como atalho: já avisa que recebeu.
+        await sendText(remoteJid, "📄 Recebi a foto, analisando agora...");
+        break;
       }
+      reply = `Me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente.`;
+      updates.conversation_step = "aguardando_doc_auto";
       break;
     }
 
