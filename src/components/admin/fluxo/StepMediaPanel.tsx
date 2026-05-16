@@ -169,19 +169,58 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
       return;
     }
     setUploading(kind);
-    const ext = file.name.split(".").pop() || "bin";
-    const path = `${consultantId}/${slotKey}/${crypto.randomUUID()}.${ext}`;
-    const { error: upErr } = await supabase.storage.from("ai-agent-media").upload(path, file, {
-      cacheControl: "3600",
-      upsert: false,
-      contentType: file.type,
-    });
-    if (upErr) {
-      setUploading(null);
-      toast.error("Falha no upload: " + upErr.message);
-      return;
+
+    let finalUrl: string | null = null;
+    let storagePath: string | null = null;
+    let durationSec: number | null = null;
+
+    // === Vídeo: tenta comprimir via compress-worker (Easypanel) antes de salvar ===
+    const compressUrl = import.meta.env.VITE_COMPRESS_WORKER_URL as string | undefined;
+    const compressKey = import.meta.env.VITE_COMPRESS_WORKER_KEY as string | undefined;
+    if (kind === "video" && compressUrl) {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("folder", `fluxos/${consultantId}/${slotKey}`);
+        fd.append("name", file.name.replace(/\.[^.]+$/, "").slice(0, 40) || "video");
+        toast.message("Comprimindo vídeo… isso pode levar até 1 min para vídeos grandes.");
+        const r = await fetch(`${compressUrl.replace(/\/+$/, "")}/compress`, {
+          method: "POST",
+          headers: compressKey ? { "x-api-key": compressKey } : {},
+          body: fd,
+        });
+        if (!r.ok) throw new Error(`worker ${r.status}`);
+        const j = await r.json();
+        if (!j?.url) throw new Error("resposta sem url");
+        finalUrl = j.url as string;
+        durationSec = typeof j.duration_sec === "number" ? Math.round(j.duration_sec) : null;
+        const ratio = j.compression_ratio ? ` (${Math.round((1 - j.compression_ratio) * 100)}% menor)` : "";
+        toast.success(`Vídeo comprimido e enviado ao MinIO${ratio}`);
+      } catch (e) {
+        console.warn("[compress-worker] falhou, caindo para upload direto:", e);
+        toast.message("Compressor indisponível — salvando vídeo original.");
+      }
     }
-    const { data: pub } = supabase.storage.from("ai-agent-media").getPublicUrl(path);
+
+    // === Fallback / outros tipos: upload direto no Supabase Storage ===
+    if (!finalUrl) {
+      const ext = file.name.split(".").pop() || "bin";
+      const path = `${consultantId}/${slotKey}/${crypto.randomUUID()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from("ai-agent-media").upload(path, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type,
+      });
+      if (upErr) {
+        setUploading(null);
+        toast.error("Falha no upload: " + upErr.message);
+        return;
+      }
+      const { data: pub } = supabase.storage.from("ai-agent-media").getPublicUrl(path);
+      finalUrl = pub.publicUrl;
+      storagePath = path;
+    }
+
     const { data: row, error: insErr } = await supabase
       .from("ai_media_library")
       .insert({
@@ -189,11 +228,12 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
         kind,
         label: file.name.slice(0, 80),
         slot_key: slotKey,
-        url: pub.publicUrl,
-        storage_path: path,
+        url: finalUrl,
+        storage_path: storagePath,
         active: true,
         send_order: 100 + items.length,
         delay_before_ms: 1500,
+        ...(durationSec ? { duration_sec: durationSec } : {}),
       })
       .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms")
       .maybeSingle();
