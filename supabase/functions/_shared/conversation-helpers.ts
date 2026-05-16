@@ -75,7 +75,8 @@ export function getNextMissingStep(c: any): string {
   if (!c.address_number) return "ask_number";
   // complemento é opcional, mas perguntar uma vez
   if (c.address_complement === null || c.address_complement === undefined) return "ask_complement";
-  if (!c.numero_instalacao) return "ask_installation_number";
+  // Nº de instalação NÃO é pedido por texto: já vem da conta de luz (OCR).
+  // Se faltar, o portal-worker resolve com a foto da conta; não bloqueamos o lead aqui.
   // Valor da conta: ausente ou suspeito (< 30)
   if (!c.electricity_bill_value || c.electricity_bill_value <= 0 || c.electricity_bill_value < 30) return "ask_bill_value";
   // Documentos (frente/verso) já foram coletados no fluxo principal

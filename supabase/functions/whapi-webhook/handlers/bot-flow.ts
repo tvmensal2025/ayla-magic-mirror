@@ -282,7 +282,7 @@ function getReentryPromptForStep(step: string, customer: any): string {
     "ask_complement": `${v}tem *complemento*? (apto, bloco) — ou diga "não".`,
     "ask_installation_number": `${v}qual o *número da instalação* da conta?`,
     "ask_bill_value": `${v}qual a *média* da sua conta de luz? (ex: 350,50)`,
-    "ask_tipo_documento": `Pra seguir: qual documento vai enviar? *RG Novo*, *RG Antigo* ou *CNH*?`,
+    "ask_tipo_documento": `Me manda só uma foto da *frente do seu documento* (RG ou CNH — eu identifico sozinho).`,
     "aguardando_conta": `${v}me envia uma *foto ou PDF da conta de luz* pra eu seguir 📸`,
     "aguardando_doc_frente": `${v}me envia a *frente* do seu documento 🪪`,
     "aguardando_doc_verso": `${v}me envia o *verso* do seu documento 🪪`,
@@ -1114,18 +1114,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     const txt = messageText.trim().toLowerCase();
     const segueAgora = isClubProgressIntent(txt);
     if (segueAgora) {
-      const ctaMsg = `Show! Pra finalizar seu cadastro me manda só a foto do seu *RG ou CNH* 📄`;
-      await sendOptions(remoteJid, ctaMsg, [
-        { id: "tipo_rg_novo", title: "📄 RG Novo" },
-        { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
-        { id: "tipo_cnh", title: "🪪 CNH" },
-      ]);
+      const ctaMsg = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — o que for mais fácil pra você. Eu reconheço automaticamente.`;
+      await sendText(remoteJid, ctaMsg);
       await supabase.from("conversations").insert({
         customer_id: customer.id, message_direction: "outbound",
         message_text: ctaMsg, message_type: "text",
-        conversation_step: "ask_tipo_documento",
+        conversation_step: "aguardando_doc_auto",
       });
-      return { reply: "", updates: { conversation_step: "ask_tipo_documento", __inline_sent: true } as any };
+      return { reply: "", updates: { conversation_step: "aguardando_doc_auto", __inline_sent: true } as any };
     }
     if (/\?|cancel|cancela|taxa|fidelidade|seguro|pagar|custa|club|clube|funciona/i.test(txt)) {
       return {
@@ -1517,8 +1513,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         if (txt && RE_REFUSE_BILL.test(txt)) {
           const billVal = Number((customer as any).electricity_bill_value || 0);
           if (billVal >= 30) {
-            reply = `Tranquilo, ${first || "vamos"}! Já tenho o valor que você passou (R$ ${billVal.toFixed(0)}), seguimos sem a foto então 👍\n\nPra fechar o cadastro eu vou precisar só de uma foto do seu *RG ou CNH*. Pode mandar?`;
-            updates.conversation_step = "ask_tipo_documento";
+            reply = `Tranquilo, ${first || "vamos"}! Já tenho o valor que você passou (R$ ${billVal.toFixed(0)}), seguimos sem a foto então 👍\n\nPra fechar o cadastro me manda só uma foto da *frente do seu documento* (RG ou CNH, tanto faz — eu reconheço sozinho).`;
+            updates.conversation_step = "aguardando_doc_auto";
             break;
           }
           // Sem valor ainda → pede só o valor, sem cobrar foto.
@@ -1835,16 +1831,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     // ─── 3a. PITCH CONEXÃO CLUB (fallback caso lead reentre nesse step) ─────────
     case "pitch_conexao_club": {
-      // Se o lead voltar a falar nesse estado, joga direto pros botões do doc.
-      const ctaMsg = `Pra finalizar, me manda a foto do seu *RG ou CNH* 📄`;
-      await sendOptions(remoteJid, ctaMsg, [
-        { id: "tipo_rg_novo", title: "📄 RG Novo" },
-        { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
-        { id: "tipo_cnh", title: "🪪 CNH" },
-      ]);
-      updates.conversation_step = "ask_tipo_documento";
-      (updates as any).__inline_sent = true;
-      reply = "";
+      // Pede o documento sem botões — o bot identifica RG/CNH sozinho.
+      reply = `Pra finalizar, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — o que for mais fácil pra você.`;
+      updates.conversation_step = "aguardando_doc_auto";
       break;
     }
 
@@ -1861,18 +1850,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         /^(sim|s|ok|pode|pode seguir|bora|vamos|partiu|segue|seguir|tudo certo|sem d[uú]vida|nenhuma|nao tenho|n[ãa]o tenho|n[ãa]o|t[ãa]|fechou|beleza|blz)\b/.test(txt) ||
         /(quero|vamos|bora).*(cadastr|seguir|finaliz)/i.test(messageText || "");
       if (segueAgora) {
-        const ctaMsg = `Show! Pra finalizar seu cadastro me manda só a foto do seu *RG ou CNH* 📄`;
-        await sendOptions(remoteJid, ctaMsg, [
-          { id: "tipo_rg_novo", title: "📄 RG Novo" },
-          { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
-          { id: "tipo_cnh", title: "🪪 CNH" },
-        ]);
+        const ctaMsg = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é.`;
+        await sendText(remoteJid, ctaMsg);
         await supabase.from("conversations").insert({
           customer_id: customer.id, message_direction: "outbound",
           message_text: ctaMsg, message_type: "text",
-          conversation_step: "ask_tipo_documento",
+          conversation_step: "aguardando_doc_auto",
         });
-        updates.conversation_step = "ask_tipo_documento";
+        updates.conversation_step = "aguardando_doc_auto";
         (updates as any).__inline_sent = true;
         reply = "";
       } else {
@@ -1979,23 +1964,22 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       break;
     }
 
-    // ─── 3b. TIPO DE DOCUMENTO ─────────
+    // ─── 3b. TIPO DE DOCUMENTO (legado) ─────────
+    // Mantido só para retrocompat. Hoje o fluxo redireciona para `aguardando_doc_auto`,
+    // onde o bot detecta RG/CNH automaticamente sem perguntar nada ao cliente.
     case "ask_tipo_documento": {
-      const resp = isButton ? buttonId : messageText.trim().toLowerCase();
-      const rgNovo = resp === "tipo_rg_novo" || resp === "1" || resp === "rg novo";
-      const rgAntigo = resp === "tipo_rg_antigo" || resp === "2" || resp === "rg antigo";
-      const cnh = resp === "tipo_cnh" || resp === "3" || resp === "cnh";
-      if (rgNovo) { updates.document_type = "rg_novo"; updates.conversation_step = "aguardando_doc_frente"; reply = "📄 *RG (Novo)*\n\n📸 Envie a *FRENTE do seu RG*.\n\nFormatos: JPG, PNG ou PDF"; }
-      else if (rgAntigo) { updates.document_type = "rg_antigo"; updates.conversation_step = "aguardando_doc_frente"; reply = "📄 *RG (Antigo)*\n\n📸 Envie a *FRENTE do seu RG*.\n\nFormatos: JPG, PNG ou PDF"; }
-      else if (cnh) { updates.document_type = "cnh"; updates.conversation_step = "aguardando_doc_frente"; reply = "📄 *CNH*\n\n📸 Envie a *FRENTE da sua CNH*.\n\nFormatos: JPG, PNG ou PDF"; }
-      else {
-        const sent = await sendOptions(remoteJid, "📋 Qual documento de identidade você vai enviar?\n\nToque em uma opção:", [
-          { id: "tipo_rg_novo", title: "📄 RG Novo" },
-          { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
-          { id: "tipo_cnh", title: "🪪 CNH" },
-        ]);
-        if (!sent) reply = "Escolha: *1* = RG Novo, *2* = RG Antigo, *3* = CNH";
+      // Se o cliente já mandou a foto, deixa o aguardando_doc_auto processar.
+      if (isFile) {
+        updates.conversation_step = "aguardando_doc_auto";
+        reply = "";
+        // Não dá break — re-emite o evento? Não dá. Mas como acabamos de salvar o step,
+        // o próximo evento (a foto chegou junto) cai em aguardando_doc_auto.
+        // Como atalho: já avisa que recebeu.
+        await sendText(remoteJid, "📄 Recebi a foto, analisando agora...");
+        break;
       }
+      reply = `Me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente.`;
+      updates.conversation_step = "aguardando_doc_auto";
       break;
     }
 
