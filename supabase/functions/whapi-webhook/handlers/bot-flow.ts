@@ -194,8 +194,32 @@ function _levSim(a: string, b: string): number {
 }
 
 /**
+ * Fontes de nome consideradas "confiáveis" — uma vez setado, só pode ser
+ * sobrescrito por confirmação explícita do usuário (editing_* / user_confirmed).
+ */
+const TRUSTED_NAME_SOURCES_LOCK = new Set(["user_confirmed", "ocr_conta", "ocr_doc"]);
+
+/**
+ * Verifica se dois nomes (conta de luz × RG) representam a mesma pessoa.
+ * Match se similaridade ≥ 0.85 ou se primeiro+último nome coincidem.
+ */
+export function checkHolderMatch(billName: string | null | undefined, docName: string | null | undefined): { match: boolean; similarity: number; reason: string } {
+  const a = _normName(String(billName || ""));
+  const b = _normName(String(docName || ""));
+  if (!a || !b) return { match: true, similarity: 1, reason: "missing_one_side" };
+  const sim = _levSim(a, b);
+  const partsA = a.split(/\s+/);
+  const partsB = b.split(/\s+/);
+  const firstLastMatch = partsA[0] === partsB[0] && partsA[partsA.length - 1] === partsB[partsB.length - 1];
+  const match = sim >= 0.85 || firstLastMatch;
+  return { match, similarity: sim, reason: `sim=${sim.toFixed(2)} firstLast=${firstLastMatch}` };
+}
+
+/**
  * Decide o nome a usar dado OCR de doc.
- * Retorna null se OCR é alucinação OU se o usuário já confirmou nome diferente.
+ * Retorna null se OCR é alucinação OU se o nome atual veio de fonte confiável.
+ * Fontes confiáveis (ocr_conta, ocr_doc, user_confirmed) só podem ser sobrescritas
+ * via fluxo de edição explícito (editing_conta_nome / editing_doc_nome).
  */
 function safeAssignName(currentName: string | null | undefined, currentSource: string | null | undefined, ocrName: string | null | undefined): string | null {
   if (!ocrName) return null;
@@ -204,8 +228,10 @@ function safeAssignName(currentName: string | null | undefined, currentSource: s
   if (/\d/.test(cleaned)) return null;
   if (cleaned.split(/\s+/).length < 2) return null;
   if (RG_HEADER_TERMS.test(cleaned)) return null;
-  // Já confirmado pelo usuário → nunca sobrescreve
-  if (currentSource === "user_confirmed" && currentName && String(currentName).trim().length >= 3) return null;
+  // Fonte confiável já gravada → nunca sobrescreve sem confirmação do usuário
+  if (currentName && String(currentName).trim().length >= 3 && TRUSTED_NAME_SOURCES_LOCK.has(String(currentSource || ""))) {
+    return null;
+  }
   // Nome atual existe e é muito diferente: mantém (não confiamos no OCR)
   if (currentName && String(currentName).trim().length >= 5) {
     if (_levSim(currentName, cleaned) < 0.7) return null;
