@@ -18,6 +18,8 @@ type Media = {
   send_order: number;
   duration_sec: number | null;
   delay_before_ms?: number | null;
+  original_size_bytes?: number | null;
+  final_size_bytes?: number | null;
 };
 
 // Whapi (WhatsApp) rejeita .webm com erro 500 em /messages/voice.
@@ -40,11 +42,20 @@ const KIND_ICON: Record<Kind, React.ComponentType<{ className?: string }>> = {
   video: Video,
 };
 
+// Vídeo aceita até 200MB porque o compress-worker comprime antes de salvar.
+// Se o worker não estiver configurado, fica salvo no Supabase Storage (limite real do bucket).
 const MAX_BYTES: Record<Kind, number> = {
   audio: 10 * 1024 * 1024,
   image: 8 * 1024 * 1024,
-  video: 50 * 1024 * 1024,
+  video: 200 * 1024 * 1024,
 };
+
+function formatBytes(n: number | null | undefined): string {
+  if (!n || n <= 0) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
 
 interface Props {
   consultantId: string;
@@ -76,7 +87,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     // Inclui mídias do próprio consultor + públicas (Super Admin)
     const { data } = await supabase
       .from("ai_media_library")
-      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, consultant_id, is_public")
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, original_size_bytes, final_size_bytes, consultant_id, is_public")
       .or(`consultant_id.eq.${consultantId},and(consultant_id.is.null,is_public.eq.true)`)
       .eq("kind", kind)
       .eq("active", true)
@@ -108,7 +119,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
         duration_sec: m.duration_sec,
         delay_before_ms: 1500,
       })
-      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms")
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, original_size_bytes, final_size_bytes")
       .maybeSingle();
     setLinking(null);
     if (error) { toast.error("Erro ao vincular: " + error.message); return; }
@@ -129,7 +140,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     (async () => {
       const { data, error } = await supabase
         .from("ai_media_library")
-        .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms")
+        .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, original_size_bytes, final_size_bytes")
         .eq("consultant_id", consultantId)
         .eq("active", true)
         .in("slot_key", slotKeys)
@@ -173,6 +184,8 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     let finalUrl: string | null = null;
     let storagePath: string | null = null;
     let durationSec: number | null = null;
+    let originalSize: number | null = file.size;
+    let finalSize: number | null = file.size;
 
     // === Vídeo: tenta comprimir via compress-worker (Easypanel) antes de salvar ===
     const compressUrl = import.meta.env.VITE_COMPRESS_WORKER_URL as string | undefined;
@@ -194,6 +207,8 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
         if (!j?.url) throw new Error("resposta sem url");
         finalUrl = j.url as string;
         durationSec = typeof j.duration_sec === "number" ? Math.round(j.duration_sec) : null;
+        if (typeof j.original_size === "number") originalSize = j.original_size;
+        if (typeof j.final_size === "number") finalSize = j.final_size;
         const ratio = j.compression_ratio ? ` (${Math.round((1 - j.compression_ratio) * 100)}% menor)` : "";
         toast.success(`Vídeo comprimido e enviado ao MinIO${ratio}`);
       } catch (e) {
@@ -233,9 +248,11 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
         active: true,
         send_order: 100 + items.length,
         delay_before_ms: 1500,
+        original_size_bytes: originalSize,
+        final_size_bytes: finalSize,
         ...(durationSec ? { duration_sec: durationSec } : {}),
       })
-      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms")
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, original_size_bytes, final_size_bytes")
       .maybeSingle();
     setUploading(null);
     if (insErr) {
@@ -297,7 +314,19 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
             <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
             <div className="min-w-0">
               <div className="text-xs font-medium truncate">{m.label}</div>
-              <div className="text-[10px] text-muted-foreground">ordem: {m.send_order}</div>
+              <div className="text-[10px] text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                <span>ordem: {m.send_order}</span>
+                {m.duration_sec ? <span>· {m.duration_sec}s</span> : null}
+                {m.final_size_bytes ? (
+                  m.original_size_bytes && m.original_size_bytes > m.final_size_bytes ? (
+                    <Badge variant="secondary" className="h-4 px-1 text-[9px] font-normal">
+                      {formatBytes(m.original_size_bytes)} → {formatBytes(m.final_size_bytes)} ({Math.round((1 - m.final_size_bytes / m.original_size_bytes) * 100)}% menor)
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="h-4 px-1 text-[9px] font-normal">{formatBytes(m.final_size_bytes)}</Badge>
+                  )
+                ) : null}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-0.5">
