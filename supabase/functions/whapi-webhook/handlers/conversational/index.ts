@@ -401,15 +401,7 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
     const ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
     if (ok !== false) {
       sent = true;
-      if (m.id && ctx.customer?.id) {
-        await ctx.supabase.rpc("try_log_media_send", {
-          _consultant_id: consultantId,
-          _customer_id: ctx.customer.id,
-          _media_id: m.id,
-          _slot_key: slotKey,
-          _kind: kind,
-        }).then(() => {}, () => {});
-      }
+      // dispatch_log já foi inserido antes do send (anti-duplicação por timeout)
       await ctx.supabase.from("conversations").insert({
         customer_id: ctx.customer.id,
         message_direction: "outbound",
@@ -418,8 +410,11 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
         conversation_step: step.step_key,
       });
     } else {
+      // sendMedia retornou false. PORÉM, com Whapi vídeos grandes (>20MB) costumam
+      // dar "Signal timed out" e ainda assim entregar. Mantemos a reserva no
+      // dispatch_log para evitar reenvio duplicado no próximo trigger.
       failed = true;
-      console.warn(`[conversational] mídia ${kind} falhou (media_id=${m.id}); SEM dedupe → tentaremos de novo no próximo gatilho`);
+      console.warn(`[conversational] mídia ${kind} retornou false (media_id=${m.id}); reserva mantida para evitar duplicação em caso de timeout-mas-entregue`);
     }
   }
   if (attempted && failed && !sent) return null;
