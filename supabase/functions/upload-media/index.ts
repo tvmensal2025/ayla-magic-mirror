@@ -11,7 +11,8 @@ const MAX_SIZE = 100 * 1024 * 1024; // 100 MB
 
 const ALLOWED_TYPES: Record<string, string[]> = {
   image: ["image/jpeg", "image/png", "image/webp", "image/gif"],
-  audio: ["audio/mpeg", "audio/ogg", "audio/mp4", "audio/wav", "audio/webm"],
+  // WhatsApp/Whapi rejeita .webm em mensagens de voz; grave/envie OGG/Opus, MP3, M4A ou WAV.
+  audio: ["audio/mpeg", "audio/ogg", "audio/mp4", "audio/wav"],
   video: ["video/mp4", "video/webm"],
   document: [
     "application/pdf",
@@ -36,7 +37,6 @@ function getExtension(mime: string): string {
     "audio/ogg": "ogg",
     "audio/mp4": "m4a",
     "audio/wav": "wav",
-    "audio/webm": "webm",
     "video/mp4": "mp4",
     "video/webm": "webm",
     "application/pdf": "pdf",
