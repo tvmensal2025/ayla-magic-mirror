@@ -1,124 +1,149 @@
-## Diagnóstico da auditoria
+## Diagnóstico principal
 
-O problema não é “só Whapi” nem “só mídia”. São 5 falhas combinadas:
+O problema não está sendo resolvido porque foram tratados sintomas separados, mas o fluxo tem uma combinação de falhas de configuração, tempo de execução, mídia e dedupe.
 
-1. **O fluxo configurado em `/admin/fluxos` está incoerente**
-   - O passo 2 captura `electricity_bill_value`, mas não tem transição `informou_valor`/`valor_brl` para o passo 3.
-   - O motor tenta compensar com auto-advance, mas isso é frágil e não representa fielmente o que foi configurado.
+A evidência mais forte é esta:
 
-2. **Há passos `wait_for=none` em cascata que ainda dependem de fallback.goto**
-   - Se o passo não tem texto e a mídia falha ou é deduplicada, a conversa pode ficar sem resposta ou salvar o step errado.
-   - Isso aparece nos testes: alguns leads ficaram no step 3 e outros foram ao step 5, variando conforme mídia/dedupe.
+- O lead envia `900`.
+- O valor é salvo no banco em `electricity_bill_value`.
+- Mesmo assim, o `conversation_step` continua no passo 2 (`flow:3e7fb4cd...`).
 
-3. **O dedupe de mídia está sendo usado como “já enviado”, mas na prática marca também “tentado”**
-   - Quando a mídia falha, ela fica bloqueada para sempre para aquele customer.
-   - Isso evita loop de 500, mas causa efeito colateral: em novo teste com o mesmo lead, o passo pode pular a mídia e parecer que o fluxo não obedeceu.
+Isso prova que a captura funciona, mas a execução depois da captura não termina de forma confiável antes de salvar o próximo passo.
 
-4. **Áudio `.webm` continua sendo o gargalo real**
-   - O código tenta URL, base64, alias OGG e multipart, mas Whapi ainda pode recusar `.webm`.
-   - Solução definitiva: converter/uploadar áudio como `.ogg` ou `.mp3` e impedir novos `.webm` no fluxo.
+## Por que as correções anteriores não bastaram
 
-5. **O admin `/admin/fluxos` permite configurar estados inválidos**
-   - Hoje ele deixa salvar passo com captura sem transição, passo sem texto/mídia, `wait_for` incorreto e fallback quebrado.
-   - O backend tenta adivinhar, mas “perfeição” aqui exige bloquear configuração inválida antes de chegar no webhook.
+### 1. O fluxo real ainda depende de auto-advance frágil
 
-## Solução definitiva proposta
+O passo 2 captura `electricity_bill_value`, mas não tem uma transição explícita `valor_brl` ou `informou_valor` apontando para o próximo passo.
 
-### 1. Tornar o motor 100% determinístico e fiel ao `/admin/fluxos`
-- Quando um passo tem captura, criar/usar intents virtuais explícitos:
-  - `informou_nome`
-  - `informou_valor`
-  - `informou_telefone`
-  - `informou_cpf`
-  - manter compatibilidade com `nome_proprio`, `valor_brl`, `telefone_br`, `cpf_br`
-- Prioridade correta:
-  1. Captura válida
-  2. Transição configurada no passo
-  3. Plano B configurado
-  4. Repetir o próprio passo sem inventar texto
-- Remover qualquer comportamento que “adivinhe” fora do fluxo, exceto uma compatibilidade controlada para fluxos antigos.
+O backend tenta compensar usando `fallback.goto_step_id`, mas isso vira remendo. Um fluxo confiável não deveria depender de adivinhação quando uma captura essencial acontece.
 
-### 2. Corrigir a cascata de passos `wait_for=none`
-- Fazer a cascata sempre seguir `fallback.goto_step_id` até encontrar um passo que espera resposta (`reply`/`media`) ou etapa especial de cadastro.
-- Enviar todos os conteúdos configurados de cada passo:
-  - áudio, imagem e vídeo sempre que existirem;
-  - texto também quando existir;
-  - sem suprimir mídia por existir texto.
-- Salvar `conversation_step` no último passo real da cascata, não no intermediário.
+Correção correta: captura de valor precisa ter destino explícito.
 
-### 3. Separar “mídia tentada” de “mídia entregue”
-- Ajustar o controle de mídia para registrar status:
-  - `attempted`
-  - `sent`
-  - `failed`
-- Não repetir falhas infinitamente no mesmo turno.
-- Permitir reset/retentativa limpa quando o lead for zerado.
-- A conversa não deve travar se uma mídia falhar: ela deve seguir o fluxo configurado e registrar a falha.
+### 2. Depois do valor, o bot entra numa cascata pesada de mídia
 
-### 4. Blindar áudio `.webm`
-- Ajustar envio Whapi para detectar mime/extensão real.
-- Preferir enviar áudio convertido/compatível (`audio/ogg` ou `audio/mpeg`) quando disponível.
-- No admin, alertar ou bloquear upload `.webm` para passos do fluxo, orientando `.ogg`/`.mp3`.
-- Opcionalmente criar rotina de conversão dos áudios atuais para `.ogg` e atualizar `ai_media_library`.
+Depois do passo 2, o fluxo tenta enviar conteúdo dos passos seguintes:
 
-### 5. Adicionar auditoria visual no `/admin/fluxos`
-- Mostrar problemas por passo antes do consultor testar:
-  - captura sem transição correspondente;
-  - `wait_for=none` sem Plano B para próximo passo;
-  - passo sem texto e sem mídia ativa;
-  - mídia `.webm` em áudio;
-  - fallback apontando para passo inativo/inexistente;
-  - passo de cadastro fora da ordem esperada.
-- Exibir um status claro: “Fluxo pronto para teste” ou “Corrigir X problemas”.
+- passo 3: vídeo + áudio no slot `como_funciona`
+- passo 4: áudio longo + vídeo no slot `fazenda_solar`
+- passo 5: texto perguntando se entendeu
 
-### 6. Corrigir o fluxo atual do Rafael no banco
-- Para o fluxo `66a19db4-b061-4f3f-921f-c13e9fb6f730`:
-  - passo 1: captura nome deve ir para passo 2;
-  - passo 2: captura valor deve ir para passo 3;
-  - passo 3: deve cascatear para passo 4;
-  - passo 4: deve cascatear para passo 5;
-  - passo 5 deve esperar resposta correta (`reply`, não `media`) se a pergunta é “vamos fazer cadastro?”;
-  - resposta afirmativa do passo 5 deve ir para `capture_conta` ou `capture_documento`, conforme sua estratégia.
-- Remover/ignorar passos vazios finais que não têm conteúdo nem função.
+Isso é muita coisa para uma Edge Function síncrona, principalmente com Whapi.
 
-### 7. Criar teste automatizado do fluxo real
-- Simular:
-  - “oi”
-  - nome
-  - “900”
-  - confirmação após explicação
-- Validar que:
-  - o step avança na ordem correta;
-  - mídia configurada é tentada/enviada;
-  - texto configurado é enviado;
-  - não há texto inventado fora do `/admin/fluxos`;
-  - não há travamento silencioso.
+Nos logs já aparece timeout real:
 
-## Arquivos/áreas a alterar
+```text
+[whapi:sendMedia] json_url falhou (video via messages/video). Último erro: Signal timed out.
+```
 
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
-  - motor de transição, cascata, captura, envio e logs.
+Ou seja: o webhook pode estar morrendo ou encerrando antes de persistir o próximo `conversation_step`.
 
-- `supabase/functions/_shared/whapi-api.ts`
-  - robustez no envio de áudio e detecção de formato.
+### 3. O áudio `.webm` continua sendo gargalo
 
-- `src/pages/FluxoCamila.tsx`
-  - auditoria visual, validações e bloqueios de configuração ruim.
+O código tenta enviar `.webm` de várias formas: URL, base64, alias OGG e multipart. Mesmo assim, Whapi pode recusar, demorar ou dar timeout.
 
-- `src/components/admin/fluxo/StepMediaPanel.tsx`
-  - bloqueio/alerta para `.webm` e indicação de mídia compatível.
+Isso explica por que “às vezes envia, às vezes pula, às vezes trava”.
 
-- Migração Supabase
-  - se necessário, ajustar status de logs de mídia e corrigir o fluxo atual do consultor Rafael.
+Solução definitiva: não depender de `.webm` no fluxo. Converter os áudios atuais para `.ogg` ou `.mp3` e impedir novo `.webm` no admin.
 
-## Resultado esperado
+### 4. O dedupe de mídia está mascarando falhas
 
-Depois da implementação, o bot deve:
+Hoje o controle de mídia marca a mídia como enviada antes de confirmar que o Whapi realmente aceitou.
 
-- seguir exatamente o que está em `/admin/fluxos`;
-- enviar sempre áudio/vídeo/imagem quando configurados;
-- enviar texto quando configurado;
-- não inventar mensagem fora do fluxo;
-- não travar em silêncio quando mídia falhar;
-- mostrar no admin quando o fluxo estiver mal configurado;
-- permitir testar com previsibilidade antes de usar com leads reais.
+Então acontece isto:
+
+1. tenta enviar mídia;
+2. grava no log como `sent`;
+3. Whapi falha ou dá timeout;
+4. no próximo teste, o sistema acha que já enviou e pula a mídia.
+
+Isso causa comportamento imprevisível e dá a impressão de que o fluxo não obedece.
+
+### 5. O passo “Deu para entender?” está com `wait_for=media`
+
+Esse passo pergunta:
+
+```text
+Deu para entender como funciona agora?
+Vamos fazer seu cadastro?
+```
+
+Mas está configurado como `wait_for = media`.
+
+Isso está incoerente. O esperado é `wait_for = reply`, porque o cliente deve responder texto/áudio/botão, não necessariamente enviar mídia.
+
+### 6. Existem passos ativos vazios no final
+
+Há passos ativos sem texto, sem mídia e sem função clara. Eles devem ser desativados ou preenchidos, porque aumentam a chance de o motor terminar num passo sem resposta.
+
+## O que precisa ser feito agora
+
+### Etapa 1: corrigir o fluxo atual no banco
+
+Para o fluxo ativo do Rafael:
+
+- passo 1: captura nome e vai para passo 2;
+- passo 2: captura valor e vai explicitamente para passo 3;
+- passo 3: cascata para passo 4;
+- passo 4: cascata para passo 5;
+- passo 5: trocar `wait_for` para `reply`;
+- passo 5: resposta afirmativa vai para cadastro/conta/documento, conforme sua estratégia;
+- desativar passos vazios finais.
+
+### Etapa 2: corrigir o motor do webhook
+
+- Não deixar envio de mídia longa bloquear a gravação do próximo passo.
+- Usar timeout curto por mídia.
+- Remover espera baseada na duração real do áudio/vídeo dentro da Edge Function.
+- Persistir o próximo `conversation_step` mesmo se mídia falhar.
+- Seguir sempre o `fallback.goto_step_id` em cascata até um passo que espere resposta.
+
+### Etapa 3: corrigir dedupe de mídia
+
+- Separar `attempted`, `sent` e `failed`.
+- Só bloquear reenvio quando a mídia realmente foi entregue.
+- Permitir limpar tentativas antigas em reset/teste.
+
+### Etapa 4: blindar o admin
+
+No `/admin/fluxos`, mostrar/bloquear:
+
+- captura sem transição explícita;
+- passo ativo sem texto e sem mídia;
+- `wait_for=media` em pergunta textual;
+- fallback quebrado;
+- mídia `.webm`;
+- mídia longa demais para webhook.
+
+### Etapa 5: validar com teste automatizado
+
+Rodar um cenário real:
+
+```text
+oi -> nome -> 900 -> sim
+```
+
+E validar:
+
+- nome salvo;
+- valor salvo;
+- passo avança após `900`;
+- mídias configuradas são tentadas;
+- textos configurados são enviados;
+- passo final aguarda resposta correta;
+- nada é inventado fora do `/admin/fluxos`.
+
+## Conclusão
+
+O motivo de não resolver é que o problema real não é uma linha específica. É arquitetura de fluxo:
+
+```text
+captura funciona
+  -> entra em cascata com mídia pesada
+  -> Whapi dá timeout ou falha
+  -> dedupe marca como enviado mesmo falhando
+  -> step não é salvo corretamente
+  -> teste seguinte pula mídia ou fica preso
+```
+
+A correção precisa atacar banco, motor, mídia e admin juntos. Remendar só `fallback`, só `FlowAuditPanel` ou só envio de áudio não vai estabilizar.
