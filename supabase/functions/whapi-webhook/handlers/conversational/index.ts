@@ -500,45 +500,10 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Nota: a avaliação de bot_flow_rules agora roda DEPOIS de matchTransition
   // (como fallback inteligente, não como primeiro filtro) — ver bloco mais abaixo.
 
-  // ─── Q&A FAQ matching ───────────────────────────────────────────────
-  // Antes de classificar intenção, vê se a mensagem casa com uma pergunta
-  // cadastrada no Flow Builder. Se casar, responde e MANTÉM o passo atual.
-  const qaHit = await matchQA(ctx.supabase, flowId, consultantId, ctx.messageText || "");
-  if (qaHit) {
-    console.log(`[conversational] QA hit at step="${stepKey}"`);
-    // Envia mídia inline (se houver) — texto vai pelo retorno padrão
-    for (const m of qaHit.mediaUrls) {
-      if ((m.kind === "audio" || m.kind === "video") && m.mediaId) {
-        const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
-          _consultant_id: consultantId,
-          _customer_id: ctx.customer.id,
-          _media_id: m.mediaId,
-          _slot_key: null,
-          _kind: m.kind,
-        });
-        if (canSend === false) {
-          console.log(`[conversational] ⏭️ QA: pulando ${m.kind} já enviado (media_id=${m.mediaId})`);
-          continue;
-        }
-      }
-      try { await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", m.kind); } catch (_) {}
-    }
-    return {
-      reply: renderTemplate(qaHit.text || "", {
-        nome: ctx.customer.name,
-        representante: ctx.nomeRepresentante,
-        valor_conta: (ctx.customer as any).electricity_bill_value,
-        telefone: ctx.customer.phone_whatsapp,
-        cpf: (ctx.customer as any).cpf,
-      }),
-      updates: { conversation_step: stepKey, __inline_sent: qaHit.mediaUrls.length > 0 || undefined },
-    };
-  }
-
-  const cls = await classifyIntent(ctx.messageText, stepKey as ConversationalStep, ctx.geminiApiKey);
-
   // ---------------------------------------------------------------------------
   // Capture phase — extract data the consultor configured for this step
+  // Roda ANTES do QA e do classifier para que "300 reais" nunca seja roubado
+  // por uma pergunta FAQ com phrase "reais".
   // ---------------------------------------------------------------------------
   const captureUpdates: Record<string, any> = {};
   try {
@@ -554,6 +519,49 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   } catch (e) {
     console.error("[conversational] capture phase failed", e);
   }
+
+  // Intents virtuais derivados das capturas (precisamos cedo para suprimir QA/regras).
+  const captureIntents: string[] = [];
+  if (captureUpdates.electricity_bill_value != null) captureIntents.push("informou_valor", "valor_brl");
+  if (captureUpdates.name) captureIntents.push("informou_nome");
+  if (captureUpdates.phone_whatsapp) captureIntents.push("informou_telefone");
+  if (captureUpdates.cpf) captureIntents.push("informou_cpf");
+  const hasCapture = captureIntents.length > 0;
+
+  // ─── Q&A FAQ matching ───────────────────────────────────────────────
+  // Pula se a mensagem produziu captura legítima — captura tem prioridade.
+  const qaHit = hasCapture ? null : await matchQA(ctx.supabase, flowId, consultantId, ctx.messageText || "");
+  if (qaHit) {
+    console.log(`[conversational] QA hit at step="${stepKey}"`);
+    for (const m of qaHit.mediaUrls) {
+      if ((m.kind === "audio" || m.kind === "video") && m.mediaId) {
+        const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
+          _consultant_id: consultantId,
+          _customer_id: ctx.customer.id,
+          _media_id: m.mediaId,
+          _slot_key: "__qa__",
+          _kind: m.kind,
+        });
+        if (canSend === false) {
+          console.log(`[conversational] ⏭️ QA: pulando ${m.kind} já enviado (media_id=${m.mediaId})`);
+          continue;
+        }
+      }
+      try { await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", m.kind); } catch (_) {}
+    }
+    return _finalize(stepKey, {
+      reply: renderTemplate(qaHit.text || "", {
+        nome: ctx.customer.name,
+        representante: ctx.nomeRepresentante,
+        valor_conta: (ctx.customer as any).electricity_bill_value,
+        telefone: ctx.customer.phone_whatsapp,
+        cpf: (ctx.customer as any).cpf,
+      }),
+      updates: { conversation_step: stepKey, __inline_sent: qaHit.mediaUrls.length > 0 || undefined, ...restoreDetourUpdates },
+    });
+  }
+
+  const cls = await classifyIntent(ctx.messageText, stepKey as ConversationalStep, ctx.geminiApiKey);
 
   // Global overrides: cadastro / humano keywords win in any step
   if (cls.intent === "quer_cadastrar") {
