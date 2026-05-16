@@ -179,6 +179,7 @@ export default function FluxoCamila() {
   const [testOpen, setTestOpen] = useState(false);
   const [testPhone, setTestPhone] = useState("");
   const [testCount, setTestCount] = useState(0);
+  const [mediaCounts, setMediaCounts] = useState<Record<string, { audio: number; video: number; image: number }>>({});
   const [showMigrationBanner, setShowMigrationBanner] = useState(
     () => typeof window !== "undefined" && !localStorage.getItem("camila_migration_v2_dismissed")
   );
@@ -212,6 +213,27 @@ export default function FluxoCamila() {
         auto_detect_doc_type: r.auto_detect_doc_type !== false,
       })));
     }
+
+    // Conta mídias ativas por slot_key (e por step_tags como fallback)
+    // para mostrar badges "⚠️ sem áudio/vídeo" nos steps.
+    const { data: medias } = await supabase
+      .from("ai_media_library")
+      .select("kind, slot_key, step_tags, active, is_public, consultant_id")
+      .or(`consultant_id.eq.${uid},is_public.eq.true`)
+      .eq("active", true);
+    const counts: Record<string, { audio: number; video: number; image: number }> = {};
+    const bump = (key: string, kind: string) => {
+      if (!key) return;
+      if (!counts[key]) counts[key] = { audio: 0, video: 0, image: 0 };
+      if (kind === "audio" || kind === "video" || kind === "image") {
+        counts[key][kind as "audio" | "video" | "image"]++;
+      }
+    };
+    for (const m of (medias ?? []) as any[]) {
+      if (m.slot_key) bump(String(m.slot_key), String(m.kind));
+      for (const t of (m.step_tags ?? []) as string[]) bump(String(t), String(m.kind));
+    }
+    setMediaCounts(counts);
   }, []);
 
   useEffect(() => {
@@ -480,6 +502,7 @@ export default function FluxoCamila() {
               total={orderedSteps.length}
               consultantId={userId!}
               allSteps={orderedSteps}
+              mediaCounts={mediaCounts}
               onPatch={(p) => patchStep(step.id, p)}
               onMoveUp={() => moveStep(step.id, -1)}
               onMoveDown={() => moveStep(step.id, +1)}
@@ -524,12 +547,13 @@ function StepCard(props: {
   total: number;
   consultantId: string;
   allSteps: Step[];
+  mediaCounts: Record<string, { audio: number; video: number; image: number }>;
   onPatch: (p: Partial<Step>) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
 }) {
-  const { step, numero, total, consultantId, allSteps, onPatch, onMoveUp, onMoveDown, onDelete } = props;
+  const { step, numero, total, consultantId, allSteps, mediaCounts, onPatch, onMoveUp, onMoveDown, onDelete } = props;
   const [localText, setLocalText] = useState(step.message_text ?? "");
   const [localTitle, setLocalTitle] = useState(step.title);
   const [localSummary, setLocalSummary] = useState(step.summary ?? "");
@@ -539,6 +563,13 @@ function StepCard(props: {
   useEffect(() => { setLocalSummary(step.summary ?? ""); }, [step.summary]);
 
   const slotKey = step.slot_key || step.step_key || step.id;
+  const c = mediaCounts[slotKey] || { audio: 0, video: 0, image: 0 };
+  const missing: string[] = [];
+  if (c.audio === 0) missing.push("áudio");
+  if (c.video === 0) missing.push("vídeo");
+  const missingLabel = missing.length === 0
+    ? null
+    : missing.length === 2 ? "Sem áudio e vídeo" : `Sem ${missing[0]}`;
 
   return (
     <Card className={`p-4 sm:p-5 ${step.is_active ? "" : "opacity-60"}`}>
@@ -547,7 +578,23 @@ function StepCard(props: {
           <IconFor tipo={step.icon} />
         </div>
         <div className="flex-1 min-w-0 space-y-1">
-          <div className="text-xs uppercase tracking-wider text-muted-foreground">Passo {numero}</div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground">Passo {numero}</div>
+            {missingLabel && (
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2 py-0.5 text-[10px] font-medium text-yellow-600 dark:text-yellow-400">
+                      <AlertTriangle className="h-3 w-3" /> {missingLabel}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[260px] text-xs">
+                    Este passo deveria enviar {missing.join(" e ")}, mas nenhuma mídia foi cadastrada com slot_key=<code>{slotKey}</code>. Suba a mídia no painel abaixo para o bot deixar de mandar só texto.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+          </div>
           <Input
             value={localTitle}
             onChange={(e) => setLocalTitle(e.target.value)}

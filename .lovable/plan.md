@@ -1,71 +1,49 @@
-## Diagnóstico — por que o fluxo travou
+## Plano: (C) Aviso de mídia + fix de timeout
 
-Comparando os logs de `bot_step_transitions` + `conversations` para o nº 5511989000650 (Rafael) com o screenshot:
+### Parte A — Aviso visual "⚠️ sem áudio/vídeo" no `/admin/fluxos`
 
-```
-17:57:55  user  "Oi"                                    (step=welcome)
-17:58:01  ➜ transição welcome → Passo 1 (Boas Vindas)
-17:58:26  ➜ transição Passo 1 → Passo 2 (Valor da conta)
-17:58:30  bot   "Rafael, qual o valor médio…"           (1ª vez)
-17:59:00  bot   "Rafael, qual o valor médio…"           (2ª vez — duplicada!)
-18:00:57  user  "Ok"
-18:01:29  bot   "Rafael, qual o valor médio…"           (3ª — repetiu por não capturar)
-18:02:25  user  "$250"
-18:02:32  bot   "Rafael, qual o valor médio…"           (4ª — "$250" não foi capturado)
-18:02:47  user  "900 reais"                             (aí sim capturou)
-```
+**Arquivos:** `src/pages/FluxoCamila.tsx` e/ou `src/components/admin/StepMediaPanel.tsx`
 
-Três problemas reais:
+1. Em `FluxoCamila.tsx`, ao carregar os steps, fazer uma query agregada em `ai_media_library` agrupando por `slot_key` (e `step_tags`) para o `consultant_id` ativo, retornando contagem por `kind` (`audio`, `video`, `image`).
+2. Para cada step renderizado no card, comparar `media_order` (ex.: `["audio","image","video","text"]`) com os kinds disponíveis no `slot_key` daquele step.
+3. Se faltar `audio` ou `video` que está pedido no `media_order`, mostrar badge amarelo:
+   - `⚠️ Sem áudio` / `⚠️ Sem vídeo` / `⚠️ Sem áudio e vídeo`
+   - Usar `bg-yellow-500/10 text-yellow-400 border-yellow-500/30`
+4. Tooltip explicando: "Este passo está configurado para enviar áudio/vídeo mas nenhuma mídia foi cadastrada. Clique para abrir o painel de mídia."
+5. Clicar no badge abre o `StepMediaPanel` daquele step direto na aba correspondente.
 
-### 1. `extractValor` não reconhece "$250"
+### Parte B — Fix de timeout do Whapi (`Signal timed out` em vídeos grandes)
 
-Em `supabase/functions/_shared/captureExtractors.ts` o gate de "indício de dinheiro" exige `r$`, `reais`, `conta`, `luz`, `valor`, `pila` ou número puro `^\d{2,5}$`. O cifrão isolado `$` não casa, então `"$250"` retorna `null` → nenhuma intent `valor_brl` → step se repete.
-Também `"Ok"` cai em repeat — esperado, mas combinado com o item 2 vira loop de mensagem idêntica.
+**Arquivo:** `supabase/functions/_shared/whapiSender.ts` (ou onde está `sendMedia`/`sendText`) + `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
 
-### 2. Mesma pergunta enviada 4× sem variação
+Problema atual: `await sendMedia(...)` em vídeo de 27MB demora >30s, Edge Function timeout dispara, mas o vídeo **é entregue** ao WhatsApp depois. Como o `await` falhou, o engine não marca como enviado e reprocessa → duplicação.
 
-Quando o `repeatCurrent()` é acionado (input sem captura), o engine remanda exatamente o `message_text` configurado. Não há dedupe de "mesmo texto enviado há menos de X segundos", então o lead vê 3-4 vezes "Rafael, qual o valor médio da sua conta de luz?" — exatamente o que aparece no print.
+Fix:
+1. Em `whapiSender.ts`, envolver `sendMedia` com timeout configurável (ex.: 25s) usando `AbortController`.
+2. **Antes** do `await fetch`, registrar a tentativa em `conversations` com `delivery_status: 'pending'` e `dispatch_key` (hash de `customer_id + step_id + media_id`).
+3. Se o `fetch` der timeout/abort, **NÃO** lançar erro — retornar `{ ok: true, status: 'pending_confirmation', dispatch_key }`.
+4. No `_smartRepeat` / dedupe check (já implementado), além de checar texto idêntico nos últimos 90s, checar também `delivery_status IN ('pending', 'sent')` por `dispatch_key` → se existe, pular reenvio de mídia.
+5. Webhook de status do Whapi (já recebido em `Whapi webhook received: {"statuses":[...]}`) atualiza `conversations.delivery_status` de `pending` → `sent`/`delivered`/`read` via `whapi_message_id`.
 
-### 3. Áudio sem vídeo no Passo 2
+### Parte C — Migração
 
-O Passo 2 (`3e7fb4cd-…`, "Qual o valor da conta") tem `media_order: [audio, image, video, text]` mas em `ai_media_library` não existe NENHUMA mídia vinculada a este passo (nenhuma com `step_tags` contendo o id e nenhum `slot_key` correspondente). O áudio que aparece no print veio do Passo 1 (slot `boas_vindas`). Como Passo 2 só tem texto, ele nunca manda vídeo — o vídeo que aparece nos prints é do cascade pós-captura (Passo 3/4) ou de uma QA match, não da pergunta em si.
+Adicionar colunas em `conversations`:
+- `dispatch_key text` (nullable, indexed)
+- `delivery_status text default 'sent'` (`pending|sent|delivered|read|failed`)
+- `whapi_message_id text` (nullable, indexed) — para casar com o webhook de status
 
-## Plano de correção
+### Parte D — Validação
 
-### A. Melhorar `extractValor` (1 arquivo)
+1. No painel `/admin/fluxos`, ver badges amarelos aparecerem nos Steps 2–8 (que não têm mídia).
+2. Disparar teste com 1 número → verificar logs da `whapi-webhook`: deve aparecer `pending_confirmation` no envio do vídeo Step 2 (quando configurado), seguido de `delivered` via webhook de status. Nenhuma duplicação.
+3. Confirmar que `_smartRepeat` não reenvia mídia quando `delivery_status='pending'`.
 
-`supabase/functions/_shared/captureExtractors.ts`:
+### Detalhes técnicos
 
-- Adicionar `$` ao conjunto de gatilhos de dinheiro: aceitar `$250`, `R$250`, `250,00`, `250.00`.
-- Aceitar número puro com 2-5 dígitos mesmo sem keyword **quando o passo atual pedir valor** (sinalizado pelo contexto — passamos o capture esperado, ou simplesmente afrouxamos o gate para `^\s*\d{2,5}([.,]\d{1,2})?\s*$`).
-- Atualizar `intent-classifier_test.ts` / adicionar caso de teste para `"$250"`, `"250"`, `"R$ 250,00"`.
+- O AbortController em Deno: `const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 25000); fetch(url, { signal: ctrl.signal })`.
+- O hash `dispatch_key`: `crypto.subtle.digest("SHA-1", new TextEncoder().encode(`${customer_id}:${step_id}:${media_id}`))` truncado para 16 chars.
+- Webhook de status já chega — só preciso adicionar handler em `whapi-webhook/index.ts` na branch `event.type === 'statuses'` que faz `UPDATE conversations SET delivery_status = ? WHERE whapi_message_id = ?`.
 
-### B. Dedupe de mensagem repetida em `repeatCurrent`
-
-`supabase/functions/whapi-webhook/handlers/conversational/index.ts`:
-
-- Antes de reenviar o `message_text` do passo, consultar `conversations` por última outbound do mesmo `customer_id` + mesmo `conversation_step` nos últimos ~60s. Se idêntico, enviar variação curta ("Me conta, quanto vem em média?" / "Pode ser um valor aproximado 🙂") em vez do texto original.
-- Limitar a no máximo 1 reenvio idêntico por janela; o segundo vira reformulação.
-
-### C. Avisar o admin quando um passo não tem mídia configurada
-
-Frontend `src/pages/FluxoCamila.tsx` + painel `StepMediaPanel.tsx`:
-
-- Mostrar um badge amarelo "⚠️ sem áudio/vídeo" no card do passo quando `media_order` contém `audio|video` mas não há nenhum `ai_media_library` com `step_tags` ou `slot_key` correspondente — assim o consultor sabe que o Passo 2 precisa de áudio/vídeo se quer manter a sequência áudio→vídeo→texto.
-
-### D. Validar
-
-- Rodar `bunx vitest run` nos testes do captureExtractors.
-- `supabase--curl_edge_functions` no `whapi-webhook` com payloads `"$250"`, `"250"`, `"Ok"` e `"900 reais"` no Passo 2 e confirmar que só "$250"/"250"/"900 reais" avançam, e que "Ok" reformula em vez de repetir literal.
-
-## Detalhe técnico — por que não mexer no `index.ts` agora
-
-O loop só existe porque a regex falha. Se A resolver a captura de `$250` e bare numbers, restará apenas o caso legítimo de "Ok" (lead respondeu fora de contexto), e o item B evita que o bot pareça um disco riscado nessa situação.
-
-Não estou tocando em nada do pipeline de OCR/cadastro nem nas mídias do Passo 1 (que estão corretas).
-
-&nbsp;
-
-&nbsp;
-
-Mas passo 2 3 4 5 6 7 8 tem que seguir 100% sem duplicar o audio e o video 
+### Fora de escopo
+- Não vou subir mídias para Steps 2–8 (o usuário precisa fazer isso pelo painel agora que o badge mostra onde falta).
+- Não vou mudar a ordem do `media_order` nem o engine de envio sequencial.

@@ -362,18 +362,21 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
     const m = medias[i];
     const kind = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) : "document";
 
-    // 🚫 REGRA: nunca repetir a mesma mídia já ENTREGUE para o mesmo cliente.
+    // 🚫 REGRA ANTI-DUPLICAÇÃO (pré-send):
+    // Reserva o slot ANTES de chamar sendMedia. Se o Whapi der timeout mas
+    // entregar a mídia mesmo assim, o próximo webhook vê a reserva e pula.
+    // try_log_media_send tem ON CONFLICT (customer_id, media_id) DO NOTHING
+    // e retorna true quando inseriu / false quando já existia.
     if ((kind === "audio" || kind === "video" || kind === "image") && m.id && ctx.customer?.id) {
-      const { data: already } = await ctx.supabase
-        .from("ai_slot_dispatch_log")
-        .select("id")
-        .eq("customer_id", ctx.customer.id)
-        .eq("media_id", m.id)
-        .eq("dispatch_status", "sent")
-        .limit(1)
-        .maybeSingle();
-      if (already?.id) {
-        console.log(`[conversational] ⏭️ pulando ${kind} já entregue (media_id=${m.id}) para customer=${ctx.customer.id}`);
+      const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
+        _consultant_id: consultantId,
+        _customer_id: ctx.customer.id,
+        _media_id: m.id,
+        _slot_key: slotKey,
+        _kind: kind,
+      });
+      if (canSend === false) {
+        console.log(`[conversational] ⏭️ pulando ${kind} já reservado/entregue (media_id=${m.id}) para customer=${ctx.customer.id}`);
         continue;
       }
     }
@@ -398,15 +401,7 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
     const ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
     if (ok !== false) {
       sent = true;
-      if (m.id && ctx.customer?.id) {
-        await ctx.supabase.rpc("try_log_media_send", {
-          _consultant_id: consultantId,
-          _customer_id: ctx.customer.id,
-          _media_id: m.id,
-          _slot_key: slotKey,
-          _kind: kind,
-        }).then(() => {}, () => {});
-      }
+      // dispatch_log já foi inserido antes do send (anti-duplicação por timeout)
       await ctx.supabase.from("conversations").insert({
         customer_id: ctx.customer.id,
         message_direction: "outbound",
@@ -415,8 +410,11 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
         conversation_step: step.step_key,
       });
     } else {
+      // sendMedia retornou false. PORÉM, com Whapi vídeos grandes (>20MB) costumam
+      // dar "Signal timed out" e ainda assim entregar. Mantemos a reserva no
+      // dispatch_log para evitar reenvio duplicado no próximo trigger.
       failed = true;
-      console.warn(`[conversational] mídia ${kind} falhou (media_id=${m.id}); SEM dedupe → tentaremos de novo no próximo gatilho`);
+      console.warn(`[conversational] mídia ${kind} retornou false (media_id=${m.id}); reserva mantida para evitar duplicação em caso de timeout-mas-entregue`);
     }
   }
   if (attempted && failed && !sent) return null;
