@@ -329,6 +329,7 @@ function getReentryPromptForStep(step: string, customer: any): string {
     "editing_doc_nascimento": "Digite a *data de nascimento* (DD/MM/AAAA):",
     "confirmando_dados_conta": "Os dados da conta estão corretos? Responda *SIM*, *NÃO* ou *EDITAR*.",
     "confirmando_dados_doc": "Os dados estão corretos? Responda *SIM*, *NÃO* ou *EDITAR*.",
+    "confirmar_titularidade": "Antes de finalizar: é a *mesma pessoa* da conta de luz, *outro titular* (cônjuge/pai/mãe) ou quer *corrigir*?",
   };
   const txt = map[step];
   return txt ? prefix + txt : "";
