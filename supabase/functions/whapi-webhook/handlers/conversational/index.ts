@@ -339,7 +339,7 @@ Responda em JSON: {"next_step_key": "<um_dos_passos_válidos>", "reason": "breve
   return await callOnce(3000);
 }
 
-async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string, waitForSend = true): Promise<boolean> {
+async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string, waitForSend = true): Promise<boolean | null> {
   const slotKey = step.slot_key || step.step_key || step.id;
   if (!slotKey) return false;
 
@@ -360,6 +360,8 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
   if (configuredOrder) medias.sort(makeKindComparator((m: any) => m.kind, configuredOrder));
 
   let sent = false;
+  let attempted = false;
+  let failed = false;
   for (let i = 0; i < medias.length; i++) {
     const m = medias[i];
     const kind = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) : "document";
@@ -379,19 +381,9 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
       }
     }
 
-    if (!waitForSend) {
-      console.log(`[conversational] mídia ${kind} não bloqueante ignorada para preservar avanço do fluxo (media_id=${m.id})`);
-      sent = true;
-      await ctx.supabase.from("conversations").insert({
-        customer_id: ctx.customer.id,
-        message_direction: "outbound",
-        message_text: `[flow-step:${step.step_key}:${kind}:skipped_nonblocking]`,
-        message_type: kind,
-        conversation_step: step.step_key,
-      });
-      continue;
-    }
+    if (!waitForSend) console.log(`[conversational] envio de mídia em cascata aguardando resultado (${kind}, media_id=${m.id})`);
 
+    attempted = true;
     const ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
     if (ok !== false) {
       sent = true;
@@ -402,16 +394,20 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
         message_type: kind,
         conversation_step: step.step_key,
       });
-    } else if ((kind === "audio" || kind === "video") && m.id && ctx.customer.id) {
+    } else {
+      failed = true;
+      if ((kind === "audio" || kind === "video") && m.id && ctx.customer.id) {
       await ctx.supabase
         .from("ai_slot_dispatch_log")
         .delete()
         .eq("customer_id", ctx.customer.id)
         .eq("media_id", m.id);
       console.warn(`[conversational] mídia ${kind} falhou; dedupe removido para retry (media_id=${m.id})`);
+      }
     }
     if (i < medias.length - 1) await sleepForMedia(kind, Number(m.duration_sec || 0) || null, Number(m.delay_before_ms || 0) || null);
   }
+  if (attempted && failed && !sent) return null;
   return sent;
 }
 
@@ -655,6 +651,14 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     let inlineSent = mediaSent;
     const replyParts = [renderTemplate(s.message_text || "", vars).trim()].filter(Boolean);
 
+    if (mediaSent === null) {
+      console.warn(`[conversational] avanço bloqueado: mídia obrigatória falhou no step=${s.step_key}`);
+      return {
+        reply: replyParts.join("\n\n"),
+        updates: { conversation_step: s.id, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: replyParts.length === 0 || undefined, ...extra },
+      };
+    }
+
     let cursor: DbStep | null = cadastroStep ? null : s;
     for (let guard = 0; cursor?.wait_for === "none" && guard < 4; guard++) {
       const nextId = cursor.fallback?.mode === "goto" ? cursor.fallback.goto_step_id : null;
@@ -665,6 +669,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       const cascadeDelay = Math.max(0, Math.min(60000, nextStep.text_delay_ms ?? 1500));
       if (cascadeDelay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, cascadeDelay));
       const cascadeMediaSent = await sendStepMedia(ctx, nextStep, consultantId, false);
+      if (cascadeMediaSent === null) {
+        console.warn(`[conversational] cascade bloqueado: mídia obrigatória falhou no step=${nextStep.step_key}`);
+        nextConversationStep = nextStep.id;
+        inlineSent = inlineSent || replyParts.length === 0;
+        break;
+      }
       const cascadeText = renderTemplate(nextStep.message_text || "", vars).trim();
       if (cascadeText) replyParts.push(cascadeText);
 
