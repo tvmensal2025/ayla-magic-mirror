@@ -2032,6 +2032,7 @@ export type Database = {
           data_validado: string | null
           debitos_aberto: boolean | null
           desconto_cliente: number | null
+          detour_count: number
           devolutiva: string | null
           distribuidora: string | null
           doc_holder_name: string | null
@@ -2140,6 +2141,7 @@ export type Database = {
           data_validado?: string | null
           debitos_aberto?: boolean | null
           desconto_cliente?: number | null
+          detour_count?: number
           devolutiva?: string | null
           distribuidora?: string | null
           doc_holder_name?: string | null
@@ -2248,6 +2250,7 @@ export type Database = {
           data_validado?: string | null
           debitos_aberto?: boolean | null
           desconto_cliente?: number | null
+          detour_count?: number
           devolutiva?: string | null
           distribuidora?: string | null
           doc_holder_name?: string | null
