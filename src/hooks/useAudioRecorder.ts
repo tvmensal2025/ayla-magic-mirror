@@ -1,11 +1,25 @@
 import { useState, useRef, useCallback } from "react";
 
+// Usa opus-recorder para gerar OGG/Opus de verdade (não webm).
+// Whapi/WhatsApp exige container OGG para messages/voice. Gravar direto em .ogg
+// resolve os erros 500 que aconteciam quando enviávamos .webm.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type OpusRecorderClass = any;
+
+let RecorderPromise: Promise<OpusRecorderClass> | null = null;
+async function loadRecorder(): Promise<OpusRecorderClass> {
+  if (!RecorderPromise) {
+    RecorderPromise = import("opus-recorder").then((m) => (m as { default: OpusRecorderClass }).default || m);
+  }
+  return RecorderPromise;
+}
+
 export function useAudioRecorder(onSendAudio?: (base64: string) => Promise<void>) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [sending, setSending] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recorderRef = useRef<any>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
@@ -13,17 +27,20 @@ export function useAudioRecorder(onSendAudio?: (base64: string) => Promise<void>
   const startRecording = useCallback(async () => {
     if (!onSendAudio) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm",
+      const Recorder = await loadRecorder();
+      const recorder = new Recorder({
+        encoderPath: "/opus/encoderWorker.min.js",
+        encoderApplication: 2048, // VOIP
+        encoderSampleRate: 16000,
+        encoderFrameSize: 20,
+        numberOfChannels: 1,
+        streamPages: false,
+        rawOpus: false, // queremos OGG container completo
       });
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      mr.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+
+      recorder.ondataavailable = async (arrayBuffer: ArrayBuffer) => {
+        // OGG/Opus completo
+        const blob = new Blob([arrayBuffer], { type: "audio/ogg; codecs=opus" });
         const reader = new FileReader();
         reader.onloadend = async () => {
           const b64 = (reader.result as string).split(",")[1];
@@ -34,28 +51,35 @@ export function useAudioRecorder(onSendAudio?: (base64: string) => Promise<void>
         };
         reader.readAsDataURL(blob);
       };
-      mediaRecorderRef.current = mr;
-      mr.start();
+
+      await recorder.start();
+      recorderRef.current = recorder;
       setIsRecording(true);
       setRecordingTime(0);
       timerRef.current = setInterval(() => setRecordingTime((p) => p + 1), 1000);
-    } catch {}
+    } catch (err) {
+      console.error("[useAudioRecorder] start failed", err);
+    }
   }, [onSendAudio]);
 
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop();
+    const rec = recorderRef.current;
+    if (rec) {
+      try { rec.stop(); } catch {}
+    }
     setIsRecording(false);
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   }, []);
 
   const cancelRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === "recording") {
-      mediaRecorderRef.current.ondataavailable = null;
-      mediaRecorderRef.current.onstop = null;
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream?.getTracks().forEach((t) => t.stop());
+    const rec = recorderRef.current;
+    if (rec) {
+      try {
+        rec.ondataavailable = null;
+        rec.stop();
+      } catch {}
     }
-    chunksRef.current = [];
+    recorderRef.current = null;
     setIsRecording(false);
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   }, []);
