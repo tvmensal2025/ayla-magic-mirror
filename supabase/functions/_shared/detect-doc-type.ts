@@ -1,12 +1,17 @@
 // Detecta automaticamente o tipo de documento (CNH / RG novo / RG antigo)
 // a partir de uma imagem (base64 ou URL pública). Usa Gemini Vision.
 //
-// Estratégia profissional:
-//   1. 1ª passada com prompt estruturado pedindo JSON {tipo, confianca}.
-//   2. Se confiança < 0.7 ou parsing falhar → 2ª passada com prompt detalhado.
-//   3. Se ainda incerto → retorna "rg_antigo" (fallback que pede verso — mais seguro).
+// Estratégia profissional (3 passadas com modelos diferentes):
+//   1. Pass1: gemini-2.5-flash com checklist visual completo + temperature=0.
+//      Aceita direto se confiança >= 0.80.
+//   2. Pass2: gemini-2.5-pro com prompt detalhado + raciocínio passo-a-passo.
+//      Aceita se confiança >= 0.60.
+//   3. Pass3 (último recurso): gemini-2.5-flash com regra de desempate
+//      ("se viu QR grande + CPF impresso → rg_novo; se papel laminado vertical → rg_antigo;
+//       se viu CATEGORIA/VALIDADE → cnh; se em dúvida → rg_antigo").
 //
-// O cliente NUNCA precisa escolher. O bot decide pela foto.
+// O cliente NUNCA precisa escolher e NUNCA vê "RG Novo"/"RG Antigo" — o bot decide
+// internamente apenas para saber se precisa pedir o verso.
 
 import { normalizeDocumentType, type DocumentTypeCanonical } from "./document-type.ts";
 
@@ -20,27 +25,82 @@ interface DetectInput {
 interface DetectResult {
   tipo: DocumentTypeCanonical;
   confianca: number; // 0..1
-  source: "gemini_pass1" | "gemini_pass2" | "fallback";
+  source: "gemini_pass1" | "gemini_pass2" | "gemini_pass3" | "fallback";
+  sinais?: string[];
 }
 
-const PROMPT_PASS1 = `Você é um especialista em documentos brasileiros. Olhe esta foto e classifique como UM destes três tipos:
+const CHECKLIST = `
+CHECKLIST VISUAL — analise os sinais antes de decidir:
 
-- "cnh": Carteira Nacional de Habilitação. Sinais: tem categoria (A, B, AB...), validade, "PERMISSÃO PARA DIRIGIR" ou "HABILITAÇÃO", geralmente formato carteira com foto, assinatura e impressão digital, costuma ter QR code.
-- "rg_novo": RG no formato moderno em policarbonato (cartão tipo cartão de crédito), com chip ou QR code, layout horizontal, "CARTEIRA DE IDENTIDADE NACIONAL" ou CIN.
-- "rg_antigo": RG tradicional em papel laminado, sem chip, layout antigo, pode estar amarelado/gasto, "REGISTRO GERAL".
+🚗 CNH (Carteira Nacional de Habilitação):
+- Cabeçalho "CARTEIRA NACIONAL DE HABILITAÇÃO" ou "PERMISSÃO PARA DIRIGIR"
+- Campo "CATEGORIA" / "CAT. HAB." (A, B, AB, AC, AD, AE, C, D, E)
+- Campo "VALIDADE" (data) e/ou "1ª HABILITAÇÃO"
+- Foto + assinatura + impressão digital na mesma face
+- Layout horizontal, fundo cinza/azulado, faixa "REPÚBLICA FEDERATIVA DO BRASIL"
+- Pode ter QR code lateral
+- ⚠️ CNH NÃO tem verso útil — só uma face importa
 
-Responda APENAS com JSON válido (sem markdown, sem texto extra):
-{"tipo":"cnh"|"rg_novo"|"rg_antigo","confianca":0.0-1.0}`;
+🆕 RG NOVO / CIN (Carteira de Identidade Nacional):
+- Cabeçalho "CARTEIRA DE IDENTIDADE NACIONAL" ou "CIN"
+- Material policarbonato (parece cartão de banco, brilhante e rígido)
+- Layout HORIZONTAL, moderno
+- QR Code GRANDE (geralmente na face do verso)
+- CPF impresso na face frontal
+- Brasão colorido da República
+- Cores vibrantes, impressão nítida tipo cartão
 
-const PROMPT_PASS2 = `Análise detalhada de documento brasileiro. Examine com cuidado:
+📜 RG ANTIGO (modelo tradicional):
+- Cabeçalho "CARTEIRA DE IDENTIDADE" / "REGISTRO GERAL"
+- Papel laminado em plástico (não é policarbonato), pode estar amarelado/manchado
+- Layout VERTICAL (frente e verso separados em papel)
+- Foto preto-e-branco ou colorida desbotada
+- "SSP/UF" em destaque, sem QR code grande
+- Aparência envelhecida, bordas onduladas
+- NÃO tem CPF impresso na frente (ou tem em local discreto)
 
-1. Tem categoria de habilitação (A, B, C, D, E, AB, AC, AD, AE)? → cnh
-2. Diz "CARTEIRA NACIONAL DE HABILITAÇÃO" ou "PERMISSÃO PARA DIRIGIR"? → cnh
-3. É formato policarbonato moderno tipo cartão de crédito (com chip/QR/layout horizontal recente)? → rg_novo
-4. Diz "CARTEIRA DE IDENTIDADE NACIONAL" / "CIN"? → rg_novo
-5. É papel laminado antigo, layout vertical, "REGISTRO GERAL" / "SSP"? → rg_antigo
+⚠️ A foto pode estar rotacionada (90°, 180°, 270°) ou ligeiramente torta — considere isso.
+⚠️ Se enxergar QR code grande + CPF impresso na frente = é RG_NOVO, mesmo que pareça antigo.
+⚠️ Se enxergar CATEGORIA + VALIDADE = é CNH, sem dúvida.
+`;
 
-Responda APENAS JSON: {"tipo":"cnh"|"rg_novo"|"rg_antigo","confianca":0.0-1.0,"motivo":"breve"}`;
+const PROMPT_PASS1 = `Você é um especialista em documentos de identidade brasileiros.
+
+${CHECKLIST}
+
+Classifique a foto como UM destes três tipos: "cnh", "rg_novo" ou "rg_antigo".
+
+Responda APENAS com JSON válido (sem markdown):
+{"tipo":"cnh"|"rg_novo"|"rg_antigo","confianca":0.0-1.0,"sinais":["sinal1","sinal2"]}
+
+Os "sinais" devem citar 2-4 evidências concretas que você viu na foto.`;
+
+const PROMPT_PASS2 = `ANÁLISE DETALHADA de documento brasileiro. Pense passo-a-passo:
+
+${CHECKLIST}
+
+Etapas obrigatórias:
+1) Identifique o cabeçalho visível.
+2) Procure CATEGORIA/VALIDADE → se achar, é CNH.
+3) Procure QR code GRANDE + CPF impresso → se achar, é RG_NOVO.
+4) Avalie material (policarbonato brilhante vs papel laminado amarelado).
+5) Se ainda em dúvida, prefira o tipo cuja maioria dos sinais bate.
+
+Responda APENAS JSON:
+{"tipo":"cnh"|"rg_novo"|"rg_antigo","confianca":0.0-1.0,"sinais":["..."],"motivo":"breve"}`;
+
+const PROMPT_PASS3 = `Última análise. Use estas REGRAS DE DESEMPATE:
+
+R1) Tem texto "CATEGORIA" ou "VALIDADE" ou "HABILITAÇÃO"? → cnh
+R2) Tem QR code claramente grande E CPF impresso na frente? → rg_novo
+R3) Tem cabeçalho "CARTEIRA DE IDENTIDADE NACIONAL" ou "CIN"? → rg_novo
+R4) Aparência de papel laminado antigo, layout vertical, sem QR grande? → rg_antigo
+R5) Em qualquer outra dúvida → rg_antigo (mais seguro porque pede verso)
+
+${CHECKLIST}
+
+Responda APENAS JSON:
+{"tipo":"cnh"|"rg_novo"|"rg_antigo","confianca":0.0-1.0,"sinais":["..."]}`;
 
 async function fetchImagePart(input: DetectInput): Promise<any | null> {
   if (input.base64 && input.base64.length > 100) {
@@ -62,46 +122,48 @@ async function fetchImagePart(input: DetectInput): Promise<any | null> {
   return null;
 }
 
-function parseDetectJson(raw: string): { tipo: DocumentTypeCanonical; confianca: number } | null {
+function parseDetectJson(raw: string): { tipo: DocumentTypeCanonical; confianca: number; sinais?: string[] } | null {
   try {
     const clean = raw.replace(/```json|```/gi, "").trim();
-    const match = clean.match(/\{[^}]+\}/);
+    // Match JSON object that may contain arrays (no greedy needed but tolerate nesting)
+    const match = clean.match(/\{[\s\S]*\}/);
     if (!match) return null;
     const obj = JSON.parse(match[0]);
     const tipo = normalizeDocumentType(obj?.tipo);
     const confianca = typeof obj?.confianca === "number"
       ? Math.max(0, Math.min(1, obj.confianca))
       : 0.5;
-    return { tipo, confianca };
+    const sinais = Array.isArray(obj?.sinais) ? obj.sinais.map((s: any) => String(s)).slice(0, 6) : undefined;
+    return { tipo, confianca, sinais };
   } catch {
     return null;
   }
 }
 
-async function callGemini(prompt: string, imagePart: any, apiKey: string): Promise<string> {
+async function callGemini(prompt: string, imagePart: any, apiKey: string, model: string): Promise<string> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12_000);
+  const timer = setTimeout(() => ctrl.abort(), 15_000);
   try {
     const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }, imagePart] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 120, responseMimeType: "application/json" },
+          generationConfig: { temperature: 0, maxOutputTokens: 400, responseMimeType: "application/json" },
         }),
         signal: ctrl.signal,
       },
     );
     if (!resp.ok) {
-      console.warn("[detectDocumentType] gemini status", resp.status);
+      console.warn(`[detectDocumentType] gemini ${model} status`, resp.status);
       return "";
     }
     const json: any = await resp.json();
     return (json?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
   } catch (e) {
-    console.warn("[detectDocumentType] erro chamando gemini:", (e as Error).message);
+    console.warn(`[detectDocumentType] erro chamando gemini ${model}:`, (e as Error).message);
     return "";
   } finally {
     clearTimeout(timer);
@@ -118,28 +180,37 @@ export async function detectDocumentTypeDetailed(input: DetectInput): Promise<De
     return { tipo: "rg_antigo", confianca: 0, source: "fallback" };
   }
 
-  // 1ª passada
-  const raw1 = await callGemini(PROMPT_PASS1, imagePart, input.geminiApiKey);
+  // ── Pass 1: gemini-2.5-flash + checklist ──
+  const raw1 = await callGemini(PROMPT_PASS1, imagePart, input.geminiApiKey, "gemini-2.5-flash");
   const parsed1 = parseDetectJson(raw1);
-  if (parsed1 && parsed1.confianca >= 0.7) {
-    console.log(`🤖 [detectDoc] pass1 confiante: ${parsed1.tipo} (${parsed1.confianca.toFixed(2)})`);
-    return { tipo: parsed1.tipo, confianca: parsed1.confianca, source: "gemini_pass1" };
+  if (parsed1 && parsed1.confianca >= 0.80) {
+    console.log(`🤖 [detectDoc] pass1 confiante: ${parsed1.tipo} (${parsed1.confianca.toFixed(2)}) sinais=${JSON.stringify(parsed1.sinais)}`);
+    return { tipo: parsed1.tipo, confianca: parsed1.confianca, source: "gemini_pass1", sinais: parsed1.sinais };
   }
 
-  // 2ª passada (prompt mais detalhado)
-  console.log(`🤖 [detectDoc] pass1 ambíguo (${parsed1 ? parsed1.confianca.toFixed(2) : "no-parse"}) — rodando pass2`);
-  const raw2 = await callGemini(PROMPT_PASS2, imagePart, input.geminiApiKey);
+  // ── Pass 2: gemini-2.5-pro (mais preciso) ──
+  console.log(`🤖 [detectDoc] pass1 ambíguo (${parsed1 ? parsed1.confianca.toFixed(2) : "no-parse"}) — pass2 com 2.5-pro`);
+  const raw2 = await callGemini(PROMPT_PASS2, imagePart, input.geminiApiKey, "gemini-2.5-pro");
   const parsed2 = parseDetectJson(raw2);
-  if (parsed2 && parsed2.confianca >= 0.5) {
-    console.log(`🤖 [detectDoc] pass2 decidiu: ${parsed2.tipo} (${parsed2.confianca.toFixed(2)})`);
-    return { tipo: parsed2.tipo, confianca: parsed2.confianca, source: "gemini_pass2" };
+  if (parsed2 && parsed2.confianca >= 0.60) {
+    console.log(`🤖 [detectDoc] pass2 decidiu: ${parsed2.tipo} (${parsed2.confianca.toFixed(2)}) sinais=${JSON.stringify(parsed2.sinais)}`);
+    return { tipo: parsed2.tipo, confianca: parsed2.confianca, source: "gemini_pass2", sinais: parsed2.sinais };
   }
 
-  // Último recurso: usa o melhor que tiver, ou fallback seguro (rg_antigo pede verso)
+  // ── Pass 3: desempate ──
+  console.log(`🤖 [detectDoc] pass2 ambíguo — pass3 desempate`);
+  const raw3 = await callGemini(PROMPT_PASS3, imagePart, input.geminiApiKey, "gemini-2.5-flash");
+  const parsed3 = parseDetectJson(raw3);
+  if (parsed3) {
+    console.log(`🤖 [detectDoc] pass3 decidiu: ${parsed3.tipo} (${parsed3.confianca.toFixed(2)}) sinais=${JSON.stringify(parsed3.sinais)}`);
+    return { tipo: parsed3.tipo, confianca: parsed3.confianca, source: "gemini_pass3", sinais: parsed3.sinais };
+  }
+
+  // Último recurso: melhor estimativa ou fallback seguro
   const best = parsed2 || parsed1;
   if (best) {
     console.log(`🤖 [detectDoc] usando melhor estimativa: ${best.tipo} (${best.confianca.toFixed(2)})`);
-    return { tipo: best.tipo, confianca: best.confianca, source: "gemini_pass2" };
+    return { tipo: best.tipo, confianca: best.confianca, source: "gemini_pass2", sinais: best.sinais };
   }
   console.warn(`⚠️ [detectDoc] sem parse — fallback rg_antigo`);
   return { tipo: "rg_antigo", confianca: 0, source: "fallback" };

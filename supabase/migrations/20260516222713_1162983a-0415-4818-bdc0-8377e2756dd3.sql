@@ -1,0 +1,1 @@
+UPDATE public.bot_flow_steps SET fallback = jsonb_set(fallback, '{goto_step_id}', to_jsonb('5b318e95-863b-43b8-96b2-d4f55bb9619c'::text)) WHERE id = '559b8f1b-0630-45b5-aeae-b96cb4d20e9a';

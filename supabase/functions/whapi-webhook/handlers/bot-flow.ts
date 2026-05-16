@@ -2053,12 +2053,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         updates.document_front_url = fileUrl.startsWith("http") ? fileUrl : "evolution-media:pending";
       }
       // Se for CNH, marca verso "não aplicável" para o pipeline pular o passo.
+      // IMPORTANTE: nunca dizemos ao cliente "RG Novo" ou "RG Antigo" — essa
+      // distinção é só interna pra decidir se precisa pedir o verso.
       if (detectedType === "cnh") {
         updates.document_back_url = "nao_aplicavel";
-        await sendText(remoteJid, "✅ CNH identificada! ⏳ Analisando os dados...");
+        await sendText(remoteJid, "✅ Documento recebido! ⏳ Analisando os dados...");
       } else {
-        const friendly = detectedType === "rg_novo" ? "RG (Novo)" : "RG (Antigo)";
-        await sendText(remoteJid, `✅ ${friendly} identificado! ⏳ Analisando a frente...\n\nDepois vou te pedir o verso.`);
+        await sendText(remoteJid, `✅ Documento recebido! ⏳ Analisando a frente...\n\nDepois vou te pedir o *verso*.`);
       }
       // Roda OCR da frente já agora (mesma lógica do aguardando_doc_frente)
       try {
@@ -2129,8 +2130,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     // ─── 4. FRENTE DO DOC ───────────
     case "aguardando_doc_frente": {
       if (!isFile) {
-        const tipo = friendlyLabel(customer.document_type);
-        const msgDoc = isCNH(customer.document_type) ? "FRENTE da sua CNH" : `FRENTE do seu ${tipo}`;
+        const msgDoc = isCNH(customer.document_type) ? "FRENTE da sua CNH" : "FRENTE do seu documento (RG ou CNH)";
         reply = `📸 Envie a *${msgDoc}*.\n\nFormatos: JPG, PNG ou PDF`;
         break;
       }
