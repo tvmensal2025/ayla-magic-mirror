@@ -14,7 +14,7 @@ import { normalizePhone } from "../_shared/utils.ts";
 import { createWhapiSender, parseWhapiMessage } from "../_shared/whapi-api.ts";
 import { checkAndMarkProcessed, logStepTransition, jsonLog } from "../_shared/audit.ts";
 import { runBotFlow } from "./handlers/bot-flow.ts";
-import { runConversationalFlow } from "./handlers/conversational/index.ts";
+import { runConversationalFlow, CADASTRO_STEPS } from "./handlers/conversational/index.ts";
 import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
@@ -388,16 +388,16 @@ Deno.serve(async (req) => {
         (customer as any).conversation_step = "welcome";
       }
 
-      // 🚀 PROMOÇÃO PARA FLOW (Fluxo da Camila como fonte única de verdade):
-      // Quando o consultor habilitou o motor novo e tem um bot_flow ativo,
-      // o primeiro contato e os steps legados conversacionais são roteados
-      // para o motor dinâmico. Ele restarta no primeiro passo ativo.
-      const LEGACY_PROMOTABLE = new Set(["", "welcome", "checkin_pos_video", "qualificacao", "menu_inicial", "pos_video"]);
+      // 🚀 FONTE ÚNICA DE VERDADE: Fluxo da Camila (DB) controla TODO step
+      // que não pertence ao pipeline de cadastro (OCR/doc/portal). Cadastro
+      // continua em sys (bot-flow.ts). Nada mais bounce entre engines.
+      const currentStepRaw = stripPrefix((customer as any).conversation_step || "");
+      const isCadastroStep = CADASTRO_STEPS.has(currentStepRaw);
       if (
         engine === "sys" &&
+        !isCadastroStep &&
         consultantFlag &&
-        customerOverride !== false &&
-        LEGACY_PROMOTABLE.has(stripPrefix((customer as any).conversation_step || ""))
+        customerOverride !== false
       ) {
         try {
           const { data: activeFlow } = await supabase
@@ -407,7 +407,6 @@ Deno.serve(async (req) => {
             .eq("is_active", true)
             .maybeSingle();
           if (activeFlow?.id) {
-            // Conta os steps ativos só pra evitar promover quando o flow está vazio.
             const { count } = await supabase
               .from("bot_flow_steps")
               .select("id", { count: "exact", head: true })
@@ -415,9 +414,10 @@ Deno.serve(async (req) => {
               .eq("is_active", true);
             if ((count || 0) > 0) {
               engine = "flow";
-              // Limpa o step para que runConversationalFlow restarte no firstActive.
+              // Limpa o step legado para que runConversationalFlow restarte
+              // no firstActive do Fluxo da Camila — sem bounce, sem mistura.
               (customer as any).conversation_step = null;
-              console.log(`🚀 [router] promovido para flow (consultor=${superAdminConsultantId}, step legado="${stepBefore}")`);
+              console.log(`🚀 [router] forçado para flow (consultor=${superAdminConsultantId}, step legado="${stepBefore}")`);
             }
           }
         } catch (e) {
