@@ -12,8 +12,6 @@
 // - max_fires_per_conversation enforced via bot_flow_rule_fires count.
 // - Idempotency: media dedupe goes through existing try_log_media_send.
 
-import { CADASTRO_STEPS } from "./index.ts" with { ignoreErrorIfMissing: true } as any;
-
 export interface BotFlowRule {
   id: string;
   flow_id: string;
