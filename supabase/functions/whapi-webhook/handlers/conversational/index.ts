@@ -756,12 +756,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const nextStep = dbSteps.find((s) => s.id === fb.goto_step_id);
     if (nextStep && nextStep.is_active) {
       if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
-        return {
+        return _finalize(stepKey, {
           reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
-          updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
-        };
+          updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
+        });
       }
-      return goToStep(nextStep);
+      return _finalize(stepKey, await goToStep(nextStep, restoreDetourUpdates));
     }
   }
   if (fb.mode === "ai" && fb.ai_prompt && !strictMode) {
@@ -769,11 +769,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey, consultantId || "global");
     if (choice) {
       const upper = choice.toUpperCase();
-      if (upper === "REPEAT") return repeatCurrent();
-      if (upper === "HUMANO") return resolveTransition({ goto_special: "humano" } as DbTransition);
-      if (upper === "CADASTRO") return resolveTransition({ goto_special: "cadastro" } as DbTransition);
+      if (upper === "REPEAT") return _finalize(stepKey, await repeatCurrent());
+      if (upper === "HUMANO") return _finalize(stepKey, await resolveTransition({ goto_special: "humano" } as DbTransition));
+      if (upper === "CADASTRO") return _finalize(stepKey, await resolveTransition({ goto_special: "cadastro" } as DbTransition));
       const nextStep = dbSteps.find(s => s.step_key === choice);
-      if (nextStep && nextStep.is_active) return goToStep(nextStep);
+      if (nextStep && nextStep.is_active) return _finalize(stepKey, await goToStep(nextStep, restoreDetourUpdates));
     }
   } else if (fb.mode === "ai" && strictMode) {
     console.log(`[conversational] strict_mode=true → fallback IA ignorado, usando repeat`);
@@ -788,18 +788,18 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       console.log(`[conversational] auto-advance ${currentStep.step_key} → ${nextByPosition.step_key} (no transitions, intent=${cls.intent})`);
       if (nextByPosition.step_key === "cadastro" || CADASTRO_STEPS.has(nextByPosition.step_key)) {
         const docStep = findActiveByType("capture_documento");
-        if (docStep) return goToStep(docStep);
-        return {
+        if (docStep) return _finalize(stepKey, await goToStep(docStep, restoreDetourUpdates));
+        return _finalize(stepKey, {
           reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
-          updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates },
-        };
+          updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
+        });
       }
-      return goToStep(nextByPosition);
+      return _finalize(stepKey, await goToStep(nextByPosition, restoreDetourUpdates));
     }
   }
 
   // Default: repeat
-  return repeatCurrent();
+  return _finalize(stepKey, await repeatCurrent());
 }
 
 // Legacy hardcoded path — preserved for consultants without a custom flow.
