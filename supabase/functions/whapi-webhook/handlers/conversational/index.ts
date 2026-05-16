@@ -769,13 +769,19 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   if (transition) return _finalize(stepKey, await resolveTransition(transition));
 
 
-  // 1.5) Captura sem transição configurada → auto-advance para o próximo passo ativo
-  // (corrige o caso "lead respondeu '300 reais' mas o passo não tinha rota informou_valor").
+  // 1.5) Captura sem transição configurada → segue o Plano B configurado
+  // (PREFERE fallback.goto_step_id — é o que o consultor configurou em /admin/fluxos).
+  // Só cai pra próximo por posição como último recurso.
   if (hasCapture) {
-    const nextByPosition = dbSteps.find((s) => s.is_active && s.position > currentStep.position);
-    if (nextByPosition) {
-      console.log(`[conversational] auto-advance por captura ${currentStep.step_key} → ${nextByPosition.step_key} (intents=${captureIntents.join(",")})`);
-      if (nextByPosition.step_key === "cadastro" || CADASTRO_STEPS.has(nextByPosition.step_key)) {
+    let nextByConfig: DbStep | undefined;
+    const fbId = currentStep.fallback?.mode === "goto" ? currentStep.fallback.goto_step_id : null;
+    if (fbId) nextByConfig = dbSteps.find((s) => s.is_active && s.id === fbId);
+    if (!nextByConfig) {
+      nextByConfig = dbSteps.find((s) => s.is_active && s.position > currentStep.position);
+    }
+    if (nextByConfig) {
+      console.log(`[conversational] auto-advance por captura ${currentStep.step_key} → ${nextByConfig.step_key} (intents=${captureIntents.join(",")}, source=${fbId ? "fallback.goto" : "position"})`);
+      if (nextByConfig.step_key === "cadastro" || CADASTRO_STEPS.has(nextByConfig.step_key)) {
         const docStep = findActiveByType("capture_documento");
         if (docStep) return _finalize(stepKey, await goToStep(docStep, restoreDetourUpdates));
         return _finalize(stepKey, {
@@ -783,7 +789,16 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
           updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
         });
       }
-      return _finalize(stepKey, await goToStep(nextByPosition, restoreDetourUpdates));
+      try {
+        return _finalize(stepKey, await goToStep(nextByConfig, restoreDetourUpdates));
+      } catch (e) {
+        console.error(`[conversational] 💥 goToStep falhou para ${nextByConfig.step_key}:`, (e as Error)?.message || e);
+        // Salva pelo menos o avanço de step para não travar o lead no passo anterior.
+        return _finalize(stepKey, {
+          reply: "",
+          updates: { conversation_step: nextByConfig.id, __inline_sent: true, ...captureUpdates, ...restoreDetourUpdates },
+        });
+      }
     }
   }
 
