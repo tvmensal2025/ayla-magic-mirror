@@ -655,29 +655,55 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   };
 
   // Helper — render and return a step (respeita text_delay_ms configurado no passo)
+  // 📐 REGRA DE OURO: cada step envia APENAS mídia OU APENAS texto — nunca os dois.
+  //   - Se o step tem mídia configurada e ela foi enviada → texto suprimido.
+  //   - Se a mídia falhou → cai no texto do step como fallback.
+  //   - Se não há mídia (slot vazio) → envia o texto.
+  // Durante cascade (wait_for=none), cada step é enviado como MENSAGEM SEPARADA
+  // via ctx.sender (mídia OU texto), e o último step vira o `reply` retornado.
+  const renderStepText = (st: DbStep): string =>
+    renderTemplate(st.message_text || "", vars).trim();
+
+  // Envia um step segundo a regra "mídia OU texto". Retorna o que foi enviado.
+  const emitStep = async (
+    st: DbStep,
+    asReply: boolean,
+  ): Promise<{ replyText: string; inlineSent: boolean }> => {
+    const mediaSent = await sendStepMedia(ctx, st, consultantId, false);
+    // mediaSent: true = enviou; false = não tem mídia; null = tentou e falhou
+    if (mediaSent === true) {
+      return { replyText: "", inlineSent: true };
+    }
+    const text = renderStepText(st);
+    if (!text) {
+      if (mediaSent === null) {
+        console.warn(`[conversational] step=${st.step_key}: mídia falhou e sem texto fallback`);
+      }
+      return { replyText: "", inlineSent: mediaSent === true };
+    }
+    if (asReply) {
+      return { replyText: text, inlineSent: false };
+    }
+    // Cascade: envia inline como mensagem separada (não concatena com próximos).
+    try { await ctx.sender.sendText(ctx.remoteJid, text); } catch (_) {}
+    return { replyText: "", inlineSent: true };
+  };
+
   const goToStep = async (s: DbStep, extra: Record<string, any> = {}) => {
     const delay = Math.max(0, Math.min(60000, s.text_delay_ms ?? 1500));
     if (delay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, delay));
-    const mediaSent = await sendStepMedia(ctx, s, consultantId, false);
+
     const cadastroStep = stepTypeToCadastro(s.step_type);
     let nextConversationStep = cadastroStep || s.id;
-    let inlineSent = mediaSent;
-    const replyParts = [renderTemplate(s.message_text || "", vars).trim()].filter(Boolean);
 
-    if (mediaSent === null) {
-      const hasOwnText = replyParts.some((p) => p && p.trim());
-      // Só bloqueia se o step tem TEXTO próprio (texto sem mídia fica incompleto).
-      // Se o step é só-mídia e a mídia falhou, NÃO trava o lead — cascateia para o próximo.
-      if (hasOwnText) {
-        console.warn(`[conversational] avanço bloqueado: mídia obrigatória falhou no step=${s.step_key} (tem texto)`);
-        return {
-          reply: replyParts.join("\n\n"),
-          updates: { conversation_step: s.id, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...extra },
-        };
-      }
-      console.warn(`[conversational] mídia falhou em step só-mídia=${s.step_key} → cascateando para próximo`);
-      // cai no loop abaixo para cascatear; nextConversationStep começa em s.id e avança naturalmente.
-    }
+    // Decide se este step vai cascatear (wait_for=none + fallback.goto). Se sim,
+    // ele é enviado inline (não como reply) e o último da cascata vira reply.
+    const willCascade = !cadastroStep && s.wait_for === "none"
+      && s.fallback?.mode === "goto" && !!s.fallback.goto_step_id;
+
+    const first = await emitStep(s, !willCascade);
+    let replyText = first.replyText;
+    let inlineSent = first.inlineSent;
 
     let cursor: DbStep | null = cadastroStep ? null : s;
     for (let guard = 0; cursor?.wait_for === "none" && guard < 4; guard++) {
@@ -688,25 +714,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
 
       const cascadeDelay = Math.max(0, Math.min(60000, nextStep.text_delay_ms ?? 1500));
       if (cascadeDelay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, cascadeDelay));
-      const cascadeMediaSent = await sendStepMedia(ctx, nextStep, consultantId, false);
-      const cascadeHasText = !!(nextStep.message_text || "").trim();
-      if (cascadeMediaSent === null) {
-        if (cascadeHasText) {
-          console.warn(`[conversational] cascade bloqueado: mídia obrigatória falhou no step=${nextStep.step_key} (tem texto)`);
-          nextConversationStep = nextStep.id;
-          inlineSent = inlineSent || replyParts.length === 0;
-          break;
-        }
-        console.warn(`[conversational] cascade: mídia falhou em step só-mídia=${nextStep.step_key} → seguindo cascata`);
-        nextConversationStep = nextStep.id;
-        cursor = nextStep;
-        continue;
-      }
-      const cascadeText = renderTemplate(nextStep.message_text || "", vars).trim();
-      if (cascadeText) replyParts.push(cascadeText);
 
-      inlineSent = inlineSent || cascadeMediaSent;
       const cascadeCadastroStep = stepTypeToCadastro(nextStep.step_type);
+      const nextWillCascade = !cascadeCadastroStep && nextStep.wait_for === "none"
+        && nextStep.fallback?.mode === "goto" && !!nextStep.fallback.goto_step_id;
+      const emit = await emitStep(nextStep, !nextWillCascade);
+      if (emit.replyText) replyText = emit.replyText;
+      inlineSent = inlineSent || emit.inlineSent;
       nextConversationStep = cascadeCadastroStep || nextStep.id;
       console.log(`[conversational] auto-cascade ${cursor.step_key} → ${nextStep.step_key} (wait_for=none)`);
       if (cascadeCadastroStep) break;
@@ -714,7 +728,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     }
 
     return {
-      reply: replyParts.join("\n\n"),
+      reply: replyText,
       updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: inlineSent || undefined, ...extra },
     };
   };
