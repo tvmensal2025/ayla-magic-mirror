@@ -663,6 +663,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     firstActive = firstActiveRaw;
     currentStep = currentStepRaw;
   }
+  // Se resolveLandingStep avançou o passo, sincroniza stepKey para que
+  // _finalize salve conversation_step no passo novo (e não no antigo).
+  if (currentStep && currentStepRaw && currentStep.id !== currentStepRaw.id) {
+    stepKey = currentStep.id;
+  }
   if (!currentStep) {
     // Unknown/legacy step → restart no primeiro step ativo.
     // REGRA DE OURO: SEMPRE seguir o /admin/fluxos. NUNCA inventar texto.
