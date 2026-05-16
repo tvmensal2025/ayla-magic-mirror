@@ -189,22 +189,18 @@ async function matchQA(
   }
 }
 
-async function sleepForMedia(kind: string, durationSec?: number | null, delayBeforeMs?: number | null): Promise<void> {
+async function sleepForMedia(kind: string, _durationSec?: number | null, delayBeforeMs?: number | null): Promise<void> {
   if (isTestMode()) return; // 🧪 modo teste: zero espera
+  // ⚠️ ANTES esperávamos a duração inteira do áudio/vídeo antes da próxima mídia.
+  // Isso fazia a Edge Function estourar 60-120s, dar timeout no Whapi e o passo
+  // nunca avançava. Agora usamos pausa curta: o Whapi já entrega na ordem.
   const configuredDelay = Number(delayBeforeMs || 0);
   if (configuredDelay > 0) {
-    await new Promise((r) => setTimeout(r, Math.min(configuredDelay, 60_000)));
+    await new Promise((r) => setTimeout(r, Math.min(configuredDelay, 5_000)));
     return;
   }
-  if (kind === "audio") {
-    await new Promise((r) => setTimeout(r, Math.min(((durationSec && durationSec > 0) ? durationSec : 7) * 1000, 120_000)));
-    return;
-  }
-  if (kind === "video") {
-    await new Promise((r) => setTimeout(r, Math.min(((durationSec && durationSec > 0) ? durationSec : 30) * 1000, 90_000)));
-    return;
-  }
-  await new Promise((r) => setTimeout(r, 1500));
+  const pause = kind === "audio" ? 1500 : kind === "video" ? 2000 : 800;
+  await new Promise((r) => setTimeout(r, pause));
 }
 
 // ---------------------------------------------------------------------------
