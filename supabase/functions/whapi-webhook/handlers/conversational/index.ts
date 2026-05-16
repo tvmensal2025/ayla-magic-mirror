@@ -480,20 +480,31 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     console.log(`[conversational] unknown step="${stepKey}" → restart at firstActive=${firstActive?.id} (steps=${dbSteps.length})`);
     const mediaSent = await sendStepMedia(ctx, firstActive, consultantId);
     const tpl = (firstActive.message_text || "").trim();
+    const vars = {
+      nome: ctx.customer.name,
+      representante: ctx.nomeRepresentante,
+      valor_conta: (ctx.customer as any).electricity_bill_value,
+      telefone: ctx.customer.phone_whatsapp,
+      cpf: (ctx.customer as any).cpf,
+    };
     const fallbackGreeting = mediaSent ? "" : `Oi${ctx.customer.name ? " " + String(ctx.customer.name).split(" ")[0] : ""}! 👋`;
-    const reply = tpl
-      ? renderTemplate(tpl, {
-          nome: ctx.customer.name,
-          representante: ctx.nomeRepresentante,
-          valor_conta: (ctx.customer as any).electricity_bill_value,
-          telefone: ctx.customer.phone_whatsapp,
-          cpf: (ctx.customer as any).cpf,
-        })
-      : fallbackGreeting;
+    const firstReply = tpl ? renderTemplate(tpl, vars) : fallbackGreeting;
+    const nextOnStart = firstActive.fallback?.mode === "goto" && firstActive.fallback.goto_step_id
+      ? dbSteps.find((s) => s.id === firstActive.fallback?.goto_step_id && s.is_active)
+      : null;
+    let reply = firstReply;
+    let nextConversationStep = firstActive.id;
+    if (nextOnStart?.message_text) {
+      const nextMediaSent = await sendStepMedia(ctx, nextOnStart, consultantId);
+      const nextReply = renderTemplate(nextOnStart.message_text || "", vars).trim();
+      reply = [firstReply, nextReply].filter((part) => part && part.trim()).join("\n\n");
+      nextConversationStep = nextOnStart.id;
+      console.log(`[conversational] start cascade ${firstActive.step_key} → ${nextOnStart.step_key} (media=${mediaSent || nextMediaSent})`);
+    }
     return {
       reply,
       // Grava o id (estável) — o orchestrator prefixa "flow:" antes de persistir.
-      updates: { conversation_step: firstActive.id, __inline_sent: mediaSent || undefined },
+      updates: { conversation_step: nextConversationStep, __inline_sent: mediaSent || undefined },
     };
   }
 
