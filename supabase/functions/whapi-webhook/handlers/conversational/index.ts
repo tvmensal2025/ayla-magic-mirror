@@ -591,7 +591,17 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     if (extracted.electricity_bill_value != null) captureUpdates.electricity_bill_value = extracted.electricity_bill_value;
     if (extracted.phone_whatsapp && !ctx.customer.phone_whatsapp) captureUpdates.phone_whatsapp = extracted.phone_whatsapp;
     if (extracted.cpf) captureUpdates.cpf = extracted.cpf;
-    if (extracted.name && !ctx.customer.name) captureUpdates.name = extracted.name;
+    // Nome: se o passo atual é um "pergunta nome" (título/slot menciona nome,
+    // ou tem capture explícita de name habilitada), sempre sobrescreve.
+    // Caso contrário, mantém a guarda anti-sobrescrita por engano.
+    const stepIsAskName =
+      /\bnome\b|\bchama\b/i.test(String((currentStep as any).title || "")) ||
+      /\bnome\b/i.test(String((currentStep as any).slot_key || "")) ||
+      (Array.isArray(currentStep.captures) &&
+        currentStep.captures.some((c: any) => c?.field === "name" && c?.enabled !== false));
+    if (extracted.name && (stepIsAskName || !ctx.customer.name)) {
+      captureUpdates.name = extracted.name;
+    }
 
     if (Object.keys(captureUpdates).length > 0 && ctx.customer.id) {
       await ctx.supabase.from("customers").update(captureUpdates).eq("id", ctx.customer.id);
