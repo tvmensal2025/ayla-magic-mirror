@@ -822,6 +822,7 @@ export type Database = {
           created_at: string
           delay_before_ms: number
           duration_sec: number | null
+          final_size_bytes: number | null
           id: string
           intent_tags: string[]
           is_draft: boolean
@@ -829,6 +830,7 @@ export type Database = {
           is_public: boolean
           kind: string
           label: string
+          original_size_bytes: number | null
           priority: number
           reply_count: number
           send_order: number
@@ -847,6 +849,7 @@ export type Database = {
           created_at?: string
           delay_before_ms?: number
           duration_sec?: number | null
+          final_size_bytes?: number | null
           id?: string
           intent_tags?: string[]
           is_draft?: boolean
@@ -854,6 +857,7 @@ export type Database = {
           is_public?: boolean
           kind: string
           label: string
+          original_size_bytes?: number | null
           priority?: number
           reply_count?: number
           send_order?: number
@@ -872,6 +876,7 @@ export type Database = {
           created_at?: string
           delay_before_ms?: number
           duration_sec?: number | null
+          final_size_bytes?: number | null
           id?: string
           intent_tags?: string[]
           is_draft?: boolean
@@ -879,6 +884,7 @@ export type Database = {
           is_public?: boolean
           kind?: string
           label?: string
+          original_size_bytes?: number | null
           priority?: number
           reply_count?: number
           send_order?: number
