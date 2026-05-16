@@ -438,6 +438,148 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     return sendButtons(jid, msg, options);
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // 🎯 Dispatcher genérico: envia o que está configurado em /admin/fluxos
+  // para um step específico (Flow Builder).
+  //   1) bot_flow_steps (flow_id, step_key) → message_text, slot_key, media_order
+  //   2) ai_media_library (consultant_id, slot_key) → mídias reais (kind/url)
+  //   3) Monta lista [texto + mídias] e ordena pela ordem configurada
+  //      (media_order do step → flow_step_media_order do consultor →
+  //      fallback global text → audio → video → image → document).
+  //   4) Envia respeitando dedup por cliente e pausa proporcional entre mídias.
+  // Texto suporta variáveis: {nome}, {nome_completo}, {representante},
+  // {valor}, {economia_mensal}, {economia_anual}. Se não houver nada
+  // configurado, NÃO inventa texto — apenas retorna false.
+  // ═══════════════════════════════════════════════════════════════════
+  async function dispatchStepFromFlow(stepKey: string, extraVars: Record<string, string> = {}): Promise<boolean> {
+    if (!customer?.consultant_id) return false;
+    try {
+      const { data: flow } = await supabase
+        .from("bot_flows")
+        .select("id")
+        .eq("consultant_id", customer.consultant_id)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (!flow?.id) return false;
+
+      const { data: stepRow } = await supabase
+        .from("bot_flow_steps")
+        .select("step_key, slot_key, message_text, media_order")
+        .eq("flow_id", (flow as any).id)
+        .eq("step_key", stepKey)
+        .maybeSingle();
+      if (!stepRow) {
+        console.log(`[dispatch:${stepKey}] step não configurado no Flow Builder — nada para enviar`);
+        return false;
+      }
+
+      const slotKey = (stepRow as any).slot_key || stepKey;
+      const { data: mediaRows } = await supabase
+        .from("ai_media_library")
+        .select("id, kind, url, slot_key, send_order, duration_sec, delay_before_ms")
+        .eq("consultant_id", customer.consultant_id)
+        .eq("slot_key", slotKey)
+        .eq("active", true)
+        .eq("is_draft", false)
+        .order("send_order", { ascending: true });
+      const medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+
+      const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
+      const vars: Record<string, string> = {
+        "{nome}": firstName,
+        "{{nome}}": firstName,
+        "{nome_completo}": String((customer as any).name || ""),
+        "{{nome_completo}}": String((customer as any).name || ""),
+        "{representante}": nomeRepresentante || "",
+        "{{representante}}": nomeRepresentante || "",
+        ...extraVars,
+      };
+      const applyVars = (s: string) =>
+        Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
+
+      type Item = { kind: string; text?: string; media?: any };
+      const items: Item[] = medias.map((m) => ({
+        kind: String(m.kind || "document").toLowerCase(),
+        media: m,
+      }));
+      const baseText = (stepRow as any).message_text
+        ? applyVars(String((stepRow as any).message_text))
+        : "";
+      if (baseText.trim()) items.push({ kind: "text", text: baseText });
+
+      const configuredOrder =
+        Array.isArray((stepRow as any).media_order) && (stepRow as any).media_order.length > 0
+          ? (stepRow as any).media_order.map((k: any) => String(k).toLowerCase())
+          : (await getStepMediaOrder(supabase, customer.consultant_id, slotKey)) ||
+            ["text", "audio", "video", "image", "document"];
+      items.sort(makeKindComparator((it: Item) => it.kind, configuredOrder));
+
+      let sent = false;
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const isLast = i === items.length - 1;
+
+        if (it.kind === "text" && it.text) {
+          try {
+            await sendText(remoteJid, it.text);
+            await supabase.from("conversations").insert({
+              customer_id: customer.id,
+              message_direction: "outbound",
+              message_text: it.text,
+              message_type: "text",
+              conversation_step: stepKey,
+            });
+            sent = true;
+            if (!isLast) await new Promise((r) => setTimeout(r, 800));
+          } catch (e) {
+            console.warn(`[dispatch:${stepKey}] envio de texto falhou:`, (e as any)?.message);
+          }
+          continue;
+        }
+
+        const m = it.media;
+        if (!m?.url) continue;
+        const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
+
+        const canSend = await canSendMediaOnce(supabase, {
+          consultantId: customer.consultant_id,
+          customerId: customer.id,
+          mediaId: m.id,
+          slotKey: m.slot_key || slotKey,
+          kind,
+        });
+        if (!canSend) {
+          console.log(`[dispatch:${stepKey}] ⏭️ ${kind} já enviado anteriormente — pulando`);
+          continue;
+        }
+
+        const delayMs = Number(m.delay_before_ms || 0);
+        if (delayMs > 0) await new Promise((r) => setTimeout(r, Math.min(delayMs, 10_000)));
+
+        try {
+          const ok = await sendMedia(remoteJid, m.url, "", kind);
+          if (ok !== false) {
+            sent = true;
+            await supabase.from("conversations").insert({
+              customer_id: customer.id,
+              message_direction: "outbound",
+              message_text: `[${kind}:${m.slot_key || slotKey}]`,
+              message_type: kind,
+              conversation_step: stepKey,
+            });
+            if (!isLast) await sleepForMedia(kind, Number(m.duration_sec || 0) || null);
+          }
+        } catch (e) {
+          console.warn(`[dispatch:${stepKey}] envio de ${kind} falhou:`, (e as any)?.message);
+        }
+      }
+      return sent;
+    } catch (e) {
+      console.warn(`[dispatch:${stepKey}] erro geral:`, (e as any)?.message);
+      return false;
+    }
+  }
+
   // CTA por etapa do funil — sempre puxa o lead pro próximo passo após responder.
   function buildStepNudge(currentStep: string, leadName: string | null): string {
     const first = (leadName || "").split(/\s+/)[0] || "";
