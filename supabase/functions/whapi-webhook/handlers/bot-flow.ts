@@ -2130,8 +2130,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     // ─── 4. FRENTE DO DOC ───────────
     case "aguardando_doc_frente": {
       if (!isFile) {
-        const tipo = friendlyLabel(customer.document_type);
-        const msgDoc = isCNH(customer.document_type) ? "FRENTE da sua CNH" : `FRENTE do seu ${tipo}`;
+        const msgDoc = isCNH(customer.document_type) ? "FRENTE da sua CNH" : "FRENTE do seu documento (RG ou CNH)";
         reply = `📸 Envie a *${msgDoc}*.\n\nFormatos: JPG, PNG ou PDF`;
         break;
       }
