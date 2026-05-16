@@ -34,6 +34,10 @@ export function useFileAttach(context?: FileAttachContext) {
     setIsUploading(true);
     setUploadProgress(0);
     try {
+      if (file.type === "audio/webm" || /\.webm$/i.test(file.name)) {
+        toast.error("WhatsApp/Whapi não aceita áudio .webm. Use .ogg, .mp3 ou .m4a.");
+        return;
+      }
       const inferKind = (mime: string) =>
         mime.startsWith("image/") ? "image" : mime.startsWith("audio/") ? "audio" : mime.startsWith("video/") ? "video" : "document";
       const result = await uploadMedia(file, (pct) => setUploadProgress(pct), {
@@ -47,8 +51,9 @@ export function useFileAttach(context?: FileAttachContext) {
         setPendingImageUrl(result.url);
         toast.success("Imagem anexada: será enviada depois do áudio");
       } else {
-        let fileType: MediaType = "document";
+        let fileType: MediaType | "audio" = "document";
         if (file.type.startsWith("image/")) fileType = "image";
+        else if (file.type.startsWith("audio/")) fileType = "audio";
         else if (file.type.startsWith("video/")) fileType = "video";
         setAttachedFile({ url: result.url, name: file.name, type: fileType });
         toast.success(`Arquivo anexado: ${formatFileSize(result.size)}`);
