@@ -77,7 +77,7 @@ export function tryMatchRule(rule: BotFlowRule, rawMessage: string): string | nu
 
   for (const kwRaw of rule.keywords || []) {
     const kw = rule.normalize ? normalize(kwRaw) : String(kwRaw || "").trim();
-    if (!kw) continue;
+    if (!kw || kw.length < 2) continue; // evita keyword de 1 caractere matchando qualquer coisa
 
     if (rule.match_mode === "exact") {
       if (haystack === kw) return kwRaw;
@@ -117,6 +117,7 @@ export interface EvaluateArgs {
   messageText: string;
   lastRuleFireAt?: string | null;
   lastRuleId?: string | null;
+  hasCapture?: boolean;          // mensagem produziu uma captura (valor/nome/telefone) — pula regras globais
 }
 
 /**
@@ -124,7 +125,7 @@ export interface EvaluateArgs {
  * Applies cooldown and max_fires_per_conversation guards.
  */
 export async function evaluateRules(args: EvaluateArgs): Promise<RuleMatchResult | null> {
-  const { supabase, flowId, consultantId, customerId, currentStepId, messageText } = args;
+  const { supabase, flowId, consultantId, customerId, currentStepId, messageText, hasCapture } = args;
   if (!messageText || messageText.trim().length < 2) return null;
 
   let rules: BotFlowRule[] = [];
@@ -152,7 +153,8 @@ export async function evaluateRules(args: EvaluateArgs): Promise<RuleMatchResult
 
   for (const rule of rules) {
     if (!isRuleApplicable(rule, currentStepId)) continue;
-
+    // Se a mensagem disparou captura legítima, regras GLOBAIS não interceptam
+    if (hasCapture && rule.scope === "global") continue;
     // Cooldown: same rule fired within cooldown_seconds → skip
     if (
       rule.cooldown_seconds > 0 &&
