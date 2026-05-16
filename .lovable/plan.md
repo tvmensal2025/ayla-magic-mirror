@@ -1,149 +1,82 @@
-## Diagnóstico principal
+# Por que aparece "gravando áudio" e para no meio
 
-O problema não está sendo resolvido porque foram tratados sintomas separados, mas o fluxo tem uma combinação de falhas de configuração, tempo de execução, mídia e dedupe.
+## Diagnóstico (confirmado nos logs)
 
-A evidência mais forte é esta:
+Quando o bot tenta enviar o áudio `como_funciona.webm` o Whapi responde com erro em TODAS as variantes que tentamos:
 
-- O lead envia `900`.
-- O valor é salvo no banco em `electricity_bill_value`.
-- Mesmo assim, o `conversation_step` continua no passo 2 (`flow:3e7fb4cd...`).
-
-Isso prova que a captura funciona, mas a execução depois da captura não termina de forma confiável antes de salvar o próximo passo.
-
-## Por que as correções anteriores não bastaram
-
-### 1. O fluxo real ainda depende de auto-advance frágil
-
-O passo 2 captura `electricity_bill_value`, mas não tem uma transição explícita `valor_brl` ou `informou_valor` apontando para o próximo passo.
-
-O backend tenta compensar usando `fallback.goto_step_id`, mas isso vira remendo. Um fluxo confiável não deveria depender de adivinhação quando uma captura essencial acontece.
-
-Correção correta: captura de valor precisa ter destino explícito.
-
-### 2. Depois do valor, o bot entra numa cascata pesada de mídia
-
-Depois do passo 2, o fluxo tenta enviar conteúdo dos passos seguintes:
-
-- passo 3: vídeo + áudio no slot `como_funciona`
-- passo 4: áudio longo + vídeo no slot `fazenda_solar`
-- passo 5: texto perguntando se entendeu
-
-Isso é muita coisa para uma Edge Function síncrona, principalmente com Whapi.
-
-Nos logs já aparece timeout real:
-
-```text
-[whapi:sendMedia] json_url falhou (video via messages/video). Último erro: Signal timed out.
+```
+messages/voice  (json_url)              -> 500 Internal Error
+messages/voice  (json_base64_real)      -> 500 Internal Error
+messages/voice  (json_base64_ogg_alias) -> 404 media not found
+messages/audio  (json_base64_ogg_audio) -> 404 media not found
+messages/voice  (multipart)             -> 500 Internal Error
+messages/audio  (multipart)             -> 500 Internal Error
 ```
 
-Ou seja: o webhook pode estar morrendo ou encerrando antes de persistir o próximo `conversation_step`.
+Resultado no WhatsApp do cliente: o ícone "gravando áudio…" aparece (Whapi inicia o envio do voice note) mas o arquivo nunca é aceito de fato, então o áudio para no meio / não toca até o fim.
 
-### 3. O áudio `.webm` continua sendo gargalo
+**Causa raiz**: o arquivo está em **container `.webm**` (gravação direta do navegador `MediaRecorder`). O Whapi exige `**.ogg` com codec opus** para `messages/voice`. Renomear/relabelar o mime type não resolve — o container precisa ser OGG de verdade. Existem 10 áudios da biblioteca em `.webm` hoje, todos quebrados pela mesma razão.
 
-O código tenta enviar `.webm` de várias formas: URL, base64, alias OGG e multipart. Mesmo assim, Whapi pode recusar, demorar ou dar timeout.
+## Plano de correção
 
-Isso explica por que “às vezes envia, às vezes pula, às vezes trava”.
+### 1. Converter os 10 áudios `.webm` da biblioteca para `.ogg/opus`
 
-Solução definitiva: não depender de `.webm` no fluxo. Converter os áudios atuais para `.ogg` ou `.mp3` e impedir novo `.webm` no admin.
+Rodar localmente um script com `ffmpeg`:
 
-### 4. O dedupe de mídia está mascarando falhas
-
-Hoje o controle de mídia marca a mídia como enviada antes de confirmar que o Whapi realmente aceitou.
-
-Então acontece isto:
-
-1. tenta enviar mídia;
-2. grava no log como `sent`;
-3. Whapi falha ou dá timeout;
-4. no próximo teste, o sistema acha que já enviou e pula a mídia.
-
-Isso causa comportamento imprevisível e dá a impressão de que o fluxo não obedece.
-
-### 5. O passo “Deu para entender?” está com `wait_for=media`
-
-Esse passo pergunta:
-
-```text
-Deu para entender como funciona agora?
-Vamos fazer seu cadastro?
+```bash
+ffmpeg -i como_funciona.webm -c:a libopus -b:a 32k -application voip como_funciona.ogg
 ```
 
-Mas está configurado como `wait_for = media`.
+Fazer upload dos `.ogg` resultantes para o bucket `ai-agent-media` (mesmo path, extensão `.ogg`) e atualizar `ai_media_library.url` para apontar para `.ogg`.
 
-Isso está incoerente. O esperado é `wait_for = reply`, porque o cliente deve responder texto/áudio/botão, não necessariamente enviar mídia.
+Áudios afetados (todos do consultor Camila):
 
-### 6. Existem passos ativos vazios no final
+- boas_vindas.webm (×2 entradas)
+- como_funciona.webm (×3 entradas)
+- fazenda_solar.webm
+- objecao_preco.webm
+- objecao_distribuidora.webm
+- prova_social.webm
+- 1 gravação avulsa em `0c2711ad…/como_funciona/`
 
-Há passos ativos sem texto, sem mídia e sem função clara. Eles devem ser desativados ou preenchidos, porque aumentam a chance de o motor terminar num passo sem resposta.
+### 2. Corrigir o upload futuro para nunca mais gravar `.webm`
 
-## O que precisa ser feito agora
+Hoje `useAudioRecorder.ts` grava `audio/webm;codecs=opus` e salva direto. Mudar o fluxo:
 
-### Etapa 1: corrigir o fluxo atual no banco
+- **Opção A (rápida)**: no client, manter gravação `.webm` mas adicionar uma Edge Function `convert-audio-webm-to-ogg` que recebe o blob, roda conversão via `ffmpeg.wasm` ou via API externa (CloudConvert / Whapi `/media` upload) e devolve a URL `.ogg`. O `MessageComposer` chama essa função antes de salvar na biblioteca.
+- **Opção B (mais simples)**: bloquear `.webm` no painel `/admin/fluxos` + `StepMediaPanel` — só aceitar upload de `.ogg` ou `.mp3`. Para gravações novas no microfone do navegador, fazer o re-encode com `ffmpeg.wasm` (browser-side) antes do upload.
 
-Para o fluxo ativo do Rafael:
+Recomendo **Opção A** porque o `ffmpeg.wasm` no browser pesa ~25MB e atrasa o app; uma Edge Function dedicada (chamando o endpoint `POST /media` do próprio Whapi, que já converte) resolve sem dependência extra.
 
-- passo 1: captura nome e vai para passo 2;
-- passo 2: captura valor e vai explicitamente para passo 3;
-- passo 3: cascata para passo 4;
-- passo 4: cascata para passo 5;
-- passo 5: trocar `wait_for` para `reply`;
-- passo 5: resposta afirmativa vai para cadastro/conta/documento, conforme sua estratégia;
-- desativar passos vazios finais.
+### 3. Validar com teste real
 
-### Etapa 2: corrigir o motor do webhook
+Após conversão + redeploy:
 
-- Não deixar envio de mídia longa bloquear a gravação do próximo passo.
-- Usar timeout curto por mídia.
-- Remover espera baseada na duração real do áudio/vídeo dentro da Edge Function.
-- Persistir o próximo `conversation_step` mesmo se mídia falhar.
-- Seguir sempre o `fallback.goto_step_id` em cascata até um passo que espere resposta.
+- Mandar "oi" no fluxo Camila
+- Conferir nos logs Whapi: `whapi_send_media_success` em vez de `attempt_failed`
+- Conferir no WhatsApp: o áudio toca do início ao fim, indicador "gravando" some no momento certo
+- Conferir Step 2 → Step 3 cascade completa
 
-### Etapa 3: corrigir dedupe de mídia
+## Detalhes técnicos
 
-- Separar `attempted`, `sent` e `failed`.
-- Só bloquear reenvio quando a mídia realmente foi entregue.
-- Permitir limpar tentativas antigas em reset/teste.
+**Arquivos a alterar**:
 
-### Etapa 4: blindar o admin
+- `src/hooks/useAudioRecorder.ts` — interceptar `onstop` e enviar blob para nova função de conversão antes de devolver base64 ao consumidor.
+- `src/components/whatsapp/MessageComposer.tsx` — quando recebe `audio/webm`, marcar `pending conversion`.
+- `src/components/admin/fluxo/StepMediaPanel.tsx` — validar extensão no upload e bloquear `.webm`.
+- Nova Edge Function `supabase/functions/convert-audio-to-ogg/index.ts` — recebe `{ audioBase64 }`, faz POST para Whapi `/media`, devolve `{ url, mediaId }`.
+- Migration: `UPDATE ai_media_library SET url = REPLACE(url, '.webm', '.ogg') WHERE url ILIKE '%.webm%'` (executar depois de subir os arquivos `.ogg` no storage).
 
-No `/admin/fluxos`, mostrar/bloquear:
+**Script local de conversão em lote** (você roda uma vez):
 
-- captura sem transição explícita;
-- passo ativo sem texto e sem mídia;
-- `wait_for=media` em pergunta textual;
-- fallback quebrado;
-- mídia `.webm`;
-- mídia longa demais para webhook.
-
-### Etapa 5: validar com teste automatizado
-
-Rodar um cenário real:
-
-```text
-oi -> nome -> 900 -> sim
+```bash
+for f in *.webm; do
+  ffmpeg -i "$f" -c:a libopus -b:a 32k -application voip "${f%.webm}.ogg"
+done
 ```
 
-E validar:
+Posso seguir com a implementação? Se sim, prefere Opção A (Edge Function chamando Whapi `/media`) ou Opção B (só bloquear `.webm` e te entregar instruções de re-upload manual)?  
+  
+AJUSTE TODOS OS QUE ESTAO AI A NGRAVE CORRETAMENTE PARA O FUTURO, AJUSTE PARA NAO DAR ERRO MAIS
 
-- nome salvo;
-- valor salvo;
-- passo avança após `900`;
-- mídias configuradas são tentadas;
-- textos configurados são enviados;
-- passo final aguarda resposta correta;
-- nada é inventado fora do `/admin/fluxos`.
-
-## Conclusão
-
-O motivo de não resolver é que o problema real não é uma linha específica. É arquitetura de fluxo:
-
-```text
-captura funciona
-  -> entra em cascata com mídia pesada
-  -> Whapi dá timeout ou falha
-  -> dedupe marca como enviado mesmo falhando
-  -> step não é salvo corretamente
-  -> teste seguinte pula mídia ou fica preso
-```
-
-A correção precisa atacar banco, motor, mídia e admin juntos. Remendar só `fallback`, só `FlowAuditPanel` ou só envio de áudio não vai estabilizar.
+  
