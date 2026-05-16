@@ -338,7 +338,7 @@ Responda em JSON: {"next_step_key": "<um_dos_passos_válidos>", "reason": "breve
   return await callOnce(3000);
 }
 
-async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string): Promise<boolean> {
+async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string, waitForSend = true): Promise<boolean> {
   const slotKey = step.slot_key || step.step_key || step.id;
   if (!slotKey) return false;
 
@@ -376,6 +376,21 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
         console.log(`[conversational] ⏭️ pulando ${kind} já enviado (media_id=${m.id}) para customer=${ctx.customer.id}`);
         continue;
       }
+    }
+
+    if (!waitForSend) {
+      ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind).catch((e: any) => {
+        console.warn(`[conversational] media async falhou (${kind}):`, e?.message || e);
+      });
+      sent = true;
+      await ctx.supabase.from("conversations").insert({
+        customer_id: ctx.customer.id,
+        message_direction: "outbound",
+        message_text: `[flow-step:${step.step_key}:${kind}:async]`,
+        message_type: kind,
+        conversation_step: step.step_key,
+      });
+      continue;
     }
 
     const ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
