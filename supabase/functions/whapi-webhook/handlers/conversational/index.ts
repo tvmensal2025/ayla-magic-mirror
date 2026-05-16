@@ -336,9 +336,21 @@ Responda em JSON: {"next_step_key": "<um_dos_passos_válidos>", "reason": "breve
   return await callOnce(3000);
 }
 
-async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string, waitForSend = true): Promise<boolean | null> {
+// Envia mídias + (opcionalmente) o texto do passo respeitando a ordem
+// configurada em consultants.flow_step_media_order[slotKey] (ex.: text→audio→video→image).
+// Retorna:
+//   - mediaSent: true se ao menos uma mídia foi enviada, false se não havia mídia,
+//                null se tentou e falhou em TODAS.
+//   - textSentInline: true quando o texto já foi enviado dentro daqui (na posição certa).
+async function sendStepMedia(
+  ctx: BotContext,
+  step: DbStep,
+  consultantId: string,
+  _waitForSend = true,
+  textPayload?: { text: string; delayMs: number } | null,
+): Promise<{ mediaSent: boolean | null; textSentInline: boolean }> {
   const slotKey = step.slot_key || step.step_key || step.id;
-  if (!slotKey) return false;
+  if (!slotKey) return { mediaSent: false, textSentInline: false };
 
   const { data: mediaRows } = await ctx.supabase
     .from("ai_media_library")
@@ -349,30 +361,91 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
     .order("send_order", { ascending: true });
 
   const medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
-  if (medias.length === 0) return false;
 
-  // Precedência: UI (consultants.flow_step_media_order) → step.media_order → default audio-first.
-  // A UI do /admin/fluxos grava em consultants.flow_step_media_order — ela vence o default
-  // de bot_flow_steps.media_order, senão a ordem configurada pelo consultor é ignorada.
+  // Precedência: UI (consultants.flow_step_media_order) → step.media_order → default.
   const uiOrder = await getStepMediaOrder(ctx.supabase, consultantId, slotKey);
   const stepOrder = Array.isArray(step.media_order) && step.media_order.length > 0
     ? step.media_order.map((k) => String(k).toLowerCase())
     : null;
-  const configuredOrder = uiOrder || stepOrder;
-  if (configuredOrder) medias.sort(makeKindComparator((m: any) => m.kind, configuredOrder));
+  const configuredOrder = uiOrder || stepOrder; // pode conter "text"
 
-  let sent = false;
-  let attempted = false;
-  let failed = false;
-  for (let i = 0; i < medias.length; i++) {
-    const m = medias[i];
-    const kind = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) : "document";
+  // Constrói sequência unificada (texto + mídias) na ordem configurada.
+  type Item =
+    | { kind: "text"; text: string; delayMs: number }
+    | { kind: "audio" | "video" | "image" | "document"; media: any };
+  const sequence: Item[] = [];
 
-    // 🚫 REGRA ANTI-DUPLICAÇÃO (pré-send):
-    // Reserva o slot ANTES de chamar sendMedia. Se o Whapi der timeout mas
-    // entregar a mídia mesmo assim, o próximo webhook vê a reserva e pula.
-    // try_log_media_send tem ON CONFLICT (customer_id, media_id) DO NOTHING
-    // e retorna true quando inseriu / false quando já existia.
+  const textItem: Item | null = (textPayload && textPayload.text.trim().length > 0)
+    ? { kind: "text", text: textPayload.text, delayMs: Math.max(0, textPayload.delayMs || 0) }
+    : null;
+
+  if (configuredOrder && configuredOrder.length > 0) {
+    const remaining = [...medias];
+    let textInjected = false;
+    for (const slot of configuredOrder) {
+      const s = String(slot).toLowerCase();
+      if (s === "text") {
+        if (textItem && !textInjected) { sequence.push(textItem); textInjected = true; }
+        continue;
+      }
+      const taken: any[] = [];
+      for (const m of remaining) {
+        if (String(m.kind).toLowerCase() === s) taken.push(m);
+      }
+      for (const m of taken) {
+        const idx = remaining.indexOf(m);
+        if (idx >= 0) remaining.splice(idx, 1);
+        const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
+        sequence.push({ kind: k, media: m });
+      }
+    }
+    // Mídias com kind não listado vão para o fim (preserva send_order)
+    for (const m of remaining) {
+      const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
+      sequence.push({ kind: k, media: m });
+    }
+    // Se a ordem não menciona "text" mas existe texto, manda no fim
+    if (textItem && !textInjected) sequence.push(textItem);
+  } else {
+    // Sem ordem configurada: mantém comportamento legado (mídias antes, texto depois).
+    for (const m of medias) {
+      const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
+      sequence.push({ kind: k, media: m });
+    }
+    if (textItem) sequence.push(textItem);
+  }
+
+  if (sequence.length === 0) return { mediaSent: false, textSentInline: false };
+
+  let mediaSent = false;
+  let mediaAttempted = false;
+  let mediaFailed = false;
+  let textSentInline = false;
+  let prevForPause: { kind: string; duration_sec?: number | null } | null = null;
+
+  for (let i = 0; i < sequence.length; i++) {
+    const item = sequence[i];
+
+    if (item.kind === "text") {
+      // ⏱️ Respeita text_delay_ms antes do texto
+      if (!isTestMode()) {
+        const wait = Math.max(0, Math.min(item.delayMs, 60_000));
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      }
+      try {
+        await ctx.sender.sendText(ctx.remoteJid, item.text);
+        textSentInline = true;
+        prevForPause = { kind: "text" };
+      } catch (e) {
+        console.error(`[conversational] sendText inline falhou step=${step.step_key}:`, (e as Error)?.message || e);
+      }
+      continue;
+    }
+
+    const m = item.media;
+    const kind = item.kind;
+
+    // 🚫 ANTI-DUPLICAÇÃO: reserva no dispatch_log antes de enviar
     if ((kind === "audio" || kind === "video" || kind === "image") && m.id && ctx.customer?.id) {
       const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
         _consultant_id: consultantId,
@@ -382,41 +455,30 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
         _kind: kind,
       });
       if (canSend === false) {
-        console.log(`[conversational] ⏭️ pulando ${kind} já reservado/entregue (media_id=${m.id}) para customer=${ctx.customer.id}`);
+        console.log(`[conversational] ⏭️ pulando ${kind} já reservado/entregue (media_id=${m.id}) customer=${ctx.customer.id}`);
         continue;
       }
     }
 
-    // ⏱️ ESPERA ANTES DE ENVIAR — sincronia natural:
-    // - Se há delay_before_ms configurado, respeita.
-    // - Se a mídia anterior é áudio/vídeo, aguarda ~duração dela (cap 8s) para o
-    //   lead ter tempo de ouvir/assistir antes da próxima entrar.
-    // - Caso contrário, pausa curta (600ms) para parecer envio rapidíssimo.
+    // ⏱️ Pausa antes da mídia (respeita delay_before_ms; senão, pausa curta baseada no item anterior)
     const configuredDelay = Number(m.delay_before_ms || 0);
     if (!isTestMode()) {
       if (configuredDelay > 0) {
         const wait = Math.min(configuredDelay, 10_000);
-        console.log(`[conversational] ⏱️ aguardando ${wait}ms antes de enviar ${kind} (media_id=${m.id})`);
         await new Promise((r) => setTimeout(r, wait));
-      } else if (i > 0) {
-        const prev = medias[i - 1];
-        const prevKind = String(prev?.kind || "");
-        const prevDur = Number(prev?.duration_sec || 0);
-        let pause = 600; // padrão super rápido
-        if ((prevKind === "audio" || prevKind === "video") && prevDur > 0) {
-          pause = Math.min(prevDur * 1000, 8000);
+      } else if (prevForPause) {
+        let pause = 600;
+        if ((prevForPause.kind === "audio" || prevForPause.kind === "video") && Number(prevForPause.duration_sec || 0) > 0) {
+          pause = Math.min(Number(prevForPause.duration_sec) * 1000, 8000);
         }
         await new Promise((r) => setTimeout(r, pause));
       }
     }
 
-    if (!waitForSend) console.log(`[conversational] envio de mídia em cascata (${kind}, media_id=${m.id})`);
-
-    attempted = true;
+    mediaAttempted = true;
     const ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
     if (ok !== false) {
-      sent = true;
-      // dispatch_log já foi inserido antes do send (anti-duplicação por timeout)
+      mediaSent = true;
       await ctx.supabase.from("conversations").insert({
         customer_id: ctx.customer.id,
         message_direction: "outbound",
@@ -424,16 +486,17 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
         message_type: kind,
         conversation_step: step.step_key,
       });
+      prevForPause = { kind, duration_sec: m.duration_sec };
     } else {
-      // sendMedia retornou false. PORÉM, com Whapi vídeos grandes (>20MB) costumam
-      // dar "Signal timed out" e ainda assim entregar. Mantemos a reserva no
-      // dispatch_log para evitar reenvio duplicado no próximo trigger.
-      failed = true;
-      console.warn(`[conversational] mídia ${kind} retornou false (media_id=${m.id}); reserva mantida para evitar duplicação em caso de timeout-mas-entregue`);
+      mediaFailed = true;
+      console.warn(`[conversational] mídia ${kind} retornou false (media_id=${m.id}); reserva mantida`);
     }
   }
-  if (attempted && failed && !sent) return null;
-  return sent;
+
+  const mediaResult: boolean | null = medias.length === 0
+    ? false
+    : (mediaAttempted && mediaFailed && !mediaSent) ? null : mediaSent;
+  return { mediaSent: mediaResult, textSentInline };
 }
 
 // 🚫 REMOVIDO: fallbackTextForStep — inventava texto fora do /admin/fluxos.
@@ -547,7 +610,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       visited.add(cursor.id);
       landingStepId = cursor.id;
 
-      const mediaSent = await sendStepMedia(ctx, cursor, consultantId, true);
+      const { mediaSent } = await sendStepMedia(ctx, cursor, consultantId, true);
       if (mediaSent === true) anyMediaSent = true;
       const tpl = (cursor.message_text || "").trim();
       if (tpl) parts.push(renderTemplate(tpl, vars));
@@ -683,7 +746,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     while (cursor && !visited.has(cursor.id)) {
       visited.add(cursor.id);
       landingStepId = cursor.id;
-      const mediaSent = await sendStepMedia(ctx, cursor, consultantId, true);
+      const { mediaSent } = await sendStepMedia(ctx, cursor, consultantId, true);
       if (mediaSent === true) anyMediaSent = true;
       const tpl = (cursor.message_text || "").trim();
       if (tpl) parts.push(renderTemplate(tpl, restartVars));
@@ -760,37 +823,69 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   const renderStepText = (st: DbStep): string =>
     renderTemplate(st.message_text || "", vars).trim();
 
-  // Envia um step (mídia SEMPRE + texto SEMPRE quando existem).
+  // Envia um step (mídia SEMPRE + texto SEMPRE quando existem), respeitando a ordem configurada.
   const emitStep = async (
     st: DbStep,
     asReply: boolean,
   ): Promise<{ replyText: string; inlineSent: boolean }> => {
-    let mediaSent: boolean | null = false;
+    const text = renderStepText(st);
+    const textDelay = Math.max(0, Math.min(60000, st.text_delay_ms ?? 1500));
+
+    // Quando é reply final, o texto vai como reply (não inline). Quando é cascade
+    // ou quando o consultor pediu texto antes da mídia, mandamos tudo inline aqui.
+    const slotKey = st.slot_key || st.step_key || st.id;
+    const uiOrder = await getStepMediaOrder(ctx.supabase, consultantId, slotKey);
+    const stepOrder = Array.isArray(st.media_order) && st.media_order.length > 0
+      ? st.media_order.map((k) => String(k).toLowerCase())
+      : null;
+    const configuredOrder = uiOrder || stepOrder;
+    const textComesBeforeAllMedia = !!text && Array.isArray(configuredOrder)
+      && configuredOrder.length > 0
+      && configuredOrder.indexOf("text") >= 0
+      && configuredOrder.every((k, i) => k !== "text" ? configuredOrder.indexOf("text") < i : true);
+
+    // Texto entra inline (na posição certa) em qualquer caso, EXCETO quando:
+    // - é o reply final E não há ordem configurada (mantém comportamento legado: texto vira reply)
+    // - é o reply final E a ordem termina em "text" (texto fica por último → vira reply)
+    const orderEndsWithText = Array.isArray(configuredOrder) && configuredOrder.length > 0
+      && configuredOrder[configuredOrder.length - 1] === "text";
+    const sendTextInline = !!text && (!asReply || !orderEndsWithText && !!configuredOrder);
+
+    let mediaResult: { mediaSent: boolean | null; textSentInline: boolean } =
+      { mediaSent: false, textSentInline: false };
     try {
-      mediaSent = await sendStepMedia(ctx, st, consultantId, false);
+      mediaResult = await sendStepMedia(
+        ctx, st, consultantId, false,
+        sendTextInline ? { text, delayMs: textDelay } : null,
+      );
     } catch (e) {
       console.error(`[conversational] sendStepMedia threw em step=${st.step_key}:`, (e as Error)?.message || e);
-      mediaSent = null;
+      mediaResult = { mediaSent: null, textSentInline: false };
     }
-    // mediaSent: true = enviou; false = não tem mídia; null = tentou e falhou
-    const text = renderStepText(st);
+    const mediaSent = mediaResult.mediaSent;
     const inlineMedia = mediaSent === true;
-    console.log(`[conversational] emitStep step=${st.step_key} asReply=${asReply} media=${mediaSent} hasText=${!!text}`);
+    console.log(`[conversational] emitStep step=${st.step_key} asReply=${asReply} media=${mediaSent} hasText=${!!text} textInline=${mediaResult.textSentInline} order=${JSON.stringify(configuredOrder)}`);
+
     if (!text) {
       if (mediaSent === null) {
         console.warn(`[conversational] ⚠️ step=${st.step_key}: mídia falhou e sem texto fallback — continuando cascata`);
       }
       return { replyText: "", inlineSent: inlineMedia };
     }
-    // ⏱️ text_delay_ms = aguardar ANTES do TEXTO (depois da mídia). É o que a UI promete.
-    const textDelay = Math.max(0, Math.min(60000, st.text_delay_ms ?? 1500));
+
+    // Se o texto já foi enviado inline na posição configurada, não devolve replyText.
+    if (mediaResult.textSentInline) {
+      return { replyText: "", inlineSent: true };
+    }
+
+    // Texto ainda não enviado: aplica text_delay e devolve como reply (asReply)
+    // ou envia inline como cascade (último recurso, sem ordem configurada).
     if (textDelay > 0 && !isTestMode()) {
       await new Promise((r) => setTimeout(r, textDelay));
     }
     if (asReply) {
       return { replyText: text, inlineSent: inlineMedia };
     }
-    // Cascade: envia o texto inline como mensagem separada (mídia já foi inline).
     try {
       await ctx.sender.sendText(ctx.remoteJid, text);
     } catch (e) {
