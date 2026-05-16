@@ -61,9 +61,24 @@ Deno.serve(async (req) => {
     const {
       remoteJid, buttonId, hasImage, hasDocument, hasAudio, isButton,
       imageMessage, documentMessage, audioMessage, key, message, messageId,
-      fileBase64: whapiFileBase64, fileUrl: whapiFileUrl,
+      fileBase64: whapiFileBase64, fileUrl: whapiFileUrl, fromName,
     } = parsed;
     let { messageText, isFile } = parsed;
+
+    // Helper: limpa emojis/símbolos do pushName e pega o primeiro nome válido
+    const cleanPushName = (raw: string | null | undefined): string | null => {
+      if (!raw) return null;
+      // Remove emojis e símbolos, mantém letras/acentos/espaços/hífen
+      const cleaned = String(raw)
+        .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F1E6}-\u{1F1FF}\u{2300}-\u{23FF}\u{2700}-\u{27BF}\u{FE0F}\u{200D}]/gu, "")
+        .replace(/[^\p{L}\s'-]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!cleaned) return null;
+      // Rejeita se parecer só número/placeholder
+      if (/^\d+$/.test(cleaned)) return null;
+      return cleaned;
+    };
 
     if (!messageText && !isFile && !isButton) {
       console.log("⏭️ Mensagem vazia");
@@ -192,6 +207,7 @@ Deno.serve(async (req) => {
     }
 
     if (!customer) {
+      const pushedName = cleanPushName(fromName);
       const { data: newCustomer, error } = await supabase
         .from("customers")
         .insert({
@@ -199,6 +215,7 @@ Deno.serve(async (req) => {
           consultant_id: superAdminConsultantId,
           status: "pending",
           conversation_step: "welcome",
+          ...(pushedName ? { name: pushedName, name_source: "whatsapp_profile" } : {}),
         })
         .select().single();
       if (error) {
@@ -224,6 +241,18 @@ Deno.serve(async (req) => {
         }
       } else {
         customer = newCustomer;
+      }
+    }
+
+    // ─── Backfill: se o customer existe mas ainda não tem nome, usa o pushName do WhatsApp ─
+    if (customer && !customer.name) {
+      const pushedName = cleanPushName(fromName);
+      if (pushedName) {
+        await supabase.from("customers")
+          .update({ name: pushedName, name_source: "whatsapp_profile" })
+          .eq("id", customer.id);
+        customer.name = pushedName;
+        (customer as any).name_source = "whatsapp_profile";
       }
     }
 

@@ -244,8 +244,12 @@ export function parseWhapiMessage(body: any) {
     fileUrl = audioPayload.link || null;
   }
 
+  // Nome do remetente vindo do WhatsApp (pushName)
+  const fromName: string | null = msg.from_name || msg.pushname || msg.notify_name || null;
+
   return {
     remoteJid,
+    fromName,
     messageText: messageText.trim(),
     buttonId,
     hasImage,
