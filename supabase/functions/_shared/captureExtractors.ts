@@ -32,11 +32,14 @@ function cpfValido(cpf: string): boolean {
 
 export function extractValor(text: string): number | null {
   if (!text) return null;
-  const t = text.toLowerCase();
-  // 1) Regex direto: "R$ 380,50", "380 reais", "uns 400", "umas 500 pila", "minha conta vem 450"
-  const rx = /(?:r\$\s*|reais?\s*|conta\s+(?:de|vem|tá|é|cerca de|uns|umas|aproximadamente)?\s*|valor\s+(?:de|é)?\s*)?(\d{2,5}(?:[.,]\d{1,2})?)/i;
-  // só dispara se houver indício de dinheiro/conta
-  if (/r\$|\breais?\b|\bconta\b|\bluz\b|\bvalor\b|\bpila\b|^\s*\d{2,5}\s*$/i.test(t)) {
+  const t = text.toLowerCase().trim();
+  // 1) Regex direto: "R$ 380,50", "$380", "380 reais", "uns 400", "umas 500 pila", "minha conta vem 450"
+  const rx = /(?:r?\$\s*|reais?\s*|conta\s+(?:de|vem|tá|é|cerca de|uns|umas|aproximadamente)?\s*|valor\s+(?:de|é)?\s*)?(\d{2,5}(?:[.,]\d{1,2})?)/i;
+  // dispara se houver indício de dinheiro (R$, $, reais, conta, luz, valor, pila)
+  // OU se a mensagem for praticamente só um número (resposta direta a "qual o valor?")
+  const moneyHint = /r?\$|\breais?\b|\bconta\b|\bluz\b|\bvalor\b|\bpila\b|\bmangos?\b|\bcontos?\b/i.test(t);
+  const bareNumber = /^\s*\d{2,5}(?:[.,]\d{1,2})?\s*(?:reais?|pila|mangos?|contos?|r?\$)?\s*$/i.test(t);
+  if (moneyHint || bareNumber) {
     const m = t.match(rx);
     if (m) {
       const v = parseFloat(m[1].replace(/\./g, "").replace(",", "."));
