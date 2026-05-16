@@ -245,7 +245,10 @@ Deno.serve(async (req) => {
     }
 
     // ─── Backfill: se o customer existe mas ainda não tem nome, usa o pushName do WhatsApp ─
-    if (customer && !customer.name) {
+    // Depois de clicar em "Zerar", não reaproveitamos from_name/pushName do WhatsApp.
+    // Isso evita parecer que o bot "lembrou" do número durante testes do fluxo.
+    const wasManuallyReset = !!(customer as any)?.chat_cleared_at;
+    if (customer && !customer.name && !wasManuallyReset) {
       const pushedName = cleanPushName(fromName);
       if (pushedName) {
         await supabase.from("customers")
