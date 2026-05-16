@@ -592,14 +592,19 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     if (extracted.phone_whatsapp && !ctx.customer.phone_whatsapp) captureUpdates.phone_whatsapp = extracted.phone_whatsapp;
     if (extracted.cpf) captureUpdates.cpf = extracted.cpf;
     // Nome: se o passo atual é um "pergunta nome" (título/slot menciona nome,
-    // ou tem capture explícita de name habilitada), sempre sobrescreve.
-    // Caso contrário, mantém a guarda anti-sobrescrita por engano.
+    // ou tem capture explícita de name habilitada), sobrescreve.
+    // Caso contrário, mantém a guarda anti-sobrescrita.
+    // EXCEÇÃO CRÍTICA: se name_source vier de OCR (ocr_conta/ocr_doc) ou
+    // user_confirmed, NUNCA sobrescreve por captura de texto livre — só os
+    // passos editing_* explícitos podem trocar (no bot-flow.ts).
+    const TRUSTED_LOCK = new Set(["ocr_conta", "ocr_doc", "user_confirmed"]);
+    const nameLocked = TRUSTED_LOCK.has(String((ctx.customer as any).name_source || ""));
     const stepIsAskName =
       /\bnome\b|\bchama\b/i.test(String((currentStep as any).title || "")) ||
       /\bnome\b/i.test(String((currentStep as any).slot_key || "")) ||
       (Array.isArray(currentStep.captures) &&
         currentStep.captures.some((c: any) => c?.field === "name" && c?.enabled !== false));
-    if (extracted.name && (stepIsAskName || !ctx.customer.name)) {
+    if (extracted.name && !nameLocked && (stepIsAskName || !ctx.customer.name)) {
       captureUpdates.name = extracted.name;
     }
 
