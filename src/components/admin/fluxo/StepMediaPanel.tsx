@@ -20,8 +20,10 @@ type Media = {
   delay_before_ms?: number | null;
 };
 
+// Whapi (WhatsApp) rejeita .webm com erro 500 em /messages/voice.
+// Aceitamos só formatos que ele entrega como voice note: .ogg/opus, .mp3 ou .m4a.
 const ACCEPT: Record<Kind, string> = {
-  audio: "audio/*",
+  audio: "audio/ogg,audio/mpeg,audio/mp4,audio/wav,audio/x-m4a,.ogg,.mp3,.m4a,.wav",
   image: "image/*",
   video: "video/*",
 };
