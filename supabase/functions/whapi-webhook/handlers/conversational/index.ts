@@ -12,6 +12,7 @@ import {
 } from "../../../_shared/captureExtractors.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
 import { isTestMode } from "../../../_shared/test-mode.ts";
+import { evaluateRules, logRuleFire } from "./rules-engine.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
@@ -447,6 +448,109 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       // Grava o id (estável) — o orchestrator prefixa "flow:" antes de persistir.
       updates: { conversation_step: firstActive.id, __inline_sent: mediaSent || undefined },
     };
+  }
+
+  // ─── GLOBAL KEYWORD RULES ───────────────────────────────────────────
+  // Regras configuradas pelo consultor (bot_flow_rules). Avaliadas ANTES do
+  // QA e do classificador. Se a regra disparar com return_behavior='stay',
+  // o lead recebe a resposta e PERMANECE no mesmo passo (não perde o lugar
+  // que estava, mesmo no último passo do funil).
+  try {
+    const ruleHit = await evaluateRules({
+      supabase: ctx.supabase,
+      flowId,
+      consultantId,
+      customerId: ctx.customer.id || null,
+      currentStepId: currentStep.id,
+      messageText: ctx.messageText || "",
+      lastRuleFireAt: (ctx.customer as any).last_rule_fire_at || null,
+      lastRuleId: (ctx.customer as any).last_rule_id || null,
+    });
+    if (ruleHit) {
+      const { rule, matchedKeyword } = ruleHit;
+      console.log(`[conversational] 🎯 rule hit "${rule.name}" (${matchedKeyword}) at step="${stepKey}" → ${rule.return_behavior}`);
+
+      // Envia mídia opcional via dedupe RPC
+      if (rule.media_id) {
+        const { data: mr } = await ctx.supabase
+          .from("ai_media_library").select("url, kind").eq("id", rule.media_id).maybeSingle();
+        if (mr?.url) {
+          const kind = ["audio","video","image"].includes(String(mr.kind)) ? String(mr.kind) : "document";
+          let canSend = true;
+          if (kind === "audio" || kind === "video") {
+            const { data } = await ctx.supabase.rpc("try_log_media_send", {
+              _consultant_id: consultantId,
+              _customer_id: ctx.customer.id,
+              _media_id: rule.media_id,
+              _slot_key: null,
+              _kind: kind,
+            });
+            canSend = data !== false;
+          }
+          if (canSend) {
+            try { await ctx.sender.sendMedia(ctx.remoteJid, mr.url, "", kind); } catch (_) {}
+          } else {
+            console.log(`[conversational] rule media já enviada, pulando (media_id=${rule.media_id})`);
+          }
+        }
+      }
+
+      // Resolve nextStep + previous_conversation_step extras
+      let nextStepKey: string = stepKey;
+      const extraUpdates: Record<string, any> = {
+        last_rule_id: rule.id,
+        last_rule_fire_at: new Date().toISOString(),
+      };
+      if (rule.return_behavior === "stay") {
+        nextStepKey = stepKey; // nada muda
+      } else if (rule.return_behavior === "goto_step" && rule.goto_step_id) {
+        const target = dbSteps.find((s) => s.id === rule.goto_step_id);
+        if (target) {
+          nextStepKey = target.id;
+          extraUpdates.previous_conversation_step = stepKey; // permite voltar
+        }
+      } else if (rule.return_behavior === "restart") {
+        nextStepKey = firstActive.id;
+        extraUpdates.previous_conversation_step = null;
+      } else if (rule.return_behavior === "handoff") {
+        nextStepKey = "aguardando_humano";
+        extraUpdates.bot_paused = true;
+        extraUpdates.bot_paused_reason = "rule_handoff";
+        extraUpdates.bot_paused_at = new Date().toISOString();
+      }
+
+      await logRuleFire(ctx.supabase, {
+        ruleId: rule.id,
+        consultantId,
+        customerId: ctx.customer.id || null,
+        matchedKeyword,
+        messageText: ctx.messageText || "",
+        stepBefore: stepKey,
+        stepAfter: nextStepKey,
+        returnBehavior: rule.return_behavior,
+      });
+
+      const reply = rule.response_text
+        ? renderTemplate(rule.response_text, {
+            nome: ctx.customer.name,
+            representante: ctx.nomeRepresentante,
+            valor_conta: (ctx.customer as any).electricity_bill_value,
+            telefone: ctx.customer.phone_whatsapp,
+            cpf: (ctx.customer as any).cpf,
+          })
+        : "";
+
+      return {
+        reply,
+        updates: {
+          conversation_step: nextStepKey,
+          __inline_sent: !!rule.media_id || undefined,
+          ...extraUpdates,
+        },
+      };
+    }
+  } catch (e) {
+    console.error("[conversational] rules-engine failed (ignorando)", e);
   }
 
   // ─── Q&A FAQ matching ───────────────────────────────────────────────

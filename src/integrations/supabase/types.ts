@@ -1091,6 +1091,156 @@ export type Database = {
           },
         ]
       }
+      bot_flow_rule_fires: {
+        Row: {
+          consultant_id: string
+          created_at: string
+          customer_id: string | null
+          id: string
+          matched_keyword: string | null
+          message_text: string | null
+          return_behavior: string | null
+          rule_id: string
+          step_after: string | null
+          step_before: string | null
+        }
+        Insert: {
+          consultant_id: string
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          matched_keyword?: string | null
+          message_text?: string | null
+          return_behavior?: string | null
+          rule_id: string
+          step_after?: string | null
+          step_before?: string | null
+        }
+        Update: {
+          consultant_id?: string
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          matched_keyword?: string | null
+          message_text?: string | null
+          return_behavior?: string | null
+          rule_id?: string
+          step_after?: string | null
+          step_before?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bot_flow_rule_fires_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "bot_flow_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bot_flow_rules: {
+        Row: {
+          consultant_id: string
+          cooldown_seconds: number
+          created_at: string
+          excluded_step_ids: string[]
+          flow_id: string
+          goto_step_id: string | null
+          id: string
+          is_active: boolean
+          keywords: string[]
+          last_regex_error: string | null
+          match_mode: string
+          max_fires_per_conversation: number | null
+          media_id: string | null
+          min_word_boundary: boolean
+          name: string
+          normalize: boolean
+          priority: number
+          regex_error_count: number
+          regex_pattern: string | null
+          response_text: string | null
+          return_behavior: string
+          scope: string
+          scoped_step_ids: string[]
+          updated_at: string
+        }
+        Insert: {
+          consultant_id: string
+          cooldown_seconds?: number
+          created_at?: string
+          excluded_step_ids?: string[]
+          flow_id: string
+          goto_step_id?: string | null
+          id?: string
+          is_active?: boolean
+          keywords?: string[]
+          last_regex_error?: string | null
+          match_mode?: string
+          max_fires_per_conversation?: number | null
+          media_id?: string | null
+          min_word_boundary?: boolean
+          name: string
+          normalize?: boolean
+          priority?: number
+          regex_error_count?: number
+          regex_pattern?: string | null
+          response_text?: string | null
+          return_behavior?: string
+          scope?: string
+          scoped_step_ids?: string[]
+          updated_at?: string
+        }
+        Update: {
+          consultant_id?: string
+          cooldown_seconds?: number
+          created_at?: string
+          excluded_step_ids?: string[]
+          flow_id?: string
+          goto_step_id?: string | null
+          id?: string
+          is_active?: boolean
+          keywords?: string[]
+          last_regex_error?: string | null
+          match_mode?: string
+          max_fires_per_conversation?: number | null
+          media_id?: string | null
+          min_word_boundary?: boolean
+          name?: string
+          normalize?: boolean
+          priority?: number
+          regex_error_count?: number
+          regex_pattern?: string | null
+          response_text?: string | null
+          return_behavior?: string
+          scope?: string
+          scoped_step_ids?: string[]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bot_flow_rules_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "bot_flows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bot_flow_rules_goto_step_id_fkey"
+            columns: ["goto_step_id"]
+            isOneToOne: false
+            referencedRelation: "bot_flow_steps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bot_flow_rules_media_id_fkey"
+            columns: ["media_id"]
+            isOneToOne: false
+            referencedRelation: "ai_media_library"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bot_flow_steps: {
         Row: {
           auto_detect_doc_type: boolean
@@ -1890,6 +2040,8 @@ export type Database = {
           last_bot_reply_at: string | null
           last_followup_at: string | null
           last_rescue_at: string | null
+          last_rule_fire_at: string | null
+          last_rule_id: string | null
           lead_source: Json | null
           link_assinatura: string | null
           link_facial: string | null
@@ -1917,6 +2069,7 @@ export type Database = {
           phone_whatsapp: string
           portal_submitted_at: string | null
           possui_procurador: boolean | null
+          previous_conversation_step: string | null
           qualification_score: number | null
           registered_by_igreen_id: string | null
           registered_by_name: string | null
@@ -1988,6 +2141,8 @@ export type Database = {
           last_bot_reply_at?: string | null
           last_followup_at?: string | null
           last_rescue_at?: string | null
+          last_rule_fire_at?: string | null
+          last_rule_id?: string | null
           lead_source?: Json | null
           link_assinatura?: string | null
           link_facial?: string | null
@@ -2015,6 +2170,7 @@ export type Database = {
           phone_whatsapp: string
           portal_submitted_at?: string | null
           possui_procurador?: boolean | null
+          previous_conversation_step?: string | null
           qualification_score?: number | null
           registered_by_igreen_id?: string | null
           registered_by_name?: string | null
@@ -2086,6 +2242,8 @@ export type Database = {
           last_bot_reply_at?: string | null
           last_followup_at?: string | null
           last_rescue_at?: string | null
+          last_rule_fire_at?: string | null
+          last_rule_id?: string | null
           lead_source?: Json | null
           link_assinatura?: string | null
           link_facial?: string | null
@@ -2113,6 +2271,7 @@ export type Database = {
           phone_whatsapp?: string
           portal_submitted_at?: string | null
           possui_procurador?: boolean | null
+          previous_conversation_step?: string | null
           qualification_score?: number | null
           registered_by_igreen_id?: string | null
           registered_by_name?: string | null
