@@ -719,6 +719,22 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     let replyText = first.replyText;
     let inlineSent = first.inlineSent;
 
+    // Se o passo é do tipo cadastro mas o consultor não configurou texto/mídia,
+    // emite o prompt padrão para não deixar o lead no escuro.
+    if (cadastroStep && !replyText && !inlineSent) {
+      if (cadastroStep === "aguardando_conta") {
+        replyText = await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars);
+      } else if (cadastroStep === "aguardando_doc_auto") {
+        replyText = "📸 Agora preciso do seu *documento com foto* (RG ou CNH).\n\nEnvie a *frente* do documento.";
+      } else if (cadastroStep === "ask_email") {
+        replyText = "📧 Qual seu *e-mail*?";
+      } else if (cadastroStep === "ask_phone_confirm") {
+        replyText = "📞 Esse número é seu telefone de contato?\n\n1️⃣ ✅ Sim\n2️⃣ 📱 Outro número";
+      } else if (cadastroStep === "ask_finalizar") {
+        replyText = "✅ Tudo pronto! Digite *1* ou *FINALIZAR* para concluir.";
+      }
+    }
+
     let cursor: DbStep | null = cadastroStep ? null : s;
     for (let guard = 0; cursor?.wait_for === "none" && guard < 6; guard++) {
       const nextId = cursor.fallback?.mode === "goto" ? cursor.fallback.goto_step_id : null;
