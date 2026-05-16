@@ -179,6 +179,7 @@ export default function FluxoCamila() {
   const [testOpen, setTestOpen] = useState(false);
   const [testPhone, setTestPhone] = useState("");
   const [testCount, setTestCount] = useState(0);
+  const [mediaCounts, setMediaCounts] = useState<Record<string, { audio: number; video: number; image: number }>>({});
   const [showMigrationBanner, setShowMigrationBanner] = useState(
     () => typeof window !== "undefined" && !localStorage.getItem("camila_migration_v2_dismissed")
   );
