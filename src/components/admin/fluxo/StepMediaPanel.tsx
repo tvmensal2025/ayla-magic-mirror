@@ -18,6 +18,8 @@ type Media = {
   send_order: number;
   duration_sec: number | null;
   delay_before_ms?: number | null;
+  original_size_bytes?: number | null;
+  final_size_bytes?: number | null;
 };
 
 // Whapi (WhatsApp) rejeita .webm com erro 500 em /messages/voice.
@@ -40,11 +42,20 @@ const KIND_ICON: Record<Kind, React.ComponentType<{ className?: string }>> = {
   video: Video,
 };
 
+// Vídeo aceita até 200MB porque o compress-worker comprime antes de salvar.
+// Se o worker não estiver configurado, fica salvo no Supabase Storage (limite real do bucket).
 const MAX_BYTES: Record<Kind, number> = {
   audio: 10 * 1024 * 1024,
   image: 8 * 1024 * 1024,
-  video: 50 * 1024 * 1024,
+  video: 200 * 1024 * 1024,
 };
+
+function formatBytes(n: number | null | undefined): string {
+  if (!n || n <= 0) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
 
 interface Props {
   consultantId: string;
