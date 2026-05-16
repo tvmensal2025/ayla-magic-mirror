@@ -81,6 +81,7 @@ const PALAVROES = /\b(merda|porra|caralho|fdp|puta|cu|viado|otario)\b/i;
 
 const STOPWORDS_NOME = new Set([
   "sim","nao","não","ok","oi","ola","olá","bom","boa","dia","tarde","noite",
+  "eu",
   "obrigado","obrigada","valeu","beleza","blz","claro","talvez","quero","posso",
   "pode","manda","vamos","bora","entao","então","como","qual","quanto","quem",
   "que","quê","hein","hum","hmm","ah","ahn","tudo","bem","tbm","tambem","também",
