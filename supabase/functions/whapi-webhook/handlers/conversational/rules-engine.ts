@@ -77,7 +77,7 @@ export function tryMatchRule(rule: BotFlowRule, rawMessage: string): string | nu
 
   for (const kwRaw of rule.keywords || []) {
     const kw = rule.normalize ? normalize(kwRaw) : String(kwRaw || "").trim();
-    if (!kw) continue;
+    if (!kw || kw.length < 2) continue; // evita keyword de 1 caractere matchando qualquer coisa
 
     if (rule.match_mode === "exact") {
       if (haystack === kw) return kwRaw;
