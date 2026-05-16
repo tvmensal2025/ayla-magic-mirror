@@ -258,7 +258,7 @@ Deno.serve(async (req) => {
         const mediaUrl = String(payload.mediaUrl || "");
         const caption = payload.caption ? String(payload.caption) : undefined;
         const fileName = payload.fileName ? String(payload.fileName) : undefined;
-        const mediatype = String(payload.mediatype || "image"); // image | video | document | audio
+        const mediatype = String(payload.mediatype || "image");
         if (!to || !mediaUrl) return json(400, { error: "to e mediaUrl obrigatórios" });
 
         const path =
@@ -266,36 +266,76 @@ Deno.serve(async (req) => {
           : mediatype === "document" ? "/messages/document"
           : mediatype === "audio" ? "/messages/voice"
           : "/messages/image";
+        const isAudio = mediatype === "audio";
 
-        const sendBody: Record<string, unknown> = { to, media: mediaUrl };
-        if (caption) sendBody.caption = caption;
-        if (fileName) sendBody.file_name = fileName;
+        const baseBody: Record<string, unknown> = { to, media: mediaUrl };
+        if (caption) baseBody.caption = caption;
+        if (fileName) baseBody.file_name = fileName;
 
+        // 1) JSON com URL
         let r = await whapiFetchWithRetry(whapiToken, path, {
           method: "POST",
-          body: JSON.stringify(sendBody),
-        }, { maxAttempts: 3, baseDelayMs: 800, label: `send_media:${mediatype}` });
-        if (!r.ok) {
+          body: JSON.stringify(baseBody),
+        }, { maxAttempts: 3, baseDelayMs: 800, label: `send_media:${mediatype}:json_url` });
+
+        let cached: { bytes: Uint8Array; mime: string; b64: string } | null = null;
+        const ensureDownload = async () => {
+          if (cached) return cached;
           try {
-            const mediaRes = await fetch(mediaUrl, { signal: AbortSignal.timeout(30_000) });
-            if (mediaRes.ok) {
-              const cleanPath = (() => { try { return new URL(mediaUrl).pathname; } catch (_) { return mediaUrl.split("?")[0] || "media"; } })();
-              const safeName = fileName || decodeURIComponent(cleanPath.split("/").pop() || (mediatype === "audio" ? "audio.webm" : "media"));
-              const blob = new Blob([await mediaRes.arrayBuffer()], { type: mediaRes.headers.get("content-type") || (mediatype === "audio" ? "audio/webm" : "application/octet-stream") });
-              const form = new FormData();
-              form.append("to", to);
-              form.append("media", blob, safeName);
-              if (caption) form.append("caption", caption);
-              if (mediatype === "audio") {
-                form.append("mime_type", blob.type || "audio/webm");
-              }
-              r = await whapiFetchMultipart(whapiToken, path, form);
-              if (!r.ok && mediatype === "audio") r = await whapiFetchMultipart(whapiToken, "/messages/audio", form);
-            }
-          } catch (e) {
-            console.warn("[whapi-proxy] fallback multipart falhou:", (e as any)?.message || e);
+            const res = await fetch(mediaUrl, { signal: AbortSignal.timeout(30_000) });
+            if (!res.ok) return null;
+            const bytes = new Uint8Array(await res.arrayBuffer());
+            const mime = res.headers.get("content-type") || (isAudio ? "audio/webm" : "application/octet-stream");
+            let bin = "";
+            const chunk = 0x8000;
+            for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+            cached = { bytes, mime, b64: btoa(bin) };
+            return cached;
+          } catch { return null; }
+        };
+
+        const sendBase64 = async (p: string, mimeAlias: string) => {
+          const dl = await ensureDownload();
+          if (!dl) return null;
+          const body: Record<string, unknown> = { to, media: `data:${mimeAlias};base64,${dl.b64}` };
+          if (caption) body.caption = caption;
+          if (fileName) body.file_name = fileName;
+          return await whapiFetch(whapiToken, p, { method: "POST", body: JSON.stringify(body) });
+        };
+
+        if (!r.ok) {
+          const realMime = (await ensureDownload())?.mime || (isAudio ? "audio/webm" : "application/octet-stream");
+          const r2 = await sendBase64(path, realMime);
+          if (r2?.ok) r = r2;
+        }
+        if (!r.ok && isAudio) {
+          const r3 = await sendBase64(path, "audio/ogg; codecs=opus");
+          if (r3?.ok) r = r3;
+        }
+        if (!r.ok && isAudio && path !== "/messages/audio") {
+          const r4 = await sendBase64("/messages/audio", "audio/ogg; codecs=opus");
+          if (r4?.ok) r = r4;
+        }
+
+        // Último recurso: multipart limpo
+        if (!r.ok) {
+          const dl = await ensureDownload();
+          if (dl) {
+            const safeName = fileName || (isAudio ? "audio.webm" : "media");
+            const blob = new Blob([dl.bytes], { type: dl.mime });
+            const form = new FormData();
+            form.append("to", to);
+            form.append("media", blob, safeName);
+            if (caption && !isAudio) form.append("caption", caption);
+            const rm = await whapiFetchMultipart(whapiToken, path, form);
+            if (rm.ok) r = rm;
+            else if (isAudio && path !== "/messages/audio") {
+              const rm2 = await whapiFetchMultipart(whapiToken, "/messages/audio", form);
+              r = rm2.ok ? rm2 : rm;
+            } else r = rm;
           }
         }
+
         if (!r.ok) return json(r.status, { error: r.data });
         return json(200, { key: { id: r.data?.message?.id || r.data?.id || "" } });
       }
