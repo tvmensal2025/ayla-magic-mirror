@@ -568,7 +568,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   if (qaHit) {
     console.log(`[conversational] QA hit at step="${stepKey}"`);
     for (const m of qaHit.mediaUrls) {
-      if ((m.kind === "audio" || m.kind === "video") && m.mediaId) {
+      if ((m.kind === "audio" || m.kind === "video" || m.kind === "image") && m.mediaId) {
         const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
           _consultant_id: consultantId,
           _customer_id: ctx.customer.id,
