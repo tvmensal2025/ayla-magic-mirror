@@ -244,10 +244,10 @@ function SuperAdminSlotsModal({ onClose }: { onClose: () => void }) {
   }
 
   async function uploadDefault(slotKey: string, blob: Blob, durationSec: number) {
-    const path = `public/slots/${slotKey}.webm`;
+    const path = `public/slots/${slotKey}.ogg`;
     const { error: upErr } = await supabase.storage
       .from("ai-agent-media")
-      .upload(path, blob, { upsert: true, contentType: blob.type || "audio/webm" });
+      .upload(path, blob, { upsert: true, contentType: "audio/ogg" });
     if (upErr) {
       toast({ title: "Erro upload", description: upErr.message, variant: "destructive" });
       return;
