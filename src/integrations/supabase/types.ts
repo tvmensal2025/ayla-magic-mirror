@@ -2005,7 +2005,9 @@ export type Database = {
           assinatura_cliente: string | null
           assinatura_igreen: string | null
           bill_base64: string | null
+          bill_holder_name: string | null
           bill_message_id: string | null
+          bill_owner_relationship: string | null
           bill_requested_at: string | null
           bot_paused: boolean
           bot_paused_at: string | null
@@ -2032,6 +2034,7 @@ export type Database = {
           desconto_cliente: number | null
           devolutiva: string | null
           distribuidora: string | null
+          doc_holder_name: string | null
           document_back_url: string | null
           document_front_base64: string | null
           document_front_url: string | null
@@ -2059,6 +2062,9 @@ export type Database = {
           media_message_id: string | null
           media_storage: string | null
           name: string | null
+          name_mismatch_acknowledged_at: string | null
+          name_mismatch_flag: boolean
+          name_mismatch_reason: string | null
           name_source: string | null
           next_followup_at: string | null
           next_rescue_allowed_at: string | null
@@ -2107,7 +2113,9 @@ export type Database = {
           assinatura_cliente?: string | null
           assinatura_igreen?: string | null
           bill_base64?: string | null
+          bill_holder_name?: string | null
           bill_message_id?: string | null
+          bill_owner_relationship?: string | null
           bill_requested_at?: string | null
           bot_paused?: boolean
           bot_paused_at?: string | null
@@ -2134,6 +2142,7 @@ export type Database = {
           desconto_cliente?: number | null
           devolutiva?: string | null
           distribuidora?: string | null
+          doc_holder_name?: string | null
           document_back_url?: string | null
           document_front_base64?: string | null
           document_front_url?: string | null
@@ -2161,6 +2170,9 @@ export type Database = {
           media_message_id?: string | null
           media_storage?: string | null
           name?: string | null
+          name_mismatch_acknowledged_at?: string | null
+          name_mismatch_flag?: boolean
+          name_mismatch_reason?: string | null
           name_source?: string | null
           next_followup_at?: string | null
           next_rescue_allowed_at?: string | null
@@ -2209,7 +2221,9 @@ export type Database = {
           assinatura_cliente?: string | null
           assinatura_igreen?: string | null
           bill_base64?: string | null
+          bill_holder_name?: string | null
           bill_message_id?: string | null
+          bill_owner_relationship?: string | null
           bill_requested_at?: string | null
           bot_paused?: boolean
           bot_paused_at?: string | null
@@ -2236,6 +2250,7 @@ export type Database = {
           desconto_cliente?: number | null
           devolutiva?: string | null
           distribuidora?: string | null
+          doc_holder_name?: string | null
           document_back_url?: string | null
           document_front_base64?: string | null
           document_front_url?: string | null
@@ -2263,6 +2278,9 @@ export type Database = {
           media_message_id?: string | null
           media_storage?: string | null
           name?: string | null
+          name_mismatch_acknowledged_at?: string | null
+          name_mismatch_flag?: boolean
+          name_mismatch_reason?: string | null
           name_source?: string | null
           next_followup_at?: string | null
           next_rescue_allowed_at?: string | null

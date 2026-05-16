@@ -194,8 +194,32 @@ function _levSim(a: string, b: string): number {
 }
 
 /**
+ * Fontes de nome consideradas "confiáveis" — uma vez setado, só pode ser
+ * sobrescrito por confirmação explícita do usuário (editing_* / user_confirmed).
+ */
+const TRUSTED_NAME_SOURCES_LOCK = new Set(["user_confirmed", "ocr_conta", "ocr_doc"]);
+
+/**
+ * Verifica se dois nomes (conta de luz × RG) representam a mesma pessoa.
+ * Match se similaridade ≥ 0.85 ou se primeiro+último nome coincidem.
+ */
+export function checkHolderMatch(billName: string | null | undefined, docName: string | null | undefined): { match: boolean; similarity: number; reason: string } {
+  const a = _normName(String(billName || ""));
+  const b = _normName(String(docName || ""));
+  if (!a || !b) return { match: true, similarity: 1, reason: "missing_one_side" };
+  const sim = _levSim(a, b);
+  const partsA = a.split(/\s+/);
+  const partsB = b.split(/\s+/);
+  const firstLastMatch = partsA[0] === partsB[0] && partsA[partsA.length - 1] === partsB[partsB.length - 1];
+  const match = sim >= 0.85 || firstLastMatch;
+  return { match, similarity: sim, reason: `sim=${sim.toFixed(2)} firstLast=${firstLastMatch}` };
+}
+
+/**
  * Decide o nome a usar dado OCR de doc.
- * Retorna null se OCR é alucinação OU se o usuário já confirmou nome diferente.
+ * Retorna null se OCR é alucinação OU se o nome atual veio de fonte confiável.
+ * Fontes confiáveis (ocr_conta, ocr_doc, user_confirmed) só podem ser sobrescritas
+ * via fluxo de edição explícito (editing_conta_nome / editing_doc_nome).
  */
 function safeAssignName(currentName: string | null | undefined, currentSource: string | null | undefined, ocrName: string | null | undefined): string | null {
   if (!ocrName) return null;
@@ -204,8 +228,10 @@ function safeAssignName(currentName: string | null | undefined, currentSource: s
   if (/\d/.test(cleaned)) return null;
   if (cleaned.split(/\s+/).length < 2) return null;
   if (RG_HEADER_TERMS.test(cleaned)) return null;
-  // Já confirmado pelo usuário → nunca sobrescreve
-  if (currentSource === "user_confirmed" && currentName && String(currentName).trim().length >= 3) return null;
+  // Fonte confiável já gravada → nunca sobrescreve sem confirmação do usuário
+  if (currentName && String(currentName).trim().length >= 3 && TRUSTED_NAME_SOURCES_LOCK.has(String(currentSource || ""))) {
+    return null;
+  }
   // Nome atual existe e é muito diferente: mantém (não confiamos no OCR)
   if (currentName && String(currentName).trim().length >= 5) {
     if (_levSim(currentName, cleaned) < 0.7) return null;
@@ -259,8 +285,9 @@ function isExpectedShape(step: string, text: string): boolean {
       return /^[0-4]$/.test(t) || /\b(nome|cpf|rg|nascimento|data|cancelar|voltar)\b/i.test(t);
     case "confirmando_dados_conta":
     case "confirmando_dados_doc":
+    case "confirmar_titularidade":
     case "ask_tipo_documento":
-      return /^(sim|s|nao|n[aã]o|n|ok|editar|3|2|1|✅|❌|✏️)/i.test(t);
+      return /^(sim|s|nao|n[aã]o|n|ok|editar|3|2|1|✅|❌|✏️|mesma|outro|corrigir|titular_)/i.test(t);
     default:
       return false;
   }
@@ -302,6 +329,7 @@ function getReentryPromptForStep(step: string, customer: any): string {
     "editing_doc_nascimento": "Digite a *data de nascimento* (DD/MM/AAAA):",
     "confirmando_dados_conta": "Os dados da conta estão corretos? Responda *SIM*, *NÃO* ou *EDITAR*.",
     "confirmando_dados_doc": "Os dados estão corretos? Responda *SIM*, *NÃO* ou *EDITAR*.",
+    "confirmar_titularidade": "Antes de finalizar: é a *mesma pessoa* da conta de luz, *outro titular* (cônjuge/pai/mãe) ou quer *corrigir*?",
   };
   const txt = map[step];
   return txt ? prefix + txt : "";
@@ -311,7 +339,7 @@ function getReentryPromptForStep(step: string, customer: any): string {
 const NO_QA_STEPS = new Set([
   "aguardando_conta", "processando_ocr_conta", "confirmando_dados_conta",
   "aguardando_doc_auto", "aguardando_doc_frente", "aguardando_doc_verso",
-  "confirmando_dados_doc", "ask_tipo_documento",
+  "confirmando_dados_doc", "confirmar_titularidade", "ask_tipo_documento",
   "ask_name", "ask_cpf", "ask_rg", "ask_birth_date", "ask_phone", "ask_phone_confirm",
   "ask_email", "ask_cep", "ask_number", "ask_complement",
   "ask_installation_number", "ask_bill_value",
@@ -1805,6 +1833,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           // C: validação anti-alucinação no nome OCR da conta
           {
             const ocrName = (d.nome || "").trim();
+            // Sempre grava o nome bruto da conta para auditoria/conferência
+            if (ocrName) updates.bill_holder_name = ocrName;
             const safe = safeAssignName(customer.name, (customer as any).name_source, ocrName);
             if (safe) {
               updates.name = safe;
@@ -2044,7 +2074,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         );
         if (ocrData.sucesso && ocrData.dados) {
           const d = ocrData.dados;
-          { const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } }
+          { if (d.nome) updates.doc_holder_name = String(d.nome).trim(); const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } const _bill = customer.bill_holder_name || updates.bill_holder_name; if (_bill && d.nome) { const _chk = checkHolderMatch(_bill, d.nome); if (!_chk.match) { updates.name_mismatch_flag = true; updates.name_mismatch_reason = `bill="${_bill}" doc="${d.nome}" ${_chk.reason}`; } else { updates.name_mismatch_flag = false; updates.name_mismatch_reason = null; } } }
           if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
           if (d.rg) updates.rg = d.rg;
           const dataConf = String(d.dataNascimentoConfianca || "").toLowerCase();
@@ -2140,7 +2170,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           console.log("📊 OCR CNH resultado:", JSON.stringify(ocrData).substring(0, 400));
           if (ocrData.sucesso && ocrData.dados) {
             const d = ocrData.dados;
-            { const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } }
+            { if (d.nome) updates.doc_holder_name = String(d.nome).trim(); const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } const _bill = customer.bill_holder_name || updates.bill_holder_name; if (_bill && d.nome) { const _chk = checkHolderMatch(_bill, d.nome); if (!_chk.match) { updates.name_mismatch_flag = true; updates.name_mismatch_reason = `bill="${_bill}" doc="${d.nome}" ${_chk.reason}`; } else { updates.name_mismatch_flag = false; updates.name_mismatch_reason = null; } } }
             if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
             if (d.rg) updates.rg = d.rg;
             const dataConf = String(d.dataNascimentoConfianca || "").toLowerCase();
@@ -2218,19 +2248,23 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         console.log("📊 OCR Doc resultado:", JSON.stringify(ocrData).substring(0, 400));
         if (ocrData.sucesso && ocrData.dados) {
           const d = ocrData.dados;
-          { const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } }
+          { if (d.nome) updates.doc_holder_name = String(d.nome).trim(); const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } const _bill = customer.bill_holder_name || updates.bill_holder_name; if (_bill && d.nome) { const _chk = checkHolderMatch(_bill, d.nome); if (!_chk.match) { updates.name_mismatch_flag = true; updates.name_mismatch_reason = `bill="${_bill}" doc="${d.nome}" ${_chk.reason}`; } else { updates.name_mismatch_flag = false; updates.name_mismatch_reason = null; } } }
           if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
           if (d.rg) updates.rg = d.rg;
           if (d.dataNascimento) updates.data_nascimento = d.dataNascimento;
           if (d.nomePai) updates.nome_pai = d.nomePai;
           if (d.nomeMae) updates.nome_mae = d.nomeMae;
           updates.conversation_step = "confirmando_dados_doc";
+          const mismatchWarn = updates.name_mismatch_flag
+            ? `\n\n⚠️ *Notei uma diferença:* o nome no documento (*${d.nome}*) parece diferente do nome na conta de luz (*${customer.bill_holder_name || updates.bill_holder_name}*).\nSem problema — pode ser titularidade de cônjuge/pai/mãe. Antes de finalizar vou te perguntar.`
+            : "";
           reply = "📋 *Confirme seus dados pessoais:*\n\n" +
             `👤 *Nome:* ${d.nome || "❌ não encontrado"}\n` +
             `🆔 *CPF:* ${d.cpf || "❌ não encontrado"}\n` +
             `📄 *RG:* ${d.rg || "❌ não encontrado"}\n` +
-            `🎂 *Data Nasc:* ${d.dataNascimento || "❌ não encontrado"}\n\n` +
-            "Está tudo correto?";
+            `🎂 *Data Nasc:* ${d.dataNascimento || "❌ não encontrado"}` +
+            mismatchWarn +
+            "\n\nEstá tudo correto?";
           await sendOptions(remoteJid, reply, [
             { id: "sim_doc", title: "✅ SIM" },
             { id: "nao_doc", title: "❌ NÃO" },
@@ -2270,10 +2304,24 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
       if (resp === "sim_doc" || resp === "sim" || resp === "s" || resp === "1" || resp === "ok" || resp === "correto" || resp === "✅") {
         if (customer.name || updates.name) updates.name_source = "user_confirmed";
-        const merged = { ...customer, ...updates };
-        const next = await autoResolveCepIfNeeded(merged, updates);
-        updates.conversation_step = next;
-        reply = getReplyForStep(next, merged);
+        const _mismatch = (updates.name_mismatch_flag ?? (customer as any).name_mismatch_flag) === true;
+        const _acked = (updates.name_mismatch_acknowledged_at ?? (customer as any).name_mismatch_acknowledged_at);
+        if (_mismatch && !_acked) {
+          updates.conversation_step = "confirmar_titularidade";
+          const _bill = (customer as any).bill_holder_name || updates.bill_holder_name || "—";
+          const _doc = (customer as any).doc_holder_name || updates.doc_holder_name || "—";
+          await sendOptions(remoteJid, `Antes de finalizar preciso confirmar:\n\n👤 Conta de luz: *${_bill}*\n🪪 Documento: *${_doc}*\n\nÉ a mesma pessoa?`, [
+            { id: "titular_mesmo", title: "Mesma pessoa" },
+            { id: "titular_outro", title: "Outro titular" },
+            { id: "titular_corrigir", title: "Corrigir" },
+          ]);
+          reply = "";
+        } else {
+          const merged = { ...customer, ...updates };
+          const next = await autoResolveCepIfNeeded(merged, updates);
+          updates.conversation_step = next;
+          reply = getReplyForStep(next, merged);
+        }
       } else if (resp === "nao_doc" || resp === "nao" || resp === "não" || resp === "n" || resp === "2" || resp === "errado" || resp === "❌") {
         // ── ANTI-LOOP: após 2 rejeições, força avanço para coleta manual em vez de re-pedir foto ──
         const rejectCount = (customer.ocr_doc_attempts || 0) + 1;
@@ -2296,6 +2344,36 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           { id: "editar_doc", title: "✏️ EDITAR" },
         ]);
         if (!sent) reply = "Digite *SIM*, *NÃO* ou *EDITAR*:";
+      }
+      break;
+    }
+
+    // ─── 6b. CONFIRMAR TITULARIDADE (mismatch conta × RG) ─────────
+    case "confirmar_titularidade": {
+      const resp = isButton ? buttonId : messageText.toLowerCase().trim();
+      if (resp === "titular_mesmo" || /mesma|sou eu|é eu|eh eu|igual/i.test(resp)) {
+        updates.name_mismatch_acknowledged_at = new Date().toISOString();
+        const merged = { ...customer, ...updates };
+        const next = await autoResolveCepIfNeeded(merged, updates);
+        updates.conversation_step = next;
+        reply = "Perfeito, anotado! ✅\n\n" + getReplyForStep(next, merged);
+      } else if (resp === "titular_outro" || /outro|c[ôo]njuge|esposa|esposo|marido|pai|m[ãa]e|filho|filha|parente/i.test(resp)) {
+        updates.name_mismatch_acknowledged_at = new Date().toISOString();
+        updates.bill_owner_relationship = messageText.trim().slice(0, 60) || "outro_titular";
+        const merged = { ...customer, ...updates };
+        const next = await autoResolveCepIfNeeded(merged, updates);
+        updates.conversation_step = next;
+        reply = "Entendido — a conta é em nome de outra pessoa. Vou registrar isso pro consultor revisar na hora do cadastro. ✅\n\n" + getReplyForStep(next, merged);
+      } else if (resp === "titular_corrigir" || /corrigir|errado|edit/i.test(resp)) {
+        updates.conversation_step = "editing_doc_menu";
+        reply = "✏️ O que deseja corrigir?\n\n1️⃣ Nome\n2️⃣ CPF\n3️⃣ RG\n4️⃣ Data de Nascimento\n0️⃣ Cancelar";
+      } else {
+        const sent = await sendOptions(remoteJid, "Me ajuda a confirmar: é a mesma pessoa, outro titular ou quer corrigir?", [
+          { id: "titular_mesmo", title: "Mesma pessoa" },
+          { id: "titular_outro", title: "Outro titular" },
+          { id: "titular_corrigir", title: "Corrigir" },
+        ]);
+        if (!sent) reply = "Responda: *mesma pessoa*, *outro titular* ou *corrigir*.";
       }
       break;
     }
