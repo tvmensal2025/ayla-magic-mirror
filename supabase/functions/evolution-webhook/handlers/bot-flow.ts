@@ -646,16 +646,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const rgNovo = resp === "tipo_rg_novo" || resp === "1" || resp === "rg novo";
       const rgAntigo = resp === "tipo_rg_antigo" || resp === "2" || resp === "rg antigo";
       const cnh = resp === "tipo_cnh" || resp === "3" || resp === "cnh";
-      if (rgNovo) { updates.document_type = "rg_novo"; updates.conversation_step = "aguardando_doc_frente"; reply = "📄 *RG (Novo)*\n\n📸 Envie a *FRENTE do seu RG*.\n\nFormatos: JPG, PNG ou PDF"; }
-      else if (rgAntigo) { updates.document_type = "rg_antigo"; updates.conversation_step = "aguardando_doc_frente"; reply = "📄 *RG (Antigo)*\n\n📸 Envie a *FRENTE do seu RG*.\n\nFormatos: JPG, PNG ou PDF"; }
-      else if (cnh) { updates.document_type = "cnh"; updates.conversation_step = "aguardando_doc_frente"; reply = "📄 *CNH*\n\n📸 Envie a *FRENTE da sua CNH*.\n\nFormatos: JPG, PNG ou PDF"; }
+      if (rgNovo) { updates.document_type = "rg_novo"; updates.conversation_step = "aguardando_doc_frente"; reply = "📸 Envie a *FRENTE do seu documento*.\n\nFormatos: JPG, PNG ou PDF"; }
+      else if (rgAntigo) { updates.document_type = "rg_antigo"; updates.conversation_step = "aguardando_doc_frente"; reply = "📸 Envie a *FRENTE do seu documento*.\n\nFormatos: JPG, PNG ou PDF"; }
+      else if (cnh) { updates.document_type = "cnh"; updates.conversation_step = "aguardando_doc_frente"; reply = "📸 Envie a *FRENTE da sua CNH*.\n\nFormatos: JPG, PNG ou PDF"; }
       else {
         const sent = await sendOptions(remoteJid, "📋 Qual documento de identidade você vai enviar?\n\nToque em uma opção:", [
-          { id: "tipo_rg_novo", title: "📄 RG Novo" },
-          { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
+          { id: "tipo_rg_novo", title: "📄 RG" },
+          { id: "tipo_rg_antigo", title: "📄 RG (mais antigo)" },
           { id: "tipo_cnh", title: "🪪 CNH" },
         ]);
-        if (!sent) reply = "Escolha: *1* = RG Novo, *2* = RG Antigo, *3* = CNH";
+        if (!sent) reply = "Escolha: *1* = RG, *2* = RG mais antigo, *3* = CNH";
       }
       break;
     }
@@ -663,8 +663,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     // ─── 4. FRENTE DO DOC ───────────
     case "aguardando_doc_frente": {
       if (!isFile) {
-        const tipo = friendlyLabel(customer.document_type);
-        const msgDoc = isCNH(customer.document_type) ? "FRENTE da sua CNH" : `FRENTE do seu ${tipo}`;
+        const msgDoc = isCNH(customer.document_type) ? "FRENTE da sua CNH" : "FRENTE do seu documento (RG ou CNH)";
         reply = `📸 Envie a *${msgDoc}*.\n\nFormatos: JPG, PNG ou PDF`;
         break;
       }
