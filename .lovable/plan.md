@@ -1,37 +1,54 @@
-Diagnóstico da auditoria
+Diagnóstico encontrado:
 
-- O envio de texto está funcionando; a falha é restrita à mídia de áudio.
-- O arquivo que falha é `audio/webm`, container WebM/Matroska com codec Opus, gerado pelo Chrome.
-- A Whapi retorna `500 Internal Error` em três caminhos: JSON com URL, multipart em `/messages/voice` e multipart em `/messages/audio`.
-- O erro anterior de `no_cache must be boolean` já saiu; agora o problema persistente é a Whapi engasgando no arquivo WebM/Opus.
-- A Lovable AI analisou o caso e recomendou remover dependência de URL/multipart e enviar o áudio como Base64 em JSON limpo.
+- O botão **Zerar** hoje chama `reset_lead_conversation`, mas a função **não exclui o lead/customer**: ela apaga alguns rastros e depois mantém o registro em `customers` resetado.
+- Depois do último teste, o número `5511989000650` já voltou a ter dados novos: `conversation_step`, mensagens, transições e 1 log de mídia. Ou seja: o reset anterior não é “sumir tudo”; ele reinicia e o bot recria rastros na próxima mensagem.
+- A trava de mídia está incompleta: atualmente bloqueia principalmente **áudio/vídeo**, não cobre **imagem** em todos os caminhos, e quando a mídia falha o código remove o dedupe, permitindo tentativa/retry de mídia de novo.
+- O erro continua vindo do envio de mídia no webhook: áudio `audio/webm` falha na Whapi com 500, e logo depois o fluxo ainda tenta vídeo/imagem no mesmo número.
 
-Plano de correção
+Plano de correção:
 
-1. Corrigir o helper central da Whapi
-   - Em `supabase/functions/_shared/whapi-api.ts`, criar um fallback específico para áudio:
-     - baixar a mídia dentro da Edge Function;
-     - converter para Base64;
-     - enviar como `media: data:audio/webm;base64,...` em JSON limpo;
-     - sem `no_cache`, sem `recording_time`, sem `mime_type` no primeiro fallback Base64.
-   - Se ainda falhar, tentar um segundo fallback Base64 declarando `data:audio/ogg;codecs=opus;base64,...`, já que o codec interno é Opus.
-   - Só depois tentar multipart como último recurso, sem parâmetros booleanos em FormData.
+1. Transformar o botão **Zerar** em reset destrutivo real
+   - Alterar a função `reset_lead_conversation` para modo “hard reset”.
+   - Ao clicar em **Zerar**, apagar todos os rastros ligados ao número/customer:
+     - `conversations`
+     - `ai_slot_dispatch_log`
+     - `customer_memory`
+     - `bot_step_transitions`
+     - `bot_flow_rule_fires`
+     - `whatsapp_message_buffer`
+     - `worker_phase_logs`
+     - `ai_decisions`
+     - `ai_agent_logs`
+     - `bot_handoff_alerts`
+     - `facebook_capi_events`
+     - `scheduled_messages`
+     - `crm_auto_message_log`
+     - `crm_deals`
+     - e por fim o próprio registro em `customers`
+   - Resultado esperado: depois de zerar, a busca por esse número não retorna customer nem histórico interno. Se ele mandar mensagem de novo, entra como lead totalmente novo.
 
-2. Padronizar o proxy manual
-   - Aplicar a mesma estratégia em `supabase/functions/whapi-proxy/index.ts` para envios manuais pelo CRM/admin não seguirem uma lógica diferente.
-   - Para áudio, incluir `seconds` quando conhecido ou quando for seguro inferir, mas não bloquear envio por isso.
+2. Corrigir a busca por número no reset
+   - Normalizar telefone sempre por dígitos.
+   - Aceitar tanto `11989000650` quanto `5511989000650` quanto `5511989000650@s.whatsapp.net`.
+   - Evitar que um reset falhe por formato diferente do telefone.
 
-3. Melhorar logs de auditoria
-   - Logar caminho tentado: `json_url`, `json_base64_webm`, `json_base64_ogg_alias`, `multipart_voice`, `multipart_audio`.
-   - Logar status e corpo de erro de cada tentativa, sem expor token.
-   - Logar tamanho do arquivo baixado e content-type real.
+3. Bloquear áudio, vídeo e imagem para o mesmo número
+   - Ajustar o dedupe de mídia para incluir `image`, além de `audio` e `video`.
+   - Aplicar a trava nos três caminhos existentes:
+     - mídia de etapa do fluxo
+     - mídia de FAQ/Q&A
+     - mídia de regra automática
+   - Mudar a regra de falha: se tentou enviar mídia para o número, **não remover o dedupe em caso de erro**, para não ficar tentando novamente e causando loops/500 repetido.
 
-4. Ajustar fluxo conversacional
-   - Garantir que o texto só venha depois da falha definitiva da mídia obrigatória.
-   - Manter a remoção de dedupe quando falhar, para poder retestar o mesmo lead sem reset manual.
+4. Resetar agora os dois números informados
+   - Apagar todos os dados internos dos números:
+     - `5511989000650`
+     - `5511971254913`
+   - Confirmar com consulta no banco que os contadores ficaram zerados e que não há mais registros em `customers` para esses números.
 
-5. Validar depois da implementação
-   - Deploy de `whapi-webhook` e `whapi-proxy`.
-   - Acionar novo `oi` no número de teste.
-   - Conferir logs recentes procurando sucesso em `json_base64_webm` ou `json_base64_ogg_alias`.
-   - Se a Whapi ainda retornar 500 em Base64, o próximo passo será converter os áudios cadastrados para `.ogg`/Opus fora da Edge Runtime e atualizar `ai_media_library` para apontar para os `.ogg` reais.
+5. Validar
+   - Conferir logs recentes do `whapi-webhook` depois do reset.
+   - Confirmar que, no próximo teste, o bot não dispara novamente áudio/vídeo/imagem repetidos para o mesmo número.
+
+Observação importante:
+- O histórico que aparece dentro da lista da Whapi/WhatsApp pode continuar existindo na conta WhatsApp externa, porque isso vem da Whapi. O que será apagado é todo o estado interno do sistema: lead, CRM, memória, logs, mensagens internas e dedupe.
