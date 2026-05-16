@@ -87,7 +87,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     // Inclui mídias do próprio consultor + públicas (Super Admin)
     const { data } = await supabase
       .from("ai_media_library")
-      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, consultant_id, is_public")
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, original_size_bytes, final_size_bytes, consultant_id, is_public")
       .or(`consultant_id.eq.${consultantId},and(consultant_id.is.null,is_public.eq.true)`)
       .eq("kind", kind)
       .eq("active", true)
@@ -119,7 +119,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
         duration_sec: m.duration_sec,
         delay_before_ms: 1500,
       })
-      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms")
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, original_size_bytes, final_size_bytes")
       .maybeSingle();
     setLinking(null);
     if (error) { toast.error("Erro ao vincular: " + error.message); return; }
@@ -140,7 +140,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     (async () => {
       const { data, error } = await supabase
         .from("ai_media_library")
-        .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms")
+        .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, original_size_bytes, final_size_bytes")
         .eq("consultant_id", consultantId)
         .eq("active", true)
         .in("slot_key", slotKeys)
@@ -246,7 +246,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
         delay_before_ms: 1500,
         ...(durationSec ? { duration_sec: durationSec } : {}),
       })
-      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms")
+      .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, original_size_bytes, final_size_bytes")
       .maybeSingle();
     setUploading(null);
     if (insErr) {
