@@ -285,8 +285,9 @@ function isExpectedShape(step: string, text: string): boolean {
       return /^[0-4]$/.test(t) || /\b(nome|cpf|rg|nascimento|data|cancelar|voltar)\b/i.test(t);
     case "confirmando_dados_conta":
     case "confirmando_dados_doc":
+    case "confirmar_titularidade":
     case "ask_tipo_documento":
-      return /^(sim|s|nao|n[aã]o|n|ok|editar|3|2|1|✅|❌|✏️)/i.test(t);
+      return /^(sim|s|nao|n[aã]o|n|ok|editar|3|2|1|✅|❌|✏️|mesma|outro|corrigir|titular_)/i.test(t);
     default:
       return false;
   }
