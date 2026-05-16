@@ -153,7 +153,8 @@ export async function evaluateRules(args: EvaluateArgs): Promise<RuleMatchResult
 
   for (const rule of rules) {
     if (!isRuleApplicable(rule, currentStepId)) continue;
-
+    // Se a mensagem disparou captura legítima, regras GLOBAIS não interceptam
+    if (hasCapture && rule.scope === "global") continue;
     // Cooldown: same rule fired within cooldown_seconds → skip
     if (
       rule.cooldown_seconds > 0 &&
