@@ -1,0 +1,1 @@
+ALTER TABLE public.ai_media_library DROP CONSTRAINT IF EXISTS ai_media_library_slot_key_fkey;
