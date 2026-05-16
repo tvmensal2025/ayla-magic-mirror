@@ -360,6 +360,22 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
   for (let i = 0; i < medias.length; i++) {
     const m = medias[i];
     const kind = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) : "document";
+
+    // 🚫 REGRA: nunca repetir o mesmo áudio/vídeo para o mesmo cliente
+    if ((kind === "audio" || kind === "video") && m.id) {
+      const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
+        _consultant_id: consultantId,
+        _customer_id: ctx.customer.id,
+        _media_id: m.id,
+        _slot_key: slotKey,
+        _kind: kind,
+      });
+      if (canSend === false) {
+        console.log(`[conversational] ⏭️ pulando ${kind} já enviado (media_id=${m.id}) para customer=${ctx.customer.id}`);
+        continue;
+      }
+    }
+
     const ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
     if (ok !== false) {
       sent = true;
