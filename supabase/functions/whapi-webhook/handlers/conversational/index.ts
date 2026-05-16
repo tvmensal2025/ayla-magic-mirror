@@ -362,27 +362,39 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
     const m = medias[i];
     const kind = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) : "document";
 
-    // 🚫 REGRA: nunca repetir a mesma mídia (áudio/vídeo/imagem) para o mesmo cliente
-    if ((kind === "audio" || kind === "video" || kind === "image") && m.id) {
-      const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
-        _consultant_id: consultantId,
-        _customer_id: ctx.customer.id,
-        _media_id: m.id,
-        _slot_key: slotKey,
-        _kind: kind,
-      });
-      if (canSend === false) {
-        console.log(`[conversational] ⏭️ pulando ${kind} já enviado (media_id=${m.id}) para customer=${ctx.customer.id}`);
+    // 🚫 REGRA: nunca repetir a mesma mídia já ENTREGUE para o mesmo cliente.
+    // Checagem prévia: se já existe registro de envio bem-sucedido, pula.
+    if ((kind === "audio" || kind === "video" || kind === "image") && m.id && ctx.customer?.id) {
+      const { data: already } = await ctx.supabase
+        .from("ai_slot_dispatch_log")
+        .select("id")
+        .eq("customer_id", ctx.customer.id)
+        .eq("media_id", m.id)
+        .eq("dispatch_status", "sent")
+        .limit(1)
+        .maybeSingle();
+      if (already?.id) {
+        console.log(`[conversational] ⏭️ pulando ${kind} já entregue (media_id=${m.id}) para customer=${ctx.customer.id}`);
         continue;
       }
     }
 
-    if (!waitForSend) console.log(`[conversational] envio de mídia em cascata aguardando resultado (${kind}, media_id=${m.id})`);
+    if (!waitForSend) console.log(`[conversational] envio de mídia em cascata (${kind}, media_id=${m.id})`);
 
     attempted = true;
     const ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
     if (ok !== false) {
       sent = true;
+      // ✅ Só registra dedupe DEPOIS do sucesso real, não antes.
+      if (m.id && ctx.customer?.id) {
+        await ctx.supabase.rpc("try_log_media_send", {
+          _consultant_id: consultantId,
+          _customer_id: ctx.customer.id,
+          _media_id: m.id,
+          _slot_key: slotKey,
+          _kind: kind,
+        }).then(() => {}, () => {});
+      }
       await ctx.supabase.from("conversations").insert({
         customer_id: ctx.customer.id,
         message_direction: "outbound",
@@ -392,10 +404,7 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
       });
     } else {
       failed = true;
-      // ⚠️ NÃO remover dedupe em caso de falha: evita loop de reenvio de mídia que
-      // está dando erro 500 no provedor (ex: áudio webm). Mídia fica marcada como
-      // já tentada e o fluxo segue sem repetir para o mesmo número.
-      console.warn(`[conversational] mídia ${kind} falhou; dedupe MANTIDO para não repetir (media_id=${m.id})`);
+      console.warn(`[conversational] mídia ${kind} falhou (media_id=${m.id}); SEM dedupe → tentaremos de novo no próximo gatilho`);
     }
     if (i < medias.length - 1) await sleepForMedia(kind, Number(m.duration_sec || 0) || null, Number(m.delay_before_ms || 0) || null);
   }
