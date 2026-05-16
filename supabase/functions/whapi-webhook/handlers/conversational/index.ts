@@ -395,11 +395,23 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
 }
 
 export async function runConversationalFlow(ctx: BotContext): Promise<BotResult> {
-  const stepKey = (ctx.customer.conversation_step || "welcome") as string;
+  let stepKey = (ctx.customer.conversation_step || "welcome") as string;
 
   // Cadastro steps are NEVER handled here — defensive guard
   if (CADASTRO_STEPS.has(stepKey)) {
     return { reply: "", updates: {} };
+  }
+
+  // ─── Detour return: se o lead foi desviado por uma regra goto_step no turno
+  // anterior, restaura o passo original ANTES de processar a nova mensagem.
+  // Isso garante que ele volte exatamente onde estava no funil.
+  const prevStep = (ctx.customer as any).previous_conversation_step as string | null;
+  const lastRuleId = (ctx.customer as any).last_rule_id as string | null;
+  let restoreDetourUpdates: Record<string, any> = {};
+  if (prevStep && lastRuleId && prevStep !== stepKey) {
+    console.log(`[conversational] ↩️  restaurando detour: ${stepKey} → ${prevStep}`);
+    stepKey = prevStep;
+    restoreDetourUpdates = { previous_conversation_step: null, last_rule_id: null };
   }
 
   // bot_flows / bot_flow_steps / bot_flow_qa use the consultant UUID (customer.consultant_id),
