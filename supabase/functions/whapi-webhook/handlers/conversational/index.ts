@@ -538,8 +538,18 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     };
   }
 
-  // Build candidate intent list: classifier intent + regex-derived intents
-  const candidateIntents = [cls.intent, ...detectRegexIntents(ctx.messageText || "")];
+  // Intents virtuais derivados das capturas: se o lead INFORMOU um dado, isso
+  // conta como intenção para o motor de transição (evita o lead responder
+  // "300 reais" e o bot repetir o vídeo por falta de transição configurada).
+  const captureIntents: string[] = [];
+  if (captureUpdates.electricity_bill_value != null) captureIntents.push("informou_valor", "valor_brl");
+  if (captureUpdates.name) captureIntents.push("informou_nome");
+  if (captureUpdates.phone_whatsapp) captureIntents.push("informou_telefone");
+  if (captureUpdates.cpf) captureIntents.push("informou_cpf");
+  const hasCapture = captureIntents.length > 0;
+
+  // Build candidate intent list: classifier intent + regex-derived intents + capture intents
+  const candidateIntents = [cls.intent, ...detectRegexIntents(ctx.messageText || ""), ...captureIntents];
   const transition = matchTransition(currentStep, candidateIntents, ctx.messageText);
 
   const vars = {
