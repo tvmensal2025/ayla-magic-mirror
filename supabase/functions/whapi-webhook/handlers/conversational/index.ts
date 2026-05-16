@@ -834,21 +834,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Repeat inteligente: se a MESMA pergunta já foi enviada nos últimos 90s,
   // manda uma reformulação curta em vez de repetir literal (sem reenviar mídia).
   // Isso evita o "disco riscado" que o lead vê quando responde algo fora do esperado.
-  const repeatCurrent = async (): Promise<BotResult> => {
-    try {
-      const since = new Date(Date.now() - 90_000).toISOString();
-      const { data: recent } = await ctx.supabase
-        .from("conversations")
-        .select("message_text, message_type, created_at")
-        .eq("customer_id", ctx.customer.id)
-        .eq("message_direction", "outbound")
-        .gte("created_at", since)
-        .order("created_at", { ascending: false })
-        .limit: undefined as any;
-      // (limit chain workaround abaixo)
-    } catch (_) { /* ignore, segue repeat normal */ }
-    return _smartRepeat();
-  };
+  const repeatCurrent = async (): Promise<BotResult> => _smartRepeat();
   const _smartRepeat = async (): Promise<BotResult> => {
     const baseText = renderStepText(currentStep);
     if (!baseText) return goToStep(currentStep, restoreDetourUpdates);
