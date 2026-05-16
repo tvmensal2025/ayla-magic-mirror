@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Mic, Image as ImageIcon, Video, Trash2, Upload, ArrowUp, ArrowDown, Loader2, Library, Check } from "lucide-react";
 import { toast } from "sonner";
+import { AudioRecorderInline } from "@/components/admin/AIAgentTab/AudioRecorderInline";
 
 type Kind = "audio" | "image" | "video";
 type Media = {
@@ -300,6 +301,14 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
             <Badge variant="secondary" className="text-[10px] h-4">{list.length}</Badge>
           </div>
           <div className="flex items-center gap-1">
+            {kind === "audio" && slotForUpload && (
+              <AudioRecorderInline
+                onRecorded={async (blob, durationSec) => {
+                  const file = new File([blob], `gravacao-${Date.now()}.webm`, { type: blob.type || "audio/webm" });
+                  await handleUpload("audio", file, slotForUpload);
+                }}
+              />
+            )}
             <Button
               size="sm"
               variant="ghost"
