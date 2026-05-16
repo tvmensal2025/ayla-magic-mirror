@@ -785,8 +785,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   };
 
   const goToStep = async (s: DbStep, extra: Record<string, any> = {}) => {
-    const delay = Math.max(0, Math.min(60000, s.text_delay_ms ?? 1500));
-    if (delay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, delay));
+    // text_delay_ms é aplicado dentro de emitStep (após mídia, antes do texto).
+    // Não esperamos aqui pra não criar espera dupla antes da mídia.
 
     const cadastroStep = stepTypeToCadastro(s.step_type);
     let nextConversationStep = cadastroStep || s.id;
