@@ -82,16 +82,33 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "base64 and mimeType required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    const normalizedBase64 = cleanBase64(base64);
+    const normalizedMimeType = normalizeMimeType(mimeType);
+
+    if (kind === "audio") {
+      try {
+        const transcript = await transcribeAudioWithOpenAI(normalizedBase64, normalizedMimeType, language);
+        if (transcript) {
+          console.log(`ai-transcribe-media: OpenAI transcreveu áudio (${transcript.length} chars)`);
+          return new Response(JSON.stringify({ transcript }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } catch (audioError: any) {
+        console.warn("ai-transcribe-media OpenAI fallback to Gemini:", audioError?.message || audioError);
+      }
+    }
+
     const prompt = kind === "image"
       ? `Descreva detalhadamente o conteúdo desta imagem em ${language}. Se for uma conta de luz, RG, CNH ou documento, identifique o tipo. Seja conciso e factual.`
       : kind === "audio"
-        ? `Transcreva este áudio em ${language} com pontuação correta. Retorne APENAS a transcrição, sem comentários.`
+        ? `Transcreva literalmente este áudio em ${language}. Se houver fala baixa, curta ou ruído, tente mesmo assim. Retorne APENAS as palavras faladas, sem comentários.`
         : `Descreva o conteúdo deste arquivo em ${language}. Seja conciso.`;
 
     const result = await geminiMultimodal({
       prompt,
-      base64,
-      mimeType,
+      base64: normalizedBase64,
+      mimeType: normalizedMimeType,
       model: "gemini-2.5-flash",
       fallbackModel: "gemini-2.5-pro",
       functionName: "ai-transcribe-media",
