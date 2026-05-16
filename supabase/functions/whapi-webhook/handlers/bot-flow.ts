@@ -230,15 +230,55 @@ function safeAssignName(currentName: string | null | undefined, currentSource: s
   if (/\d/.test(cleaned)) return null;
   if (cleaned.split(/\s+/).length < 2) return null;
   if (RG_HEADER_TERMS.test(cleaned)) return null;
-  // Fonte confiável já gravada → nunca sobrescreve sem confirmação do usuário
-  if (currentName && String(currentName).trim().length >= 3 && TRUSTED_NAME_SOURCES_LOCK.has(String(currentSource || ""))) {
-    return null;
+  const src = String(currentSource || "");
+  const isOcrSource = src === "ocr_conta" || src === "ocr_doc";
+  // Fonte confiável (outro OCR ou confirmação explícita do usuário) só pode
+  // ser sobrescrita via fluxo de edição. Nome digitado (self_introduced/typed/null)
+  // SEMPRE é sobrescrito pelo OCR — é o nome do titular real da conta/doc.
+  if (currentName && String(currentName).trim().length >= 3 && TRUSTED_NAME_SOURCES_LOCK.has(src)) {
+    // Exceção: se a fonte atual é user_confirmed mas o nome atual NÃO veio de OCR
+    // (foi um "user_confirmed" travado em cima de nome digitado), deixa o OCR vencer.
+    // Não temos como saber isso aqui sem mais contexto — então mantemos o lock só
+    // para fontes OCR puras. user_confirmed sem OCR prévio é tratado no call-site.
+    if (isOcrSource || src === "user_confirmed") return null;
   }
-  // Nome atual existe e é muito diferente: mantém (não confiamos no OCR)
-  if (currentName && String(currentName).trim().length >= 5) {
+  // Nome atual veio de OCR e é muito diferente: mantém (não confiamos no novo OCR)
+  if (isOcrSource && currentName && String(currentName).trim().length >= 5) {
     if (_levSim(currentName, cleaned) < 0.7) return null;
   }
   return cleaned;
+}
+
+/**
+ * Acha o próximo step ativo do fluxo customizado do consultor por position,
+ * opcionalmente filtrando por step_type. Retorna null se não houver fluxo
+ * configurado ou nenhum step compatível (caller usa fallback legado).
+ */
+async function findNextActiveFlowStep(
+  supabase: any,
+  consultantId: string | null | undefined,
+  opts: { afterPosition?: number; stepType?: string; stepTypeIn?: string[] } = {},
+): Promise<{ id: string; step_key: string; step_type: string; position: number } | null> {
+  if (!consultantId) return null;
+  try {
+    const { data: flow } = await supabase
+      .from("bot_flows").select("id")
+      .eq("consultant_id", consultantId).eq("is_active", true).maybeSingle();
+    if (!flow?.id) return null;
+    let q = supabase.from("bot_flow_steps")
+      .select("id, step_key, step_type, position")
+      .eq("flow_id", (flow as any).id).eq("is_active", true)
+      .order("position", { ascending: true });
+    if (typeof opts.afterPosition === "number") q = q.gt("position", opts.afterPosition);
+    if (opts.stepType) q = q.eq("step_type", opts.stepType);
+    if (opts.stepTypeIn && opts.stepTypeIn.length) q = q.in("step_type", opts.stepTypeIn);
+    const { data } = await q.limit(1);
+    const row = Array.isArray(data) ? data[0] : null;
+    return row ? { id: String(row.id), step_key: String(row.step_key), step_type: String(row.step_type), position: Number(row.position) } : null;
+  } catch (e) {
+    console.warn("[findNextActiveFlowStep] erro:", (e as any)?.message || e);
+    return null;
+  }
 }
 
 // Heurística: a mensagem tem o formato esperado pelo step?
