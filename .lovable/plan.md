@@ -1,90 +1,62 @@
-## Diagnóstico — de onde vem o texto e por que não segue o fluxo
+## Diagnóstico (análise das últimas conversas do fluxo de Camila — consultor `0c2711ad`)
 
-### 1. Onde está o texto "Show, Rafael! 💚 Sua conta de R$ 385,62…"
+Cliente `be540865` ("Rafael"), em 16/05 19:55–19:58:
 
-Não é IA. É **texto hardcoded** com variáveis interpoladas dentro do código do webhook:
-
-**Arquivo:** `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
-**Linha:** 1770
-
-```ts
-const economiaMsg = valor >= 30
-  ? `Show, ${v.trim().replace(/,$/, "")}! 💚\n\nSua conta de *R$ ${_fmtBRL(valor)}/mês* cabe certinho na economia:\n→ até *R$ ${_fmtBRL(_mensal)}* por mês no seu bolso\n→ até *R$ ${_fmtBRL(_anual)}* por ano (desconto de até 20%)\n\nE ainda entra no *Conexão Club* — até 70% de desconto em farmácia, mercado, posto e várias parceiras. Minha mãe usa direto kkk`
-  : `Show, ${v}dados confirmados! 💚…`;
+```
+19:55:22  inbound  "OI"                        step=welcome
+19:55:?   (nenhum áudio de boas-vindas registrado em conversations)
+19:55:52  inbound  "Lucas"                     step=flow:6226...
+19:55:59  outbound "Rafael, qual o valor..."   step=flow:3e7fb4...
+19:56:09  inbound  "900"
+19:58:49  outbound "Deu para entender..."      step=flow:559b8f1b
 ```
 
-Logo abaixo (linhas 1782–1830) o código busca o **vídeo** do slot `conexao_club` em `ai_media_library` e envia.
-Em seguida (linha 1838) outro texto hardcoded: `"${firstNm}, ficou alguma dúvida sobre o Conexão Club…"`.
+Três bugs reais que explicam tudo que o usuário relatou:
 
-### 2. Por que o fluxo configurado em /admin/fluxos é ignorado neste step
+### 1. Ordem de mídias do passo **NÃO** é a configurada na UI
+- `StepMediaPanel` salva a ordem em `consultants.flow_step_media_order[stepKey]`.
+- O bot (em `conversational/index.ts > sendStepMedia`) lê **primeiro** `bot_flow_steps.media_order` e só usa `flow_step_media_order` como fallback.
+- O default semeado em `bot_flow_steps.media_order` é `["text","audio","video","image"]` — então o áudio nunca vem antes do texto, mesmo quando o consultor arrasta "audio" pro topo na UI.
+- O `StepMediaPanel` também **não recebe `initialOrder`**, então ao abrir o passo ele sempre mostra `["audio","image","video","text"]` (default da UI), ignorando o que está salvo.
 
-Esse trecho (case `confirmando_dados_conta` → transição para `pitch_conexao_club`) **não chama** o dispatcher genérico de mídia. Outros steps usam:
+Resultado: o consultor mexe na ordem, mas (a) a UI não reflete o salvo, e (b) o bot ignora.
 
-- `getStepMediaOrder(supabase, consultantId, stepKey)` → lê `consultants.flow_step_media_order[stepKey]`
-- Itera `bot_flow_qa_media` / `ai_media_library` (slot_key) na ordem configurada (text, audio, image, video, document)
-- Helpers: `sendStepMedia` em `conversational/index.ts:339` e o loop em `bot-flow.ts:586-660`
+### 2. `text_delay_ms` aplicado no momento errado
+- A UI rotula o campo como "⏱️ Aguardar antes de enviar a *mensagem de texto*".
+- No bot, o `goToStep` aplica esse delay **antes de tudo** (antes da mídia), depois dispara `emitStep` que envia mídia e texto sem pausa entre eles.
+- Consequência: o lead vê tudo quase junto; o áudio chega imediatamente após a mídia anterior e o texto cola no áudio. O "tempo configurado" não tem o efeito esperado.
 
-O `pitch_conexao_club` foi escrito **inline** e ignora completamente:
-- O texto configurado em `bot_flow_qa.text_response` para esse step
-- O áudio configurado (slot ou `media_id`)
-- A imagem configurada
-- A ordem definida em `flow_step_media_order["pitch_conexao_club"]`
-
-Resultado: o bot sempre manda **texto hardcoded → vídeo → texto hardcoded**, nunca text→audio→video→image como você definiu.
-
-### 3. Onde o admin salva o fluxo (referência)
-
-- Tabela `bot_flow_qa` (campo `text_response` = texto exato)
-- Tabela `bot_flow_qa_media` (lista ordenada de mídias com `media_kind`, `slot_key`, `media_id`, `position`)
-- Tabela `consultants.flow_step_media_order` (jsonb com ordem por step)
-- Tabela `ai_media_library` (mídia em si: url, kind, duration, slot_key)
+### 3. "Regras" (transitions) e captura de nome não atualizam dados existentes
+- Em `extractCaptures` o nome só é gravado se `!ctx.customer.name`. Cliente já tinha `name="Rafael"`, então o "Lucas" digitado no passo Boas-Vindas foi descartado e o template seguinte renderizou `{{nome}} = Rafael`.
+- Passo "Boas Vindas e Nome" (`6226...`) tem `message_text` vazio e `wait_for=reply`, então quando o lead respondeu "Lucas" o bot não tinha regra/transition pra esse passo e caiu no auto-advance por captura — só que a captura foi suprimida pela razão acima, dando a sensação de "regra não funcionou".
 
 ---
 
-## Plano de correção
+## Plano de correção (apenas o que o usuário pediu — sem mudar layout)
 
-### Mudança única em `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
+### A. Unificar ordem de mídias na fonte certa
+1. Em `sendStepMedia` (`supabase/functions/whapi-webhook/handlers/conversational/index.ts`) e no `dispatchStepFromFlow` (`bot-flow.ts`), **inverter a precedência**: ler `consultants.flow_step_media_order[stepKey]` primeiro (UI) e só cair em `bot_flow_steps.media_order` se não houver override.
+2. Em `StepMediaPanel.tsx`, carregar `consultants.flow_step_media_order[stepKey]` no `useEffect` inicial e usar como estado inicial do `order` (hoje só lê na hora de gravar — daí mostrar sempre o default).
+3. Em `FluxoCamila.tsx`, passar `initialOrder` para `<StepMediaPanel>` lendo do `consultants.flow_step_media_order` (uma vez, no carregamento do passo).
+4. Migration de saneamento opcional: zerar `bot_flow_steps.media_order` antigos que estejam com o default `[text,audio,video,image]` para que o override da UI passe a valer.
 
-Substituir o bloco hardcoded do case `confirmando_dados_conta` (linhas ~1759-1848) por uma chamada ao dispatcher genérico que:
+### B. `text_delay_ms` virar "delay antes do TEXTO" de verdade
+1. Em `emitStep`, mover o `await sleep(text_delay_ms)` para **depois** de `sendStepMedia` e **antes** do `sender.sendText` / retorno como reply.
+2. Remover o sleep do início de `goToStep` (e do `cascadeDelay` antes de `emitStep`) para evitar dupla espera.
+3. Manter `delay_before_ms` por mídia individual já existente (`ai_media_library.delay_before_ms`) — funciona, só não tinha como ser percebido enquanto o delay do passo todo travava antes da mídia.
 
-1. Lê `bot_flow_qa` onde `step_key = 'pitch_conexao_club'` para pegar `text_response` **exato** configurado no admin (com substituição de `{nome}`, `{valor}`, `{economia_mensal}`, `{economia_anual}`).
-2. Lê `bot_flow_qa_media` desse QA, monta a lista de itens.
-3. Adiciona o texto como item de tipo `text`.
-4. Ordena pela ordem configurada em `flow_step_media_order["pitch_conexao_club"]`, com fallback `["text","audio","video","image","document"]` (a regra que você definiu).
-5. Envia cada item na ordem, com `sleepForMedia` entre eles e `canSendMediaOnce` para não duplicar.
-6. Não envia mais o texto hardcoded "Ficou alguma dúvida…" — esse passa a ser outro QA configurável (step `duvidas_pos_club`) ou um trailing nudge curto.
+### C. Captura de nome funcionar mesmo com customer já nomeado
+- Em `extractCaptures` (no callsite linha 589 do `conversational/index.ts`), trocar `if (extracted.name && !ctx.customer.name)` por: sempre atualizar quando o passo atual for explicitamente um passo de "perguntar nome" (`step.title`/`step.slot_key` contém "nome", ou tem capture `name` habilitado). Em outros passos, manter a guarda atual para não sobrescrever por engano.
 
-### Garantias
-
-- Se não houver `bot_flow_qa.text_response` configurado, **não** envia texto (em vez de cair no hardcoded). Assim o painel /admin/fluxos vira a única fonte da verdade.
-- Mantém a regra "não repetir vídeo/áudio para o mesmo cliente" via `canSendMediaOnce`.
-- Mantém a ordem **text → audio → video → image** como default global, e respeita a override por step se houver.
-
-### Variáveis disponíveis para o texto configurado
-
-Documentar (no painel ou em comentário) as chaves substituíveis no `text_response`:
-- `{nome}` → primeiro nome do cliente
-- `{nome_completo}` → nome completo
-- `{valor}` → valor da conta formatado pt-BR
-- `{economia_mensal}` → 20% do valor, formatado
-- `{economia_anual}` → 12 × economia mensal, formatado
-- `{representante}` → nome do consultor
-
-### Verificação após o deploy
-
-1. Configurar em /admin/fluxos no step `pitch_conexao_club`: 1 texto + 1 áudio + 1 vídeo + 1 imagem.
-2. Disparar um cadastro de teste no WhatsApp e confirmar a conta.
-3. Conferir nos logs do `whapi-webhook` e na conversa que chega exatamente: texto configurado → áudio → vídeo → imagem (nessa ordem) — sem o "Show, Rafael 💚" hardcoded e sem duplicar vídeo.
+### D. Validação rápida pós-deploy
+- Resetar o cliente de teste (`reset-conversation` já existe) e refazer "OI" → conferir nos logs da `whapi-webhook`:
+  - mídia áudio enviada **antes** do texto no passo Boas-Vindas;
+  - delay configurado em "Como funciona" respeitado entre áudio e vídeo;
+  - "Lucas" sobrescreve "Rafael" no passo Boas-Vindas e o passo seguinte renderiza "Lucas, qual o valor...".
 
 ### Detalhes técnicos
+- Arquivos tocados: `supabase/functions/whapi-webhook/handlers/conversational/index.ts`, `supabase/functions/whapi-webhook/handlers/bot-flow.ts`, `supabase/functions/_shared/step-media-order.ts` (helper já existe — só inverter precedência no caller), `src/components/admin/fluxo/StepMediaPanel.tsx`, `src/pages/FluxoCamila.tsx`.
+- Sem mudanças de schema obrigatórias. Migration opcional só pra limpar `bot_flow_steps.media_order` semeado.
+- Sem mudanças em layout/UI — só corrigir leitura/gravação da ordem e o ponto do `setTimeout`.
 
-- Não mexer no `_shared/step-media-order.ts` nem em `sendStepMedia` — eles já fazem o trabalho.
-- Reaproveitar o loop já existente em `bot-flow.ts:586-660` (extrair para função `dispatchStepFlow(step, customer, ctx)` e chamar tanto no QA matching quanto no novo `pitch_conexao_club`).
-- Manter `updates.conversation_step = "duvidas_pos_club"` e `__inline_sent = true` ao final para não acionar o reply padrão.
-- O case `pitch_conexao_club:` autônomo (linha 1867, fallback) também deve usar o dispatcher novo.
-
-### Fora de escopo (não fazer agora)
-
-- Compressão de vídeo (assunto Easypanel/ffmpeg).
-- Fila Redis (combinado para depois do fluxo end-to-end estabilizar).
-- Mudar outros steps hardcoded — fazer só este primeiro, validar, e depois replicar o padrão.
+Posso seguir e implementar?

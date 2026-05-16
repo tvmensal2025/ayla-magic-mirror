@@ -507,11 +507,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         : "";
       if (baseText.trim()) items.push({ kind: "text", text: baseText });
 
-      const configuredOrder =
-        Array.isArray((stepRow as any).media_order) && (stepRow as any).media_order.length > 0
-          ? (stepRow as any).media_order.map((k: any) => String(k).toLowerCase())
-          : (await getStepMediaOrder(supabase, customer.consultant_id, slotKey)) ||
-            ["text", "audio", "video", "image", "document"];
+      // Precedência: UI (consultants.flow_step_media_order[slotKey]) → bot_flow_steps.media_order → default.
+      // A UI do /admin/fluxos grava em consultants.flow_step_media_order, então ela vence
+      // o default semeado em bot_flow_steps.media_order.
+      const uiOrder = await getStepMediaOrder(supabase, customer.consultant_id, slotKey);
+      const stepOrder = Array.isArray((stepRow as any).media_order) && (stepRow as any).media_order.length > 0
+        ? (stepRow as any).media_order.map((k: any) => String(k).toLowerCase())
+        : null;
+      const configuredOrder = uiOrder || stepOrder || ["audio", "image", "video", "text", "document"];
       items.sort(makeKindComparator((it: Item) => it.kind, configuredOrder));
 
       let sent = false;

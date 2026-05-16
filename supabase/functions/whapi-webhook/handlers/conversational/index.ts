@@ -351,9 +351,14 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
   const medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
   if (medias.length === 0) return false;
 
-  const configuredOrder = Array.isArray(step.media_order) && step.media_order.length > 0
+  // Precedência: UI (consultants.flow_step_media_order) → step.media_order → default audio-first.
+  // A UI do /admin/fluxos grava em consultants.flow_step_media_order — ela vence o default
+  // de bot_flow_steps.media_order, senão a ordem configurada pelo consultor é ignorada.
+  const uiOrder = await getStepMediaOrder(ctx.supabase, consultantId, slotKey);
+  const stepOrder = Array.isArray(step.media_order) && step.media_order.length > 0
     ? step.media_order.map((k) => String(k).toLowerCase())
-    : await getStepMediaOrder(ctx.supabase, consultantId, slotKey);
+    : null;
+  const configuredOrder = uiOrder || stepOrder;
   if (configuredOrder) medias.sort(makeKindComparator((m: any) => m.kind, configuredOrder));
 
   let sent = false;
@@ -586,7 +591,17 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     if (extracted.electricity_bill_value != null) captureUpdates.electricity_bill_value = extracted.electricity_bill_value;
     if (extracted.phone_whatsapp && !ctx.customer.phone_whatsapp) captureUpdates.phone_whatsapp = extracted.phone_whatsapp;
     if (extracted.cpf) captureUpdates.cpf = extracted.cpf;
-    if (extracted.name && !ctx.customer.name) captureUpdates.name = extracted.name;
+    // Nome: se o passo atual é um "pergunta nome" (título/slot menciona nome,
+    // ou tem capture explícita de name habilitada), sempre sobrescreve.
+    // Caso contrário, mantém a guarda anti-sobrescrita por engano.
+    const stepIsAskName =
+      /\bnome\b|\bchama\b/i.test(String((currentStep as any).title || "")) ||
+      /\bnome\b/i.test(String((currentStep as any).slot_key || "")) ||
+      (Array.isArray(currentStep.captures) &&
+        currentStep.captures.some((c: any) => c?.field === "name" && c?.enabled !== false));
+    if (extracted.name && (stepIsAskName || !ctx.customer.name)) {
+      captureUpdates.name = extracted.name;
+    }
 
     if (Object.keys(captureUpdates).length > 0 && ctx.customer.id) {
       await ctx.supabase.from("customers").update(captureUpdates).eq("id", ctx.customer.id);
@@ -762,6 +777,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       }
       return { replyText: "", inlineSent: inlineMedia };
     }
+    // ⏱️ text_delay_ms = aguardar ANTES do TEXTO (depois da mídia). É o que a UI promete.
+    const textDelay = Math.max(0, Math.min(60000, st.text_delay_ms ?? 1500));
+    if (textDelay > 0 && !isTestMode()) {
+      await new Promise((r) => setTimeout(r, textDelay));
+    }
     if (asReply) {
       return { replyText: text, inlineSent: inlineMedia };
     }
@@ -775,8 +795,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   };
 
   const goToStep = async (s: DbStep, extra: Record<string, any> = {}) => {
-    const delay = Math.max(0, Math.min(60000, s.text_delay_ms ?? 1500));
-    if (delay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, delay));
+    // text_delay_ms é aplicado dentro de emitStep (após mídia, antes do texto).
+    // Não esperamos aqui pra não criar espera dupla antes da mídia.
 
     const cadastroStep = stepTypeToCadastro(s.step_type);
     let nextConversationStep = cadastroStep || s.id;
@@ -819,8 +839,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         break;
       }
 
-      const cascadeDelay = Math.max(0, Math.min(60000, nextStep.text_delay_ms ?? 1500));
-      if (cascadeDelay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, cascadeDelay));
+      // text_delay_ms do próximo passo é aplicado dentro de emitStep (após mídia).
 
       const cascadeCadastroStep = stepTypeToCadastro(nextStep.step_type);
       const nextWillCascade = !cascadeCadastroStep && nextStep.wait_for === "none"
