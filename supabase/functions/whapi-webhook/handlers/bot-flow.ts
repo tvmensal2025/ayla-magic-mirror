@@ -2072,7 +2072,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         );
         if (ocrData.sucesso && ocrData.dados) {
           const d = ocrData.dados;
-          { const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } }
+          { if (d.nome) updates.doc_holder_name = String(d.nome).trim(); const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome); if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; } const _bill = customer.bill_holder_name || updates.bill_holder_name; if (_bill && d.nome) { const _chk = checkHolderMatch(_bill, d.nome); if (!_chk.match) { updates.name_mismatch_flag = true; updates.name_mismatch_reason = `bill="${_bill}" doc="${d.nome}" ${_chk.reason}`; } else { updates.name_mismatch_flag = false; updates.name_mismatch_reason = null; } } }
           if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
           if (d.rg) updates.rg = d.rg;
           const dataConf = String(d.dataNascimentoConfianca || "").toLowerCase();
