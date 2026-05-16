@@ -735,15 +735,16 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       const replyText = rule.response_text ? renderTemplate(rule.response_text, vars) : "";
       const hasReply = !!(replyText && replyText.trim().length > 0);
       const inlineSent = hasReply || !!rule.media_id;
-      return {
+      return _finalize(stepKey, {
         reply: hasReply ? replyText : "",
         updates: {
           conversation_step: nextStepKey,
           __inline_sent: inlineSent || undefined,
           ...captureUpdates,
           ...extraUpdates,
+          ...restoreDetourUpdates,
         },
-      };
+      });
     }
   } catch (e) {
     console.error("[conversational] rules-engine failed (ignorando)", e);
