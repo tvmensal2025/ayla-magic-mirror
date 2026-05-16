@@ -662,18 +662,22 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       console.log(`[conversational] auto-advance por captura ${currentStep.step_key} → ${nextByPosition.step_key} (intents=${captureIntents.join(",")})`);
       if (nextByPosition.step_key === "cadastro" || CADASTRO_STEPS.has(nextByPosition.step_key)) {
         const docStep = findActiveByType("capture_documento");
-        if (docStep) return goToStep(docStep, restoreDetourUpdates);
-        return {
+        if (docStep) return _finalize(stepKey, await goToStep(docStep, restoreDetourUpdates));
+        return _finalize(stepKey, {
           reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", vars),
           updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
-        };
+        });
       }
-      return goToStep(nextByPosition, restoreDetourUpdates);
+      return _finalize(stepKey, await goToStep(nextByPosition, restoreDetourUpdates));
     }
   }
 
-  // 1.75) GLOBAL KEYWORD RULES — fallback inteligente (só roda se o fluxo não soube responder)
-  try {
+  // 1.75) GLOBAL KEYWORD RULES — fallback inteligente, com rate-limit por customer
+  const rateLimitOk = ctx.customer.id ? _consumeCustomerRateLimit(String(ctx.customer.id)) : true;
+  if (!rateLimitOk) {
+    console.warn(`[conversational] ⛔ rate-limit: pulando regras para customer=${ctx.customer.id}`);
+  }
+  if (rateLimitOk) try {
     const ruleHit = await evaluateRules({
       supabase: ctx.supabase,
       flowId,
