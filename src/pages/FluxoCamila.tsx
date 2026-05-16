@@ -578,7 +578,23 @@ function StepCard(props: {
           <IconFor tipo={step.icon} />
         </div>
         <div className="flex-1 min-w-0 space-y-1">
-          <div className="text-xs uppercase tracking-wider text-muted-foreground">Passo {numero}</div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground">Passo {numero}</div>
+            {missingLabel && (
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2 py-0.5 text-[10px] font-medium text-yellow-600 dark:text-yellow-400">
+                      <AlertTriangle className="h-3 w-3" /> {missingLabel}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[260px] text-xs">
+                    Este passo deveria enviar {missing.join(" e ")}, mas nenhuma mídia foi cadastrada com slot_key=<code>{slotKey}</code>. Suba a mídia no painel abaixo para o bot deixar de mandar só texto.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+          </div>
           <Input
             value={localTitle}
             onChange={(e) => setLocalTitle(e.target.value)}
