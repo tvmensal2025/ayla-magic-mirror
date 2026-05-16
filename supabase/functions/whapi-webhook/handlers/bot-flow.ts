@@ -2302,10 +2302,24 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
       if (resp === "sim_doc" || resp === "sim" || resp === "s" || resp === "1" || resp === "ok" || resp === "correto" || resp === "✅") {
         if (customer.name || updates.name) updates.name_source = "user_confirmed";
-        const merged = { ...customer, ...updates };
-        const next = await autoResolveCepIfNeeded(merged, updates);
-        updates.conversation_step = next;
-        reply = getReplyForStep(next, merged);
+        const _mismatch = (updates.name_mismatch_flag ?? (customer as any).name_mismatch_flag) === true;
+        const _acked = (updates.name_mismatch_acknowledged_at ?? (customer as any).name_mismatch_acknowledged_at);
+        if (_mismatch && !_acked) {
+          updates.conversation_step = "confirmar_titularidade";
+          const _bill = (customer as any).bill_holder_name || updates.bill_holder_name || "—";
+          const _doc = (customer as any).doc_holder_name || updates.doc_holder_name || "—";
+          await sendOptions(remoteJid, `Antes de finalizar preciso confirmar:\n\n👤 Conta de luz: *${_bill}*\n🪪 Documento: *${_doc}*\n\nÉ a mesma pessoa?`, [
+            { id: "titular_mesmo", title: "Mesma pessoa" },
+            { id: "titular_outro", title: "Outro titular" },
+            { id: "titular_corrigir", title: "Corrigir" },
+          ]);
+          reply = "";
+        } else {
+          const merged = { ...customer, ...updates };
+          const next = await autoResolveCepIfNeeded(merged, updates);
+          updates.conversation_step = next;
+          reply = getReplyForStep(next, merged);
+        }
       } else if (resp === "nao_doc" || resp === "nao" || resp === "não" || resp === "n" || resp === "2" || resp === "errado" || resp === "❌") {
         // ── ANTI-LOOP: após 2 rejeições, força avanço para coleta manual em vez de re-pedir foto ──
         const rejectCount = (customer.ocr_doc_attempts || 0) + 1;
