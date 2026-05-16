@@ -2344,6 +2344,35 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         if (!sent) reply = "Digite *SIM*, *NÃO* ou *EDITAR*:";
       }
       break;
+
+    // ─── 6b. CONFIRMAR TITULARIDADE (mismatch conta × RG) ─────────
+    case "confirmar_titularidade": {
+      const resp = isButton ? buttonId : messageText.toLowerCase().trim();
+      if (resp === "titular_mesmo" || /mesma|sou eu|é eu|eh eu|igual/i.test(resp)) {
+        updates.name_mismatch_acknowledged_at = new Date().toISOString();
+        const merged = { ...customer, ...updates };
+        const next = await autoResolveCepIfNeeded(merged, updates);
+        updates.conversation_step = next;
+        reply = "Perfeito, anotado! ✅\n\n" + getReplyForStep(next, merged);
+      } else if (resp === "titular_outro" || /outro|c[ôo]njuge|esposa|esposo|marido|pai|m[ãa]e|filho|filha|parente/i.test(resp)) {
+        updates.name_mismatch_acknowledged_at = new Date().toISOString();
+        updates.bill_owner_relationship = messageText.trim().slice(0, 60) || "outro_titular";
+        const merged = { ...customer, ...updates };
+        const next = await autoResolveCepIfNeeded(merged, updates);
+        updates.conversation_step = next;
+        reply = "Entendido — a conta é em nome de outra pessoa. Vou registrar isso pro consultor revisar na hora do cadastro. ✅\n\n" + getReplyForStep(next, merged);
+      } else if (resp === "titular_corrigir" || /corrigir|errado|edit/i.test(resp)) {
+        updates.conversation_step = "editing_doc_menu";
+        reply = "✏️ O que deseja corrigir?\n\n1️⃣ Nome\n2️⃣ CPF\n3️⃣ RG\n4️⃣ Data de Nascimento\n0️⃣ Cancelar";
+      } else {
+        const sent = await sendOptions(remoteJid, "Me ajuda a confirmar: é a mesma pessoa, outro titular ou quer corrigir?", [
+          { id: "titular_mesmo", title: "Mesma pessoa" },
+          { id: "titular_outro", title: "Outro titular" },
+          { id: "titular_corrigir", title: "Corrigir" },
+        ]);
+        if (!sent) reply = "Responda: *mesma pessoa*, *outro titular* ou *corrigir*.";
+      }
+      break;
     }
 
     // ─── 7. EDIÇÃO CONTA ─────────
