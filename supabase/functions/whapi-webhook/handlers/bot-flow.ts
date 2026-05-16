@@ -2053,12 +2053,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         updates.document_front_url = fileUrl.startsWith("http") ? fileUrl : "evolution-media:pending";
       }
       // Se for CNH, marca verso "não aplicável" para o pipeline pular o passo.
+      // IMPORTANTE: nunca dizemos ao cliente "RG Novo" ou "RG Antigo" — essa
+      // distinção é só interna pra decidir se precisa pedir o verso.
       if (detectedType === "cnh") {
         updates.document_back_url = "nao_aplicavel";
-        await sendText(remoteJid, "✅ CNH identificada! ⏳ Analisando os dados...");
+        await sendText(remoteJid, "✅ Documento recebido! ⏳ Analisando os dados...");
       } else {
-        const friendly = detectedType === "rg_novo" ? "RG (Novo)" : "RG (Antigo)";
-        await sendText(remoteJid, `✅ ${friendly} identificado! ⏳ Analisando a frente...\n\nDepois vou te pedir o verso.`);
+        await sendText(remoteJid, `✅ Documento recebido! ⏳ Analisando a frente...\n\nDepois vou te pedir o *verso*.`);
       }
       // Roda OCR da frente já agora (mesma lógica do aguardando_doc_frente)
       try {
