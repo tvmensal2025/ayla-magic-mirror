@@ -126,7 +126,7 @@ async function loadFlow(supabase: any, consultantId: string): Promise<LoadedFlow
 const _norm = (s: string) =>
   String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
-async function matchQA(
+export async function matchQA(
   supabase: any,
   flowId: string,
   consultantId: string,
