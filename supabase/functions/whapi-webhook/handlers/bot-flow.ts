@@ -1114,18 +1114,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     const txt = messageText.trim().toLowerCase();
     const segueAgora = isClubProgressIntent(txt);
     if (segueAgora) {
-      const ctaMsg = `Show! Pra finalizar seu cadastro me manda só a foto do seu *RG ou CNH* 📄`;
-      await sendOptions(remoteJid, ctaMsg, [
-        { id: "tipo_rg_novo", title: "📄 RG Novo" },
-        { id: "tipo_rg_antigo", title: "📄 RG Antigo" },
-        { id: "tipo_cnh", title: "🪪 CNH" },
-      ]);
+      const ctaMsg = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — o que for mais fácil pra você. Eu reconheço automaticamente.`;
+      await sendText(remoteJid, ctaMsg);
       await supabase.from("conversations").insert({
         customer_id: customer.id, message_direction: "outbound",
         message_text: ctaMsg, message_type: "text",
-        conversation_step: "ask_tipo_documento",
+        conversation_step: "aguardando_doc_auto",
       });
-      return { reply: "", updates: { conversation_step: "ask_tipo_documento", __inline_sent: true } as any };
+      return { reply: "", updates: { conversation_step: "aguardando_doc_auto", __inline_sent: true } as any };
     }
     if (/\?|cancel|cancela|taxa|fidelidade|seguro|pagar|custa|club|clube|funciona/i.test(txt)) {
       return {
