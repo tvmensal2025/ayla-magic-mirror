@@ -2346,6 +2346,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         if (!sent) reply = "Digite *SIM*, *NÃO* ou *EDITAR*:";
       }
       break;
+    }
 
     // ─── 6b. CONFIRMAR TITULARIDADE (mismatch conta × RG) ─────────
     case "confirmar_titularidade": {
