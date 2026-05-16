@@ -49,6 +49,7 @@ interface DbStep {
   step_key: string;
   step_type: string | null;
   message_text: string | null;
+  wait_for: string | null;
   text_delay_ms: number | null;
   slot_key: string | null;
   is_active: boolean;
@@ -97,7 +98,7 @@ async function loadFlow(supabase: any, consultantId: string): Promise<LoadedFlow
 
     const { data: steps, error: stepsErr } = await supabase
       .from("bot_flow_steps")
-      .select("id, step_key, step_type, message_text, text_delay_ms, slot_key, is_active, position, transitions, captures, fallback, auto_detect_doc_type, media_order")
+      .select("id, step_key, step_type, message_text, wait_for, text_delay_ms, slot_key, is_active, position, transitions, captures, fallback, auto_detect_doc_type, media_order")
       .eq("flow_id", flow.id)
       .order("position", { ascending: true });
     if (stepsErr) {
