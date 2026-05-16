@@ -1263,6 +1263,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               const m = ordered[i];
               const k = ["audio", "video", "image"].includes(m.kind) ? m.kind : "document";
               const cap = i === 0 ? (args.caption || "") : "";
+              // 🚫 Regra: nunca repetir áudio/vídeo para o mesmo cliente
+              const canSend = await canSendMediaOnce(supabase, {
+                consultantId: customer.consultant_id, customerId: customer.id,
+                mediaId: (m as any).id || null, slotKey: (m as any).slot_key || null, kind: k,
+              });
+              if (!canSend) continue;
               try {
                 await sendMedia(remoteJid, m.url, cap, k);
                 if (i < ordered.length - 1 && !isTestMode()) await new Promise((r) => setTimeout(r, 1500));
