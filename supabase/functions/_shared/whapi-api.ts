@@ -22,10 +22,10 @@ export interface WhapiButton {
 export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whapi.cloud") {
   const url = baseUrl.replace(/\/$/, "");
 
-  async function sendWithRetry(label: string, doSend: () => Promise<Response>): Promise<boolean> {
+  async function sendWithRetry(label: string, doSend: () => Promise<Response>, maxAttempts = 3): Promise<boolean> {
     let lastStatus = 0;
     let lastBody = "";
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const res = await doSend();
         if (res.ok) return true;
@@ -35,7 +35,7 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
       } catch (error: any) {
         lastBody = error?.message || String(error);
       }
-      if (attempt < 3) await new Promise((r) => setTimeout(r, 300 * Math.pow(3, attempt - 1)));
+      if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, 300 * Math.pow(3, attempt - 1)));
     }
     logStructured("error", `whapi_${label}_failed`, { status: lastStatus, error: lastBody });
     captureError(new Error(`Whapi ${label} failed: ${lastBody}`), {
@@ -156,8 +156,9 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
         method: "POST",
         headers,
         body: JSON.stringify(body),
-        timeout: 120_000,
+        timeout: 25_000,
       })
+      , 1
     );
     console.log(`${ok ? "✅" : "❌"} [whapi:sendMedia] resultado=${ok} (${mediatype})`);
     return ok;
