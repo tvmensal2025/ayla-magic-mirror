@@ -3757,6 +3757,10 @@ export type Database = {
         }
         Returns: number
       }
+      reset_all_consultant_conversations: {
+        Args: { _consultant_id: string }
+        Returns: Json
+      }
       reset_lead_conversation: {
         Args: {
           _consultant_id: string
