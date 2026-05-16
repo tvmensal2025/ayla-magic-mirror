@@ -651,6 +651,14 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     let inlineSent = mediaSent;
     const replyParts = [renderTemplate(s.message_text || "", vars).trim()].filter(Boolean);
 
+    if (mediaSent === null) {
+      console.warn(`[conversational] avanço bloqueado: mídia obrigatória falhou no step=${s.step_key}`);
+      return {
+        reply: replyParts.join("\n\n"),
+        updates: { conversation_step: s.id, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: replyParts.length === 0 || undefined, ...extra },
+      };
+    }
+
     let cursor: DbStep | null = cadastroStep ? null : s;
     for (let guard = 0; cursor?.wait_for === "none" && guard < 4; guard++) {
       const nextId = cursor.fallback?.mode === "goto" ? cursor.fallback.goto_step_id : null;
@@ -661,6 +669,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       const cascadeDelay = Math.max(0, Math.min(60000, nextStep.text_delay_ms ?? 1500));
       if (cascadeDelay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, cascadeDelay));
       const cascadeMediaSent = await sendStepMedia(ctx, nextStep, consultantId, false);
+      if (cascadeMediaSent === null) {
+        console.warn(`[conversational] cascade bloqueado: mídia obrigatória falhou no step=${nextStep.step_key}`);
+        nextConversationStep = nextStep.id;
+        inlineSent = inlineSent || replyParts.length === 0;
+        break;
+      }
       const cascadeText = renderTemplate(nextStep.message_text || "", vars).trim();
       if (cascadeText) replyParts.push(cascadeText);
 
