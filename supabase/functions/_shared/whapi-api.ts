@@ -186,20 +186,35 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
       }
     };
 
+    const tryJsonSend = async (path: string, jsonBody: Record<string, unknown>): Promise<boolean> => {
+      let last = "";
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const res = await fetchWithTimeout(`${url}/${path}`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(jsonBody),
+            timeout: 60_000,
+          });
+          if (res.ok) return true;
+          last = `${res.status} ${(await res.text()).substring(0, 180)}`;
+          if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) break;
+        } catch (e: any) {
+          last = e?.message || String(e);
+        }
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 300 * Math.pow(3, attempt - 1)));
+      }
+      console.warn(`⚠️ [whapi:sendMedia] JSON falhou (${mediatype} via ${path}); tentando multipart. Último erro: ${last}`);
+      return false;
+    };
+
     sendPresence(remoteJid, isAudio ? "recording" : "typing", 3).catch(() => {});
 
     console.log(`📤 [whapi:sendMedia] -> ${to} (${mediatype} via ${endpoint}) url=…${urlPreview}`);
     const body: Record<string, unknown> = isAudio
       ? { to, media: mediaUrl, mime_type: contentType, no_cache: true, recording_time: 1 }
       : { to, media: mediaUrl, caption };
-    const ok = await sendWithRetry("send_media", () =>
-      fetchWithTimeout(`${url}/${endpoint}`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        timeout: 60_000,
-      }),
-    );
+    const ok = await tryJsonSend(endpoint, body);
     if (ok) {
       console.log(`✅ [whapi:sendMedia] resultado=true (${mediatype} via ${endpoint})`);
       return true;
