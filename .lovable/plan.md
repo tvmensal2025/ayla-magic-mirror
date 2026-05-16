@@ -1,65 +1,39 @@
-# Plano — Fases 5 e 6
+## Problema
 
-## Fase 5 — Testes Deno do fluxo conversacional
+O botão "Zerar" chama `reset_lead_conversation` (RPC) que **funciona** — apaga `conversations`, `bot_step_transitions`, memória, OCR, agendados e zera o customer. Mas a UI continua mostrando tudo porque:
 
-Criar `supabase/functions/whapi-webhook/handlers/conversational/index_test.ts` cobrindo os bugs corrigidos. Usar `Deno.test` + mocks leves do Supabase client (stub das chamadas `.from().select()/.insert()/.update()` e do RPC de dedupe).
+1. As **bolhas do chat** vêm direto do Whapi/Evolution (servidor do WhatsApp), não da nossa tabela. O servidor do WhatsApp não nos deixa apagar histórico do destinatário — só dá pra **esconder localmente**.
+2. Após o reset, **nada é recarregado** na UI: card do lead, lista de chats, deals do CRM e mensagens continuam com os dados velhos em cache (React state + polling de 20s).
 
-Cenários (8):
+## Solução
 
-1. **Idempotência** — mesmo `messageId` processado 2x → segunda chamada retorna early sem efeitos colaterais (sem update de step, sem rule fire).
-2. **Captura + auto-advance** — lead em `qualificacao`, manda "300 reais" → `electricity_bill_value=300` setado, step avança para `checkin_pos_video` por position.
-3. **Captura bloqueia QA** — mesma "300 reais" com FAQ ativa contendo "reais" como keyword → QA NÃO casa, captura processa, auto-advance ocorre.
-4. **Captura bloqueia regra global** — regra global com keyword "valor" + lead informa valor → regra suprimida com `suppressed_reason='capture_priority'`, fluxo segue.
-5. **Detour + restauração** — lead em `welcome`, regra FAQ dispara `goto_step=faq_como_funciona` com `return_behavior='goto_step'` → próximo turno restaura `welcome`, zera `previous_conversation_step` e `last_rule_id`.
-6. **Max fires por conversa** — regra com `max_fires_per_conversation=null` (default 10) dispara 10x, 11ª é suprimida com `suppressed_reason='max_fires'`.
-7. **Rate limit por cliente** — 6 regras gatilháveis em 60s → 6ª é suprimida com `suppressed_reason='rate_limit'`.
-8. **Empty reply guard** — passo com `return_behavior='stay'` sem `response_text` e sem mídia → `_finalize` retorna `reply: ""` + `__inline_sent: true` (não dispara mensagem fantasma).
+### 1. Marcar um "ponto de corte" para esconder bolhas antigas
+- Nova coluna `customers.chat_cleared_at timestamptz` (migration).
+- `reset_lead_conversation` passa a setar `chat_cleared_at = now()` no UPDATE final.
+- `useMessages.fetchMessages`: depois de buscar do Whapi/Evolution, filtra mensagens com `timestamp < chat_cleared_at` do customer atual. Carrega esse valor uma vez (e em cada refetch) via `customers.select('chat_cleared_at').eq('phone_whatsapp', phone)`.
+- Efeito: bolhas antigas somem do painel imediatamente. Novas mensagens (inbound/outbound após o reset) aparecem normalmente.
 
-Rodar via `supabase--test_edge_functions` com `functions: ["whapi-webhook"]`.
+### 2. Forçar refresh completo após reset
+No `handleReset` do `ChatView.tsx`:
+- Após sucesso, disparar em paralelo:
+  - `refetch()` do `useMessages` (já existe, só não está exposto no destructuring — adicionar).
+  - Invalidar/recarregar a lista de chats (`useChats`) — expor um `refetch` e chamar.
+  - Recarregar dados do customer no painel lateral (componente que mostra nome/valor/step).
+  - Recarregar `crm_deals` do lead.
+- Trocar o toast por algo tipo "Conversa zerada — histórico oculto e dados do lead resetados".
 
-## Fase 6 — Painel de observabilidade
+### 3. Pequenos ajustes
+- `useMessages.ts`: adicionar realtime listener em `customers` (UPDATE no `chat_cleared_at`) para reagir caso o reset venha de outra aba.
+- Garantir que o filtro de `chat_cleared_at` também se aplique ao `MessagesList` agrupado (para não mostrar "data separator" de dia antigo vazio).
 
-### 6.1 Hook `src/hooks/useSuppressedRules.ts` (novo)
+## Arquivos afetados
 
-Consulta `bot_flow_rule_fires` agregando por `suppressed_reason` nos últimos N dias (default 7). RPC ou query direta com `group by`.
+- `supabase/migrations/*` — adicionar coluna `chat_cleared_at` em `customers` + atualizar função `reset_lead_conversation` para preencher esse campo.
+- `src/hooks/useMessages.ts` — buscar `chat_cleared_at`, filtrar mensagens, expor `refetch`.
+- `src/components/whatsapp/ChatView.tsx` — destructurar `refetch`, disparar refresh do card/chats/deals após reset, ajustar copy do toast.
+- `src/hooks/useChats.ts` — expor `refetch` (se ainda não expõe).
+- Componente do card lateral do lead (identificar no ChatView) — expor callback de refresh ou usar realtime.
 
-```typescript
-useSuppressedRules(days) → { reason, count, last_at, top_rules: [{rule_id, name, count}] }[]
-```
+## Observação importante (a comunicar ao usuário)
 
-### 6.2 Componente `src/components/superadmin/SuppressedRulesPanel.tsx` (novo)
-
-Card no estilo de `BotFunnelPanel.tsx`:
-- Cabeçalho com ícone `ShieldOff` + dropdown 24h/7d/30d
-- Lista barras horizontais por motivo (`capture_priority`, `max_fires`, `rate_limit`, `cooldown`, `step_scope_mismatch`)
-- Labels traduzidos em PT-BR (mapa `REASON_LABELS`)
-- Expandir motivo mostra top 5 regras suprimidas com nome + contagem
-- Empty state quando 0 supressões
-
-### 6.3 Integração
-
-Adicionar `<SuppressedRulesPanel />` no `src/pages/SuperAdmin.tsx`, próximo ao `BotFunnelPanel`. Sem mudanças de rota.
-
-## Arquivos
-
-**Novos:**
-- `supabase/functions/whapi-webhook/handlers/conversational/index_test.ts`
-- `src/hooks/useSuppressedRules.ts`
-- `src/components/superadmin/SuppressedRulesPanel.tsx`
-
-**Editados:**
-- `src/pages/SuperAdmin.tsx` — mount do painel
-
-**Sem migrations.** A coluna `suppressed_reason` já existe (criada na fase 1).
-
-## Ordem
-
-1. Painel (6.1 → 6.2 → 6.3) — valor visível imediato
-2. Testes Deno (Fase 5) — protege regressões
-3. Rodar `supabase--test_edge_functions` e validar verde
-
-## Não inclui
-
-- Fase 7 (`whapi:sendMedia` 500 com retry) — fica para próximo ciclo
-- Alertas/notificações em cima do painel
-- Export CSV das supressões
+Não dá para apagar o histórico do **WhatsApp do cliente** — o servidor da Meta/Whapi não permite. O cliente continua vendo as mensagens antigas no app dele. O que conseguimos é: limpar tudo do nosso lado e esconder as bolhas no nosso painel, fazendo o bot recomeçar do zero. Se quiser, também posso adicionar um botão "Apagar conversa do meu lado" no Whapi (`DELETE /chats/{id}`) que limpa o chat **só na sua conta WhatsApp conectada** (não no celular do cliente) — me avisa se faz sentido incluir.
