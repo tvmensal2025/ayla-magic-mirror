@@ -2007,6 +2007,7 @@ export type Database = {
           bot_paused_until: string | null
           cashback: string | null
           cep: string | null
+          chat_cleared_at: string | null
           consultant_id: string | null
           conta_pdf_protegida: boolean | null
           conversation_step: string | null
@@ -2108,6 +2109,7 @@ export type Database = {
           bot_paused_until?: string | null
           cashback?: string | null
           cep?: string | null
+          chat_cleared_at?: string | null
           consultant_id?: string | null
           conta_pdf_protegida?: boolean | null
           conversation_step?: string | null
@@ -2209,6 +2211,7 @@ export type Database = {
           bot_paused_until?: string | null
           cashback?: string | null
           cep?: string | null
+          chat_cleared_at?: string | null
           consultant_id?: string | null
           conta_pdf_protegida?: boolean | null
           conversation_step?: string | null
