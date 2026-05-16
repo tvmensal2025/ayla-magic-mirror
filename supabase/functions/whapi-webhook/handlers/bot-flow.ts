@@ -21,6 +21,7 @@ import {
   logStructured,
 } from "../../_shared/utils.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../_shared/step-media-order.ts";
+import { canSendMediaOnce } from "../../_shared/media-dedupe.ts";
 import {
   getReplyForStep,
   getNextMissingStep,
