@@ -246,7 +246,8 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
       const body: Record<string, unknown> = isAudio
         ? { to, media: dataUri }
         : { to, media: dataUri, caption };
-      return await tryJsonSend(label, path, body);
+      const r = await tryJsonSend(label, path, body);
+      return r === true || r === "timeout_optimistic";
     };
 
     const sendMultipart = async (path: string): Promise<boolean> => {
