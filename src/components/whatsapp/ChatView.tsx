@@ -32,7 +32,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({ instanceName, chat, templates, consultantId, initialMessage, isWhapi = false }: ChatViewProps) {
-  const { messages, isLoading, sendMessage, loadMedia, resolveSendTargetJid } = useMessages(
+  const { messages, isLoading, sendMessage, loadMedia, resolveSendTargetJid, refetch } = useMessages(
     instanceName,
     chat?.remoteJid || null,
     chat?.sendTargetJid || null,
@@ -52,11 +52,16 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
     const r = await resetLeadConversation({ consultantId, remoteJid: chat.remoteJid });
     setResetting(false);
     if (r.ok) {
-      toast({ title: "Conversa zerada", description: "O bot vai começar do zero na próxima mensagem." });
+      // Refresh chat panel + customer card + CRM card after wipe
+      await refetch();
+      toast({
+        title: "Conversa zerada",
+        description: "Histórico oculto no painel e dados do lead resetados. O bot vai começar do zero.",
+      });
     } else {
       toast({ title: "Erro ao zerar", description: (r as { error: string }).error, variant: "destructive" });
     }
-  }, [chat, consultantId, toast]);
+  }, [chat, consultantId, refetch, toast]);
 
   // Fetch kanban stages
   useEffect(() => {

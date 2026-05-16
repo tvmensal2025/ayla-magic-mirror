@@ -7,6 +7,7 @@ import {
 } from "@/services/evolutionApi";
 import { whapiListMessages } from "@/services/whapiApi";
 import { sendWhatsAppMessage, resolveRecipient } from "@/services/messageSender";
+import { supabase } from "@/integrations/supabase/client";
 import { createLogger } from "@/lib/logger";
 
 const logger = createLogger("useMessages");
@@ -107,6 +108,7 @@ export function useMessages(
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fetchingRef = useRef(false);
   const lastReadIdRef = useRef<string | null>(null);
+  const clearedAtRef = useRef<number>(0);
 
   useEffect(() => {
     setResolvedSendTargetJid(preferredSendTargetJid || null);
@@ -115,6 +117,7 @@ export function useMessages(
   // Reset lastReadId when chat changes
   useEffect(() => {
     lastReadIdRef.current = null;
+    clearedAtRef.current = 0;
   }, [remoteJid]);
 
   const fetchMessages = useCallback(async () => {
@@ -126,9 +129,24 @@ export function useMessages(
 
     try {
       setIsLoading((prev) => (!prev ? true : prev));
-      const raw = isWhapi
-        ? await whapiListMessages(remoteJid, 50)
-        : await findMessages(instanceName!, remoteJid, 50);
+      const phone = remoteJid.split("@")[0];
+      const [raw, clearedRow] = await Promise.all([
+        isWhapi
+          ? whapiListMessages(remoteJid, 50)
+          : findMessages(instanceName!, remoteJid, 50),
+        supabase
+          .from("customers")
+          .select("chat_cleared_at")
+          .eq("phone_whatsapp", phone)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      const clearedAtMs = clearedRow.data?.chat_cleared_at
+        ? new Date(clearedRow.data.chat_cleared_at).getTime()
+        : 0;
+      clearedAtRef.current = clearedAtMs;
 
       // Deduplicate by message id
       const seen = new Set<string>();
@@ -141,6 +159,7 @@ export function useMessages(
 
       const mapped = unique
         .map(mapMessage)
+        .filter((m) => clearedAtMs === 0 || m.timestamp * 1000 >= clearedAtMs)
         .sort((a, b) => a.timestamp - b.timestamp);
       setMessages(mapped);
 
