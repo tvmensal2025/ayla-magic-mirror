@@ -96,6 +96,7 @@ export function TemplateCreateForm({ onCreateTemplate }: Props) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 100 * 1024 * 1024) { toast.error("Arquivo muito grande (máximo 100MB)"); return; }
+    if (file.type === "audio/webm" || /\.webm$/i.test(file.name)) { toast.error("WhatsApp/Whapi não aceita áudio .webm. Use .ogg, .mp3 ou .m4a."); return; }
     setIsUploading(true);
     setUploadProgress(0);
     setUploadedFileName(file.name);
