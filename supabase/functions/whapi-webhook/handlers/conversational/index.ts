@@ -60,7 +60,7 @@ interface DbStep {
 }
 
 // Steps the bot must NEVER override (cadastro pipeline owns them)
-const CADASTRO_STEPS = new Set([
+export const CADASTRO_STEPS = new Set([
   "aguardando_conta", "processando_ocr_conta", "confirmando_dados_conta",
   "ask_tipo_documento", "aguardando_doc_auto", "aguardando_doc_frente", "aguardando_doc_verso",
   "confirmando_dados_doc", "ask_name", "ask_cpf", "ask_rg", "ask_birth_date",
