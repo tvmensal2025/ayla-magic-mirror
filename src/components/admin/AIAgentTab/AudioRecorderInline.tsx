@@ -2,6 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, Square, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type OpusRecorderClass = any;
+let RecorderPromise: Promise<OpusRecorderClass> | null = null;
+async function loadRecorder(): Promise<OpusRecorderClass> {
+  if (!RecorderPromise) {
+    RecorderPromise = import("opus-recorder").then((m) => (m as { default: OpusRecorderClass }).default || m);
+  }
+  return RecorderPromise;
+}
+
 type Props = {
   onRecorded: (blob: Blob, durationSec: number) => Promise<void> | void;
   disabled?: boolean;
@@ -13,8 +23,8 @@ export function AudioRecorderInline({ onRecorded, disabled }: Props) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [saving, setSaving] = useState(false);
-  const mrRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recorderRef = useRef<any>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => () => {
@@ -24,31 +34,35 @@ export function AudioRecorderInline({ onRecorded, disabled }: Props) {
 
   async function start() {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
-      const mr = new MediaRecorder(stream, { mimeType: mime });
-      chunksRef.current = [];
-      mr.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
-      mr.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+      const Recorder = await loadRecorder();
+      const recorder = new Recorder({
+        encoderPath: "/opus/encoderWorker.min.js",
+        encoderApplication: 2048,
+        encoderSampleRate: 16000,
+        encoderFrameSize: 20,
+        numberOfChannels: 1,
+        streamPages: false,
+        rawOpus: false,
+      });
+      recorder.ondataavailable = (arrayBuffer: ArrayBuffer) => {
+        const blob = new Blob([arrayBuffer], { type: "audio/ogg; codecs=opus" });
         setPreviewBlob(blob);
         setPreviewUrl(URL.createObjectURL(blob));
       };
-      mrRef.current = mr;
-      mr.start();
+      await recorder.start();
+      recorderRef.current = recorder;
       setRecording(true);
       setSeconds(0);
       timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
     } catch (e) {
       console.error("mic error", e);
+      alert("Falha ao iniciar gravação. Verifique a permissão do microfone.");
     }
   }
 
   function stop() {
-    if (mrRef.current?.state === "recording") mrRef.current.stop();
+    const rec = recorderRef.current;
+    if (rec) { try { rec.stop(); } catch {} }
     setRecording(false);
     if (timerRef.current) clearInterval(timerRef.current);
   }
@@ -62,14 +76,8 @@ export function AudioRecorderInline({ onRecorded, disabled }: Props) {
 
   async function save() {
     if (!previewBlob) return;
-    if (seconds < 3) {
-      alert("Áudio muito curto (mínimo 3s).");
-      return;
-    }
-    if (seconds > 600) {
-      alert("Áudio muito longo (máximo 10 minutos).");
-      return;
-    }
+    if (seconds < 3) { alert("Áudio muito curto (mínimo 3s)."); return; }
+    if (seconds > 600) { alert("Áudio muito longo (máximo 10 minutos)."); return; }
     setSaving(true);
     try {
       await onRecorded(previewBlob, seconds);
