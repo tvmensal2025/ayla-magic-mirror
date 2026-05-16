@@ -31,7 +31,9 @@ import {
   RE_INTENT_RESET,
   TRUSTED_NAME_SOURCES,
   resetLeadIdentity,
+  detectQuestionIntent,
 } from "../../_shared/conversation-helpers.ts";
+import { matchQA } from "./conversational/index.ts";
 import { ocrContaEnergia, ocrDocumentoFrenteVerso } from "../../_shared/ocr.ts";
 import { normalizeDocumentType, isCNH, friendlyLabel } from "../../_shared/document-type.ts";
 import { detectDocumentType } from "../../_shared/detect-doc-type.ts";
