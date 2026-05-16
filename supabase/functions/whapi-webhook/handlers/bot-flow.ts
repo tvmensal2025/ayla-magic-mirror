@@ -2253,12 +2253,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           if (d.nomePai) updates.nome_pai = d.nomePai;
           if (d.nomeMae) updates.nome_mae = d.nomeMae;
           updates.conversation_step = "confirmando_dados_doc";
+          const mismatchWarn = updates.name_mismatch_flag
+            ? `\n\n⚠️ *Notei uma diferença:* o nome no documento (*${d.nome}*) parece diferente do nome na conta de luz (*${customer.bill_holder_name || updates.bill_holder_name}*).\nSem problema — pode ser titularidade de cônjuge/pai/mãe. Antes de finalizar vou te perguntar.`
+            : "";
           reply = "📋 *Confirme seus dados pessoais:*\n\n" +
             `👤 *Nome:* ${d.nome || "❌ não encontrado"}\n` +
             `🆔 *CPF:* ${d.cpf || "❌ não encontrado"}\n` +
             `📄 *RG:* ${d.rg || "❌ não encontrado"}\n` +
-            `🎂 *Data Nasc:* ${d.dataNascimento || "❌ não encontrado"}\n\n` +
-            "Está tudo correto?";
+            `🎂 *Data Nasc:* ${d.dataNascimento || "❌ não encontrado"}` +
+            mismatchWarn +
+            "\n\nEstá tudo correto?";
           await sendOptions(remoteJid, reply, [
             { id: "sim_doc", title: "✅ SIM" },
             { id: "nao_doc", title: "❌ NÃO" },
