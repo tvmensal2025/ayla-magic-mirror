@@ -402,10 +402,26 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
         message_type: kind,
         conversation_step: step.step_key,
       });
+    } else if ((kind === "audio" || kind === "video") && m.id && ctx.customer.id) {
+      await ctx.supabase
+        .from("ai_slot_dispatch_log")
+        .delete()
+        .eq("customer_id", ctx.customer.id)
+        .eq("media_id", m.id);
+      console.warn(`[conversational] mídia ${kind} falhou; dedupe removido para retry (media_id=${m.id})`);
     }
     if (i < medias.length - 1) await sleepForMedia(kind, Number(m.duration_sec || 0) || null, Number(m.delay_before_ms || 0) || null);
   }
   return sent;
+}
+
+function fallbackTextForStep(step: DbStep, customerName?: string | null): string {
+  const fields = new Set((step.captures || []).filter((c) => c.enabled !== false).map((c) => c.field));
+  if (fields.has("name")) return `Oi${customerName ? " " + String(customerName).split(" ")[0] : ""}! 👋 Qual é o seu nome?`;
+  if (fields.has("electricity_bill_value")) return `${customerName ? String(customerName).split(" ")[0] + ", " : ""}qual o valor médio da sua conta de luz?`;
+  if (fields.has("phone_whatsapp")) return "Qual é o melhor WhatsApp para contato?";
+  if (fields.has("cpf")) return "Me envie seu CPF, por favor.";
+  return `Oi${customerName ? " " + String(customerName).split(" ")[0] : ""}! 👋`;
 }
 
 // Wrapper de segurança — bloqueia replies vazios sem mídia (evita mensagens fantasma).
@@ -501,7 +517,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       telefone: ctx.customer.phone_whatsapp,
       cpf: (ctx.customer as any).cpf,
     };
-    const fallbackGreeting = mediaSent ? "" : `Oi${ctx.customer.name ? " " + String(ctx.customer.name).split(" ")[0] : ""}! 👋`;
+    const fallbackGreeting = mediaSent ? "" : fallbackTextForStep(firstActive, ctx.customer.name);
     const firstReply = tpl ? renderTemplate(tpl, vars) : fallbackGreeting;
     const canCascadeOnStart = firstActive.wait_for === "none";
     const nextOnStart = canCascadeOnStart && firstActive.fallback?.mode === "goto" && firstActive.fallback.goto_step_id
