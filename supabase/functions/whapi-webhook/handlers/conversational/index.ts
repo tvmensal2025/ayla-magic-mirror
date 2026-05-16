@@ -665,11 +665,18 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const replyParts = [renderTemplate(s.message_text || "", vars).trim()].filter(Boolean);
 
     if (mediaSent === null) {
-      console.warn(`[conversational] avanço bloqueado: mídia obrigatória falhou no step=${s.step_key}`);
-      return {
-        reply: replyParts.join("\n\n"),
-        updates: { conversation_step: s.id, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: replyParts.length === 0 || undefined, ...extra },
-      };
+      const hasOwnText = replyParts.some((p) => p && p.trim());
+      // Só bloqueia se o step tem TEXTO próprio (texto sem mídia fica incompleto).
+      // Se o step é só-mídia e a mídia falhou, NÃO trava o lead — cascateia para o próximo.
+      if (hasOwnText) {
+        console.warn(`[conversational] avanço bloqueado: mídia obrigatória falhou no step=${s.step_key} (tem texto)`);
+        return {
+          reply: replyParts.join("\n\n"),
+          updates: { conversation_step: s.id, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...extra },
+        };
+      }
+      console.warn(`[conversational] mídia falhou em step só-mídia=${s.step_key} → cascateando para próximo`);
+      // cai no loop abaixo para cascatear; nextConversationStep começa em s.id e avança naturalmente.
     }
 
     let cursor: DbStep | null = cadastroStep ? null : s;
