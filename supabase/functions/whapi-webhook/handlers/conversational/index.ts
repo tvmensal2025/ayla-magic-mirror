@@ -199,8 +199,8 @@ async function sleepForMedia(kind: string, _durationSec?: number | null, delayBe
     await new Promise((r) => setTimeout(r, Math.min(configuredDelay, 5_000)));
     return;
   }
-  // Sincronia padrão: 2s entre mídias consecutivas (texto→vídeo→áudio→imagem)
-  const pause = kind === "audio" || kind === "video" ? 2000 : 800;
+  // Sincronia rápida entre mídias soltas (fora do cascade); 600ms padrão.
+  const pause = kind === "audio" || kind === "video" ? 800 : 600;
   await new Promise((r) => setTimeout(r, pause));
 }
 
