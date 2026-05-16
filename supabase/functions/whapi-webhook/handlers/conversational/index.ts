@@ -457,6 +457,19 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     console.log(`[conversational] QA hit at step="${stepKey}"`);
     // Envia mídia inline (se houver) — texto vai pelo retorno padrão
     for (const m of qaHit.mediaUrls) {
+      if ((m.kind === "audio" || m.kind === "video") && m.mediaId) {
+        const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
+          _consultant_id: consultantId,
+          _customer_id: ctx.customer.id,
+          _media_id: m.mediaId,
+          _slot_key: null,
+          _kind: m.kind,
+        });
+        if (canSend === false) {
+          console.log(`[conversational] ⏭️ QA: pulando ${m.kind} já enviado (media_id=${m.mediaId})`);
+          continue;
+        }
+      }
       try { await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", m.kind); } catch (_) {}
     }
     return {
