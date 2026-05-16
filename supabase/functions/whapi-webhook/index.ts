@@ -382,7 +382,7 @@ Deno.serve(async (req) => {
             }).eq("id", inboundLog.id);
           }
         } else {
-          console.warn("⚠️ [whapi] Transcrição vazia — pedindo pro lead repetir por texto");
+          console.warn(`⚠️ [whapi] Transcrição vazia — status=${transRes.status} body=${JSON.stringify(tj).substring(0, 300)}`);
           try { await sender.sendText(remoteJid, "Não consegui ouvir direito seu áudio 🙏 Pode me mandar por texto, por favor?"); } catch {}
           return new Response(JSON.stringify({ ok: true, msg: "audio_empty_transcript" }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },

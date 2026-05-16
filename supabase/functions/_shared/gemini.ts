@@ -18,8 +18,8 @@ const USD_TO_BRL = 5.4;
 
 export type GeminiPart =
   | { text: string }
-  | { inlineData: { mimeType: string; data: string } }
-  | { fileData: { mimeType: string; fileUri: string } }
+  | { inline_data: { mime_type: string; data: string } }
+  | { file_data: { mime_type: string; file_uri: string } }
   | { functionCall: { name: string; args: Record<string, any> } }
   | { functionResponse: { name: string; response: Record<string, any> } };
 
@@ -301,7 +301,7 @@ export async function geminiMultimodal(opts: {
       role: "user",
       parts: [
         { text: opts.prompt },
-        { inlineData: { mimeType: opts.mimeType, data: opts.base64 } },
+        { inline_data: { mime_type: opts.mimeType, data: opts.base64 } },
       ],
     }],
     signal: opts.signal,
