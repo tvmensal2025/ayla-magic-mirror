@@ -3586,6 +3586,16 @@ export type Database = {
         Args: { _consultant_id: string }
         Returns: string
       }
+      try_log_media_send: {
+        Args: {
+          _consultant_id: string
+          _customer_id: string
+          _kind: string
+          _media_id: string
+          _slot_key: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
       app_role: "admin" | "user" | "super_admin"

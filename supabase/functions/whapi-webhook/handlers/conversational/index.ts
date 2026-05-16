@@ -129,7 +129,7 @@ async function matchQA(
   flowId: string,
   consultantId: string,
   messageText: string,
-): Promise<{ text: string; mediaUrls: { url: string; kind: string }[] } | null> {
+): Promise<{ text: string; mediaUrls: { url: string; kind: string; mediaId: string | null }[] } | null> {
   const normalized = _norm(messageText);
   if (!normalized || normalized.length < 2) return null;
   try {
@@ -160,9 +160,10 @@ async function matchQA(
       .eq("qa_id", qa.id)
       .order("position");
 
-    const mediaUrls: { url: string; kind: string }[] = [];
+    const mediaUrls: { url: string; kind: string; mediaId: string | null }[] = [];
     for (const m of ((mediaRows as any[]) || [])) {
       let url: string | null = null;
+      let mediaId: string | null = m.media_id || null;
       let kind = ["audio", "video", "image"].includes(m.media_kind) ? m.media_kind : "document";
       if (m.media_id) {
         const { data: mr } = await supabase
@@ -171,12 +172,12 @@ async function matchQA(
       }
       if (!url && m.slot_key) {
         const { data: personal } = await supabase
-          .from("ai_media_library").select("url")
+          .from("ai_media_library").select("id, url")
           .eq("consultant_id", consultantId).eq("slot_key", m.slot_key)
           .eq("active", true).limit(1).maybeSingle();
-        if (personal?.url) url = personal.url;
+        if (personal?.url) { url = personal.url; mediaId = personal.id || mediaId; }
       }
-      if (url) mediaUrls.push({ url, kind });
+      if (url) mediaUrls.push({ url, kind, mediaId });
     }
 
     return { text: String(qa.text_response || "").trim(), mediaUrls };
@@ -360,6 +361,22 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
   for (let i = 0; i < medias.length; i++) {
     const m = medias[i];
     const kind = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) : "document";
+
+    // 🚫 REGRA: nunca repetir o mesmo áudio/vídeo para o mesmo cliente
+    if ((kind === "audio" || kind === "video") && m.id) {
+      const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
+        _consultant_id: consultantId,
+        _customer_id: ctx.customer.id,
+        _media_id: m.id,
+        _slot_key: slotKey,
+        _kind: kind,
+      });
+      if (canSend === false) {
+        console.log(`[conversational] ⏭️ pulando ${kind} já enviado (media_id=${m.id}) para customer=${ctx.customer.id}`);
+        continue;
+      }
+    }
+
     const ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
     if (ok !== false) {
       sent = true;
@@ -440,6 +457,19 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     console.log(`[conversational] QA hit at step="${stepKey}"`);
     // Envia mídia inline (se houver) — texto vai pelo retorno padrão
     for (const m of qaHit.mediaUrls) {
+      if ((m.kind === "audio" || m.kind === "video") && m.mediaId) {
+        const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
+          _consultant_id: consultantId,
+          _customer_id: ctx.customer.id,
+          _media_id: m.mediaId,
+          _slot_key: null,
+          _kind: m.kind,
+        });
+        if (canSend === false) {
+          console.log(`[conversational] ⏭️ QA: pulando ${m.kind} já enviado (media_id=${m.mediaId})`);
+          continue;
+        }
+      }
       try { await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", m.kind); } catch (_) {}
     }
     return {
