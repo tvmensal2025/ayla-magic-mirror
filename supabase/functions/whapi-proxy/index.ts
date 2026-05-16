@@ -259,10 +259,10 @@ Deno.serve(async (req) => {
         if (caption) sendBody.caption = caption;
         if (fileName) sendBody.file_name = fileName;
 
-        const r = await whapiFetch(whapiToken, path, {
+        const r = await whapiFetchWithRetry(whapiToken, path, {
           method: "POST",
           body: JSON.stringify(sendBody),
-        });
+        }, { maxAttempts: 3, baseDelayMs: 800, label: `send_media:${mediatype}` });
         if (!r.ok) return json(r.status, { error: r.data });
         return json(200, { key: { id: r.data?.message?.id || r.data?.id || "" } });
       }
