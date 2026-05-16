@@ -401,6 +401,8 @@ export default function FluxoCamila() {
           </Card>
         )}
 
+        <FlowAuditPanel steps={orderedSteps} />
+
         {/* Atalhos */}
         <Card className="p-4 sm:p-5 border-amber-500/30 bg-amber-500/5">
           <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
