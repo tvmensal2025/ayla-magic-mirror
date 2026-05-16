@@ -498,10 +498,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     dbSteps.find((s) => s.id === stepKey) ||
     dbSteps.find((s) => s.step_key === stepKey);
   if (!currentStep) {
-    // Unknown/legacy step → restart at the first active dynamic step.
+    // Unknown/legacy step → restart no primeiro step ativo.
+    // REGRA DE OURO: SEMPRE seguir o /admin/fluxos. NUNCA inventar texto.
+    // - Se o step tem message_text → usa.
+    // - Se está vazio → tenta mídia; se também vazio/falhou, cascateia pelo
+    //   fallback.goto_step_id até achar um step com conteúdo real OU um
+    //   step que precise esperar resposta (wait_for=reply).
     console.log(`[conversational] unknown step="${stepKey}" → restart at firstActive=${firstActive?.id} (steps=${dbSteps.length})`);
-    const mediaSent = await sendStepMedia(ctx, firstActive, consultantId, true);
-    const tpl = (firstActive.message_text || "").trim();
     const vars = {
       nome: ctx.customer.name,
       representante: ctx.nomeRepresentante,
@@ -509,25 +512,44 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       telefone: ctx.customer.phone_whatsapp,
       cpf: (ctx.customer as any).cpf,
     };
-    const fallbackGreeting = mediaSent ? "" : fallbackTextForStep(firstActive, ctx.customer.name);
-    const firstReply = tpl ? renderTemplate(tpl, vars) : fallbackGreeting;
-    const canCascadeOnStart = firstActive.wait_for === "none";
-    const nextOnStart = canCascadeOnStart && firstActive.fallback?.mode === "goto" && firstActive.fallback.goto_step_id
-      ? dbSteps.find((s) => s.id === firstActive.fallback?.goto_step_id && s.is_active)
-      : null;
-    let reply = firstReply;
-    let nextConversationStep = firstActive.id;
-    if (nextOnStart?.message_text) {
-      const nextMediaSent = await sendStepMedia(ctx, nextOnStart, consultantId, true);
-      const nextReply = renderTemplate(nextOnStart.message_text || "", vars).trim();
-      reply = [firstReply, nextReply].filter((part) => part && part.trim()).join("\n\n");
-      nextConversationStep = nextOnStart.id;
-      console.log(`[conversational] start cascade ${firstActive.step_key} → ${nextOnStart.step_key} (media=${mediaSent || nextMediaSent})`);
+
+    const parts: string[] = [];
+    let anyMediaSent = false;
+    let cursor: DbStep | undefined = firstActive;
+    const visited = new Set<string>();
+    let landingStepId = firstActive.id;
+
+    while (cursor && !visited.has(cursor.id)) {
+      visited.add(cursor.id);
+      landingStepId = cursor.id;
+
+      const mediaSent = await sendStepMedia(ctx, cursor, consultantId, true);
+      if (mediaSent === true) anyMediaSent = true;
+      const tpl = (cursor.message_text || "").trim();
+      if (tpl) parts.push(renderTemplate(tpl, vars));
+
+      const stepHasContent = !!tpl || mediaSent === true;
+      // Para se o step espera resposta do cliente.
+      if (cursor.wait_for === "reply" || cursor.wait_for === "media") break;
+      // Se este step já entregou conteúdo (texto OU mídia), só cascateia se
+      // o próximo tipo for "none" sem espera — preserva a UX configurada.
+      const nextId = cursor.fallback?.mode === "goto" ? cursor.fallback?.goto_step_id : null;
+      if (!nextId) break;
+      const next = dbSteps.find((s) => s.id === nextId && s.is_active);
+      if (!next) break;
+      // Continuamos cascateando enquanto não tivermos NADA para enviar OU
+      // enquanto o consultor configurou cascata explícita (wait_for=none).
+      if (stepHasContent && cursor.wait_for !== "none") break;
+      cursor = next;
+    }
+
+    const reply = parts.filter((p) => p && p.trim()).join("\n\n");
+    if (!reply && !anyMediaSent) {
+      console.warn(`[conversational] restart sem conteúdo — step ${landingStepId} sem text/mídia válidos. Mantendo lead no step sem resposta para não inventar texto.`);
     }
     return {
       reply,
-      // Grava o id (estável) — o orchestrator prefixa "flow:" antes de persistir.
-      updates: { conversation_step: nextConversationStep, __inline_sent: mediaSent || undefined },
+      updates: { conversation_step: landingStepId, __inline_sent: anyMediaSent || undefined },
     };
   }
 
