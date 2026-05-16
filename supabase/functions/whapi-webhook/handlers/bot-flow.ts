@@ -230,15 +230,55 @@ function safeAssignName(currentName: string | null | undefined, currentSource: s
   if (/\d/.test(cleaned)) return null;
   if (cleaned.split(/\s+/).length < 2) return null;
   if (RG_HEADER_TERMS.test(cleaned)) return null;
-  // Fonte confiável já gravada → nunca sobrescreve sem confirmação do usuário
-  if (currentName && String(currentName).trim().length >= 3 && TRUSTED_NAME_SOURCES_LOCK.has(String(currentSource || ""))) {
-    return null;
+  const src = String(currentSource || "");
+  const isOcrSource = src === "ocr_conta" || src === "ocr_doc";
+  // Fonte confiável (outro OCR ou confirmação explícita do usuário) só pode
+  // ser sobrescrita via fluxo de edição. Nome digitado (self_introduced/typed/null)
+  // SEMPRE é sobrescrito pelo OCR — é o nome do titular real da conta/doc.
+  if (currentName && String(currentName).trim().length >= 3 && TRUSTED_NAME_SOURCES_LOCK.has(src)) {
+    // Exceção: se a fonte atual é user_confirmed mas o nome atual NÃO veio de OCR
+    // (foi um "user_confirmed" travado em cima de nome digitado), deixa o OCR vencer.
+    // Não temos como saber isso aqui sem mais contexto — então mantemos o lock só
+    // para fontes OCR puras. user_confirmed sem OCR prévio é tratado no call-site.
+    if (isOcrSource || src === "user_confirmed") return null;
   }
-  // Nome atual existe e é muito diferente: mantém (não confiamos no OCR)
-  if (currentName && String(currentName).trim().length >= 5) {
+  // Nome atual veio de OCR e é muito diferente: mantém (não confiamos no novo OCR)
+  if (isOcrSource && currentName && String(currentName).trim().length >= 5) {
     if (_levSim(currentName, cleaned) < 0.7) return null;
   }
   return cleaned;
+}
+
+/**
+ * Acha o próximo step ativo do fluxo customizado do consultor por position,
+ * opcionalmente filtrando por step_type. Retorna null se não houver fluxo
+ * configurado ou nenhum step compatível (caller usa fallback legado).
+ */
+async function findNextActiveFlowStep(
+  supabase: any,
+  consultantId: string | null | undefined,
+  opts: { afterPosition?: number; stepType?: string; stepTypeIn?: string[] } = {},
+): Promise<{ id: string; step_key: string; step_type: string; position: number } | null> {
+  if (!consultantId) return null;
+  try {
+    const { data: flow } = await supabase
+      .from("bot_flows").select("id")
+      .eq("consultant_id", consultantId).eq("is_active", true).maybeSingle();
+    if (!flow?.id) return null;
+    let q = supabase.from("bot_flow_steps")
+      .select("id, step_key, step_type, position")
+      .eq("flow_id", (flow as any).id).eq("is_active", true)
+      .order("position", { ascending: true });
+    if (typeof opts.afterPosition === "number") q = q.gt("position", opts.afterPosition);
+    if (opts.stepType) q = q.eq("step_type", opts.stepType);
+    if (opts.stepTypeIn && opts.stepTypeIn.length) q = q.in("step_type", opts.stepTypeIn);
+    const { data } = await q.limit(1);
+    const row = Array.isArray(data) ? data[0] : null;
+    return row ? { id: String(row.id), step_key: String(row.step_key), step_type: String(row.step_type), position: Number(row.position) } : null;
+  } catch (e) {
+    console.warn("[findNextActiveFlowStep] erro:", (e as any)?.message || e);
+    return null;
+  }
 }
 
 // Heurística: a mensagem tem o formato esperado pelo step?
@@ -1994,14 +2034,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "confirmando_dados_conta": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
       if (resp === "sim_conta" || resp === "sim" || resp === "s" || resp === "1" || resp === "ok" || resp === "correto" || resp === "✅") {
-        // Usuário confirmou os dados (incluindo nome) — blindar contra OCR de doc futuro
-        if (customer.name) updates.name_source = "user_confirmed";
-        // Vai para o pitch do Conexão Club ANTES de pedir RG/CNH
-        updates.conversation_step = "pitch_conexao_club";
+        // FIX 2: garantir que o nome confirmado é o do TITULAR DA CONTA (OCR),
+        // não o nome digitado pelo lead no boas-vindas.
+        const _billHolder = String((customer as any).bill_holder_name || (updates as any).bill_holder_name || "").trim();
+        const _curSrc = String((customer as any).name_source || "");
+        if (_billHolder && _billHolder.length >= 5 && _curSrc !== "ocr_conta" && _curSrc !== "ocr_doc") {
+          updates.name = _billHolder;
+          updates.name_source = "ocr_conta";
+          console.log(`[name-override] SIM da conta → name="${_billHolder}" (era src=${_curSrc})`);
+        }
+        // Usuário confirmou os dados → blindar contra OCR de doc futuro
+        if (updates.name || customer.name) updates.name_source = "user_confirmed";
 
-        // 🎯 Envia EXATAMENTE o que o consultor configurou em /admin/fluxos
-        // no step "pitch_conexao_club" (texto + mídias na ordem definida —
-        // padrão text → audio → video → image). Nada é hardcoded aqui.
         const _valor = Number((customer as any).electricity_bill_value || 0);
         const _fmtBRL = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const _vars = {
@@ -2012,12 +2056,29 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           "{economia_anual}": _fmtBRL(_valor * 0.20 * 12),
           "{{economia_anual}}": _fmtBRL(_valor * 0.20 * 12),
         };
-        await dispatchStepFromFlow("pitch_conexao_club", _vars);
 
-        // Em seguida, dispara o step "duvidas_pos_club" também via fluxo configurado.
-        await dispatchStepFromFlow("duvidas_pos_club", _vars);
-
-        updates.conversation_step = "duvidas_pos_club";
+        // FIX 1: se o consultor tem fluxo customizado, pula direto pro próximo
+        // step de capture_documento (ou finalizar). Evita parar em "duvidas_pos_club"
+        // que pode não existir no fluxo dele e causar reset no Passo 1.
+        const nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {
+          stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
+        });
+        if (nextCustom) {
+          console.log(`[post-confirm-conta] next=${nextCustom.step_key} type=${nextCustom.step_type} reason=customflow`);
+          await dispatchStepFromFlow(nextCustom.step_key, _vars);
+          if (nextCustom.step_type === "capture_documento" || nextCustom.step_type === "capture_doc") {
+            updates.conversation_step = "aguardando_doc_auto";
+          } else if (nextCustom.step_type === "finalizar_cadastro") {
+            updates.conversation_step = "finalizar_cadastro";
+          } else {
+            updates.conversation_step = nextCustom.id;
+          }
+        } else {
+          console.log(`[post-confirm-conta] reason=legacy (sem fluxo custom)`);
+          await dispatchStepFromFlow("pitch_conexao_club", _vars);
+          await dispatchStepFromFlow("duvidas_pos_club", _vars);
+          updates.conversation_step = "duvidas_pos_club";
+        }
         (updates as any).__inline_sent = true;
         reply = "";
       } else if (resp === "nao_conta" || resp === "nao" || resp === "não" || resp === "n" || resp === "2" || resp === "errado" || resp === "❌") {
