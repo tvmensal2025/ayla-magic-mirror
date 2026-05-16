@@ -1103,6 +1103,7 @@ export type Database = {
           rule_id: string
           step_after: string | null
           step_before: string | null
+          suppressed_reason: string | null
         }
         Insert: {
           consultant_id: string
@@ -1115,6 +1116,7 @@ export type Database = {
           rule_id: string
           step_after?: string | null
           step_before?: string | null
+          suppressed_reason?: string | null
         }
         Update: {
           consultant_id?: string
@@ -1127,6 +1129,7 @@ export type Database = {
           rule_id?: string
           step_after?: string | null
           step_before?: string | null
+          suppressed_reason?: string | null
         }
         Relationships: [
           {
@@ -3334,6 +3337,24 @@ export type Database = {
         }
         Update: {
           instance_name?: string
+          message_id?: string
+          processed_at?: string
+        }
+        Relationships: []
+      }
+      webhook_message_dedupe: {
+        Row: {
+          consultant_id: string | null
+          message_id: string
+          processed_at: string
+        }
+        Insert: {
+          consultant_id?: string | null
+          message_id: string
+          processed_at?: string
+        }
+        Update: {
+          consultant_id?: string | null
           message_id?: string
           processed_at?: string
         }
