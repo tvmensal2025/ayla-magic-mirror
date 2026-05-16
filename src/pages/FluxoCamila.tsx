@@ -547,12 +547,13 @@ function StepCard(props: {
   total: number;
   consultantId: string;
   allSteps: Step[];
+  mediaCounts: Record<string, { audio: number; video: number; image: number }>;
   onPatch: (p: Partial<Step>) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
 }) {
-  const { step, numero, total, consultantId, allSteps, onPatch, onMoveUp, onMoveDown, onDelete } = props;
+  const { step, numero, total, consultantId, allSteps, mediaCounts, onPatch, onMoveUp, onMoveDown, onDelete } = props;
   const [localText, setLocalText] = useState(step.message_text ?? "");
   const [localTitle, setLocalTitle] = useState(step.title);
   const [localSummary, setLocalSummary] = useState(step.summary ?? "");
@@ -562,6 +563,13 @@ function StepCard(props: {
   useEffect(() => { setLocalSummary(step.summary ?? ""); }, [step.summary]);
 
   const slotKey = step.slot_key || step.step_key || step.id;
+  const c = mediaCounts[slotKey] || { audio: 0, video: 0, image: 0 };
+  const missing: string[] = [];
+  if (c.audio === 0) missing.push("áudio");
+  if (c.video === 0) missing.push("vídeo");
+  const missingLabel = missing.length === 0
+    ? null
+    : missing.length === 2 ? "Sem áudio e vídeo" : `Sem ${missing[0]}`;
 
   return (
     <Card className={`p-4 sm:p-5 ${step.is_active ? "" : "opacity-60"}`}>
