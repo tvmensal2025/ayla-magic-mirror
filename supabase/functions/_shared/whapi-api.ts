@@ -185,27 +185,46 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
       return btoa(bin);
     };
 
+    // Vídeo/imagem grandes não são idempotentes: timeout do cliente NÃO significa
+    // que o Whapi não entregou. Para evitar enviar 2x, tratamos timeout como
+    // "provavelmente entregue" (otimista) e usamos só 1 tentativa por chamada.
+    // Áudio/documento (pequenos) mantêm o retry tradicional.
+    const isHeavy = mediatype === "video" || mediatype === "image";
+    const perAttemptTimeout = isHeavy ? 120_000 : 60_000;
+    const maxAttempts = isHeavy ? 1 : 3;
+
     const tryJsonSend = async (
       label: string,
       path: string,
       jsonBody: Record<string, unknown>,
-    ): Promise<boolean> => {
+    ): Promise<boolean | "timeout_optimistic"> => {
       let last = "";
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      let timedOut = false;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
           const res = await fetchWithTimeout(`${url}/${path}`, {
             method: "POST",
             headers,
             body: JSON.stringify(jsonBody),
-            timeout: 60_000,
+            timeout: perAttemptTimeout,
           });
           if (res.ok) return true;
           last = `${res.status} ${(await res.text()).substring(0, 180)}`;
           if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) break;
         } catch (e: any) {
           last = e?.message || String(e);
+          if (/timed out|timeout|aborted/i.test(last)) timedOut = true;
         }
-        if (attempt < 3) await new Promise((r) => setTimeout(r, 300 * Math.pow(3, attempt - 1)));
+        if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, 300 * Math.pow(3, attempt - 1)));
+      }
+      // Para vídeo/imagem grandes: se foi timeout, assumimos que o Whapi entregou
+      // e evitamos o fallback que duplicaria a mensagem no WhatsApp do lead.
+      if (isHeavy && timedOut) {
+        logStructured("warn", "whapi_send_media_timeout_optimistic", {
+          path, label, mediatype, last_error: last,
+        });
+        console.warn(`⏳ [whapi:sendMedia] ${label} timeout em ${mediatype} — assumindo entregue (sem retry para não duplicar)`);
+        return "timeout_optimistic";
       }
       logStructured("warn", "whapi_send_media_attempt_failed", {
         path, label, mediatype, last_error: last,
