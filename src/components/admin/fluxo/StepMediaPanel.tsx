@@ -301,6 +301,14 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
             <Badge variant="secondary" className="text-[10px] h-4">{list.length}</Badge>
           </div>
           <div className="flex items-center gap-1">
+            {kind === "audio" && slotForUpload && (
+              <AudioRecorderInline
+                onRecorded={async (blob, durationSec) => {
+                  const file = new File([blob], `gravacao-${Date.now()}.webm`, { type: blob.type || "audio/webm" });
+                  await handleUpload("audio", file, slotForUpload);
+                }}
+              />
+            )}
             <Button
               size="sm"
               variant="ghost"
