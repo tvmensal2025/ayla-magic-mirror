@@ -7,6 +7,7 @@ import {
 } from "@/services/evolutionApi";
 import { whapiListMessages } from "@/services/whapiApi";
 import { sendWhatsAppMessage, resolveRecipient } from "@/services/messageSender";
+import { supabase } from "@/integrations/supabase/client";
 import { createLogger } from "@/lib/logger";
 
 const logger = createLogger("useMessages");
