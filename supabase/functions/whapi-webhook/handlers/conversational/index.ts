@@ -394,12 +394,47 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
   return sent;
 }
 
+// Wrapper de segurança — bloqueia replies vazios sem mídia (evita mensagens fantasma).
+function _finalize(stepKey: string, r: BotResult): BotResult {
+  const reply = (r.reply || "").trim();
+  const hasMedia = r.updates?.__inline_sent === true;
+  if (!reply && !hasMedia) {
+    console.warn(`[conversational] ⚠️ reply vazio bloqueado em step=${stepKey}`);
+    return { reply: "", updates: { ...r.updates, __inline_sent: true } };
+  }
+  return { reply, updates: r.updates };
+}
+
 export async function runConversationalFlow(ctx: BotContext): Promise<BotResult> {
   let stepKey = (ctx.customer.conversation_step || "welcome") as string;
 
   // Cadastro steps are NEVER handled here — defensive guard
   if (CADASTRO_STEPS.has(stepKey)) {
     return { reply: "", updates: {} };
+  }
+
+  // ─── Dedupe de mensagem (idempotência) ─────────────────────────────────
+  // Whapi às vezes reenvia o mesmo webhook. Sem isso, capturas são processadas
+  // 2x e auto-advance pula passos. Tabela tem TTL de 24h (pg_cron).
+  if (ctx.messageId) {
+    try {
+      const { data: inserted, error: dupErr } = await ctx.supabase
+        .from("webhook_message_dedupe")
+        .insert({ message_id: ctx.messageId, consultant_id: ctx.customer?.consultant_id || null })
+        .select("message_id")
+        .maybeSingle();
+      if (!inserted && !dupErr) {
+        console.log(`[conversational] 🔁 dedupe hit: ${ctx.messageId} já processado`);
+        return { reply: "", updates: { __inline_sent: true } };
+      }
+      // Em caso de conflito (PK violation), o insert retorna erro 23505 — também é dedupe hit.
+      if (dupErr && String((dupErr as any).code) === "23505") {
+        console.log(`[conversational] 🔁 dedupe conflict: ${ctx.messageId}`);
+        return { reply: "", updates: { __inline_sent: true } };
+      }
+    } catch (e) {
+      console.error("[conversational] dedupe check failed (continuando)", e);
+    }
   }
 
   // ─── Detour return: se o lead foi desviado por uma regra goto_step no turno
