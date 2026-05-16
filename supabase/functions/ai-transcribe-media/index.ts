@@ -1,4 +1,4 @@
-// Transcreve áudios (e descreve imagens/vídeos quando aplicável) via Lovable AI Gateway.
+// Transcreve áudios (e descreve imagens/vídeos quando aplicável) via Gemini oficial.
 // Body: { base64: string, mimeType: string, kind?: "audio"|"image"|"video"|"document", language?: string }
 // Resp: { transcript: string }
 
@@ -61,6 +61,8 @@ Deno.serve(async (req) => {
       functionName: "ai-transcribe-media",
     });
     const transcript = result.text;
+
+    console.log(`ai-transcribe-media ok kind=${kind} mime=${normalizedMimeType} input_b64=${normalizedBase64.length} transcript_chars=${transcript.trim().length}`);
 
     return new Response(JSON.stringify({ transcript: transcript.trim() }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
