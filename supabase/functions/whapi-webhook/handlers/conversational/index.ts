@@ -829,8 +829,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         break;
       }
 
-      const cascadeDelay = Math.max(0, Math.min(60000, nextStep.text_delay_ms ?? 1500));
-      if (cascadeDelay > 0 && !isTestMode()) await new Promise((r) => setTimeout(r, cascadeDelay));
+      // text_delay_ms do próximo passo é aplicado dentro de emitStep (após mídia).
 
       const cascadeCadastroStep = stepTypeToCadastro(nextStep.step_type);
       const nextWillCascade = !cascadeCadastroStep && nextStep.wait_for === "none"
