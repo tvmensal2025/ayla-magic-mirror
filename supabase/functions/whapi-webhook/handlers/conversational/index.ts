@@ -379,14 +379,12 @@ async function sendStepMedia(ctx: BotContext, step: DbStep, consultantId: string
     }
 
     if (!waitForSend) {
-      ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind).catch((e: any) => {
-        console.warn(`[conversational] media async falhou (${kind}):`, e?.message || e);
-      });
+      console.log(`[conversational] mídia ${kind} não bloqueante ignorada para preservar avanço do fluxo (media_id=${m.id})`);
       sent = true;
       await ctx.supabase.from("conversations").insert({
         customer_id: ctx.customer.id,
         message_direction: "outbound",
-        message_text: `[flow-step:${step.step_key}:${kind}:async]`,
+        message_text: `[flow-step:${step.step_key}:${kind}:skipped_nonblocking]`,
         message_type: kind,
         conversation_step: step.step_key,
       });
