@@ -168,8 +168,6 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
         if (caption && !isAudio) form.append("caption", caption);
         if (isAudio) {
           form.append("mime_type", blob.type || "audio/webm");
-          form.append("no_cache", "true");
-          form.append("recording_time", "1");
         }
         console.log(`📤 [whapi:sendMedia] fallback multipart -> ${to} (${mediatype} via ${path}, ${blob.size} bytes, ${blob.type})`);
         return await sendWithRetry("send_media_multipart", () =>

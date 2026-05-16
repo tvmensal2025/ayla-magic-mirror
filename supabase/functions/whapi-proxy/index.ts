@@ -288,8 +288,6 @@ Deno.serve(async (req) => {
               if (caption) form.append("caption", caption);
               if (mediatype === "audio") {
                 form.append("mime_type", blob.type || "audio/webm");
-                form.append("no_cache", "true");
-                form.append("recording_time", "1");
               }
               r = await whapiFetchMultipart(whapiToken, path, form);
               if (!r.ok && mediatype === "audio") r = await whapiFetchMultipart(whapiToken, "/messages/audio", form);
