@@ -37,6 +37,55 @@ async function whapiFetch(token: string, path: string, init: RequestInit = {}) {
   return { ok: res.ok, status: res.status, data };
 }
 
+// Retry com backoff exponencial para erros transitórios (500/502/503/504, network).
+// Usado em send_media para mitigar instabilidades do gate Whapi (Fase 7).
+const RETRYABLE_STATUS = new Set([500, 502, 503, 504]);
+async function whapiFetchWithRetry(
+  token: string,
+  path: string,
+  init: RequestInit = {},
+  opts: { maxAttempts?: number; baseDelayMs?: number; label?: string } = {},
+) {
+  const maxAttempts = opts.maxAttempts ?? 3;
+  const baseDelay = opts.baseDelayMs ?? 600;
+  const label = opts.label ?? path;
+  let lastResult: { ok: boolean; status: number; data: any } | null = null;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const r = await whapiFetch(token, path, init);
+      lastResult = r;
+      if (r.ok) {
+        if (attempt > 1) {
+          console.info(`[whapi-proxy] ✅ ${label} ok após ${attempt} tentativas`);
+        }
+        return r;
+      }
+      if (!RETRYABLE_STATUS.has(r.status) || attempt === maxAttempts) {
+        return r;
+      }
+      const delay = baseDelay * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 200);
+      console.warn(
+        `[whapi-proxy] ⚠️ ${label} status=${r.status} tentativa ${attempt}/${maxAttempts} — retry em ${delay}ms`,
+      );
+      await new Promise((res) => setTimeout(res, delay));
+    } catch (err) {
+      lastError = err;
+      if (attempt === maxAttempts) break;
+      const delay = baseDelay * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 200);
+      console.warn(
+        `[whapi-proxy] ⚠️ ${label} network err tentativa ${attempt}/${maxAttempts} — retry em ${delay}ms:`,
+        (err as any)?.message || err,
+      );
+      await new Promise((res) => setTimeout(res, delay));
+    }
+  }
+
+  if (lastResult) return lastResult;
+  return { ok: false, status: 599, data: { error: (lastError as any)?.message || "network error" } };
+}
+
 // ── Mappers Whapi → formato Evolution (para reaproveitar UI) ──
 function mapChat(c: any) {
   const lm = c.last_message || c.lastMessage || null;
@@ -210,10 +259,10 @@ Deno.serve(async (req) => {
         if (caption) sendBody.caption = caption;
         if (fileName) sendBody.file_name = fileName;
 
-        const r = await whapiFetch(whapiToken, path, {
+        const r = await whapiFetchWithRetry(whapiToken, path, {
           method: "POST",
           body: JSON.stringify(sendBody),
-        });
+        }, { maxAttempts: 3, baseDelayMs: 800, label: `send_media:${mediatype}` });
         if (!r.ok) return json(r.status, { error: r.data });
         return json(200, { key: { id: r.data?.message?.id || r.data?.id || "" } });
       }
