@@ -519,6 +519,8 @@ async function sendStepMedia(
         message_text: `[flow-step:${step.step_key}:${kind}]`,
         message_type: kind,
         conversation_step: step.step_key,
+        media_id: m.id || null,
+        slot_key: slotKey || null,
       });
       prevForPause = { kind, duration_sec: m.duration_sec };
     } else {
@@ -531,6 +533,8 @@ async function sendStepMedia(
           message_text: `[failed:${kind}] media_id=${m.id}`,
           message_type: `${kind}_failed`,
           conversation_step: step.step_key,
+          media_id: m.id || null,
+          slot_key: slotKey || null,
         });
       } catch (_) { /* noop */ }
     }

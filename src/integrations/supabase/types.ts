@@ -1758,27 +1758,33 @@ export type Database = {
           created_at: string
           customer_id: string
           id: string
+          media_id: string | null
           message_direction: string
           message_text: string | null
           message_type: string | null
+          slot_key: string | null
         }
         Insert: {
           conversation_step?: string | null
           created_at?: string
           customer_id: string
           id?: string
+          media_id?: string | null
           message_direction: string
           message_text?: string | null
           message_type?: string | null
+          slot_key?: string | null
         }
         Update: {
           conversation_step?: string | null
           created_at?: string
           customer_id?: string
           id?: string
+          media_id?: string | null
           message_direction?: string
           message_text?: string | null
           message_type?: string | null
+          slot_key?: string | null
         }
         Relationships: [
           {
@@ -2089,6 +2095,8 @@ export type Database = {
           otp_received_at: string | null
           pain_point: string | null
           pending_flow_switch: string | null
+          pending_inbound_at: string | null
+          pending_inbound_message_id: string | null
           phone_contact_confirmed: boolean
           phone_landline: string | null
           phone_whatsapp: string
@@ -2203,6 +2211,8 @@ export type Database = {
           otp_received_at?: string | null
           pain_point?: string | null
           pending_flow_switch?: string | null
+          pending_inbound_at?: string | null
+          pending_inbound_message_id?: string | null
           phone_contact_confirmed?: boolean
           phone_landline?: string | null
           phone_whatsapp: string
@@ -2317,6 +2327,8 @@ export type Database = {
           otp_received_at?: string | null
           pain_point?: string | null
           pending_flow_switch?: string | null
+          pending_inbound_at?: string | null
+          pending_inbound_message_id?: string | null
           phone_contact_confirmed?: boolean
           phone_landline?: string | null
           phone_whatsapp?: string
@@ -3722,6 +3734,10 @@ export type Database = {
       admin_unpause_global_bot: { Args: never; Returns: number }
       cleanup_bot_test_data: { Args: { _run_id: string }; Returns: Json }
       cleanup_webhook_artifacts: { Args: never; Returns: undefined }
+      clear_pending_inbound: {
+        Args: { _customer_id: string }
+        Returns: undefined
+      }
       credit_consultant_wallet:
         | {
             Args: {
@@ -3768,6 +3784,10 @@ export type Database = {
             }
             Returns: number
           }
+      enqueue_pending_inbound: {
+        Args: { _customer_id: string; _message_id: string }
+        Returns: undefined
+      }
       fb_emit_capi: {
         Args: {
           _consultant_id: string

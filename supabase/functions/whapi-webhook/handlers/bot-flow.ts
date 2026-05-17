@@ -734,22 +734,25 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   async function dispatchStepFromFlow(stepKey: string, extraVars: Record<string, string> = {}): Promise<boolean> {
     if (!customer?.consultant_id) return false;
     try {
-      // Anti-repetição: se o último outbound foi exatamente esse step nos últimos 10min, pula.
+      // Anti-repetição reforçado: olha os últimos 8 outbounds (não só 1) e
+      // normaliza o prefixo "flow:" dos dois lados — pega passos custom + legacy.
       try {
-        const { data: lastOut } = await supabase
+        const sinceIso = new Date(Date.now() - 10 * 60_000).toISOString();
+        const { data: recentOuts } = await supabase
           .from("conversations")
           .select("conversation_step, created_at")
           .eq("customer_id", customer.id)
           .eq("message_direction", "outbound")
+          .gte("created_at", sinceIso)
           .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (lastOut?.conversation_step === stepKey) {
-          const ageMs = Date.now() - new Date((lastOut as any).created_at).getTime();
-          if (ageMs < 10 * 60_000) {
-            console.log(`[dispatch:${stepKey}] skip — já enviado há ${Math.round(ageMs/1000)}s`);
-            return true;
-          }
+          .limit(8);
+        const norm = (v: any) => String(v || "").replace(/^flow:/, "");
+        const target = norm(stepKey);
+        const hit = ((recentOuts as any[]) || []).find((r) => norm(r.conversation_step) === target);
+        if (hit) {
+          const ageMs = Date.now() - new Date((hit as any).created_at).getTime();
+          console.log(`[dispatch:${stepKey}] skip — já enviado há ${Math.round(ageMs/1000)}s (anti-rep reforçado)`);
+          return true;
         }
       } catch (_e) { /* ignora — anti-rep é best-effort */ }
 
