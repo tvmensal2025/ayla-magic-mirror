@@ -533,13 +533,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           const reentry = getReentryPromptForStep(stepKey, customer);
           const text = [qa.text, reentry].filter(Boolean).join("\n\n");
 
-          // Atualiza detour_count; 3+ → pausa para humano
+          // Sprint C3: threshold 5 (era 3) + handoff alert visível ao consultor
           const detourNext = Number((customer as any).detour_count || 0) + 1;
           const patch: Record<string, any> = { detour_count: detourNext };
-          if (detourNext >= 3) {
+          if (detourNext >= 5) {
             patch.bot_paused = true;
             patch.bot_paused_reason = "muitas_duvidas";
             patch.bot_paused_at = new Date().toISOString();
+            try {
+              await supabase.from("bot_handoff_alerts").insert({
+                customer_id: customer.id,
+                consultant_id: customer.consultant_id,
+                reason: "muitas_duvidas",
+                metadata: { detour_count: detourNext, last_question: messageText.slice(0, 200) },
+              });
+            } catch (e) { console.warn("[midflow-qa] handoff alert falhou:", (e as Error).message); }
           }
           try { await supabase.from("customers").update(patch).eq("id", customer.id); } catch (_) {}
           return { reply: text, updates: { __inline_sent: qa.mediaUrls.length > 0 || undefined } as any };
@@ -3073,7 +3081,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "aguardando_assinatura": {
       const link = customer.link_facial || customer.link_assinatura;
       const txt = (messageText || "").toLowerCase().trim();
-      const confirmou = /\b(pronto|prontinho|conclu[ií]do|conclui|conclu[ií]|finalizei|terminei|fiz|feito|ok|certo|sim)\b/.test(txt);
+      const confirmou = /\b(pronto|prontinho|conclu[ií]do|conclui|conclu[ií]|finalizei|terminei|terminado|finalizado|fiz|feito|feita|ok|okay|okk?|certo|sim|j[aá]\s+(assinei|fiz|tirei|validei|terminei|terminado)|assinei|tirei|validei|selfie|liberado|consegui)\b/i.test(txt);
       if (confirmou && link) {
         updates.facial_confirmed_at = new Date().toISOString();
         updates.conversation_step = "complete";
@@ -3179,11 +3187,25 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       // Usa rescue_attempts como contador (coluna já existente) para não depender de coluna nova
       const redirectCount = customer.rescue_attempts || 0;
       if (redirectCount >= 1) {
-        console.warn(`⚠️ [ANTI-LOOP] ${customer.id} já foi redirecionado ${redirectCount}x. Forçando finalização.`);
+        console.warn(`⚠️ [ANTI-LOOP] ${customer.id} já foi redirecionado ${redirectCount}x. Escalando para humano.`);
         logStructured("warn", "force_finalize_after_redirects", {
           customer_id: customer.id, errors: validation.errors, redirects: redirectCount,
         });
-        // Não redirecionar mais — seguir pro portal mesmo com erros
+        // Sprint C2: em vez de ficar mudo ou seguir pro portal com lixo, escala pra humano com diagnóstico
+        updates.bot_paused = true;
+        updates.bot_paused_reason = "dados_incompletos_pos_loop";
+        updates.bot_paused_at = new Date().toISOString();
+        updates.conversation_step = "aguardando_humano";
+        try {
+          await supabase.from("bot_handoff_alerts").insert({
+            customer_id: customer.id,
+            consultant_id: customer.consultant_id || consultorId,
+            reason: "dados_incompletos_pos_loop",
+            metadata: { errors: validation.errors, redirects: redirectCount },
+          });
+        } catch (e) { console.warn("[anti-loop] handoff alert falhou:", (e as Error).message); }
+        reply = "Vou te passar pra um consultor humano agora pra gente finalizar com calma, ok? Em instantes alguém te responde por aqui. 👋";
+        return { reply, updates };
       } else {
         updates.rescue_attempts = redirectCount + 1;
         

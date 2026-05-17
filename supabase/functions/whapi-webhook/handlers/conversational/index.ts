@@ -1099,21 +1099,29 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     }
 
     // Já mandou esse texto nos últimos 90s → reformula, SEM reenviar mídia.
+    // Sprint C4: pool ampliado + fallback de escalonamento quando esgotar
     const userName = vars.nome || ctx.customer.name || "";
     const reformVariants: Record<string, string[]> = {
       default: [
         "Pode me responder, por favor? 🙂",
         "Tô aqui esperando sua resposta 😉",
         "Me conta aí, posso te ajudar!",
+        userName ? `${userName}, me dá um retorno rapidinho? 🙏` : "Me dá um retorno rapidinho? 🙏",
+        "Posso continuar? É só responder aqui 😊",
+        "Sem pressa, mas se puder me responder eu sigo o atendimento 🙂",
       ],
       valor: [
         userName ? `${userName}, me passa só o valor médio da conta de luz, por favor? Pode ser aproximado 😉` : "Me passa só o valor médio da conta de luz, por favor? Pode ser aproximado 😉",
         "Quanto vem em média sua conta de luz? Tipo R$ 200, R$ 400...",
         "Pode mandar só o número mesmo, ex: 350 🙏",
+        "Me diz uma média da conta — não precisa ser exato, ok?",
+        "Quanto você paga mais ou menos por mês de luz?",
       ],
       nome: [
         "Como posso te chamar? Só seu primeiro nome já tá ótimo 😊",
         "Me conta seu nome, por favor 🙂",
+        "Qual seu nome? Pode ser só o primeiro 😉",
+        "Me diz seu nome pra eu te chamar direitinho 🙏",
       ],
     };
     const stepKeyLower = (currentStep.title || currentStep.step_key || "").toLowerCase();
@@ -1123,6 +1131,32 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       ? "nome"
       : "default";
     const pool = reformVariants[variantKey];
+
+    // Esgotou o pool (5+ repetições da mesma pergunta) → escala silenciosamente pra humano
+    if (lastSameTextCount >= pool.length) {
+      console.warn(`[smart-repeat] pool esgotado em "${currentStep.step_key}" após ${lastSameTextCount} repetições — escalando`);
+      try {
+        await ctx.supabase.from("bot_handoff_alerts").insert({
+          customer_id: ctx.customer.id,
+          consultant_id: ctx.customer.consultant_id,
+          reason: "lead_nao_responde",
+          metadata: { step: currentStep.step_key, repetitions: lastSameTextCount },
+        });
+      } catch (_) { /* noop */ }
+      return {
+        reply: userName ? `${userName}, vou pedir pra um consultor humano te chamar daqui a pouco, ok? 🤝` : "Vou pedir pra um consultor humano te chamar daqui a pouco, ok? 🤝",
+        updates: {
+          conversation_step: currentStep.id,
+          bot_paused: true,
+          bot_paused_reason: "lead_nao_responde",
+          bot_paused_at: new Date().toISOString(),
+          __intent: cls.intent,
+          __confidence: cls.confidence,
+          ...captureUpdates,
+          ...restoreDetourUpdates,
+        },
+      };
+    }
     const reform = pool[Math.min(lastSameTextCount - 1, pool.length - 1)];
 
     return {
