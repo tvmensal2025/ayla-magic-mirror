@@ -2764,8 +2764,11 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     case "ask_phone_confirm": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
-      const sim = resp === "sim_phone" || resp === "1" || resp === "sim" || resp === "s";
-      const editar = resp === "editar_phone" || resp === "2" || resp === "editar" || resp === "outro" || resp === "outro número" || resp === "outro numero";
+      // Sprint D-B11: "1"/"2" só valem se vieram do botão. Texto livre exige palavra explícita.
+      const sim = (isButton && (resp === "sim_phone" || resp === "1"))
+        || (!isButton && /^(sim|s|isso|isso\s+mesmo|é\s+meu|eh\s+meu|confirmo|pode|certo|correto|positivo)\b/.test(resp));
+      const editar = (isButton && (resp === "editar_phone" || resp === "2"))
+        || (!isButton && /^(n[aã]o|n|editar|outro|outro\s+n[uú]mero|trocar|mudar|errado)\b/.test(resp));
 
       // ── PROTEÇÃO: Se o phone_whatsapp é o número do consultor/instância,
       // NÃO permitir confirmar — forçar digitar outro número ──
