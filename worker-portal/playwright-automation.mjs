@@ -572,7 +572,7 @@ async function flagOfflineInstance(supabase, customerId, consultantId, context) 
       customer_id: customerId,
       consultant_id: consultantId,
       reason: 'whatsapp_instance_offline',
-      metadata: { context, source: 'worker-portal' },
+      user_message: `worker-portal:${context}`,
     });
     await supabase
       .from('customers')
