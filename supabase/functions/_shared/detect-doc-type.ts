@@ -195,6 +195,8 @@ export async function detectDocumentTypeDetailed(input: DetectInput): Promise<De
     return { tipo: parsed1.tipo, confianca: parsed1.confianca, source: "gemini_pass1", sinais: parsed1.sinais };
   }
 
+  if (!parsed1) console.warn(`[detectDoc] pass1 raw vazio/inválido: "${raw1.substring(0, 300)}"`);
+
   // ── Pass 2: gemini-2.5-pro (mais preciso) ──
   console.log(`🤖 [detectDoc] pass1 ambíguo (${parsed1 ? parsed1.confianca.toFixed(2) : "no-parse"}) — pass2 com 2.5-pro`);
   const raw2 = await callGemini(PROMPT_PASS2, imagePart, input.geminiApiKey, "gemini-2.5-pro");
@@ -203,6 +205,7 @@ export async function detectDocumentTypeDetailed(input: DetectInput): Promise<De
     console.log(`🤖 [detectDoc] pass2 decidiu: ${parsed2.tipo} (${parsed2.confianca.toFixed(2)}) sinais=${JSON.stringify(parsed2.sinais)}`);
     return { tipo: parsed2.tipo, confianca: parsed2.confianca, source: "gemini_pass2", sinais: parsed2.sinais };
   }
+  if (!parsed2) console.warn(`[detectDoc] pass2 raw vazio/inválido: "${raw2.substring(0, 300)}"`);
 
   // ── Pass 3: desempate ──
   console.log(`🤖 [detectDoc] pass2 ambíguo — pass3 desempate`);
@@ -212,14 +215,15 @@ export async function detectDocumentTypeDetailed(input: DetectInput): Promise<De
     console.log(`🤖 [detectDoc] pass3 decidiu: ${parsed3.tipo} (${parsed3.confianca.toFixed(2)}) sinais=${JSON.stringify(parsed3.sinais)}`);
     return { tipo: parsed3.tipo, confianca: parsed3.confianca, source: "gemini_pass3", sinais: parsed3.sinais };
   }
+  console.warn(`[detectDoc] pass3 raw vazio/inválido: "${raw3.substring(0, 300)}"`);
 
-  // Último recurso: melhor estimativa ou fallback seguro
+  // Último recurso: melhor estimativa ou fallback marcado (confianca=0)
   const best = parsed2 || parsed1;
   if (best) {
     console.log(`🤖 [detectDoc] usando melhor estimativa: ${best.tipo} (${best.confianca.toFixed(2)})`);
     return { tipo: best.tipo, confianca: best.confianca, source: "gemini_pass2", sinais: best.sinais };
   }
-  console.warn(`⚠️ [detectDoc] sem parse — fallback rg_antigo`);
+  console.warn(`⚠️ [detectDoc] sem parse nas 3 passadas — retornando fallback (handler deve perguntar ao usuário)`);
   return { tipo: "rg_antigo", confianca: 0, source: "fallback" };
 }
 
