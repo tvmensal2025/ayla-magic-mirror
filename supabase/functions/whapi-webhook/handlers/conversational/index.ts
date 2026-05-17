@@ -835,6 +835,20 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   try {
     const extracted = extractCaptures(ctx.messageText || "", currentStep.captures || []);
     if (extracted.electricity_bill_value != null) captureUpdates.electricity_bill_value = extracted.electricity_bill_value;
+    // Fallback contextual: se este passo claramente pergunta valor da conta
+    // (slot/text/title mencionam valor|conta|luz) e o lead respondeu com um número plausível,
+    // captura mesmo sem `captures` configurado e mesmo com texto extra ("200 mas ou menos").
+    if (extracted.electricity_bill_value == null && !ctx.customer.electricity_bill_value) {
+      const stepHaystack = `${currentStep.message_text || ""} ${(currentStep as any).title || ""} ${currentStep.slot_key || ""}`.toLowerCase();
+      const isValueStep = /\bvalor\b|\bconta\b|\bluz\b|electricity|bill/.test(stepHaystack);
+      if (isValueStep) {
+        const permissive = extractValorPermissivo(ctx.messageText || "");
+        if (permissive != null) {
+          captureUpdates.electricity_bill_value = permissive;
+          console.log(`[capture-fallback] valor=${permissive} via permissivo no step ${currentStep.step_key}`);
+        }
+      }
+    }
     if (extracted.phone_whatsapp && !ctx.customer.phone_whatsapp) captureUpdates.phone_whatsapp = extracted.phone_whatsapp;
     if (extracted.cpf) captureUpdates.cpf = extracted.cpf;
     // Nome: se o passo atual é um "pergunta nome" (título/slot menciona nome,
