@@ -380,8 +380,51 @@ app.post('/force-submit', async (req, res) => {
 });
 
 //
-// Recebe código OTP do WhatsApp e armazena para o script usar
+// POST /retry-facial-link
+// Reenvia o link de validação facial para um cliente que já tem link salvo
+// mas o envio anterior falhou (facial_link_sent_at = null).
+// Body: { customer_id }
+///
+app.post('/retry-facial-link', async (req, res) => {
+  const { customer_id } = req.body || {};
+  if (!customer_id) return res.status(400).json({ error: 'customer_id required' });
+  try {
+    const result = await retryFacialLinkForCustomer(customer_id);
+    pushActivity(result.ok ? 'facial_link_resent' : 'facial_link_resend_failed', customer_id, `retry-facial-link: ${result.reason}`);
+    return res.status(result.ok ? 200 : 502).json({ success: result.ok, ...result, customer_id });
+  } catch (e) {
+    console.error('   ❌ /retry-facial-link erro:', e.message);
+    return res.status(500).json({ success: false, error: e.message, customer_id });
+  }
+});
+
 //
+// POST /retry-pending-facial-links
+// Varre o banco e reenvia link facial a todos com link_facial preenchido
+// e facial_link_sent_at nulo. Pode ser chamado por cron externo.
+///
+app.post('/retry-pending-facial-links', async (req, res) => {
+  const supabase = getSupabase();
+  if (!supabase) return res.status(500).json({ error: 'supabase not configured' });
+  try {
+    const { data: rows } = await supabase
+      .from('customers')
+      .select('id')
+      .in('status', ['awaiting_signature'])
+      .not('link_facial', 'is', null)
+      .is('facial_link_sent_at', null)
+      .limit(50);
+    const ids = (rows || []).map((r) => r.id);
+    const results = [];
+    for (const id of ids) {
+      const r = await retryFacialLinkForCustomer(id);
+      results.push({ id, ...r });
+    }
+    res.json({ success: true, processed: ids.length, results });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
 app.post('/confirm-otp', async (req, res) => {
   const { customer_id, otp_code } = req.body;
   
