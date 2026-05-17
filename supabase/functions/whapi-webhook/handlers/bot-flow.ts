@@ -1842,6 +1842,119 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // 🧭 RESOLVER de passos do FluxoCamila (/admin/fluxos)
+  // Se conversation_step for um UUID ou um step_key custom (qualquer valor
+  // que não bate com os "case" do switch abaixo), procura o registro em
+  // bot_flow_steps e:
+  //   • capture_conta       → roteia para "aguardando_conta"
+  //   • capture_documento   → roteia para "aguardando_doc_auto"
+  //   • capture_email       → roteia para "ask_email"
+  //   • confirm_phone       → roteia para "ask_phone_confirm"
+  //   • finalizar_cadastro  → roteia para "finalizando"
+  //   • message             → passo informativo: avança para o próximo passo
+  //                            ativo por position e despacha (text+mídia).
+  // Assim os passos 1..N criados pelo consultor NUNCA travam o bot, nem
+  // caem no default que reseta para "aguardando_conta".
+  // ═══════════════════════════════════════════════════════════════════
+  const LEGACY_STEPS = new Set<string>([
+    "welcome", "menu_inicial", "qualificacao", "aguardando_conta", "processando_ocr_conta",
+    "confirmando_dados_conta", "editing_conta_menu", "editing_conta_nome", "editing_conta_endereco",
+    "editing_conta_cep", "editing_conta_distribuidora", "editing_conta_instalacao",
+    "editing_conta_valor", "pitch_conexao_club", "duvidas_pos_club",
+    "aguardando_doc_auto", "aguardando_doc_frente", "aguardando_doc_verso",
+    "ask_tipo_documento", "confirmando_dados_doc", "editing_doc_menu", "editing_doc_nome",
+    "editing_doc_rg", "editing_doc_cpf", "editing_doc_nascimento",
+    "ask_name", "ask_cpf", "ask_birth_date", "ask_phone", "ask_phone_confirm",
+    "ask_bill_value", "ask_installation_number", "ask_cep", "ask_number",
+    "ask_complement", "ask_email", "ask_rg", "ask_finalizar",
+    "confirmar_titularidade", "validacao_facial", "pos_video",
+    "finalizando", "finalizar_cadastro", "complete", "valor_baixo",
+    "aguardando_humano",
+  ]);
+  const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const stepIsUuid = UUID_RX.test(step);
+  const stepIsCustom = !LEGACY_STEPS.has(step) && !step.startsWith("editing_") && !step.startsWith("ask_");
+
+  if (customer.consultant_id && (stepIsUuid || stepIsCustom)) {
+    try {
+      const { data: flow } = await supabase
+        .from("bot_flows").select("id")
+        .eq("consultant_id", customer.consultant_id)
+        .eq("is_active", true).maybeSingle();
+      if (flow?.id) {
+        let stepRow: any = null;
+        if (stepIsUuid) {
+          const { data } = await supabase
+            .from("bot_flow_steps")
+            .select("id, step_key, step_type, position")
+            .eq("flow_id", flow.id).eq("id", step).maybeSingle();
+          stepRow = data;
+        }
+        if (!stepRow) {
+          const { data } = await supabase
+            .from("bot_flow_steps")
+            .select("id, step_key, step_type, position")
+            .eq("flow_id", flow.id).eq("step_key", step).maybeSingle();
+          stepRow = data;
+        }
+
+        if (stepRow) {
+          const stype = String(stepRow.step_type || "message");
+          console.log(`[custom-step-resolver] step="${step}" → type=${stype} pos=${stepRow.position}`);
+
+          if (stype === "capture_conta") step = "aguardando_conta";
+          else if (stype === "capture_documento" || stype === "capture_doc") step = "aguardando_doc_auto";
+          else if (stype === "capture_email") step = "ask_email";
+          else if (stype === "confirm_phone") step = "ask_phone_confirm";
+          else if (stype === "finalizar_cadastro") step = "finalizando";
+          else {
+            // step_type === "message" → passo informativo.
+            // Qualquer resposta do lead avança para o próximo passo ativo por position.
+            const nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {
+              afterPosition: Number(stepRow.position) || 0,
+            });
+            const _fmtBRL = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const _valor = Number((customer as any).electricity_bill_value || 0);
+            const _vars = {
+              "{valor}": _fmtBRL(_valor),
+              "{{valor}}": _fmtBRL(_valor),
+              "{economia_mensal}": _fmtBRL(_valor * 0.20),
+              "{{economia_mensal}}": _fmtBRL(_valor * 0.20),
+              "{economia_anual}": _fmtBRL(_valor * 0.20 * 12),
+              "{{economia_anual}}": _fmtBRL(_valor * 0.20 * 12),
+            };
+
+            if (nextCustom) {
+              const ok = await dispatchStepFromFlow(nextCustom.step_key, _vars);
+              const ntype = String(nextCustom.step_type || "message");
+              let nextStepValue = nextCustom.id;
+              if (ntype === "capture_conta") nextStepValue = "aguardando_conta";
+              else if (ntype === "capture_documento" || ntype === "capture_doc") nextStepValue = "aguardando_doc_auto";
+              else if (ntype === "capture_email") nextStepValue = "ask_email";
+              else if (ntype === "confirm_phone") nextStepValue = "ask_phone_confirm";
+              else if (ntype === "finalizar_cadastro") nextStepValue = "finalizando";
+              console.log(`[custom-step-resolver] message→advance next=${nextCustom.step_key} type=${ntype} dispatched=${ok}`);
+              return { reply: "", updates: { conversation_step: nextStepValue, __inline_sent: ok || undefined } as any };
+            }
+            // Sem próximo passo configurado → finaliza
+            console.log(`[custom-step-resolver] sem próximo passo após pos=${stepRow.position} → finalizando`);
+            step = "finalizando";
+          }
+        } else {
+          // UUID/step_key órfão (passo deletado, fluxo trocado): tenta redispatch idempotente
+          console.warn(`[custom-step-resolver] step "${step}" não encontrado no fluxo ativo — tentando redispatch e mantendo`);
+          if (!stepIsUuid) {
+            await dispatchStepFromFlow(step).catch(() => false);
+          }
+          return { reply: "", updates: { __inline_sent: true } as any };
+        }
+      }
+    } catch (e) {
+      console.warn("[custom-step-resolver] falhou:", (e as any)?.message);
+    }
+  }
+
   switch (step) {
     // ─── 1. BOAS-VINDAS ────────────────────
     case "welcome": {
