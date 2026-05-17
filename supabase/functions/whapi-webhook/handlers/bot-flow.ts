@@ -2381,6 +2381,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
           });
         }
+        // SAFETY-BELT: após SIM, NUNCA enviar outro passo informativo (message).
+        // O fluxo correto é avançar direto para captura de documento/finalização.
+        if (nextCustom && nextCustom.step_type === "message") {
+          const forwardCapture = await findNextActiveFlowStep(supabase, customer.consultant_id, {
+            afterPosition: _captureContaPos > 0 ? _captureContaPos : undefined,
+            stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
+          });
+          if (forwardCapture) {
+            console.warn(`[post-confirm-conta] pulando message "${nextCustom.step_key}" → ${forwardCapture.step_key} (${forwardCapture.step_type})`);
+            nextCustom = forwardCapture;
+          }
+        }
         const DOC_FALLBACK = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é.`;
         const FINAL_FALLBACK = `✅ *Todos os dados foram preenchidos!*\n\n1️⃣ Finalizar\n\n_Digite *1* ou *FINALIZAR* para concluir:_`;
         const sendFallback = async (text: string, stepStr: string) => {
