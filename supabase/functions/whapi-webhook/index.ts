@@ -537,6 +537,30 @@ Deno.serve(async (req) => {
     }
 
     // ─── Run bot flow ──────────────────────────────────────────────────
+    // ─── 🔒 Lock per-customer: evita webhooks paralelos enviando msgs duplicadas
+    // quando o lead manda 2+ mensagens em rajada. Aguarda até ~25s pelo lock; se
+    // não conseguir, drop silencioso (a outra invocação está processando).
+    let lockAcquired = false;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const { data: ok } = await supabase.rpc("try_lock_customer_processing", {
+        _customer_id: customer.id,
+        _seconds: 25,
+      });
+      if (ok === true) { lockAcquired = true; break; }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    if (!lockAcquired) {
+      console.warn(`⏸️ [whapi] customer=${customer.id} ocupado por outra invocação — dropando msg duplicada`);
+      return new Response(JSON.stringify({ ok: true, skipped: "busy" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    // Re-fetch customer pra pegar updates feitos pela invocação anterior (ex: novo conversation_step)
+    try {
+      const { data: fresh } = await supabase.from("customers").select("*").eq("id", customer.id).maybeSingle();
+      if (fresh) customer = fresh;
+    } catch (_) { /* mantém customer atual */ }
+
     // Roteamento por prefixo: "flow:<id>" → conversational; nome cru → bot-flow determinístico.
     // Compat reversa: UUIDs/"passo_xxx" sem prefixo são tratados como flow.
     const rawStep = customer.conversation_step || null;
@@ -712,12 +736,23 @@ Deno.serve(async (req) => {
       });
     }
 
+    // 🔓 Libera o lock antes de retornar.
+    try { await supabase.rpc("release_customer_processing_lock", { _customer_id: customer.id }); } catch (_) {}
+
     return new Response(JSON.stringify({ ok: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
     console.error("Whapi webhook error:", err);
     captureError(err, { tags: { function: "whapi-webhook" } });
+    // best-effort: tenta liberar lock se foi adquirido
+    try {
+      // @ts-ignore — customer/lockAcquired podem não estar no escopo
+      if (typeof customer !== "undefined" && customer?.id && typeof lockAcquired !== "undefined" && lockAcquired) {
+        // @ts-ignore
+        await supabase.rpc("release_customer_processing_lock", { _customer_id: customer.id });
+      }
+    } catch (_) {}
     return new Response(JSON.stringify({ error: String(err) }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
