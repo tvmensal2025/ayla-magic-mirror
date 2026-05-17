@@ -297,6 +297,30 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
           </div>
         </div>
 
+        {/* Origem do público — NUNCA mistura Leads WhatsApp com Clientes iGreen */}
+        <div className="flex flex-wrap gap-2 mb-3 p-2 rounded-xl border border-border/50 bg-secondary/20">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground/80 mr-1">
+            <Users className="w-3.5 h-3.5" /> Público:
+          </div>
+          {[
+            { key: "igreen_sync", label: "Clientes iGreen (carteira)" },
+            { key: "whatsapp_lead", label: "Leads WhatsApp (anúncio)" },
+          ].map((o) => (
+            <button
+              key={o.key}
+              onClick={() => setOriginFilter(o.key as any)}
+              disabled={isSending}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                originFilter === o.key
+                  ? "bg-primary/20 border-primary/40 text-primary"
+                  : "bg-card/60 border-border/40 text-muted-foreground hover:bg-card"
+              } ${isSending ? "opacity-50 pointer-events-none" : ""}`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+
         {/* Status filters */}
         <div className="flex flex-wrap gap-2 mb-3">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground mr-1">
