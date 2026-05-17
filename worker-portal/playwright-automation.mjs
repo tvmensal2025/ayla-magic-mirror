@@ -493,53 +493,6 @@ async function atualizarStatus(customerId, status, errorMsg = null) {
   await getSupabase().from('customers').update(updates).eq('id', customerId);
 }
 
-// ─── Notificar cliente para digitar o OTP no chat ────────────────────────────
-async function notificarClienteOTP(customerId) {
-  const supabase = getSupabase();
-  if (!supabase) return;
-  try {
-    const { data: customer } = await supabase
-      .from('customers').select('phone_whatsapp, consultant_id, name')
-      .eq('id', customerId).single();
-    if (!customer?.phone_whatsapp) return;
-
-    const instanceName = await pickConnectedInstance(supabase, customer.consultant_id);
-    const evolutionUrl = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
-    const evolutionKey = process.env.EVOLUTION_API_KEY || '';
-    if (!evolutionUrl || !evolutionKey) {
-      console.warn('   ⚠️  notificarClienteOTP: Evolution API não configurada');
-      return;
-    }
-    if (!instanceName) {
-      console.warn('   ⚠️  notificarClienteOTP: nenhuma instância conectada para o consultor — registrando alerta');
-      await flagOfflineInstance(supabase, customerId, customer.consultant_id, 'otp_notify');
-      return;
-    }
-
-    let phone = String(customer.phone_whatsapp).replace(/\D/g, '');
-    if (!phone.startsWith('55')) phone = '55' + phone;
-    const remoteJid = `${phone}@s.whatsapp.net`;
-
-    const nome = customer.name?.split(' ')[0] || '';
-    const message = `📱 *Código de Verificação*\n\nOlá${nome ? ' ' + nome : ''}! Você vai receber um *código numérico* no WhatsApp enviado pela iGreen Energy.\n\n👉 *Quando receber, digite o código aqui neste chat* para eu finalizar seu cadastro!\n\n⏳ Aguardando o código...`;
-
-    const res = await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
-      method: 'POST',
-      headers: { apikey: evolutionKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ number: remoteJid, text: message }),
-    });
-    if (res.ok) {
-      console.log(`   ✅ Mensagem OTP enviada ao cliente ${phone}`);
-    } else {
-      console.warn(`   ⚠️  Falha ao notificar cliente sobre OTP: ${res.status} (instância ${instanceName})`);
-      await markInstanceNeedsReconnect(supabase, instanceName);
-      await flagOfflineInstance(supabase, customerId, customer.consultant_id, `otp_notify_http_${res.status}`);
-    }
-  } catch (e) {
-    console.error(`   ❌ notificarClienteOTP erro: ${e.message}`);
-  }
-}
-
 // ─── Helpers compartilhados (instância conectada + alertas) ───────────────────
 async function pickConnectedInstance(supabase, consultantId) {
   if (!consultantId) return null;
@@ -586,55 +539,124 @@ async function flagOfflineInstance(supabase, customerId, consultantId, context) 
   }
 }
 
+// ─── Buscar credenciais Whapi (settings → env) ──────────────────────────
+async function getWhapiCreds(supabase) {
+  let token = process.env.WHAPI_TOKEN || '';
+  let baseUrl = (process.env.WHAPI_API_URL || 'https://gate.whapi.cloud').replace(/\/$/, '');
+  if (!token) {
+    try {
+      const { data: rows } = await supabase.from('settings').select('key, value');
+      const s = {}; (rows || []).forEach((r) => { s[r.key] = r.value; });
+      token = s.whapi_token || token;
+      baseUrl = (s.whapi_api_url || baseUrl).replace(/\/$/, '');
+    } catch (_) {}
+  }
+  return { token, baseUrl };
+}
+
+// ─── Sender unificado: Whapi PRIORITÁRIO; Evolution só fallback opcional ──
+async function sendWhatsAppMessage(supabase, customer, message, context) {
+  let phone = String(customer.phone_whatsapp || '').replace(/\D/g, '');
+  if (!phone) return false;
+  if (!phone.startsWith('55')) phone = '55' + phone;
+  const remoteJid = `${phone}@s.whatsapp.net`;
+
+  // 1) Whapi (canal primário)
+  const { token: whapiToken, baseUrl: whapiUrl } = await getWhapiCreds(supabase);
+  if (whapiToken) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch(`${whapiUrl}/messages/text`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${whapiToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ to: remoteJid, body: message, typing_time: 0 }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (res.ok) {
+          console.log(`   ✅ [whapi] ${context} enviado para ${phone}`);
+          return true;
+        }
+        const txt = (await res.text()).substring(0, 180);
+        console.warn(`   ⚠️  [whapi] ${context} tentativa ${attempt}/3 falhou: ${res.status} ${txt}`);
+        if (res.status >= 400 && res.status < 500 && res.status !== 429) break;
+      } catch (e) {
+        console.warn(`   ⚠️  [whapi] ${context} tentativa ${attempt}/3 erro: ${e.message}`);
+      }
+      if (attempt < 3) await delay(500 * attempt);
+    }
+  } else {
+    console.warn('   ⚠️  WHAPI_TOKEN ausente — pulando canal Whapi');
+  }
+
+  // 2) Evolution (fallback opcional)
+  try {
+    const instanceName = await pickConnectedInstance(supabase, customer.consultant_id);
+    let eUrl = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
+    let eKey = process.env.EVOLUTION_API_KEY || '';
+    if (!eUrl || !eKey) {
+      const { data: rows } = await supabase.from('settings').select('key, value');
+      const s = {}; (rows || []).forEach((r) => { s[r.key] = r.value; });
+      eUrl = eUrl || (s.evolution_api_url || '').replace(/\/$/, '');
+      eKey = eKey || s.evolution_api_key || '';
+    }
+    if (eUrl && eKey && instanceName) {
+      const res = await fetch(`${eUrl}/message/sendText/${instanceName}`, {
+        method: 'POST',
+        headers: { apikey: eKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ number: remoteJid, text: message }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.ok) {
+        console.log(`   ✅ [evolution-fallback] ${context} enviado para ${phone}`);
+        return true;
+      }
+      console.warn(`   ⚠️  [evolution] ${context} falhou: ${res.status} (instância ${instanceName})`);
+      await markInstanceNeedsReconnect(supabase, instanceName);
+    }
+  } catch (e) {
+    console.warn(`   ⚠️  [evolution] ${context} erro: ${e.message}`);
+  }
+
+  console.error(`   ❌ ${context}: TODOS os canais falharam`);
+  await flagOfflineInstance(supabase, customer.id || customer.customerId, customer.consultant_id, context);
+  return false;
+}
+
+// ─── Notificar cliente para digitar o OTP no chat ────────────────────────────
+async function notificarClienteOTP(customerId) {
+  const supabase = getSupabase();
+  if (!supabase) return;
+  try {
+    const { data: customer } = await supabase
+      .from('customers').select('id, phone_whatsapp, consultant_id, name')
+      .eq('id', customerId).single();
+    if (!customer?.phone_whatsapp) return;
+    const nome = customer.name?.split(' ')[0] || '';
+    const message = `📱 *Código de Verificação*\n\nOlá${nome ? ' ' + nome : ''}! Você vai receber um *código numérico* no WhatsApp enviado pela iGreen Energy.\n\n👉 *Quando receber, digite o código aqui neste chat* para eu finalizar seu cadastro!\n\n⏳ Aguardando o código...`;
+    await sendWhatsAppMessage(supabase, customer, message, 'otp_notify');
+  } catch (e) {
+    console.error(`   ❌ notificarClienteOTP erro: ${e.message}`);
+  }
+}
+
 // ─── Enviar link de reconhecimento facial ao cliente via WhatsApp ─────────────
 async function sendFacialLinkToCustomer(customerId, facialLink) {
   const supabase = getSupabase();
   if (!supabase) { console.error('   ❌ sendFacialLink: Supabase não configurado'); return; }
   try {
     const { data: customer } = await supabase
-      .from('customers').select('phone_whatsapp, consultant_id, name')
+      .from('customers').select('id, phone_whatsapp, consultant_id, name')
       .eq('id', customerId).single();
     if (!customer?.phone_whatsapp) { console.error('   ❌ sendFacialLink: telefone não encontrado'); return; }
-
-    const instanceName = await pickConnectedInstance(supabase, customer.consultant_id);
-
-    const evolutionUrl = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
-    const evolutionKey = process.env.EVOLUTION_API_KEY || '';
-
-    // Fallback: buscar das settings
-    let eUrl = evolutionUrl, eKey = evolutionKey;
-    if (!eUrl || !eKey) {
-      const { data: rows } = await supabase.from('settings').select('key, value');
-      const s = {}; (rows || []).forEach(r => { s[r.key] = r.value; });
-      eUrl = eUrl || (s.evolution_api_url || '').replace(/\/$/, '');
-      eKey = eKey || s.evolution_api_key || '';
+    // Normalizar: alguns capturas concatenam o link duas vezes
+    let cleanLink = String(facialLink || '').trim();
+    const halfLen = Math.floor(cleanLink.length / 2);
+    if (halfLen > 20 && cleanLink.slice(0, halfLen) === cleanLink.slice(halfLen)) {
+      cleanLink = cleanLink.slice(0, halfLen);
     }
-
-    let phone = String(customer.phone_whatsapp).replace(/\D/g, '');
-    if (!phone.startsWith('55')) phone = '55' + phone;
-    const remoteJid = `${phone}@s.whatsapp.net`;
-
     const nome = customer.name?.split(' ')[0] || '';
-    const message = `📲 *Última etapa — Validação Facial*\n\nOlá${nome ? ' ' + nome : ''}! Falta apenas a validação facial para concluir seu cadastro.\n\n🔗 Abra o link abaixo *no celular*:\n${facialLink}\n\n📱 Siga as instruções na tela (selfie + documento).\n\n⚠️ Use boa iluminação e tire o óculos se necessário.\n\n✅ *Quando terminar, responda aqui:* PRONTO\n\nQualquer dúvida, estamos aqui! ☀️`;
-
-    if (eUrl && eKey && instanceName) {
-      const res = await fetch(`${eUrl}/message/sendText/${instanceName}`, {
-        method: 'POST',
-        headers: { apikey: eKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ number: remoteJid, text: message }),
-      });
-      if (res.ok) {
-        console.log(`   ✅ Link facial enviado via WhatsApp para ${phone}`);
-        return;
-      }
-      console.warn(`   ⚠️  Evolution falhou ao enviar link facial: ${res.status} (instância ${instanceName})`);
-      await markInstanceNeedsReconnect(supabase, instanceName);
-      await flagOfflineInstance(supabase, customerId, customer.consultant_id, `facial_link_http_${res.status}`);
-    } else if (!instanceName) {
-      console.warn('   ⚠️  sendFacialLink: nenhuma instância conectada — registrando alerta');
-      await flagOfflineInstance(supabase, customerId, customer.consultant_id, 'facial_link_no_instance');
-    }
-    console.warn('   ⚠️  Não foi possível enviar link facial via WhatsApp');
+    const message = `📲 *Última etapa — Validação Facial*\n\nOlá${nome ? ' ' + nome : ''}! Falta apenas a validação facial para concluir seu cadastro.\n\n🔗 Abra o link abaixo *no celular*:\n${cleanLink}\n\n📱 Siga as instruções na tela (selfie + documento).\n\n⚠️ Use boa iluminação e tire o óculos se necessário.\n\n✅ *Quando terminar, responda aqui:* PRONTO\n\nQualquer dúvida, estamos aqui! ☀️`;
+    await sendWhatsAppMessage(supabase, customer, message, 'facial_link');
   } catch (e) {
     console.error(`   ❌ sendFacialLink erro: ${e.message}`);
   }
