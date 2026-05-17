@@ -565,6 +565,44 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     return { reply: "", updates: {} };
   }
 
+  // 📸 FIX: foto/documento recebido enquanto o lead ainda está em step
+  // conversacional (welcome, qualificacao, flow:*) deve ser tratado como
+  // conta de luz IMEDIATAMENTE — vai para o pipeline determinístico de OCR
+  // no próximo turno. Sem isso, o lead manda a foto e o bot continua
+  // disparando áudios/explicações antigas.
+  if (
+    (ctx.isFile || ctx.hasImage || ctx.hasDocument) &&
+    !(ctx.customer as any).electricity_bill_photo_url &&
+    !CADASTRO_STEPS.has(stepKey)
+  ) {
+    console.log(`[conversational] 📸 arquivo recebido em step="${stepKey}" → redirecionando para aguardando_conta`);
+    try {
+      await ctx.sender.sendText(
+        ctx.remoteJid,
+        "✅ Conta recebida! ⏳ Analisando seus dados...\n\nAguarde alguns instantes...",
+      );
+    } catch (_) { /* noop */ }
+    // Reprocessa a mesma mensagem como conta no próximo webhook
+    // (que será disparado quando o customer for atualizado).
+    // Alternativamente, chama o bot determinístico inline.
+    try {
+      const { runBotFlow } = await import("../bot-flow.ts");
+      // Atualiza step em memória pra o bot-flow processar como aguardando_conta
+      (ctx.customer as any).conversation_step = "aguardando_conta";
+      const result = await runBotFlow(ctx);
+      return {
+        reply: result.reply,
+        updates: { ...(result.updates || {}), conversation_step: result.updates?.conversation_step || "aguardando_conta", __inline_sent: true },
+      };
+    } catch (e) {
+      console.error("[conversational] falha ao redirecionar p/ bot-flow:", (e as Error)?.message || e);
+      return {
+        reply: "",
+        updates: { conversation_step: "aguardando_conta", __inline_sent: true },
+      };
+    }
+  }
+
   // ─── Dedupe de mensagem (idempotência) ─────────────────────────────────
   // Whapi às vezes reenvia o mesmo webhook. Sem isso, capturas são processadas
   // 2x e auto-advance pula passos. Tabela tem TTL de 24h (pg_cron).
@@ -978,6 +1016,35 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   ): Promise<{ replyText: string; inlineSent: boolean }> => {
     const text = renderStepText(st);
     const textDelay = Math.max(0, Math.min(60000, st.text_delay_ms ?? 1500));
+
+    // 🛡️ Anti-repetição: se o MESMO step (por step_key OU id) saiu como outbound
+    // nos últimos 10 minutos, não reenvia (texto nem mídia). Evita os disparos
+    // duplicados de "Vou explicar..." / "Deu para entender..." observados nos logs.
+    try {
+      const since = new Date(Date.now() - 10 * 60_000).toISOString();
+      const { data: recent } = await ctx.supabase
+        .from("conversations")
+        .select("conversation_step, created_at")
+        .eq("customer_id", ctx.customer.id)
+        .eq("message_direction", "outbound")
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      const rows: any[] = (recent as any[]) || [];
+      const stepIds = new Set<string>([
+        st.id,
+        st.step_key,
+        `flow:${st.id}`,
+        `flow:${st.step_key}`,
+      ]);
+      const hit = rows.find((r) => stepIds.has(String(r.conversation_step || "")));
+      if (hit) {
+        const ageSec = Math.round((Date.now() - new Date(hit.created_at).getTime()) / 1000);
+        console.log(`[conversational] 🛡️ anti-rep emitStep ${st.step_key} (saiu há ${ageSec}s) — pulando reenvio`);
+        return { replyText: "", inlineSent: true };
+      }
+    } catch (_e) { /* best-effort */ }
+
 
     // Quando é reply final, o texto vai como reply (não inline). Quando é cascade
     // ou quando o consultor pediu texto antes da mídia, mandamos tudo inline aqui.
