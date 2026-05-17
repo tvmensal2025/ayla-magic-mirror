@@ -9,6 +9,7 @@ import { MediaColumn } from "./MediaColumn";
 import { RoteiroColumn } from "./RoteiroColumn";
 import { AIDecisionsPanel } from "./AIDecisionsPanel";
 import { SlotsPanel } from "./SlotsPanel";
+import { BotTelemetryStrip } from "./BotTelemetryStrip";
 
 type SubTab = "atendimentos" | "agente" | "decisoes";
 type AgenteSub = "audios" | "midias" | "roteiro";
