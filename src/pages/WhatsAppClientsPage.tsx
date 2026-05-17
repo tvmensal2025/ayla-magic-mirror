@@ -171,12 +171,21 @@ export default function WhatsAppClientsPage() {
     toast.success("Exportado com sucesso!");
   };
 
-  const stats = [
-    { label: "Total", value: customers.length, icon: Users, gradient: "from-violet-500/10 to-violet-600/5", iconColor: "text-violet-500" },
-    { label: "Completos", value: customers.filter(c => c.status === "complete" || c.status === "registered_igreen" || c.status === "approved").length, icon: CheckCircle, gradient: "from-emerald-500/10 to-emerald-600/5", iconColor: "text-emerald-500" },
-    { label: "Pendentes", value: customers.filter(c => c.status === "pending").length, icon: Clock, gradient: "from-amber-500/10 to-amber-600/5", iconColor: "text-amber-500" },
-    { label: "Falhas", value: customers.filter(c => c.status === "automation_failed" || c.status === "worker_offline").length, icon: AlertTriangle, gradient: "from-red-500/10 to-red-600/5", iconColor: "text-red-500" },
-  ];
+  const isLeadsTab = originTab === "whatsapp_lead";
+
+  const stats = isLeadsTab
+    ? [
+        { label: "Total leads", value: leadsWhatsapp.length, icon: Users, gradient: "from-violet-500/10 to-violet-600/5", iconColor: "text-violet-500" },
+        { label: "Em conversa", value: leadsWhatsapp.filter(c => c.status === "pending" && c.conversation_step && c.conversation_step !== "welcome").length, icon: MessageCircle, gradient: "from-sky-500/10 to-sky-600/5", iconColor: "text-sky-500" },
+        { label: "Qualificados / Completos", value: leadsWhatsapp.filter(c => ["complete","approved","registered_igreen","data_complete"].includes(c.status)).length, icon: CheckCircle, gradient: "from-emerald-500/10 to-emerald-600/5", iconColor: "text-emerald-500" },
+        { label: "Falhas / Pausados", value: leadsWhatsapp.filter(c => c.status === "automation_failed" || c.status === "worker_offline").length, icon: AlertTriangle, gradient: "from-red-500/10 to-red-600/5", iconColor: "text-red-500" },
+      ]
+    : [
+        { label: "Total carteira", value: clientesIgreen.length, icon: Briefcase, gradient: "from-emerald-500/10 to-emerald-600/5", iconColor: "text-emerald-500" },
+        { label: "Ativos", value: clientesIgreen.filter(c => /ativo/i.test(c.andamento_igreen || "") || c.status === "active").length, icon: CheckCircle, gradient: "from-green-500/10 to-green-600/5", iconColor: "text-green-500" },
+        { label: "Devolutiva", value: clientesIgreen.filter(c => !!c.devolutiva || /devolutiva/i.test(c.andamento_igreen || "")).length, icon: AlertTriangle, gradient: "from-rose-500/10 to-rose-600/5", iconColor: "text-rose-500" },
+        { label: "Em análise / Outros", value: clientesIgreen.filter(c => !c.devolutiva && !/ativo|devolutiva/i.test(c.andamento_igreen || "")).length, icon: Clock, gradient: "from-amber-500/10 to-amber-600/5", iconColor: "text-amber-500" },
+      ];
 
   if (loading) {
     return (
@@ -194,14 +203,36 @@ export default function WhatsAppClientsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold font-heading text-foreground">Clientes WhatsApp</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Clientes cadastrados via automação WhatsApp</p>
+          <h1 className="text-2xl font-bold font-heading text-foreground">
+            {isLeadsTab ? "Leads WhatsApp" : "Clientes iGreen"}
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {isLeadsTab
+              ? "Pessoas que chegaram pelo anúncio e estão em conversa no WhatsApp"
+              : "Clientes já cadastrados, sincronizados do portal iGreen (ativos, devolutivas, em análise...)"}
+          </p>
         </div>
         <Button onClick={exportToCSV} variant="outline" className="gap-2 rounded-xl border-border/50 hover:border-primary/30">
           <Download className="w-4 h-4" />
           Exportar CSV
         </Button>
       </div>
+
+      {/* Origin tabs — Leads NUNCA misturam com Clientes iGreen */}
+      <Tabs value={originTab} onValueChange={(v) => setOriginTab(v as OriginTab)}>
+        <TabsList className="grid grid-cols-2 w-full sm:w-auto sm:inline-grid h-11 rounded-xl">
+          <TabsTrigger value="whatsapp_lead" className="gap-2 rounded-lg">
+            <MessageCircle className="w-4 h-4" />
+            Leads WhatsApp
+            <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px]">{leadsWhatsapp.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="igreen_sync" className="gap-2 rounded-lg">
+            <Briefcase className="w-4 h-4" />
+            Clientes iGreen
+            <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px]">{clientesIgreen.length}</Badge>
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -229,18 +260,29 @@ export default function WhatsAppClientsPage() {
             />
           </div>
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-full sm:w-[200px] h-10 rounded-xl border-border/50 bg-muted/30">
+            <SelectTrigger className="w-full sm:w-[220px] h-10 rounded-xl border-border/50 bg-muted/30">
               <SelectValue placeholder="Todos os Status" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos os Status</SelectItem>
-              <SelectItem value="pending">Pendente</SelectItem>
-              <SelectItem value="approved">Aprovado</SelectItem>
-              <SelectItem value="awaiting_signature">Aguardando Assinatura</SelectItem>
-              <SelectItem value="complete">Completo</SelectItem>
-              <SelectItem value="registered_igreen">Cadastrado iGreen</SelectItem>
-              <SelectItem value="devolutiva">Devolutiva</SelectItem>
-              <SelectItem value="automation_failed">Falha</SelectItem>
+              {isLeadsTab ? (
+                <>
+                  <SelectItem value="pending">Pendente</SelectItem>
+                  <SelectItem value="approved">Aprovado</SelectItem>
+                  <SelectItem value="awaiting_signature">Aguardando Assinatura</SelectItem>
+                  <SelectItem value="complete">Completo</SelectItem>
+                  <SelectItem value="registered_igreen">Cadastrado iGreen</SelectItem>
+                  <SelectItem value="automation_failed">Falha</SelectItem>
+                </>
+              ) : (
+                <>
+                  <SelectItem value="active">Ativo</SelectItem>
+                  <SelectItem value="inactive">Inativo</SelectItem>
+                  <SelectItem value="devolutiva">Com devolutiva</SelectItem>
+                  <SelectItem value="pending">Em análise</SelectItem>
+                  <SelectItem value="rejected">Reprovado</SelectItem>
+                </>
+              )}
             </SelectContent>
           </Select>
           <Badge variant="outline" className="self-center text-xs py-2 px-3 border-border/50 whitespace-nowrap">
@@ -248,6 +290,7 @@ export default function WhatsAppClientsPage() {
           </Badge>
         </div>
       </div>
+
 
       {/* Customer List */}
       <div className="space-y-2">
