@@ -1241,9 +1241,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       }
       return dbSteps.find((step) => step.is_active && step.position > cur.position);
     };
-    // C1: guard reduzido (6→3) e cada hop com timeout de 12s — se a Edge Function
+    // C1: guard reduzido (6→3) e cada hop com timeout — se a Edge Function
     // estourar 20s, perdíamos passos no meio da cascata sem deixar rastro.
-    for (let guard = 0; cursor?.wait_for === "none" && guard < 3; guard++) {
+    const cursorCascades = (st: DbStep): boolean => {
+      const caps = Array.isArray(st.captures) && st.captures.some((c: any) => c?.enabled !== false && c?.field);
+      return !caps && st.wait_for === "none";
+    };
+    for (let guard = 0; cursor && cursorCascades(cursor) && guard < 3; guard++) {
       const nextStep = findCascadeNext(cursor);
       if (!nextStep) {
         console.log(`[conversational] cascade parou em step=${cursor.step_key} (sem próximo step ativo)`);
