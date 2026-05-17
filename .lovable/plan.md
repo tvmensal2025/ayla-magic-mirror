@@ -1,78 +1,81 @@
-# Sprint E — Router de Fluxo + Extrator Multi-Campo
+# Diagnóstico: por que o cliente não recebeu a msg do OTP nem o link da facial
 
-Dois recursos para fechar as lacunas do fluxo conversacional:
+## O que aconteceu (lead `c52d49af...` - MÁRCIA RECHE MARFIL)
 
-## E1. Extrator multi-campo (mensagem rica)
+1. ✅ Playwright preencheu o portal iGreen perfeitamente (passos 1→11).
+2. ✅ Portal redirecionou para `/validacao-codigo/...` (tela de OTP de 6 dígitos).
+3. ❌ Worker tentou avisar o cliente no WhatsApp:
+   ```
+   ⚠️  Falha ao notificar cliente sobre OTP: 500
+   ```
+4. ⏳ Worker entrou em polling de OTP por 300s.
+5. Cliente acabou em `status=awaiting_signature` (OTP processado por outro caminho, mas a msg pedindo nunca chegou).
 
-**Problema:** lead manda "sou João, CEP 01310-100, conta 450" no step `pedir_nome` — hoje só captura nome, perde CEP e valor.
+## Causa raiz
 
-**Solução:** novo helper `extractMultiField(text)` em `_shared/multi-field-extractor.ts` que roda regex paralelo em **toda** mensagem livre e devolve `{ nome?, cep?, valor_conta?, cpf?, email?, telefone? }`. Integra em `bot-flow.ts` antes do `safeAssignName`:
-- Cada campo extraído é gravado no `customer` (se ainda vazio) com `source=freeform_multi`
-- Steps subsequentes detectam campo já preenchido e pulam (`shouldSkipStep`)
-- Log único `[multi-extract] capturou: nome=X cep=Y valor=Z` pra auditoria
+A função `notificarClienteOTP` (worker-portal/playwright-automation.mjs:497) busca a instância do consultor **sem filtrar por status**:
 
-Regex usadas:
-- CEP: `\b\d{5}-?\d{3}\b`
-- Valor conta: `\b(?:R\$\s*)?(\d{2,4})(?:[,.]\d{2})?\b` com contexto `conta|luz|fatura|paga|gasto`
-- CPF: `\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b`
-- Email: regex padrão RFC simplificada
-- Telefone: `\b(?:\(?\d{2}\)?\s?)?\d{4,5}-?\d{4}\b`
-
-Hierarquia: campos vindos de step dedicado (`pedir_cep`, `pedir_valor`) **sobrescrevem** os do multi-extract — o multi só preenche slots vazios.
-
-## E2. Router de fluxo (intent forte de outro produto)
-
-**Problema:** lead começou cadastro residencial e no meio diz "na verdade quero o plano PJ" ou "quero ser licenciada" — hoje cai no midflow-qa, IA responde mas não troca de fluxo.
-
-**Solução:** novo intent `mudar_fluxo` no classifier + tabela `flow_router_rules`:
-
-```sql
-CREATE TABLE public.flow_router_rules (
-  id uuid PK,
-  consultant_id uuid NULL,  -- NULL = regra global
-  trigger_keywords text[],   -- ["pj", "empresa", "cnpj", "pessoa juridica"]
-  target_flow_key text NOT NULL,  -- "conexao_club_pj" | "licenciada" | "residencial"
-  priority int DEFAULT 10,
-  is_active bool DEFAULT true
-);
+```js
+.from('whatsapp_instances').select('instance_name')
+.eq('consultant_id', customer.consultant_id).limit(1).single();
 ```
 
-Seed inicial com 3 regras: PJ, Licenciada, Residencial (default).
+Consulta no banco para o consultor `0c2711ad-4836-41e6-afba-edd94f698ae3`:
 
-No `conversational/index.ts`, antes do `midflow-qa`:
-1. Roda `detectFlowSwitchIntent(text, currentFlow)` que faz regex match nas regras ativas
-2. Se match e `target_flow_key != currentFlow.name`: envia mensagem de confirmação ("Vi que você quer falar sobre **plano PJ** — quer que eu mude pra esse atendimento? (sim/não)") e seta `customer.pending_flow_switch = 'conexao_club_pj'`
-3. Na próxima resposta `afirmacao`: muda `customer.active_flow_id` pro fluxo destino, reseta `conversation_step` pro primeiro step desse fluxo, loga `bot_step_transitions` com motivo `flow_router`
-4. `negacao`: limpa `pending_flow_switch` e volta ao step atual
+| instance_name | status |
+|---|---|
+| `igreen-0c2711ad4836` | **`needs_reconnect`** |
 
-Campos novos em `customers`:
-- `active_flow_id uuid` (já existe via `flow_id` no contexto — verificar)
-- `pending_flow_switch text NULL`
+A instância existe mas está desconectada do Evolution → POST `/message/sendText/igreen-0c2711ad4836` retorna **HTTP 500**.
 
-## E3. Telemetria
+A função `sendFacialLinkToCustomer` (linha 544) tem **o mesmo bug** → quando o portal liberar o link facial, a msg também vai falhar silenciosamente.
 
-Adicionar 2 contadores em `bot_handoff_alerts.reason`:
-- `multi_field_captured` (info, não bloqueante)
-- `flow_switch_requested` / `flow_switch_confirmed` / `flow_switch_rejected`
+## Fix proposto (worker-portal/playwright-automation.mjs)
 
-Painel SuperAdmin (`BotFunnelPanel.tsx`) ganha card "Trocas de fluxo (7d)" e "Multi-campo (taxa de captura)".
+### 1. Filtrar instância conectada nas duas funções
 
----
+Substituir as duas queries por:
+```js
+const { data: inst } = await supabase
+  .from('whatsapp_instances')
+  .select('instance_name, status')
+  .eq('consultant_id', customer.consultant_id)
+  .in('status', ['connected', 'open'])
+  .order('updated_at', { ascending: false })
+  .limit(1)
+  .maybeSingle();
+instanceName = inst?.instance_name || null;
+```
 
-## Ordem de execução
+### 2. Quando não houver instância conectada, registrar alerta e seguir
 
-1. Migration: `flow_router_rules` + colunas em `customers` + seed
-2. `_shared/multi-field-extractor.ts` (puro, testável)
-3. `_shared/flow-router.ts` (lê regras, decide switch)
-4. Integrar no `bot-flow.ts` (multi-extract no topo do handler de texto livre)
-5. Integrar no `conversational/index.ts` (router antes do midflow-qa)
-6. Deploy `whapi-webhook`
-7. UI: card no `BotFunnelPanel.tsx`
+- Log claro: `⚠️ Instância desconectada (needs_reconnect) — cliente não notificado, manter polling`
+- Inserir em `bot_handoff_alerts` com `reason='whatsapp_instance_offline'`, `customer_id`, `consultant_id` para o painel mostrar.
+- Atualizar `customers.error_message` com texto curto (`"Instância WhatsApp desconectada ao pedir OTP"`) para visibilidade no CRM, **sem mudar `status`** (segue `awaiting_otp` / `portal_submitting`).
 
-## O que **não** vou mexer
+### 3. Tratar HTTP 500 do Evolution como sinal de instância caída
 
-- Lógica de OCR / name-lock (Sprint D já blindou)
-- Steps determinísticos do cadastro (CEP, CPF, etc. — só vão receber valores prontos quando multi-extract pegar)
-- Engine de classifier (só adiciono o intent `mudar_fluxo` no enum)
+Em ambas as funções, após `res.status >= 400`:
+- Marcar instância como `needs_reconnect` em `whatsapp_instances` se estava `connected`.
+- Mesmo registro em `bot_handoff_alerts`.
 
-Aprova que eu mando.
+### 4. Fallback opcional (a confirmar com o usuário)
+
+Se quiser, adicionar fallback para enviar via **qualquer outra instância conectada do mesmo tenant/super-admin** quando a do consultor estiver offline — útil para não perder o cliente. Pode usar a instância de uma outra licenciada do mesmo grupo.
+
+## Fora do escopo
+
+- Reconexão automática da instância (já tratada em `whatsapp/connection-management`).
+- Mudanças no fluxo Playwright/portal.
+- UI nova (apenas o alerta em `bot_handoff_alerts` que já é renderizado).
+
+## Arquivos afetados
+
+- `worker-portal/playwright-automation.mjs` (funções `notificarClienteOTP` e `sendFacialLinkToCustomer`)
+- Sem migration; usa tabelas já existentes (`whatsapp_instances`, `bot_handoff_alerts`, `customers`).
+
+## Validação
+
+1. Forçar `notificarClienteOTP(customerId_test)` com instância offline → deve logar warning + criar `bot_handoff_alerts`, sem 500 não tratado.
+2. Reconectar a instância e reexecutar lead → msg do OTP chega no WhatsApp do cliente.
+3. Verificar painel admin mostra o alerta novo.
