@@ -655,15 +655,21 @@ async function notificarClienteOTP(customerId) {
 }
 
 // ─── Enviar link de reconhecimento facial ao cliente via WhatsApp ─────────────
+// Garantias:
+//  - Só marca `facial_link_sent_at` quando o envio realmente sucede.
+//  - Em falha, registra `facial_link_failed` em `conversations` (visível no CRM)
+//    e grava `error_message` no cliente para diagnóstico.
+//  - Agenda retry interno (30s/120s) enquanto o processo viver.
+//  - Pode ser chamado novamente via endpoint `/retry-facial-link/:id`.
 async function sendFacialLinkToCustomer(customerId, facialLink) {
   const supabase = getSupabase();
-  if (!supabase) { console.error('   ❌ sendFacialLink: Supabase não configurado'); return; }
+  if (!supabase) { console.error('   ❌ sendFacialLink: Supabase não configurado'); return false; }
   try {
     const { data: customer } = await supabase
       .from('customers').select('id, phone_whatsapp, consultant_id, name, facial_link_sent_at')
       .eq('id', customerId).single();
-    if (!customer?.phone_whatsapp) { console.error('   ❌ sendFacialLink: telefone não encontrado'); return; }
-    // Normalizar: alguns capturas concatenam o link duas vezes
+    if (!customer?.phone_whatsapp) { console.error('   ❌ sendFacialLink: telefone não encontrado'); return false; }
+
     let cleanLink = String(facialLink || '').trim();
     const halfLen = Math.floor(cleanLink.length / 2);
     if (halfLen > 20 && cleanLink.slice(0, halfLen) === cleanLink.slice(halfLen)) {
@@ -671,27 +677,93 @@ async function sendFacialLinkToCustomer(customerId, facialLink) {
     }
     const nome = customer.name?.split(' ')[0] || '';
     const message = `📲 *Última etapa — Validação Facial*\n\nOlá${nome ? ' ' + nome : ''}! Falta apenas a validação facial para concluir seu cadastro.\n\n🔗 Abra o link abaixo *no celular*:\n${cleanLink}\n\n📱 Siga as instruções na tela (selfie + documento).\n\n⚠️ Use boa iluminação e tire o óculos se necessário.\n\n✅ *Quando terminar, responda aqui:* PRONTO\n\nQualquer dúvida, estamos aqui! ☀️`;
-    const ok = await sendWhatsAppMessage(supabase, customer, message, 'facial_link');
-    // H1: marca facial_link_sent_at e agenda re-envio em 30s se permanecer null
-    try {
-      await supabase.from('customers').update({ facial_link_sent_at: new Date().toISOString() }).eq('id', customerId);
-    } catch (_) { /* coluna pode não existir; ignora */ }
 
-    setTimeout(async () => {
+    const ok = await sendWhatsAppMessage(supabase, customer, message, 'facial_link');
+
+    if (ok) {
+      try {
+        await supabase.from('customers').update({
+          facial_link_sent_at: new Date().toISOString(),
+          error_message: null,
+          updated_at: new Date().toISOString(),
+        }).eq('id', customerId);
+      } catch (_) {}
+      try {
+        await supabase.from('conversations').insert({
+          customer_id: customerId,
+          message_direction: 'outbound',
+          message_type: 'text',
+          conversation_step: 'aguardando_facial',
+          message_text: message,
+        });
+      } catch (_) {}
+      console.log(`   ✅ Link facial enviado ao cliente ${customerId}`);
+    } else {
+      console.error(`   ❌ Link facial NÃO enviado (todos canais falharam) — customer ${customerId}`);
+      try {
+        await supabase.from('customers').update({
+          error_message: 'Link facial: todos os canais WhatsApp falharam (Whapi/Evolution).',
+          updated_at: new Date().toISOString(),
+        }).eq('id', customerId);
+      } catch (_) {}
+      try {
+        await supabase.from('conversations').insert({
+          customer_id: customerId,
+          message_direction: 'outbound',
+          message_type: 'text_failed',
+          conversation_step: 'aguardando_facial',
+          message_text: `[FALHA WhatsApp] ${message}`,
+        });
+      } catch (_) {}
+    }
+
+    // Retry interno (best-effort): 30s e 120s
+    const scheduleRetry = (ms, label) => setTimeout(async () => {
       try {
         const { data: chk } = await supabase
           .from('customers').select('status, link_facial, facial_link_sent_at')
           .eq('id', customerId).maybeSingle();
-        if (chk && chk.status === 'aguardando_facial' && chk.link_facial) {
-          // Reenvia se ainda está aguardando depois de 30s
-          console.log(`   🔁 [facial-retry] reenviando link facial para ${customerId}`);
-          await sendWhatsAppMessage(supabase, customer, message, 'facial_link_retry');
+        if (chk && chk.link_facial && !chk.facial_link_sent_at &&
+            ['awaiting_signature','aguardando_facial'].includes(chk.status)) {
+          console.log(`   🔁 [facial-retry ${label}] reenviando link para ${customerId}`);
+          const ok2 = await sendWhatsAppMessage(supabase, customer, message, `facial_link_${label}`);
+          if (ok2) {
+            await supabase.from('customers').update({
+              facial_link_sent_at: new Date().toISOString(),
+              error_message: null,
+              updated_at: new Date().toISOString(),
+            }).eq('id', customerId);
+            await supabase.from('conversations').insert({
+              customer_id: customerId,
+              message_direction: 'outbound',
+              message_type: 'text',
+              conversation_step: 'aguardando_facial',
+              message_text: message,
+            }).catch(() => {});
+          }
         }
-      } catch (e) { console.warn(`   ⚠️ [facial-retry] falhou: ${e.message}`); }
-    }, 30_000);
+      } catch (e) { console.warn(`   ⚠️ [facial-retry ${label}] erro: ${e.message}`); }
+    }, ms);
+    scheduleRetry(30_000, 'retry_30s');
+    scheduleRetry(120_000, 'retry_120s');
+
+    return ok;
   } catch (e) {
     console.error(`   ❌ sendFacialLink erro: ${e.message}`);
+    return false;
   }
+}
+
+// Exportado para o endpoint /retry-facial-link do server.mjs
+export async function retryFacialLinkForCustomer(customerId) {
+  const supabase = getSupabase();
+  if (!supabase) return { ok: false, reason: 'no_supabase' };
+  const { data: c } = await supabase
+    .from('customers').select('link_facial, link_assinatura').eq('id', customerId).single();
+  const link = c?.link_facial || c?.link_assinatura;
+  if (!link) return { ok: false, reason: 'no_link' };
+  const ok = await sendFacialLinkToCustomer(customerId, link);
+  return { ok, reason: ok ? 'sent' : 'send_failed' };
 }
 
 let _whapiSettings = null;
@@ -1741,8 +1813,20 @@ export async function executarAutomacao(customerId, options = {}) {
             await delay(1000);
             
             // Confirmar OTP
-            const confirmOtpClicked = await clickText('Confirmar') || await clickText('Verificar') || await clickText('Enviar');
-            if (confirmOtpClicked) console.log('   ✅ OTP confirmado');
+            // Confirmar OTP — clicar em qualquer botão de confirmação (sem helper externo)
+            let confirmOtpClicked = false;
+            for (const label of ['Confirmar', 'Verificar', 'Enviar', 'Validar', 'Continuar']) {
+              try {
+                const btn = page.locator(`button:has-text("${label}")`).first();
+                if (await btn.count() > 0 && await btn.isVisible().catch(() => false)) {
+                  await btn.click({ timeout: 5000 });
+                  console.log(`   ✅ OTP confirmado (botão "${label}")`);
+                  confirmOtpClicked = true;
+                  break;
+                }
+              } catch (_) {}
+            }
+            if (!confirmOtpClicked) console.log('   ⚠️  Nenhum botão de confirmar OTP encontrado (auto-submit?)');
             
             await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
             await delay(3000);
