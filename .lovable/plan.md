@@ -1,80 +1,77 @@
-## Problema observado
 
-Screenshot do teste:
-1. Bot: "Informe seu e-mail" → user respondeu
-2. Bot: "Qual o seu CEP?" → user respondeu **"Oi me chamo Luciano"** (não era CEP)
-3. Bot: "Qual seu nome para eu adicionar aqui?" → user: "Luciano"
+## Objetivo
 
-O sistema **ignorou** "me chamo Luciano" e ainda perguntou o nome no passo seguinte. O `resolveLandingStep` que adicionamos antes deveria pular o passo de nome — mas não pulou porque o nome nunca foi salvo.
+Trocar o cérebro do classificador de intenção do bot (hoje Gemini 2.0 Flash) por **OpenAI GPT-5-mini**, usando sua chave própria da OpenAI. Isso resolve o bug onde respostas como "tá", "pode ser", "bora" eram classificadas como `outro` e travavam o fluxo.
 
-## Causa raiz
+## Por que GPT-5-mini
 
-`extractCaptures` (linha 217 de `supabase/functions/whapi-webhook/handlers/conversational/index.ts`) só tenta extrair nome quando o **step atual** tem `capture.field === "name"` habilitada:
+- Melhor compreensão de gírias e variações do português falado ("tá bom", "fechou", "simbora", "pode crer").
+- Custo baixíssimo nesse uso (~$0.0001 por classificação, classifier roda só quando regex falha).
+- Mantém o pre-pass de regex (resolve 70% sem chamar IA), então o custo real é marginal.
 
-```ts
-if (enabled.has("name")) {
-  const n = extractNome(messageText);
-  ...
-}
+## Etapas
+
+### 1. Adicionar a chave OpenAI (interação do usuário)
+- Use o tool de secrets para pedir `OPENAI_API_KEY`.
+- Onde pegar: https://platform.openai.com/api-keys → "Create new secret key".
+- Você precisa ter crédito na conta OpenAI (mínimo $5).
+
+### 2. Criar helper compartilhado OpenAI
+Novo arquivo: `supabase/functions/_shared/openai.ts`
+- Função `openaiChat({ model, messages, jsonSchema, temperature })` similar ao `ai-gateway.ts`.
+- Lê `OPENAI_API_KEY` do env.
+- Chama `https://api.openai.com/v1/chat/completions`.
+- Suporta `response_format: json_schema` (structured output nativo do GPT-5).
+- Trata erros 429 (rate limit), 401 (chave inválida), 402 (sem crédito).
+
+### 3. Refatorar o classificador
+Editar: `supabase/functions/whapi-webhook/handlers/conversational/intent-classifier.ts`
+- Manter o pre-pass regex (não mexer — funciona bem).
+- Trocar a chamada Gemini por OpenAI GPT-5-mini quando regex falhar.
+- Manter a mesma interface `ClassifyResult` (intent, confidence, source).
+- `source` passa a ser `"regex" | "openai" | "fallback"`.
+- Prompt fica praticamente igual, mas com uma linha extra: "Considere gírias brasileiras: 'tá', 'fechou', 'bora', 'pode crer' = afirmacao; 'nem' = negacao".
+
+### 4. Passar a chave para o classificador
+- O orchestrator (`handlers/conversational/index.ts` ou `whapi-webhook/index.ts`) hoje passa `geminiApiKey` para `classifyIntent`. Vamos renomear o parâmetro para `openaiApiKey` e ler `Deno.env.get("OPENAI_API_KEY")`.
+- Gemini continua sendo usado para OCR de conta de luz (`extract-pdf-text`) — **não mexer**, está funcionando bem.
+
+### 5. Validação
+- Deploy automático da edge function `whapi-webhook`.
+- Teste com 5 mensagens reais via curl:
+  - "tá bom" → deve virar `afirmacao` (hoje vira `outro`)
+  - "pode ser" → `afirmacao`
+  - "fechou" → `afirmacao` ou `quer_cadastrar`
+  - "nem rola" → `negacao`
+  - "vocês atendem SP?" → `tem_duvida`
+- Conferir logs em `supabase--edge_function_logs whapi-webhook` para ver `source: "openai"` aparecendo.
+
+## Detalhes técnicos
+
+```text
+ANTES (Gemini):
+mensagem → regex → [falhou] → Gemini 2.0 Flash → intent
+
+DEPOIS (OpenAI):
+mensagem → regex → [falhou] → GPT-5-mini → intent
+                              ↑
+                              novo: melhor com gírias PT-BR
 ```
 
-No step de CEP, `name` não está habilitado → `extractNome` nunca roda → nome não é salvo → no próximo passo (que pergunta nome), `resolveLandingStep` vê `customer.name = null` e mantém o passo. Bot repete a pergunta.
+**Arquivos tocados:** 2 criados/editados, 0 removidos.
+- `supabase/functions/_shared/openai.ts` (novo)
+- `supabase/functions/whapi-webhook/handlers/conversational/intent-classifier.ts` (editar)
+- Talvez 1 linha em `whapi-webhook/index.ts` se for onde a key é injetada.
 
-Mesmo se rodasse a extração, faltaria gravar `name_source = "self_introduced"` para o `TRUSTED_NAME_SKIP` ativar — hoje a linha 755 só seta `captureUpdates.name`, sem `name_source`.
+**Custo estimado:** ~$0.50/mês para 5.000 mensagens (assumindo 30% chegam ao LLM após regex).
 
-## Solução (cirúrgica, só no conversational engine)
+**O que NÃO muda:**
+- Fluxo de cadastro, captura de nome, OCR de conta, envio de mídia, RLS, banco — tudo intocado.
+- Gemini continua no OCR (`extract-pdf-text`) — é multimodal e barato lá.
 
-Arquivo: `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
+## O que fica para depois (não incluído neste plano)
 
-### 1. Sempre tentar extrair nome em texto livre (~linha 233)
+- Bug da captura de nome em texto livre ("oi me chamo Luciano").
+- Handler de resposta livre (`answerFreeQuestion`) — você escolheu fazer só o classificador agora.
 
-Remover o gate `enabled.has("name")` só para nome. Os outros campos (valor/cpf/telefone) continuam dependendo de configuração do step. A guarda real (lock por OCR/user_confirmed, etc.) já está feita lá em baixo (linha 747).
-
-```ts
-// Nome: sempre tenta — guard real fica no consumer (linha 754).
-const n = extractNome(messageText);
-if (n) out.name = n;
-```
-
-### 2. Gravar `name_source = "self_introduced"` junto com `name` (~linha 754-756)
-
-```ts
-if (extracted.name && !nameLocked && (stepIsAskName || !ctx.customer.name)) {
-  captureUpdates.name = extracted.name;
-  captureUpdates.name_source = "self_introduced";
-}
-```
-
-### 3. Re-resolver landing step após captura (~depois da linha 760)
-
-Se o cliente acabou de preencher o campo que o próximo step pediria, pular agora:
-
-```ts
-if (captureUpdates.name) {
-  (ctx.customer as any).name = captureUpdates.name;
-  (ctx.customer as any).name_source = captureUpdates.name_source;
-  const advanced = resolveLandingStep(currentStep);
-  if (advanced && advanced.id !== currentStep.id) {
-    currentStep = advanced;
-    stepKey = currentStep.id;
-    console.log(`[skip-step] post-capture: jumped to ${currentStep.step_key}`);
-  }
-}
-```
-
-(idem para `electricity_bill_value`/`cpf`/`phone_whatsapp` se quiser — mas o bug reportado é só nome; mantenho o escopo no nome).
-
-### 4. Deploy
-
-Apenas `whapi-webhook`. Testar com o mesmo lead após reset.
-
-## O que NÃO muda
-
-- Fluxo `/admin/fluxos` do consultor
-- `safeAssignName`, lock de OCR/user_confirmed (continua ativo)
-- `bot-flow.ts` (fluxo Camila legado)
-- Schemas, RLS, edge functions
-
-## Critério de sucesso
-
-Lead manda "Oi me chamo X" em qualquer step do fluxo customizado → nome é gravado com `self_introduced` → no próximo step que pediria nome, `resolveLandingStep` pula automaticamente para o passo seguinte. Log esperado: `[skip-step] post-capture: jumped to <step>`.
+Se depois de 1 semana o bot estiver respondendo "sim/tá/pode" corretamente, atacamos os outros 2 bugs.
