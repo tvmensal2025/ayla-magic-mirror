@@ -3179,11 +3179,25 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       // Usa rescue_attempts como contador (coluna já existente) para não depender de coluna nova
       const redirectCount = customer.rescue_attempts || 0;
       if (redirectCount >= 1) {
-        console.warn(`⚠️ [ANTI-LOOP] ${customer.id} já foi redirecionado ${redirectCount}x. Forçando finalização.`);
+        console.warn(`⚠️ [ANTI-LOOP] ${customer.id} já foi redirecionado ${redirectCount}x. Escalando para humano.`);
         logStructured("warn", "force_finalize_after_redirects", {
           customer_id: customer.id, errors: validation.errors, redirects: redirectCount,
         });
-        // Não redirecionar mais — seguir pro portal mesmo com erros
+        // Sprint C2: em vez de ficar mudo ou seguir pro portal com lixo, escala pra humano com diagnóstico
+        updates.bot_paused = true;
+        updates.bot_paused_reason = "dados_incompletos_pos_loop";
+        updates.bot_paused_at = new Date().toISOString();
+        updates.conversation_step = "aguardando_humano";
+        try {
+          await supabase.from("bot_handoff_alerts").insert({
+            customer_id: customer.id,
+            consultant_id: customer.consultant_id || consultorId,
+            reason: "dados_incompletos_pos_loop",
+            metadata: { errors: validation.errors, redirects: redirectCount },
+          });
+        } catch (e) { console.warn("[anti-loop] handoff alert falhou:", (e as Error).message); }
+        reply = "Vou te passar pra um consultor humano agora pra gente finalizar com calma, ok? Em instantes alguém te responde por aqui. 👋";
+        return { reply, updates };
       } else {
         updates.rescue_attempts = redirectCount + 1;
         
