@@ -3459,12 +3459,31 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     default: {
-      console.warn(`⚠️ Step desconhecido: ${step} — resetando para aguardando_conta`);
+      // Se o consultor tem fluxo custom ativo, NUNCA reseta para aguardando_conta:
+      // tenta redispatch idempotente do passo atual e mantém. Evita derrubar
+      // o lead pro Passo 1 quando o resolver não conseguiu mapear o step.
       if (step?.startsWith("editing_")) {
         reply = "❌ Opção inválida. Digite novamente:";
       } else {
-        updates.conversation_step = "aguardando_conta";
-        reply = `👋 Olá! Eu sou o assistente de *${nomeRepresentante}* em parceria com a *iGreen Energy*!\n\n📸 *Envie uma FOTO ou PDF da sua conta de energia* para começarmos!\n\nFormatos aceitos: JPG, PNG ou PDF`;
+        let hasCustomFlow = false;
+        try {
+          const { data: flow } = await supabase
+            .from("bot_flows").select("id")
+            .eq("consultant_id", customer.consultant_id)
+            .eq("is_active", true).maybeSingle();
+          hasCustomFlow = !!flow?.id;
+        } catch (_) { /* noop */ }
+
+        if (hasCustomFlow) {
+          console.warn(`⚠️ Step "${step}" não roteado — fluxo custom ativo, redispatching idempotente`);
+          const ok = await dispatchStepFromFlow(step).catch(() => false);
+          (updates as any).__inline_sent = ok || true;
+          reply = "";
+        } else {
+          console.warn(`⚠️ Step desconhecido: ${step} — resetando para aguardando_conta`);
+          updates.conversation_step = "aguardando_conta";
+          reply = `👋 Olá! Eu sou o assistente de *${nomeRepresentante}* em parceria com a *iGreen Energy*!\n\n📸 *Envie uma FOTO ou PDF da sua conta de energia* para começarmos!\n\nFormatos aceitos: JPG, PNG ou PDF`;
+        }
       }
       break;
     }
