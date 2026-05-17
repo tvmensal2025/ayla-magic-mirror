@@ -1603,10 +1603,14 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       return _finalize(stepKey, await goToStep(nextStep, restoreDetourUpdates));
     }
   }
-  // Sprint A2: passo terminal nunca deve cair no fallback AI (risco de jogar lead de volta no funil)
+  // Sprint A2: passo terminal nunca deve cair no fallback AI nem voltar pra cadastro —
+  // o lead já está finalizando. Mantém no passo, sem regredir para documento/conta.
   if (currentStep.step_type === "finalizar_cadastro") {
-    console.log(`[conversational] terminal step ${currentStep.step_key} → forçando cadastro em vez de fallback`);
-    return _finalize(stepKey, await resolveTransition({ goto_special: "cadastro" } as DbTransition));
+    console.log(`[conversational] terminal step ${currentStep.step_key} → mantendo (sem regressão)`);
+    return _finalize(stepKey, {
+      reply: "",
+      updates: { conversation_step: currentStep.id, __inline_sent: true, ...captureUpdates, ...restoreDetourUpdates },
+    });
   }
   if (fb.mode === "ai" && fb.ai_prompt && !strictMode) {
     const candidates = dbSteps.filter(s => s.is_active && s.id !== currentStep.id).map(s => ({ id: s.id, step_key: s.step_key }));
