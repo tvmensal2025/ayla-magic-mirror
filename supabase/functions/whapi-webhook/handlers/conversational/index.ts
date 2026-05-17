@@ -1001,10 +1001,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const cadastroStep = stepTypeToCadastro(s.step_type);
     let nextConversationStep = cadastroStep || s.id;
 
-    // Decide se este step vai cascatear (wait_for=none + fallback.goto). Se sim,
-    // ele é enviado inline (não como reply) e o último da cascata vira reply.
+    // Decide se este step vai cascatear (wait_for=none). Cascade segue fallback.goto
+    // OU, se o consultor deixou repeat/sem goto mas marcou none, próximo por position.
+    const hasNextActive = !!dbSteps.find((step) => step.is_active && step.position > s.position);
+    const gotoTargetId = s.fallback?.mode === "goto" ? s.fallback?.goto_step_id : null;
     const willCascade = !cadastroStep && s.wait_for === "none"
-      && s.fallback?.mode === "goto" && !!s.fallback.goto_step_id;
+      && (!!gotoTargetId || hasNextActive);
 
     const first = await emitStep(s, !willCascade);
     let replyText = first.replyText;
