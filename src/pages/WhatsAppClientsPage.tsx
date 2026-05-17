@@ -92,7 +92,7 @@ export default function WhatsAppClientsPage() {
       if (!consultant) { toast.error("Consultor não encontrado"); return; }
       const { data, error } = await supabase.from("customers").select("*").eq("consultant_id", consultant.id).order("created_at", { ascending: false });
       if (error) throw error;
-      setCustomers(data || []);
+      setCustomers((data as any) || []);
     } catch (error: any) {
       console.error("Erro ao carregar clientes:", error);
       toast.error("Erro ao carregar clientes");
