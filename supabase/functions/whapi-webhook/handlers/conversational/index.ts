@@ -1253,28 +1253,10 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       const nextWillCascade = !cascadeCadastroStep && nextStep.wait_for === "none"
         && !!findCascadeNext(nextStep);
 
-      // C1: Promise.race com timeout — se passar de 12s, paramos cascade e
-      // mantemos o lead no último passo bem-sucedido (vira drip no próximo turno).
-      let emit: { replyText: string; inlineSent: boolean };
-      try {
-        emit = await Promise.race([
-          emitStep(nextStep, !nextWillCascade),
-          new Promise<{ replyText: string; inlineSent: boolean }>((_r, rej) =>
-            setTimeout(() => rej(new Error("cascade_hop_timeout")), 12_000),
-          ),
-        ]);
-      } catch (e) {
-        console.warn(`[conversational] ⏱️ cascade hop timeout em ${nextStep.step_key} (mantendo lead em ${cursor.step_key})`);
-        break;
-      }
-
-      if (emit.replyText) replyText = emit.replyText;
-      inlineSent = inlineSent || emit.inlineSent;
+      // PERSIST FIRST: marca o lead já no nextStep ANTES de enviar mídia pesada.
+      // Se o envio demorar e a Edge Function reentrar, não regredimos pro passo
+      // anterior nem reprocessamos a captura.
       nextConversationStep = cascadeCadastroStep || nextStep.id;
-      console.log(`[conversational] auto-cascade ${cursor.step_key} → ${nextStep.step_key} (wait_for=${nextStep.wait_for})`);
-
-      // Persiste o avanço por hop (anti-race: se função timeout ou outro webhook reentrar,
-      // não regride pro passo anterior). Best-effort, ignora falhas.
       if (ctx.customer?.id) {
         try {
           await ctx.supabase
@@ -1283,6 +1265,26 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
             .eq("id", ctx.customer.id);
         } catch (_) { /* noop */ }
       }
+
+      // Timeout ampliado para 30s — vídeos/áudios pesados (boas_vindas/como_funciona)
+      // chegam a levar 15-25s de upload+envio. Se passar de 30s, paramos cascade
+      // mas o lead já está persistido no passo correto.
+      let emit: { replyText: string; inlineSent: boolean };
+      try {
+        emit = await Promise.race([
+          emitStep(nextStep, !nextWillCascade),
+          new Promise<{ replyText: string; inlineSent: boolean }>((_r, rej) =>
+            setTimeout(() => rej(new Error("cascade_hop_timeout")), 30_000),
+          ),
+        ]);
+      } catch (e) {
+        console.warn(`[conversational] ⏱️ cascade hop timeout em ${nextStep.step_key} (lead persistido em ${nextConversationStep})`);
+        break;
+      }
+
+      if (emit.replyText) replyText = emit.replyText;
+      inlineSent = inlineSent || emit.inlineSent;
+      console.log(`[conversational] auto-cascade ${cursor.step_key} → ${nextStep.step_key} (wait_for=${nextStep.wait_for})`);
 
       // G1: telemetria por hop — sem isso parece que pulamos passos.
       try {
