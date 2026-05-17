@@ -1104,7 +1104,9 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       }
       return dbSteps.find((step) => step.is_active && step.position > cur.position);
     };
-    for (let guard = 0; cursor?.wait_for === "none" && guard < 6; guard++) {
+    // C1: guard reduzido (6→3) e cada hop com timeout de 12s — se a Edge Function
+    // estourar 20s, perdíamos passos no meio da cascata sem deixar rastro.
+    for (let guard = 0; cursor?.wait_for === "none" && guard < 3; guard++) {
       const nextStep = findCascadeNext(cursor);
       if (!nextStep) {
         console.log(`[conversational] cascade parou em step=${cursor.step_key} (sem próximo step ativo)`);
@@ -1115,16 +1117,42 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         break;
       }
 
-      // text_delay_ms do próximo passo é aplicado dentro de emitStep (após mídia).
-
       const cascadeCadastroStep = stepTypeToCadastro(nextStep.step_type);
       const nextWillCascade = !cascadeCadastroStep && nextStep.wait_for === "none"
         && !!findCascadeNext(nextStep);
-      const emit = await emitStep(nextStep, !nextWillCascade);
+
+      // C1: Promise.race com timeout — se passar de 12s, paramos cascade e
+      // mantemos o lead no último passo bem-sucedido (vira drip no próximo turno).
+      let emit: { replyText: string; inlineSent: boolean };
+      try {
+        emit = await Promise.race([
+          emitStep(nextStep, !nextWillCascade),
+          new Promise<{ replyText: string; inlineSent: boolean }>((_r, rej) =>
+            setTimeout(() => rej(new Error("cascade_hop_timeout")), 12_000),
+          ),
+        ]);
+      } catch (e) {
+        console.warn(`[conversational] ⏱️ cascade hop timeout em ${nextStep.step_key} (mantendo lead em ${cursor.step_key})`);
+        break;
+      }
+
       if (emit.replyText) replyText = emit.replyText;
       inlineSent = inlineSent || emit.inlineSent;
       nextConversationStep = cascadeCadastroStep || nextStep.id;
       console.log(`[conversational] auto-cascade ${cursor.step_key} → ${nextStep.step_key} (wait_for=${nextStep.wait_for})`);
+
+      // G1: telemetria por hop — sem isso parece que pulamos passos.
+      try {
+        await ctx.supabase.from("bot_step_transitions").insert({
+          customer_id: ctx.customer?.id || null,
+          consultant_id: consultantId,
+          phone: ctx.remoteJid?.replace(/\D/g, "") || null,
+          from_step: cursor.step_key,
+          to_step: nextStep.step_key,
+          intent: "cascade",
+        });
+      } catch (_) { /* noop */ }
+
       if (cascadeCadastroStep) break;
       cursor = nextStep;
     }
