@@ -388,6 +388,14 @@ export default function FluxoCamila() {
             <h1 className="text-lg sm:text-xl font-bold truncate">Fluxo da Camila</h1>
             <p className="text-xs text-muted-foreground">Você decide o que ela fala, em que ordem, e pra onde vai depois.</p>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => document.getElementById("faq-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className="shrink-0"
+          >
+            <HelpCircle className="h-4 w-4 mr-1" /> Ir para FAQ
+          </Button>
         </div>
       </header>
 
