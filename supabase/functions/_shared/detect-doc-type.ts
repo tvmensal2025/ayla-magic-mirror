@@ -151,7 +151,14 @@ async function callGemini(prompt: string, imagePart: any, apiKey: string, model:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }, imagePart] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 400, responseMimeType: "application/json" },
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 2048,
+            responseMimeType: "application/json",
+            // Crítico: desliga o "thinking" do gemini-2.5. Sem isto o thinking
+            // consome todo o orçamento de tokens e a resposta visível volta vazia.
+            thinkingConfig: { thinkingBudget: 0 },
+          },
         }),
         signal: ctrl.signal,
       },
