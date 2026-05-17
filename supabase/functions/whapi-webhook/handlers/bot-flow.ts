@@ -3452,14 +3452,23 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const confirmou = /\b(pronto|prontinho|conclu[ií]do|conclui|conclu[ií]|finalizei|terminei|terminado|finalizado|fiz|feito|feita|ok|okay|okk?|certo|sim|j[aá]\s+(assinei|fiz|tirei|validei|terminei|terminado)|assinei|tirei|validei|selfie|liberado|consegui)\b/i.test(txt);
       if (confirmou && link) {
         updates.facial_confirmed_at = new Date().toISOString();
-        updates.conversation_step = "complete";
+        updates.conversation_step = "cadastro_em_analise";
         updates.status = "cadastro_concluido";
-        reply = "🎉 *Cadastro concluído com sucesso!*\n\nRecebemos a confirmação da sua validação facial. ✅\n\nEm breve você receberá os próximos passos da iGreen Energy. Obrigado por confiar em nós! ☀️💚";
+        const _firstName = String(customer.name || "").trim().split(/\s+/)[0] || "";
+        reply = `🎉 *Validação facial confirmada!*\n\nPrimeiro, parabéns ${_firstName ? _firstName + " " : ""}por dar esse passo rumo à economia! 💚\n\nSeu cadastro foi enviado para a equipe da *iGreen Energy* e agora entra na fila de análise.\n\n⏳ A aprovação costuma sair em *24 a 48 horas úteis*.\n\nAssim que estiver aprovado eu te aviso por aqui com os próximos passos. Pode relaxar — daqui em diante é com a gente. ☀️`;
       } else if (link) {
         reply = "📸 *Última etapa: Validação Facial*\n\n👉 Abra este link no seu celular e siga as instruções:\n" + `${link}\n\n` + "Quando terminar a selfie, me responda *PRONTO* aqui que finalizamos seu cadastro! ✅";
       } else {
         reply = "⏳ Estamos preparando o link da validação facial. Você será notificado em instantes!";
       }
+      break;
+    }
+
+    case "cadastro_em_analise": {
+      // Lead já concluiu a selfie. Aguardando aprovação da iGreen (24-48h).
+      // Não voltar para aguardando_conta nem reiniciar fluxo. Só responder educadamente.
+      const _firstName = String(customer.name || "").trim().split(/\s+/)[0] || "";
+      reply = `Oi${_firstName ? " " + _firstName : ""}! 💚 Seu cadastro ainda está em análise pela equipe da *iGreen Energy*.\n\n⏳ O prazo de aprovação é de *24 a 48 horas úteis* — assim que sair, eu te aviso aqui mesmo.\n\nSe precisar de qualquer coisa enquanto isso, é só chamar! ☀️`;
       break;
     }
 
