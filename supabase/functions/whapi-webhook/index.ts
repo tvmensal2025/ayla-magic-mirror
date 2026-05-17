@@ -318,6 +318,12 @@ Deno.serve(async (req) => {
         }
       } else {
         customer = newCustomer;
+        // 🎉 Notifica o consultor (fire-and-forget)
+        notifyNewLead(superAdminConsultantId, {
+          id: newCustomer.id,
+          name: newCustomer.name,
+          phone_whatsapp: newCustomer.phone_whatsapp,
+        }).catch((e) => console.warn("[notify-new-lead] falhou:", (e as Error).message));
       }
     }
 
