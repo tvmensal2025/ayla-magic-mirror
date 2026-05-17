@@ -152,8 +152,12 @@ export async function classifyIntent(
   if (fast) return { intent: fast, confidence: 0.95, source: "regex" };
   if (!text.trim()) return { intent: "outro", confidence: 0, source: "fallback" };
 
+  // Sprint A4: log de visibilidade — confirma que OPENAI_API_KEY chega no runtime
+  const hasOpenAI = !!Deno.env.get("OPENAI_API_KEY");
+  console.log(`[classifier] route step=${currentStep} hasOpenAI=${hasOpenAI} hasGemini=${!!geminiApiKey} textLen=${text.length}`);
+
   // Prefer OpenAI when configured (better PT-BR slang understanding).
-  if (Deno.env.get("OPENAI_API_KEY")) {
+  if (hasOpenAI) {
     const r = await classifyOpenAI(text, currentStep);
     if (r) return r;
   }
