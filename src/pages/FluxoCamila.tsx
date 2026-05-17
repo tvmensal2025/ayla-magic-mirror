@@ -527,7 +527,7 @@ export default function FluxoCamila() {
           <Plus className="h-4 w-4 mr-2" /> Adicionar passo
         </Button>
 
-        {flowId && <FaqSection flowId={flowId} />}
+        {flowId && <div id="faq-section" className="scroll-mt-20"><FaqSection flowId={flowId} /></div>}
       </main>
 
       <Dialog open={testOpen} onOpenChange={setTestOpen}>
