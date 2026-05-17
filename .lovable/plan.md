@@ -1,81 +1,84 @@
-# Diagnóstico: por que o cliente não recebeu a msg do OTP nem o link da facial
+Diagnóstico confirmado:
 
-## O que aconteceu (lead `c52d49af...` - MÁRCIA RECHE MARFIL)
+- O link final foi gerado e salvo no banco para a cliente `c52d49af...`:
+  `https://digital.igreenenergy.com.br/validacao-codigo/1460954?id=129414&sendcontract=true`
+- O problema é que o worker do portal ainda envia OTP e link facial via Evolution em `notificarClienteOTP()` e `sendFacialLinkToCustomer()`. Como a instância Evolution do consultor está `needs_reconnect` e o projeto está configurado com `whapi_token`, a mensagem final não chegou ao cliente.
+- O Whapi webhook atual não tem interceptação de OTP antes do roteamento normal do bot. Se o cliente mandar só o código, pode cair como mensagem comum/nova conversa em vez de alimentar `/confirm-otp` do worker.
+- A confirmação de telefone repetiu porque o fluxo manda texto numerado `1/2` e também tenta botão. Além disso, o texto `1` foi bloqueado para evitar falso positivo, então o cliente precisou confirmar de novo com o botão.
+- O complemento hoje é só texto: não existe botão de `Pular` nem botão de `Acrescentar complemento` mapeado.
+- As demoras vêm de dois pontos: envios de mídia/Whapi aguardando tempo demais dentro da Edge Function e perguntas do cliente/off-topic que podem repetir o passo em vez de responder e retomar o mesmo ponto do funil.
 
-1. ✅ Playwright preencheu o portal iGreen perfeitamente (passos 1→11).
-2. ✅ Portal redirecionou para `/validacao-codigo/...` (tela de OTP de 6 dígitos).
-3. ❌ Worker tentou avisar o cliente no WhatsApp:
-   ```
-   ⚠️  Falha ao notificar cliente sobre OTP: 500
-   ```
-4. ⏳ Worker entrou em polling de OTP por 300s.
-5. Cliente acabou em `status=awaiting_signature` (OTP processado por outro caminho, mas a msg pedindo nunca chegou).
+Plano de implementação:
 
-## Causa raiz
+1. Tornar o worker 100% compatível com Whapi para OTP e link facial
+   - Criar helper de envio no `worker-portal/playwright-automation.mjs` com prioridade Whapi.
+   - Usar `settings.whapi_token` / `WHAPI_TOKEN` e `whapi_api_url` para enviar texto em `/messages/text`.
+   - Manter Evolution só como fallback opcional, nunca como canal principal nesse fluxo.
+   - Reusar esse helper em:
+     - `notificarClienteOTP()`
+     - `sendFacialLinkToCustomer()`
+   - Registrar claramente no log se a mensagem foi enviada por Whapi, Evolution ou falhou.
 
-A função `notificarClienteOTP` (worker-portal/playwright-automation.mjs:497) busca a instância do consultor **sem filtrar por status**:
+2. Garantir captura de OTP no Whapi
+   - Adicionar no `supabase/functions/whapi-webhook/index.ts` um interceptador de OTP antes de criar/retomar lead e antes de rodar o bot.
+   - Procurar cliente do mesmo telefone/consultor com status `awaiting_otp` ou `portal_submitting`.
+   - Salvar `otp_code` e `otp_received_at` no cliente.
+   - Chamar o worker `POST /confirm-otp` usando `portal_worker_url`/`WORKER_PORTAL_URL` e `worker_secret`.
+   - Responder ao cliente: “Código recebido, estou processando”.
+   - Não deixar OTP cair no fluxo conversacional normal.
 
-```js
-.from('whatsapp_instances').select('instance_name')
-.eq('consultant_id', customer.consultant_id).limit(1).single();
-```
+3. Garantir envio obrigatório do link facial
+   - Depois que o worker detectar ou construir `validacao-codigo/...`, salvar `link_facial` e `link_assinatura` como já faz.
+   - Enviar o link via Whapi imediatamente.
+   - Se o primeiro envio falhar, tentar novamente com backoff curto.
+   - Se ainda falhar, registrar alerta em `bot_handoff_alerts` e manter `error_message`, mas sem perder o link salvo.
+   - Evitar link duplicado colado duas vezes: normalizar antes do envio quando vier repetido no texto.
 
-Consulta no banco para o consultor `0c2711ad-4836-41e6-afba-edd94f698ae3`:
+4. Corrigir botões de telefone para não aparecer duplicado
+   - Em Whapi, quando houver botão real, enviar a pergunta sem lista `1/2` no corpo.
+   - O fallback numerado só aparece se `sendButtons` falhar.
+   - Aceitar `1` e `2` também como texto válido apenas nos steps de confirmação, para não travar o cliente caso ele responda digitando.
+   - Mapear:
+     - `sim_phone` ou `1` → confirmar telefone
+     - `editar_phone` ou `2` → pedir outro número
 
-| instance_name | status |
-|---|---|
-| `igreen-0c2711ad4836` | **`needs_reconnect`** |
+5. Adicionar botões no complemento
+   - No step `ask_complement`, enviar botões Whapi:
+     - `skip_complement` → salvar complemento vazio e avançar
+     - `add_complement` → pedir para digitar o complemento e manter no mesmo step
+   - Mapear também texto livre:
+     - `não`, `nao`, `pular`, `sem complemento`, `skip_complement` → pular
+     - qualquer outro texto após escolher adicionar → salvar como complemento
+   - Ajustar a mensagem para não depender só de “digite NÃO/PULAR”.
 
-A instância existe mas está desconectada do Evolution → POST `/message/sendText/igreen-0c2711ad4836` retorna **HTTP 500**.
+6. Proteger perguntas do cliente sem quebrar o funil
+   - Antes de repetir um step de cadastro, detectar pergunta/off-topic.
+   - Se houver FAQ/QA configurado, responder a dúvida e manter o mesmo `conversation_step`.
+   - Depois da resposta, mandar um lembrete curto do passo atual, sem avançar indevidamente.
+   - Aplicar isso nos steps críticos: documento, confirmação, telefone, email, complemento, finalizar.
 
-A função `sendFacialLinkToCustomer` (linha 544) tem **o mesmo bug** → quando o portal liberar o link facial, a msg também vai falhar silenciosamente.
+7. Reduzir travamentos e demora
+   - Diminuir waits longos dentro do envio Whapi para texto/botões.
+   - Para mídia pesada, não deixar a Edge Function depender de timeout longo para avançar o estado.
+   - Persistir o próximo `conversation_step` antes de operações demoradas quando for seguro.
+   - Melhorar logs de transição para identificar exatamente em qual step parou.
 
-## Fix proposto (worker-portal/playwright-automation.mjs)
+8. Validação após implementar
+   - Testar fluxo Whapi com lead de teste do início ao fim:
+     - abertura → nome → valor → conta → documento → telefone → email → complemento → finalizar → OTP → link facial.
+   - Conferir no banco:
+     - `conversation_step`
+     - `status`
+     - `otp_code`
+     - `link_facial`
+     - `conversations`
+     - `bot_step_transitions`
+   - Confirmar que telefone não repete botão/texto, complemento tem botões e o link final é enviado ao cliente.
 
-### 1. Filtrar instância conectada nas duas funções
+Resultado esperado:
 
-Substituir as duas queries por:
-```js
-const { data: inst } = await supabase
-  .from('whatsapp_instances')
-  .select('instance_name, status')
-  .eq('consultant_id', customer.consultant_id)
-  .in('status', ['connected', 'open'])
-  .order('updated_at', { ascending: false })
-  .limit(1)
-  .maybeSingle();
-instanceName = inst?.instance_name || null;
-```
-
-### 2. Quando não houver instância conectada, registrar alerta e seguir
-
-- Log claro: `⚠️ Instância desconectada (needs_reconnect) — cliente não notificado, manter polling`
-- Inserir em `bot_handoff_alerts` com `reason='whatsapp_instance_offline'`, `customer_id`, `consultant_id` para o painel mostrar.
-- Atualizar `customers.error_message` com texto curto (`"Instância WhatsApp desconectada ao pedir OTP"`) para visibilidade no CRM, **sem mudar `status`** (segue `awaiting_otp` / `portal_submitting`).
-
-### 3. Tratar HTTP 500 do Evolution como sinal de instância caída
-
-Em ambas as funções, após `res.status >= 400`:
-- Marcar instância como `needs_reconnect` em `whatsapp_instances` se estava `connected`.
-- Mesmo registro em `bot_handoff_alerts`.
-
-### 4. Fallback opcional (a confirmar com o usuário)
-
-Se quiser, adicionar fallback para enviar via **qualquer outra instância conectada do mesmo tenant/super-admin** quando a do consultor estiver offline — útil para não perder o cliente. Pode usar a instância de uma outra licenciada do mesmo grupo.
-
-## Fora do escopo
-
-- Reconexão automática da instância (já tratada em `whatsapp/connection-management`).
-- Mudanças no fluxo Playwright/portal.
-- UI nova (apenas o alerta em `bot_handoff_alerts` que já é renderizado).
-
-## Arquivos afetados
-
-- `worker-portal/playwright-automation.mjs` (funções `notificarClienteOTP` e `sendFacialLinkToCustomer`)
-- Sem migration; usa tabelas já existentes (`whatsapp_instances`, `bot_handoff_alerts`, `customers`).
-
-## Validação
-
-1. Forçar `notificarClienteOTP(customerId_test)` com instância offline → deve logar warning + criar `bot_handoff_alerts`, sem 500 não tratado.
-2. Reconectar a instância e reexecutar lead → msg do OTP chega no WhatsApp do cliente.
-3. Verificar painel admin mostra o alerta novo.
+- O fluxo passa a funcionar pela Whapi, sem depender da Evolution desconectada.
+- OTP sempre é pedido e capturado.
+- Link facial sempre é enviado quando existir.
+- Perguntas do cliente não quebram nem reiniciam o funil.
+- Telefone e complemento ficam com botões claros e mapeados.

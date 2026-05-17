@@ -104,16 +104,15 @@ export function getReplyForStep(step: string, c: any): string {
     case "ask_birth_date": return "Qual sua *data de nascimento*? (DD/MM/AAAA)";
     case "ask_phone_confirm": {
       let p = (c.phone_whatsapp || "").replace(/\D/g, "");
-      // Remove 55 prefix for display
       if (p.startsWith("55") && p.length >= 12) p = p.substring(2);
       const fmt = p.length >= 11 ? `(${p.slice(0, 2)}) ${p.slice(2, 7)}-${p.slice(7)}` : (c.phone_whatsapp || "");
-      return `📞 Esse é o seu *telefone de contato*?\n\n*${fmt}*\n\n1️⃣ ✅ Sim, é meu\n2️⃣ 📱 Outro número\n\n_Digite o número da opção:_`;
+      return `📞 Esse é o seu *telefone de contato*?\n\n*${fmt}*`;
     }
     case "ask_phone": return "Informe seu *telefone* com DDD (ex: 11999998888):";
     case "ask_email": return "📧 Informe seu *e-mail* para finalizarmos seu cadastro no portal iGreen (ex: joao.silva@gmail.com)\n\n_Se não tiver e-mail, crie um agora em *gmail.com* — leva 1 minuto._";
     case "ask_cep": return "Qual o seu *CEP*? (8 dígitos)";
     case "ask_number": return `📍 Endereço: *${c.address_street || ""}*\n\nQual o *número* da residência?`;
-    case "ask_complement": return "Tem *complemento*? (ex: Apto 12)\n\nDigite *NÃO* ou *PULAR* se não tiver.";
+    case "ask_complement": return "Tem *complemento*? (ex: Apto 12)";
     case "ask_installation_number": return "Qual o *número da instalação* de energia?\n(Campo \"Seu Código\" na conta de luz)";
     case "ask_bill_value": return "Qual o *valor médio* da sua conta de luz? (ex: 350)";
     case "ask_doc_frente_manual": return "📸 Envie a *FRENTE do seu documento* (RG ou CNH)";
