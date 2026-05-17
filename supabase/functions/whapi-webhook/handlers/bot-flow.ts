@@ -2373,7 +2373,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               await sendFallback(FINAL_FALLBACK, "finalizar_cadastro");
             }
             updates.conversation_step = "finalizar_cadastro";
+          } else if (nextCustom.step_type === "capture_conta") {
+            updates.conversation_step = "aguardando_conta";
+          } else if (nextCustom.step_type === "capture_email") {
+            updates.conversation_step = "ask_email";
+          } else if (nextCustom.step_type === "confirm_phone") {
+            updates.conversation_step = "ask_phone_confirm";
           } else {
+            // message → fica no UUID; o resolver pré-switch avança quando o lead responder.
             updates.conversation_step = nextCustom.id;
           }
         } else {
