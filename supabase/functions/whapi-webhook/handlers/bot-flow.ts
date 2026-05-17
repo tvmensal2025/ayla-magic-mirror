@@ -3485,6 +3485,27 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
   }
 
+  // 🔘 Auto-converter pergunta em botões quando o próximo step for confirmação
+  // de telefone ou complemento de endereço. Evita texto duplicado "1/2".
+  try {
+    const nextStep = (updates as any)?.conversation_step;
+    if (reply && nextStep === "ask_phone_confirm") {
+      const sent = await sendButtons(remoteJid, reply, [
+        { id: "sim_phone", title: "✅ Sim, é meu" },
+        { id: "editar_phone", title: "📱 Outro número" },
+      ]);
+      if (sent) { reply = ""; (updates as any).__inline_sent = true; }
+    } else if (reply && nextStep === "ask_complement") {
+      const sent = await sendButtons(remoteJid, reply, [
+        { id: "add_complement", title: "✍️ Adicionar" },
+        { id: "skip_complement", title: "⏭️ Pular" },
+      ]);
+      if (sent) { reply = ""; (updates as any).__inline_sent = true; }
+    }
+  } catch (e) {
+    console.warn("[bot-flow] auto-buttons wrapper falhou:", (e as any)?.message);
+  }
+
   return { reply, updates };
 }
 
