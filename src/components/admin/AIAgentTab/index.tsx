@@ -140,7 +140,12 @@ export function AIAgentTab({ userId }: { userId: string }) {
       </nav>
 
       <div className="flex-1 min-h-0">
-        {sub === "atendimentos" && <LiveConversationsPanel userId={userId} />}
+        {sub === "atendimentos" && (
+          <div className="flex flex-col h-full gap-3">
+            <BotTelemetryStrip userId={userId} />
+            <div className="flex-1 min-h-0"><LiveConversationsPanel userId={userId} /></div>
+          </div>
+        )}
         {sub === "agente" && (
           <div className="flex flex-col h-full gap-3">
             <div className="flex gap-1 flex-wrap">
