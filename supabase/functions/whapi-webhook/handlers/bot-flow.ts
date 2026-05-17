@@ -34,6 +34,8 @@ import {
   detectQuestionIntent,
 } from "../../_shared/conversation-helpers.ts";
 import { matchQA } from "./conversational/index.ts";
+import { extractMultiField, buildMultiFieldPatch } from "../../_shared/multi-field-extractor.ts";
+import { detectFlowSwitch } from "../../_shared/flow-router.ts";
 import { ocrContaEnergia, ocrDocumentoFrenteVerso } from "../../_shared/ocr.ts";
 import { normalizeDocumentType, isCNH, friendlyLabel } from "../../_shared/document-type.ts";
 import { detectDocumentType } from "../../_shared/detect-doc-type.ts";
