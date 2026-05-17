@@ -8,7 +8,7 @@ import { CONVERSATIONAL_STEPS, decideTransition, type ConversationalStep } from 
 import { classifyIntent } from "./intent-classifier.ts";
 import { getTemplate, renderTemplate } from "./templates.ts";
 import {
-  extractValor, extractTelefone, extractCPF, extractNome, detectRegexIntents,
+  extractValor, extractValorPermissivo, extractTelefone, extractCPF, extractNome, detectRegexIntents,
 } from "../../../_shared/captureExtractors.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
 import { isTestMode } from "../../../_shared/test-mode.ts";
@@ -783,6 +783,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     let landingStepId = firstActive.id;
 
     while (cursor && !visited.has(cursor.id)) {
+      // Skip steps already satisfied (ex: pergunta nome quando self-intro já capturou)
+      const resolvedCursor = resolveLandingStep(cursor);
+      if (resolvedCursor && resolvedCursor.id !== cursor.id) {
+        console.log(`[restart-cascade] skip ${cursor.step_key} → ${resolvedCursor.step_key} (captura já satisfeita)`);
+        cursor = resolvedCursor;
+        if (visited.has(cursor.id)) break;
+      }
       visited.add(cursor.id);
       landingStepId = cursor.id;
 
@@ -828,6 +835,20 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   try {
     const extracted = extractCaptures(ctx.messageText || "", currentStep.captures || []);
     if (extracted.electricity_bill_value != null) captureUpdates.electricity_bill_value = extracted.electricity_bill_value;
+    // Fallback contextual: se este passo claramente pergunta valor da conta
+    // (slot/text/title mencionam valor|conta|luz) e o lead respondeu com um número plausível,
+    // captura mesmo sem `captures` configurado e mesmo com texto extra ("200 mas ou menos").
+    if (extracted.electricity_bill_value == null && !ctx.customer.electricity_bill_value) {
+      const stepHaystack = `${currentStep.message_text || ""} ${(currentStep as any).title || ""} ${currentStep.slot_key || ""}`.toLowerCase();
+      const isValueStep = /\bvalor\b|\bconta\b|\bluz\b|electricity|bill/.test(stepHaystack);
+      if (isValueStep) {
+        const permissive = extractValorPermissivo(ctx.messageText || "");
+        if (permissive != null) {
+          captureUpdates.electricity_bill_value = permissive;
+          console.log(`[capture-fallback] valor=${permissive} via permissivo no step ${currentStep.step_key}`);
+        }
+      }
+    }
     if (extracted.phone_whatsapp && !ctx.customer.phone_whatsapp) captureUpdates.phone_whatsapp = extracted.phone_whatsapp;
     if (extracted.cpf) captureUpdates.cpf = extracted.cpf;
     // Nome: se o passo atual é um "pergunta nome" (título/slot menciona nome,
@@ -1170,6 +1191,16 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       }
     }
 
+    // Persiste o step alvo ANTES de dispatchar mídia pesada (anti-race entre webhooks paralelos).
+    if (ctx.customer?.id) {
+      try {
+        await ctx.supabase
+          .from("customers")
+          .update({ conversation_step: nextConversationStep, last_step_advanced_at: new Date().toISOString() })
+          .eq("id", ctx.customer.id);
+      } catch (_) { /* best-effort */ }
+    }
+
     let cursor: DbStep | null = cadastroStep ? null : s;
     // Helper para achar próximo step: respeita fallback.goto configurado;
     // se o consultor deixou fallback=repeat (ou vazio) mas marcou wait_for=none,
@@ -1219,6 +1250,17 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       nextConversationStep = cascadeCadastroStep || nextStep.id;
       console.log(`[conversational] auto-cascade ${cursor.step_key} → ${nextStep.step_key} (wait_for=${nextStep.wait_for})`);
 
+      // Persiste o avanço por hop (anti-race: se função timeout ou outro webhook reentrar,
+      // não regride pro passo anterior). Best-effort, ignora falhas.
+      if (ctx.customer?.id) {
+        try {
+          await ctx.supabase
+            .from("customers")
+            .update({ conversation_step: nextConversationStep, last_step_advanced_at: new Date().toISOString() })
+            .eq("id", ctx.customer.id);
+        } catch (_) { /* noop */ }
+      }
+
       // G1: telemetria por hop — sem isso parece que pulamos passos.
       try {
         await ctx.supabase.from("bot_step_transitions").insert({
@@ -1245,6 +1287,20 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Isso evita o "disco riscado" que o lead vê quando responde algo fora do esperado.
   const repeatCurrent = async (): Promise<BotResult> => _smartRepeat();
   const _smartRepeat = async (): Promise<BotResult> => {
+    // Debounce: se houve outbound nos últimos 30s, não dispara nudge agora —
+    // evita "Pode me responder, por favor?" 6s depois do lead já ter respondido.
+    try {
+      const sinceDebounce = new Date(Date.now() - 30_000).toISOString();
+      const { count: recentOut } = await ctx.supabase
+        .from("conversations")
+        .select("id", { count: "exact", head: true })
+        .eq("customer_id", ctx.customer.id)
+        .eq("message_direction", "outbound")
+        .gte("created_at", sinceDebounce);
+      if ((recentOut ?? 0) > 0) {
+        return { reply: "", updates: { conversation_step: currentStep.id, ...restoreDetourUpdates } };
+      }
+    } catch (_) { /* segue */ }
     const baseText = renderStepText(currentStep);
     if (!baseText) return goToStep(currentStep, restoreDetourUpdates);
     let lastSameTextCount = 0;

@@ -39,7 +39,7 @@ export function extractValor(text: string): number | null {
   // OU se a mensagem for praticamente só um número (resposta direta a "qual o valor?")
   // OU se contiver expressões de aproximação ("uns 200", "200 mais ou menos", "cerca de 300")
   const moneyHint = /r?\$|\breais?\b|\bconta\b|\bluz\b|\bvalor\b|\bpila\b|\bmangos?\b|\bcontos?\b/i.test(t);
-  const approxHint = /\b(uns|umas|cerca\s+de|aproximadamente|aprox|por\s+volta|em\s+torno|quase|talvez|mais\s+ou\s+menos)\b/i.test(t);
+  const approxHint = /\b(uns|umas|cerca\s+de|aproximadamente|aprox|por\s+volta|em\s+torno|quase|talvez|ma[is]?\s+ou\s+menos)\b/i.test(t);
   const bareNumber = /^\s*\d{2,5}(?:[.,]\d{1,2})?\s*(?:reais?|pila|mangos?|contos?|r?\$)?\s*$/i.test(t);
   if (moneyHint || bareNumber || approxHint) {
     const m = t.match(rx);

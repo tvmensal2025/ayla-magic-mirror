@@ -2061,6 +2061,7 @@ export type Database = {
           last_rescue_at: string | null
           last_rule_fire_at: string | null
           last_rule_id: string | null
+          last_step_advanced_at: string | null
           lead_source: Json | null
           link_assinatura: string | null
           link_facial: string | null
@@ -2173,6 +2174,7 @@ export type Database = {
           last_rescue_at?: string | null
           last_rule_fire_at?: string | null
           last_rule_id?: string | null
+          last_step_advanced_at?: string | null
           lead_source?: Json | null
           link_assinatura?: string | null
           link_facial?: string | null
@@ -2285,6 +2287,7 @@ export type Database = {
           last_rescue_at?: string | null
           last_rule_fire_at?: string | null
           last_rule_id?: string | null
+          last_step_advanced_at?: string | null
           lead_source?: Json | null
           link_assinatura?: string | null
           link_facial?: string | null

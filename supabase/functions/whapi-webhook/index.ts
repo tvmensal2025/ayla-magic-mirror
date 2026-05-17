@@ -18,6 +18,7 @@ import { runConversationalFlow, CADASTRO_STEPS } from "./handlers/conversational
 import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
+import { extractMultiField, buildMultiFieldPatch } from "../_shared/multi-field-extractor.ts";
 import { botRequestStore, isTestPhone, logTestOutbound } from "../_shared/test-mode.ts";
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
 
@@ -362,6 +363,33 @@ Deno.serve(async (req) => {
           .eq("id", customer.id);
         customer.name = pushedName;
         (customer as any).name_source = "whatsapp_profile";
+      }
+    }
+
+    // ─── Self-intro: captura nome/CEP/valor da PRIMEIRA mensagem do lead ───
+    // Ex: "Oi me chamo Paula", "Sou João, conta 250" — evita re-perguntar o nome.
+    // Source `freeform_multi` sobrescreve `whatsapp_profile`.
+    if (messageText && !isFile && customer && !(customer as any).chat_cleared_at) {
+      try {
+        const { count: inboundCount } = await supabase
+          .from("conversations")
+          .select("id", { count: "exact", head: true })
+          .eq("customer_id", customer.id)
+          .eq("message_direction", "inbound");
+        const isEarly = (inboundCount ?? 0) <= 2; // 1ª ou 2ª inbound
+        if (isEarly) {
+          const multi = extractMultiField(messageText);
+          const patch = buildMultiFieldPatch(customer, multi);
+          if (Object.keys(patch).length > 0) {
+            // Promove name_source para self_introduced (mais forte que freeform_multi)
+            if (patch.name) patch.name_source = "self_introduced";
+            await supabase.from("customers").update(patch).eq("id", customer.id);
+            Object.assign(customer as any, patch);
+            console.log(`[self-intro] customer=${customer.id} fields=${Object.keys(patch).join(",")} name="${patch.name || ""}"`);
+          }
+        }
+      } catch (e) {
+        console.warn("[self-intro] falhou:", (e as Error).message);
       }
     }
 
