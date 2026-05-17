@@ -120,7 +120,7 @@ const AdminContent = () => {
         data_validado: c.data_validado, status_financeiro: c.status_financeiro,
         cashback: c.cashback, nivel_licenciado: c.nivel_licenciado,
         assinatura_cliente: c.assinatura_cliente, assinatura_igreen: c.assinatura_igreen,
-        link_assinatura: c.link_assinatura,
+        link_assinatura: c.link_assinatura, customer_origin: c.customer_origin,
       }));
       setCustomers(mapped);
       try { sessionStorage.setItem(`customers_cache_${userId}`, JSON.stringify(mapped)); } catch { /* quota */ }
