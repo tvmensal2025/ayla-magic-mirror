@@ -2323,6 +2323,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     // ─── 3. CONFIRMANDO DADOS DA CONTA ──────────
     case "confirmando_dados_conta": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
+      console.log(`[post-confirm-conta] ENTER resp="${resp}" customer=${customer.id}`);
       if (resp === "sim_conta" || resp === "sim" || resp === "s" || resp === "1" || resp === "ok" || resp === "correto" || resp === "✅") {
         // FIX 2: garantir que o nome confirmado é o do TITULAR DA CONTA (OCR),
         // não o nome digitado pelo lead no boas-vindas.
