@@ -1,95 +1,111 @@
-## Diagnóstico do caso MARCIA
 
-O link facial foi gerado corretamente pelo portal:
+## Diagnóstico (lead Bruna — `06a3ed56-…04b`)
 
-```text
-https://digital.igreenenergy.com.br/validacao-codigo/1460976?id=139114&sendcontract=true
+Linha do tempo real (tabela `conversations`):
+
+```
+04:51:57  OUT  aguardando_conta            "Me manda foto da conta…"
+04:52:54  IN   aguardando_conta            [arquivo conta]
+04:53:25  IN   confirmando_dados_conta     "✅ SIM"
+                                           ⛔ silêncio de 2min30s
+04:55:55  IN   aguardando_doc_auto         "Oi"  ← cliente teve que cutucar
+04:56:03  OUT  aguardando_doc_auto         "Me envie a foto do RG ou CNH…"
 ```
 
-Ele também foi salvo no cliente no banco:
+E mais cedo houve **repetição** do mesmo passo do flow:
 
-```text
-conversation_step = aguardando_facial
-status = awaiting_signature
-link_facial = link correto
-link_assinatura = link correto
+```
+04:43:24  OUT  a71ba814 "Vou explicar como funciona, perai"
+04:48:04  IN   "Okay"
+04:49:09  OUT  a71ba814 "Vou explicar como funciona"   ← repetiu
+04:49:45  OUT  559b8f1b "Deu para entender…"
+04:50:09  IN   "Pode ser"
+04:50:46  OUT  559b8f1b "Deu para entender…"           ← repetiu
 ```
 
-O problema foi no envio pelo WhatsApp:
+### Causa raiz #1 — Dispatch silencioso após "SIM" da conta
 
-1. O worker tentou avisar o cliente sobre OTP e retornou falha 500.
-2. Depois do OTP, o worker encontrou o link facial, mas o envio também retornou 500.
-3. A instância do consultor ficou marcada como `needs_reconnect`.
-4. Como o envio falhou, `facial_link_sent_at` ficou nulo e não há mensagem outbound do link facial no histórico.
-5. Existe ainda um bug de automação: `clickText is not defined` ao confirmar OTP. Apesar disso, o portal mudou para a URL facial e o link foi capturado, então este bug não impediu a geração do link neste caso, mas precisa ser corrigido para não quebrar em outros cadastros.
+Em `bot-flow.ts` (case `confirmando_dados_conta`, linhas 2178-2197):
 
-## Causa raiz
+1. Chama `findNextActiveFlowStep(..., stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"])`.
+2. No fluxo desse consultor (`0c2711ad-…`) o próximo passo é `passo_mp74oztd` (`capture_documento`) — confirmado no banco.
+3. Chama `dispatchStepFromFlow("passo_mp74oztd", _vars)`.
+4. Esse step está cadastrado em `bot_flow_steps` mas com `message_text` vazio e **não tem nenhuma mídia em `ai_media_library`** para esse slot (consulta retornou `[]`).
+5. `dispatchStepFromFlow` monta `items=[]`, o loop não envia nada, retorna `false` silenciosamente.
+6. Mesmo assim o código marca `__inline_sent = true` e seta `conversation_step = "aguardando_doc_auto"` → bot fica mudo esperando a próxima mensagem do cliente.
 
-O fluxo de geração funcionou. O que falhou foi a entrega da mensagem pelo canal WhatsApp:
+Quando o cliente manda "Oi", aí sim cai no case `aguardando_doc_auto` (linha 2258) que tem o texto hardcoded e finalmente pede o documento.
 
-```text
-Evolution falhou: 500
-Não foi possível enviar link facial via WhatsApp
-```
+O mesmo risco existe nas chamadas legacy (linhas 2193-2194) para `pitch_conexao_club` e `duvidas_pos_club`.
 
-Mesmo o projeto usando Whapi como canal principal no código atual, este log mostra que a versão em execução no worker ainda caiu no envio Evolution/instância desconectada, ou que o worker na VPS não está com a versão mais recente/variáveis Whapi corretas em runtime.
+### Causa raiz #2 — Repetição do mesmo step
+
+O step `a71ba814` foi disparado às 04:43:24 e re-disparado às 04:49:09 após o cliente responder "Okay". O dispatcher de flow não checa se o `step_key` em questão já foi enviado recentemente, então qualquer reentrada no caminho re-envia o mesmo bloco. O mesmo aconteceu com `559b8f1b` depois do "Pode ser".
+
+---
 
 ## Plano de correção
 
-### 1. Corrigir envio imediato do link facial
-- Ajustar `sendFacialLinkToCustomer` para só marcar `facial_link_sent_at` quando o envio realmente retornar sucesso.
-- Se Whapi/Evolution falhar, manter `facial_link_sent_at = null` e gravar `error_message` claro no cliente.
-- Registrar no histórico `conversations` uma tentativa `facial_link_failed`, para o CRM mostrar por que o link não chegou.
+### 1. `dispatchStepFromFlow` precisa avisar quando não enviou nada
 
-### 2. Fazer reenvio automático real
-- Hoje o reenvio de 30s roda dentro do processo do job; se o worker terminar/reiniciar, esse timer pode não executar.
-- Criar endpoint/rotina de recuperação no worker para buscar clientes com:
+Arquivo: `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (função em ~L702).
 
-```text
-conversation_step = aguardando_facial
-link_facial preenchido
-facial_link_sent_at nulo
-```
+- Já retorna `boolean`. Vamos usar o retorno no call-site.
+- Quando o step não tem `message_text` nem mídias válidas, logar `[dispatch:${stepKey}] EMPTY — sem texto e sem mídia` e retornar `false`.
 
-- Reenviar o link pelo WhatsApp e só marcar `facial_link_sent_at` após sucesso.
+### 2. Fallback obrigatório no "SIM" da conta
 
-### 3. Padronizar canal Whapi como principal
-- Garantir que OTP e link facial usem primeiro Whapi (`/messages/text`).
-- Evolution fica apenas como fallback.
-- Se Evolution retornar 500, marcar a instância como `needs_reconnect`, mas não considerar o fluxo concluído sem tentar Whapi.
+Arquivo: `bot-flow.ts`, case `confirmando_dados_conta` (~L2149-2213).
 
-### 4. Corrigir bug do OTP
-- Implementar helper `clickText` ou trocar por um clique direto em botões `Confirmar`, `Verificar`, `Enviar`.
-- Isso elimina o erro:
+- Capturar o retorno: `const ok = await dispatchStepFromFlow(nextCustom.step_key, _vars);`
+- Se `ok === false` **e** o próximo step é `capture_documento`/`capture_doc`: enviar imediatamente o prompt hardcoded
+  `"Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é."`
+  via `sendText` + `insert conversations(step="aguardando_doc_auto")`.
+- Se `ok === false` e o próximo é `finalizar_cadastro`: enviar `"✅ *Todos os dados foram preenchidos!*\n\n1️⃣ Finalizar\n\n_Digite *1* ou *FINALIZAR* para concluir:_"`.
+- Aplicar a mesma checagem no ramo legacy (`pitch_conexao_club`/`duvidas_pos_club`): se ambos retornaram `false`, mandar o prompt de doc.
 
-```text
-OTP falhou: clickText is not defined
-```
+### 3. Anti-repetição por `step_key` recente
 
-### 5. Reenviar agora para a cliente afetada
-- Após a correção, disparar o reenvio do link já salvo para o customer:
+Em `dispatchStepFromFlow` (mesma função):
 
-```text
-06a3ed56-f980-4d3c-93d0-a69a4061004b
-```
+- Antes de montar `items`, consultar a última mensagem outbound dessa conversa:
+  ```ts
+  const { data: lastOut } = await supabase
+    .from("conversations")
+    .select("conversation_step, created_at")
+    .eq("customer_id", customer.id)
+    .eq("message_direction", "outbound")
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  ```
+- Se `lastOut?.conversation_step === stepKey` e `Date.now() - new Date(lastOut.created_at).getTime() < 10 * 60_000` (10 min), pular: `console.log("[dispatch:${stepKey}] skip — já enviado há <10min"); return true;`
+- Isso elimina os re-disparos vistos em `a71ba814` e `559b8f1b`.
 
-- Confirmar no banco:
+### 4. Aviso operacional no admin
 
-```text
-facial_link_sent_at preenchido
-conversations com outbound do link facial
-whatsapp_instances não bloqueando o envio
-```
+Adicionar log estruturado (já existe `console.warn`) quando o dispatcher detectar step custom sem conteúdo. Sem mudança de UI — só facilita debug futuro pelos logs de edge function.
+
+### 5. Recuperar o lead atual (Bruna)
+
+O lead já avançou para `aguardando_facial`. Não precisa de ação extra de fluxo — basta o `/retry-facial-link` planejado anteriormente para o envio do link, que já está implementado no worker-portal.
+
+---
 
 ## Arquivos a alterar
 
-- `worker-portal/playwright-automation.mjs`
-- `worker-portal/server.mjs`
-- Possivelmente `supabase/functions/worker-callback/index.ts` para manter o mesmo padrão Whapi-first no callback legado.
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
+  - Função `dispatchStepFromFlow` (anti-repetição + log de vazio)
+  - Case `confirmando_dados_conta` (capturar retorno + fallback hardcoded)
 
-## Resultado esperado
+Nenhuma alteração de UI, banco ou worker. Só edge function.
 
-- Link facial nunca fica apenas salvo no banco sem tentativa rastreável de envio.
-- Se o WhatsApp falhar, o sistema tenta novamente e mostra o motivo no CRM.
-- O fluxo não marca a etapa facial como enviada se a mensagem não chegou.
-- O caso atual da MARCIA recebe o link de assinatura/facial automaticamente.
+## Detalhes técnicos
+
+- `findNextActiveFlowStep` continua o mesmo — o problema é a ausência de conteúdo no step, não a busca.
+- A janela anti-repetição de 10 min é conservadora: cobre cliente respondendo lento sem bloquear reentradas legítimas (ex.: cliente envia foto ruim e o flow precisa reagir com outro step).
+- Os textos fallback usam exatamente as strings que já existem no código (case `duvidas_pos_club` L2237 e `aguardando_doc_auto` L2260) → mantém o tom da Camila.
+
+## Critérios de aceitação
+
+1. Em novo lead com mesmo consultor, após `✅ SIM` da conta o bot envia o pedido de documento em ≤3s, sem o cliente precisar mandar "Oi".
+2. Steps `a71ba814` / `559b8f1b` não são disparados duas vezes seguidas em <10 min.
+3. Logs `[dispatch:*] EMPTY` aparecem quando o flow tem step sem conteúdo (sinaliza configuração para o admin).
