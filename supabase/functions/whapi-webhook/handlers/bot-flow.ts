@@ -2527,17 +2527,43 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       }
       const mime = imageMessage?.mimetype || documentMessage?.mimetype || "image/jpeg";
       let detectedType: "cnh" | "rg_novo" | "rg_antigo" = "rg_antigo";
+      let detectConfidence = 0;
+      let detectSource: string = "fallback";
       try {
-        detectedType = await detectDocumentType({
+        const det = await (await import("../../_shared/detect-doc-type.ts")).detectDocumentTypeDetailed({
           base64: fileBase64 || undefined,
           mimeType: mime,
           imageUrl: fileUrl?.startsWith("http") ? fileUrl : undefined,
           geminiApiKey,
         });
-        console.log(`🤖 [doc-auto] tipo detectado pela IA: ${detectedType}`);
+        detectedType = det.tipo;
+        detectConfidence = det.confianca;
+        detectSource = det.source;
+        console.log(`🤖 [doc-auto] tipo=${detectedType} conf=${detectConfidence.toFixed(2)} source=${detectSource}`);
       } catch (e) {
         console.warn(`⚠️ [doc-auto] falha detectando tipo:`, (e as Error).message);
       }
+
+      // Se a detecção realmente falhou (fallback puro), salva a frente e pergunta ao usuário.
+      if (detectSource === "fallback" && detectConfidence === 0) {
+        console.warn(`⚠️ [doc-auto] detecção falhou — perguntando RG/CNH ao lead`);
+        if (fileBase64) {
+          updates.document_front_url = `data:${mime};base64,${fileBase64}`;
+          updates.document_front_base64 = fileBase64;
+          updates.media_message_id = messageId || null;
+          updates.media_storage = "inline";
+        } else if (fileUrl) {
+          updates.document_front_url = fileUrl.startsWith("http") ? fileUrl : "evolution-media:pending";
+        }
+        updates.conversation_step = "ask_tipo_documento";
+        await sendOptions(remoteJid, "✅ Foto recebida! Só pra eu processar certinho — esse documento é:", [
+          { id: "rg", title: "🪪 RG" },
+          { id: "cnh", title: "🚗 CNH" },
+        ]);
+        reply = "";
+        break;
+      }
+
       updates.document_type = detectedType;
       // Reaproveita o handler clássico: marca o passo como aguardando_doc_frente
       // e encaminha o processamento para o case já existente abaixo.
