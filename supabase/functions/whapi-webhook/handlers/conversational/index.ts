@@ -1304,6 +1304,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       return _finalize(stepKey, await goToStep(nextStep, restoreDetourUpdates));
     }
   }
+  // Sprint A2: passo terminal nunca deve cair no fallback AI (risco de jogar lead de volta no funil)
+  if (currentStep.step_type === "finalizar_cadastro") {
+    console.log(`[conversational] terminal step ${currentStep.step_key} → forçando cadastro em vez de fallback`);
+    return _finalize(stepKey, await resolveTransition({ goto_special: "cadastro" } as DbTransition));
+  }
   if (fb.mode === "ai" && fb.ai_prompt && !strictMode) {
     const candidates = dbSteps.filter(s => s.is_active && s.id !== currentStep.id).map(s => ({ id: s.id, step_key: s.step_key }));
     const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey, consultantId || "global");
