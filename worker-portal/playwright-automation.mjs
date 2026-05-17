@@ -1813,8 +1813,20 @@ export async function executarAutomacao(customerId, options = {}) {
             await delay(1000);
             
             // Confirmar OTP
-            const confirmOtpClicked = await clickText('Confirmar') || await clickText('Verificar') || await clickText('Enviar');
-            if (confirmOtpClicked) console.log('   ✅ OTP confirmado');
+            // Confirmar OTP — clicar em qualquer botão de confirmação (sem helper externo)
+            let confirmOtpClicked = false;
+            for (const label of ['Confirmar', 'Verificar', 'Enviar', 'Validar', 'Continuar']) {
+              try {
+                const btn = page.locator(`button:has-text("${label}")`).first();
+                if (await btn.count() > 0 && await btn.isVisible().catch(() => false)) {
+                  await btn.click({ timeout: 5000 });
+                  console.log(`   ✅ OTP confirmado (botão "${label}")`);
+                  confirmOtpClicked = true;
+                  break;
+                }
+              } catch (_) {}
+            }
+            if (!confirmOtpClicked) console.log('   ⚠️  Nenhum botão de confirmar OTP encontrado (auto-submit?)');
             
             await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
             await delay(3000);
