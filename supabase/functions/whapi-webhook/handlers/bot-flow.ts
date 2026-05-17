@@ -702,6 +702,25 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   async function dispatchStepFromFlow(stepKey: string, extraVars: Record<string, string> = {}): Promise<boolean> {
     if (!customer?.consultant_id) return false;
     try {
+      // Anti-repetição: se o último outbound foi exatamente esse step nos últimos 10min, pula.
+      try {
+        const { data: lastOut } = await supabase
+          .from("conversations")
+          .select("conversation_step, created_at")
+          .eq("customer_id", customer.id)
+          .eq("message_direction", "outbound")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (lastOut?.conversation_step === stepKey) {
+          const ageMs = Date.now() - new Date((lastOut as any).created_at).getTime();
+          if (ageMs < 10 * 60_000) {
+            console.log(`[dispatch:${stepKey}] skip — já enviado há ${Math.round(ageMs/1000)}s`);
+            return true;
+          }
+        }
+      } catch (_e) { /* ignora — anti-rep é best-effort */ }
+
       const { data: flow } = await supabase
         .from("bot_flows")
         .select("id")
