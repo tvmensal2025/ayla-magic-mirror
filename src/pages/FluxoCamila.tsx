@@ -518,6 +518,8 @@ export default function FluxoCamila() {
         <Button onClick={addStep} className="w-full" variant="outline" size="lg">
           <Plus className="h-4 w-4 mr-2" /> Adicionar passo
         </Button>
+
+        {flowId && <FaqSection flowId={flowId} />}
       </main>
 
       <Dialog open={testOpen} onOpenChange={setTestOpen}>
