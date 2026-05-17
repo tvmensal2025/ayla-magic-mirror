@@ -2202,21 +2202,45 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         const nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {
           stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
         });
+        const DOC_FALLBACK = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é.`;
+        const FINAL_FALLBACK = `✅ *Todos os dados foram preenchidos!*\n\n1️⃣ Finalizar\n\n_Digite *1* ou *FINALIZAR* para concluir:_`;
+        const sendFallback = async (text: string, stepStr: string) => {
+          await sendText(remoteJid, text);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id, message_direction: "outbound",
+            message_text: text, message_type: "text", conversation_step: stepStr,
+          });
+        };
+
         if (nextCustom) {
           console.log(`[post-confirm-conta] next=${nextCustom.step_key} type=${nextCustom.step_type} reason=customflow`);
-          await dispatchStepFromFlow(nextCustom.step_key, _vars);
+          const ok = await dispatchStepFromFlow(nextCustom.step_key, _vars);
           if (nextCustom.step_type === "capture_documento" || nextCustom.step_type === "capture_doc") {
+            if (!ok) {
+              console.warn(`[post-confirm-conta] dispatch vazio — usando fallback hardcoded de doc`);
+              await sendFallback(DOC_FALLBACK, "aguardando_doc_auto");
+            }
             updates.conversation_step = "aguardando_doc_auto";
           } else if (nextCustom.step_type === "finalizar_cadastro") {
+            if (!ok) {
+              console.warn(`[post-confirm-conta] dispatch vazio — usando fallback hardcoded de finalizar`);
+              await sendFallback(FINAL_FALLBACK, "finalizar_cadastro");
+            }
             updates.conversation_step = "finalizar_cadastro";
           } else {
             updates.conversation_step = nextCustom.id;
           }
         } else {
           console.log(`[post-confirm-conta] reason=legacy (sem fluxo custom)`);
-          await dispatchStepFromFlow("pitch_conexao_club", _vars);
-          await dispatchStepFromFlow("duvidas_pos_club", _vars);
-          updates.conversation_step = "duvidas_pos_club";
+          const okPitch = await dispatchStepFromFlow("pitch_conexao_club", _vars);
+          const okDuvidas = await dispatchStepFromFlow("duvidas_pos_club", _vars);
+          if (!okPitch && !okDuvidas) {
+            console.warn(`[post-confirm-conta] legacy dispatch vazio — usando fallback hardcoded de doc`);
+            await sendFallback(DOC_FALLBACK, "aguardando_doc_auto");
+            updates.conversation_step = "aguardando_doc_auto";
+          } else {
+            updates.conversation_step = "duvidas_pos_club";
+          }
         }
         (updates as any).__inline_sent = true;
         reply = "";
