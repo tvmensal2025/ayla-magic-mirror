@@ -747,8 +747,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 🔓 Libera o lock antes de retornar.
+    // 🔓 Libera o lock antes de retornar + limpa marker de fila pendente.
     try { await supabase.rpc("release_customer_processing_lock", { _customer_id: customer.id }); } catch (_) {}
+    try { await supabase.rpc("clear_pending_inbound", { _customer_id: customer.id }); } catch (_) {}
 
     return new Response(JSON.stringify({ ok: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
