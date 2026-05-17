@@ -19,6 +19,7 @@ import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-nam
 import { captureError } from "../_shared/sentry.ts";
 import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
 import { botRequestStore, isTestPhone, logTestOutbound } from "../_shared/test-mode.ts";
+import { notifyNewLead } from "../_shared/notify-consultant.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
