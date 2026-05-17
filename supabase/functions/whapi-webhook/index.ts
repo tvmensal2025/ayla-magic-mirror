@@ -538,13 +538,14 @@ Deno.serve(async (req) => {
 
     // ─── Run bot flow ──────────────────────────────────────────────────
     // ─── 🔒 Lock per-customer: evita webhooks paralelos enviando msgs duplicadas
-    // quando o lead manda 2+ mensagens em rajada. Aguarda até ~25s pelo lock; se
-    // não conseguir, drop silencioso (a outra invocação está processando).
+    // quando o lead manda 2+ mensagens em rajada. O fluxo pode enviar áudio/vídeo/
+    // imagem + texto e passar de 25s; por isso a trava precisa durar mais que a
+    // cascata inteira, senão uma segunda invocação entra no meio e repete o step.
     let lockAcquired = false;
     for (let attempt = 0; attempt < 50; attempt++) {
       const { data: ok } = await supabase.rpc("try_lock_customer_processing", {
         _customer_id: customer.id,
-        _seconds: 25,
+        _seconds: 120,
       });
       if (ok === true) { lockAcquired = true; break; }
       await new Promise((r) => setTimeout(r, 500));
