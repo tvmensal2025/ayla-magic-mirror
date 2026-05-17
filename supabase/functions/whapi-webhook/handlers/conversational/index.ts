@@ -1287,6 +1287,20 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Isso evita o "disco riscado" que o lead vê quando responde algo fora do esperado.
   const repeatCurrent = async (): Promise<BotResult> => _smartRepeat();
   const _smartRepeat = async (): Promise<BotResult> => {
+    // Debounce: se houve outbound nos últimos 30s, não dispara nudge agora —
+    // evita "Pode me responder, por favor?" 6s depois do lead já ter respondido.
+    try {
+      const sinceDebounce = new Date(Date.now() - 30_000).toISOString();
+      const { count: recentOut } = await ctx.supabase
+        .from("conversations")
+        .select("id", { count: "exact", head: true })
+        .eq("customer_id", ctx.customer.id)
+        .eq("message_direction", "outbound")
+        .gte("created_at", sinceDebounce);
+      if ((recentOut ?? 0) > 0) {
+        return { reply: "", updates: { conversation_step: currentStep.id, ...restoreDetourUpdates } };
+      }
+    } catch (_) { /* segue */ }
     const baseText = renderStepText(currentStep);
     if (!baseText) return goToStep(currentStep, restoreDetourUpdates);
     let lastSameTextCount = 0;
