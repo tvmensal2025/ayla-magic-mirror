@@ -1177,6 +1177,16 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       }
     }
 
+    // Persiste o step alvo ANTES de dispatchar mídia pesada (anti-race entre webhooks paralelos).
+    if (ctx.customer?.id) {
+      try {
+        await ctx.supabase
+          .from("customers")
+          .update({ conversation_step: nextConversationStep, last_step_advanced_at: new Date().toISOString() })
+          .eq("id", ctx.customer.id);
+      } catch (_) { /* best-effort */ }
+    }
+
     let cursor: DbStep | null = cadastroStep ? null : s;
     // Helper para achar próximo step: respeita fallback.goto configurado;
     // se o consultor deixou fallback=repeat (ou vazio) mas marcou wait_for=none,
