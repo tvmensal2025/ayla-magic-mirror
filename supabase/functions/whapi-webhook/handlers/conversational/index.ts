@@ -783,6 +783,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     let landingStepId = firstActive.id;
 
     while (cursor && !visited.has(cursor.id)) {
+      // Skip steps already satisfied (ex: pergunta nome quando self-intro já capturou)
+      const resolvedCursor = resolveLandingStep(cursor);
+      if (resolvedCursor && resolvedCursor.id !== cursor.id) {
+        console.log(`[restart-cascade] skip ${cursor.step_key} → ${resolvedCursor.step_key} (captura já satisfeita)`);
+        cursor = resolvedCursor;
+        if (visited.has(cursor.id)) break;
+      }
       visited.add(cursor.id);
       landingStepId = cursor.id;
 
