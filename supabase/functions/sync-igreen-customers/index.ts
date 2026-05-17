@@ -76,6 +76,8 @@ function buildRecord(c: Record<string, unknown>): Record<string, unknown> | null
   }
 
   const record: Record<string, unknown> = { phone_whatsapp: phone };
+  // Marca explicitamente que veio do sync iGreen — não é lead do WhatsApp
+  record.customer_origin = "igreen_sync";
   // ⚠️ Telefone NÃO foi confirmado pelo cliente — bot precisa pedir confirmação antes do portal
   record.phone_contact_confirmed = false;
 
