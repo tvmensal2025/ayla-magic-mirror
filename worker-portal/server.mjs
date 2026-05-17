@@ -16,7 +16,7 @@ import dotenv from 'dotenv';
 // Sentry — fallback caso a flag --import não seja suportada (Node < 20.6)
 import * as Sentry from '@sentry/node';
 // SOLUÇÃO 2: Import ESTÁTICO garante UMA ÚNICA instância do módulo (e do activeBrowser)
-import { executarAutomacao } from './playwright-automation.mjs';
+import { executarAutomacao, retryFacialLinkForCustomer } from './playwright-automation.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
