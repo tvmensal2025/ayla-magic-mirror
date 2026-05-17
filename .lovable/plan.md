@@ -1,63 +1,91 @@
-# Auditoria — risco de mensagem duplicada
+# Causa raiz: detector de CNH/RG está **silenciosamente quebrado**
 
-Revisei as 3 camadas de defesa atuais e simulei cenários reais. Ainda existem **4 brechas** que podem permitir duplicidade. Abaixo o diagnóstico e o plano de correção.
+## O que está acontecendo (provado pelos logs)
 
-## Defesas hoje (estão OK)
+Olhei os logs reais do `whapi-webhook` nas últimas horas:
 
-1. **Dedup por message_id** (`checkAndMarkProcessed`) — bloqueia mesmo webhook reentregue pelo Whapi.
-2. **Lock por cliente** (`try_lock_customer_processing`, 120 s) — bloqueia 2ª invocação enquanto a 1ª processa.
-3. **Anti-rep duplo no `emitStep`** (conversational): por `step_key/id` E por `message_text` igual nos últimos 10 min.
-4. **Anti-rep no `dispatchStepFromFlow`** (bot-flow): última outbound = mesmo step ⇒ pula.
+```
+🤖 [detectDoc] pass1 ambíguo (no-parse) — pass2 com 2.5-pro
+🤖 [detectDoc] pass2 ambíguo — pass3 desempate
+⚠️ [detectDoc] sem parse — fallback rg_antigo
+🤖 [doc-auto] tipo detectado pela IA: rg_antigo
+```
 
-## Brechas detectadas
+**As 3 passadas do Gemini estão retornando vazio (`no-parse`)** e o código cai no fallback final `tipo: "rg_antigo"`. Resultado: **TODO documento — CNH, RG novo, RG antigo — está sendo classificado como `rg_antigo`**, então o bot sempre pede o verso. O classificador "profissional" de 3 passadas hoje nunca funcionou.
 
-### Brecha 1 — Janela entre fim do processamento e release do lock + falta de "marker" antes de enviar
-- O lock é liberado em `finally` (linha 741). Se a 1ª invocação demora 30 s e a 2ª chega no segundo 5, ela faz retry por até **25 s** (50 × 500 ms) e desiste com `{skipped:"busy"}` — a mensagem do usuário é **silenciosamente descartada**. Não duplica, mas perde input do lead (UX ruim, pior que duplicar em alguns casos).
-- Pior: se o usuário manda 3 mensagens em rajada, a 2ª espera e entra, mas pode reabrir o mesmo step se o anti-rep não pegar (ver brecha 3).
+## Por que as 3 passadas retornam vazio
 
-### Brecha 2 — Anti-rep por `step_key` falha em passos **custom** (UUID vs step_key)
-- Em `dispatchStepFromFlow` (bot-flow.ts:747) a comparação é `lastOut.conversation_step === stepKey` (string igual). Mas o `conversation_step` salvo no banco às vezes vem com prefixo `flow:` (normalização no index.ts:663) e o `stepKey` passado é cru. Resultado: **anti-rep não dispara** para passos do Fluxo da Camila despachados por bot-flow.
-- O anti-rep do `emitStep` cobre isso (compara contra `{id, step_key, flow:id, flow:step_key}`), mas só roda quando a entrada é pelo motor `conversational`. Quando o cadastro chama `dispatchStepFromFlow`, **a checagem fica incompleta**.
+`supabase/functions/_shared/detect-doc-type.ts:154`:
 
-### Brecha 3 — Anti-rep por step_key olha somente o **último** outbound (não os últimos N)
-- `dispatchStepFromFlow` usa `.limit(1).maybeSingle()`. Se entre a 1ª emissão e a 2ª chegada da mensagem houver QUALQUER outbound (ex.: áudio do mesmo step gravado como linha separada com outro `conversation_step` ou null), a comparação falha e o texto é reenviado.
-- Já o `emitStep` (conversational) usa `limit(5)` para step e `limit(10)` para texto — mais robusto, mas ainda pode escapar se a cascata gerou 6+ linhas outbound entre as duas tentativas.
+```ts
+generationConfig: { temperature: 0, maxOutputTokens: 400, responseMimeType: "application/json" }
+```
 
-### Brecha 4 — Mídia (áudio/vídeo/imagem) **não tem anti-rep por conteúdo**
-- O check de "mesmo texto" só roda em `message_type='text'`. Mídias só dependem do check por `step_key`. Se o `step_key` mudar (ex.: 2 steps diferentes apontando para o mesmo `slot_key`) ou se a linha outbound não persistir `conversation_step`, a mesma mídia pode ser reenviada.
+Dois problemas combinados:
+
+1. **`gemini-2.5-flash` e `gemini-2.5-pro` têm "thinking" ligado por default.** Os tokens de raciocínio entram no mesmo orçamento de `maxOutputTokens`. Com 400 tokens, o thinking consome tudo e a parte visível (`candidates[0].content.parts[0].text`) volta vazia.
+2. **`responseMimeType: "application/json"` força JSON estrito** — qualquer "pensamento" no meio quebra ou é cortado pelo limite.
+
+A função `parseDetectJson` então recebe `""`, retorna `null`, e cada pass é marcado como "no-parse". O fallback final `rg_antigo` sempre vence.
+
+## Diferença entre RG antigo, RG novo e CNH (o checklist já está bom)
+
+O `CHECKLIST` no arquivo já cobre corretamente as diferenças visuais:
+- **CNH**: horizontal, "CATEGORIA"/"VALIDADE"/"HABILITAÇÃO", sem verso útil.
+- **RG novo (CIN)**: policarbonato, QR grande, CPF na frente, horizontal.
+- **RG antigo**: papel laminado vertical, sem QR grande, sem CPF na frente.
+
+O problema **não é** o prompt nem a distinção — é que o Gemini nunca responde nada parseável.
 
 ## Plano de correção
 
-### 1. Trocar "drop silencioso" por enfileiramento curto
-Quando `try_lock_customer_processing` falha após os 50 retries:
-- **NÃO** retornar `{skipped:"busy"}`. Em vez disso, marcar `customer.pending_inbound = messageId` e retornar 200. A 1ª invocação, ao terminar e liberar o lock, verifica esse flag e reentra (loop interno de 1 passo). Garante que nenhuma mensagem é perdida.
+### 1. Desligar thinking explicitamente e aumentar orçamento
 
-### 2. Reforçar anti-rep do `dispatchStepFromFlow`
-- Buscar últimos 5 outbounds (não 1).
-- Normalizar comparação removendo prefixo `flow:` dos dois lados.
-- Aceitar match por `step_key` **ou** por `step_id` (quando custom).
+Em `callGemini` (detect-doc-type.ts):
 
-### 3. Aumentar janela de checagem do `emitStep` para mídia
-- Para `mediaSent` recente, consultar `conversations.message_type IN ('audio','video','image')` e checar se a mesma `media_id` saiu nos últimos 10 min (campo `metadata->media_id` se persistido; caso contrário, comparar URL).
-- Se persistido por `slot_key`, comparar slot_key + tipo de mídia.
+```ts
+generationConfig: {
+  temperature: 0,
+  maxOutputTokens: 2048,                         // antes 400
+  responseMimeType: "application/json",
+  thinkingConfig: { thinkingBudget: 0 },         // 🚨 sem thinking
+},
+```
 
-### 4. Persistir `media_id`/`slot_key` na linha outbound de conversations
-- Para a defesa #3 funcionar bem, garantir que toda outbound de mídia salva `metadata.media_id` (ou colunas novas `media_id`, `slot_key`). Sem isso, a checagem de mídia continua frágil.
-- Migration: adicionar `media_id uuid` e `slot_key text` em `conversations` (nullable).
+Isso aplica nas 3 passadas (flash e pro). Sem thinking, o modelo gera o JSON direto e o `text` volta preenchido.
 
-### 5. Lock advisory **antes** da transcrição/áudio
-- Hoje o lock só é adquirido depois de transcrever áudio (linhas 470-537). Se 2 mensagens chegam juntas com áudio, ambas transcrevem em paralelo (custo Gemini duplicado), e só depois disputam o lock. Mover o `try_lock` para logo após `checkAndMarkProcessed` (antes de transcrever) elimina trabalho duplicado.
+### 2. Log da resposta crua quando o parse falha
 
-### 6. Telemetria
-- Adicionar contador em `ai_usage_log` (ou tabela própria) para cada `skipped:"busy"`, `anti-rep step`, `anti-rep text`, `anti-rep media` — para você acompanhar no painel se as defesas estão sendo acionadas e onde.
+Hoje o log diz só "no-parse" — não dá pra debugar. Adicionar:
+
+```ts
+if (!parsed1) console.warn("[detectDoc] pass1 raw:", raw1.substring(0, 300));
+```
+
+Idem pass2 e pass3. Sem isso, qualquer regressão futura fica invisível de novo.
+
+### 3. Fallback inteligente em vez de assumir `rg_antigo`
+
+Quando as 3 passadas falham (caso raro após o fix), em vez de empurrar `rg_antigo` (que sempre pede verso e quebra UX de CNH), o bot deve **perguntar** uma única vez: "É RG ou CNH?" e seguir com a resposta. Isso vai no `case "aguardando_doc_auto"` em `bot-flow.ts:2519`.
+
+Implementação:
+- `detectDocumentTypeDetailed` ganha campo `confianca: 0, source: "fallback"` (já existe).
+- No handler, se `confianca === 0 && source === "fallback"`, em vez de prosseguir, salva `document_front_*`, vai para `ask_tipo_documento` (que já existe — linha 2620) e pergunta "RG ou CNH?".
+
+### 4. Ajuste do fallback "rg_antigo é mais seguro" no PROMPT_PASS3
+
+Hoje a regra R5 do pass3 ("em dúvida → rg_antigo") **incentiva** o modelo a chutar RG mesmo quando viu CATEGORIA/VALIDADE. Trocar por "em dúvida → responda com `confianca: 0.3`" e deixar o handler aplicar o fallback humano do item 3.
 
 ## Arquivos afetados
 
-- `supabase/functions/whapi-webhook/index.ts` (ordem do lock, fallback de enfileiramento)
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (anti-rep do `dispatchStepFromFlow`)
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (anti-rep de mídia em `emitStep` e `sendStepMedia`)
-- Migration nova: colunas `media_id`/`slot_key` em `conversations` + RPC `enqueue_pending_inbound`.
+- `supabase/functions/_shared/detect-doc-type.ts` (itens 1, 2, 4)
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (item 3, no case `aguardando_doc_auto`)
 
-## Resumo executivo
+## Verificação
 
-As defesas atuais cobrem ~80% dos casos de duplicidade. As 4 brechas acima explicam por que a Fran ainda recebeu repetição: provavelmente o `dispatchStepFromFlow` reenviou um step custom porque o anti-rep dele só olha 1 linha e não normaliza prefixo `flow:`. Aplicando os 6 itens, o risco de duplicidade fica praticamente zero e nenhuma mensagem do lead é descartada.
+Depois de deploy:
+1. Esperar próximo lead enviar CNH ou RG.
+2. Conferir logs: deve aparecer `pass1 confiante: cnh (0.90+)` em vez de `no-parse`.
+3. Conferir que CNH não dispara mais "envie o verso".
+
+Sem mudar UX visível para o lead — a correção é só fazer o classificador realmente funcionar.
