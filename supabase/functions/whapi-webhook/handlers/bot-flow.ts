@@ -505,7 +505,108 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
 
   // ═══════════════════════════════════════════════════════════════════
-  // 🤔 MIDFLOW QA — cliente faz pergunta no meio do cadastro
+  // 🎯 MULTI-FIELD EXTRACTOR — captura nome/CEP/valor/CPF/email/tel
+  // de uma mensagem livre, preenchendo slots vazios (Sprint E1).
+  // Só preenche o que tá vazio — não sobrescreve campos fortes (manual/OCR).
+  // ═══════════════════════════════════════════════════════════════════
+  if (messageText && !isFile && !isButton) {
+    try {
+      const multi = extractMultiField(messageText);
+      const patch = buildMultiFieldPatch(customer as any, multi);
+      if (Object.keys(patch).length > 0) {
+        console.log(`[multi-extract] captured ${Object.keys(patch).join(",")} from livre msg`);
+        await supabase.from("customers").update(patch).eq("id", customer.id);
+        Object.assign(customer as any, patch);
+      }
+    } catch (e) {
+      console.warn("[multi-extract] falhou:", (e as Error).message);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 🔀 FLOW ROUTER — detecta pedido de troca de fluxo (PJ / Licenciada / etc).
+  // Se já tem switch pendente, processa afirmação/negação. Senão, propõe troca.
+  // Sprint E2.
+  // ═══════════════════════════════════════════════════════════════════
+  if (messageText && !isFile && !isButton) {
+    try {
+      const pending = String((customer as any).pending_flow_switch || "").trim();
+      const stepNow = String((customer as any).conversation_step || "");
+      const norm = messageText.toLowerCase().trim();
+
+      if (pending) {
+        const isYes = /^(sim|s|claro|pode|positivo|isso|quero|vamos|bora|👍|✅|1)\b/.test(norm);
+        const isNo = /^(n[ãa]o|n|nao|negativo|deixa|👎|❌|2)\b/.test(norm);
+        if (isYes) {
+          console.log(`[flow-router] confirmed switch → ${pending}`);
+          await supabase.from("customers").update({
+            pending_flow_switch: null,
+            conversation_step: "boas_vindas",
+          }).eq("id", customer.id);
+          (customer as any).pending_flow_switch = null;
+          (customer as any).conversation_step = "boas_vindas";
+          try {
+            await supabase.from("bot_handoff_alerts").insert({
+              customer_id: customer.id,
+              consultant_id: customer.consultant_id,
+              reason: "flow_switch_confirmed",
+              user_message: messageText.slice(0, 200),
+            } as any);
+          } catch {}
+          try {
+            await supabase.from("bot_step_transitions").insert({
+              customer_id: customer.id,
+              consultant_id: customer.consultant_id,
+              from_step: stepNow,
+              to_step: "boas_vindas",
+              intent: `flow_router:${pending}`,
+            });
+          } catch {}
+          return { reply: `Beleza! Vou te atender pelo fluxo **${pending}**. 🙌\n\nMe conta — em que posso te ajudar primeiro?`, updates: {} };
+        }
+        if (isNo) {
+          console.log(`[flow-router] rejected switch → ${pending}`);
+          await supabase.from("customers").update({ pending_flow_switch: null }).eq("id", customer.id);
+          (customer as any).pending_flow_switch = null;
+          try {
+            await supabase.from("bot_handoff_alerts").insert({
+              customer_id: customer.id,
+              consultant_id: customer.consultant_id,
+              reason: "flow_switch_rejected",
+            } as any);
+          } catch {}
+          return { reply: "Tranquilo, segue aqui mesmo então! 😉 Onde a gente tava?", updates: {} };
+        }
+        // sem sim/não claro → segue fluxo normal (limpa o pending pra não travar)
+        await supabase.from("customers").update({ pending_flow_switch: null }).eq("id", customer.id);
+        (customer as any).pending_flow_switch = null;
+      } else {
+        const candidate = await detectFlowSwitch(supabase, customer.consultant_id, messageText, null);
+        if (candidate) {
+          console.log(`[flow-router] proposing switch → ${candidate.target_flow_key} (kw="${candidate.matched_keyword}")`);
+          await supabase.from("customers").update({ pending_flow_switch: candidate.target_flow_key }).eq("id", customer.id);
+          (customer as any).pending_flow_switch = candidate.target_flow_key;
+          try {
+            await supabase.from("bot_handoff_alerts").insert({
+              customer_id: customer.id,
+              consultant_id: customer.consultant_id,
+              reason: "flow_switch_requested",
+              user_message: messageText.slice(0, 200),
+            } as any);
+          } catch {}
+          return {
+            reply: `Vi que você quer falar sobre **${candidate.target_flow_label}** — quer que eu mude pra esse atendimento? (responde *sim* ou *não*)`,
+            updates: {},
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[flow-router] falhou:", (e as Error).message);
+    }
+  }
+
+
+
   // Aditivo, gated por env MIDFLOW_QA_ENABLED (default "true").
   // Se a mensagem parece pergunta e casa com a FAQ do consultor:
   //   1) responde a FAQ
