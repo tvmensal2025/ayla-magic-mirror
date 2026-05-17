@@ -1910,10 +1910,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           else if (stype === "finalizar_cadastro") step = "finalizando";
           else {
             // step_type === "message" → passo informativo.
-            // Qualquer resposta do lead avança para o próximo passo ativo por position.
-            const nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {
-              afterPosition: Number(stepRow.position) || 0,
-            });
+            // ANTES de avançar, garante que o conteúdo do step ATUAL foi emitido
+            // (dispatchStepFromFlow tem anti-rep interno de 10 min, então não duplica).
             const _fmtBRL = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             const _valor = Number((customer as any).electricity_bill_value || 0);
             const _vars = {
@@ -1924,6 +1922,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               "{economia_anual}": _fmtBRL(_valor * 0.20 * 12),
               "{{economia_anual}}": _fmtBRL(_valor * 0.20 * 12),
             };
+            const emittedCurrent = await dispatchStepFromFlow(stepRow.step_key, _vars).catch(() => false);
+            console.log(`[custom-step-resolver] emit-current step=${stepRow.step_key} ok=${emittedCurrent}`);
+
+            // Qualquer resposta do lead avança para o próximo passo ativo por position.
+            const nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {
+              afterPosition: Number(stepRow.position) || 0,
+            });
 
             if (nextCustom) {
               const ok = await dispatchStepFromFlow(nextCustom.step_key, _vars);
@@ -1935,7 +1940,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               else if (ntype === "confirm_phone") nextStepValue = "ask_phone_confirm";
               else if (ntype === "finalizar_cadastro") nextStepValue = "finalizando";
               console.log(`[custom-step-resolver] message→advance next=${nextCustom.step_key} type=${ntype} dispatched=${ok}`);
-              return { reply: "", updates: { conversation_step: nextStepValue, __inline_sent: ok || undefined } as any };
+              return { reply: "", updates: { conversation_step: nextStepValue, __inline_sent: (emittedCurrent || ok) || undefined } as any };
             }
             // Sem próximo passo configurado → finaliza
             console.log(`[custom-step-resolver] sem próximo passo após pos=${stepRow.position} → finalizando`);
