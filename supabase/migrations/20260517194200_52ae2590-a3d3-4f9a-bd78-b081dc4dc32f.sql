@@ -1,0 +1,1 @@
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS last_step_advanced_at TIMESTAMPTZ;
