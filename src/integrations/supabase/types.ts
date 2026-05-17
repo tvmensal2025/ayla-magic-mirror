@@ -2016,6 +2016,7 @@ export type Database = {
           bot_paused_at: string | null
           bot_paused_reason: string | null
           bot_paused_until: string | null
+          bot_processing_until: string | null
           cashback: string | null
           cep: string | null
           chat_cleared_at: string | null
@@ -2129,6 +2130,7 @@ export type Database = {
           bot_paused_at?: string | null
           bot_paused_reason?: string | null
           bot_paused_until?: string | null
+          bot_processing_until?: string | null
           cashback?: string | null
           cep?: string | null
           chat_cleared_at?: string | null
@@ -2242,6 +2244,7 @@ export type Database = {
           bot_paused_at?: string | null
           bot_paused_reason?: string | null
           bot_paused_until?: string | null
+          bot_processing_until?: string | null
           cashback?: string | null
           cep?: string | null
           chat_cleared_at?: string | null
@@ -3850,6 +3853,10 @@ export type Database = {
         }
         Returns: number
       }
+      release_customer_processing_lock: {
+        Args: { _customer_id: string }
+        Returns: undefined
+      }
       reset_all_consultant_conversations: {
         Args: { _consultant_id: string }
         Returns: Json
@@ -3865,6 +3872,10 @@ export type Database = {
       seed_default_camila_flow: {
         Args: { _consultant_id: string }
         Returns: string
+      }
+      try_lock_customer_processing: {
+        Args: { _customer_id: string; _seconds?: number }
+        Returns: boolean
       }
       try_log_media_send: {
         Args: {
