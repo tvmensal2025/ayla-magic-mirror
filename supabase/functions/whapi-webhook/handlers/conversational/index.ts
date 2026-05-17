@@ -1685,6 +1685,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
           updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
         });
       }
+      await emitCurrentBeforeGoto(currentStep, nextByPosition);
       return _finalize(stepKey, await goToStep(nextByPosition, restoreDetourUpdates));
     }
   }
