@@ -1932,16 +1932,39 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             });
 
             if (nextCustom) {
-              const ok = await dispatchStepFromFlow(nextCustom.step_key, _vars);
-              const ntype = String(nextCustom.step_type || "message");
-              let nextStepValue = nextCustom.id;
+              // Chain enquanto o próximo for type=message com transição default sem trigger_phrases.
+              // Isso garante que após emitir mídia (sem pergunta), o bot avança sozinho para o próximo passo
+              // sem esperar nova mensagem do lead.
+              let current = nextCustom;
+              let dispatchedAny = false;
+              for (let hops = 0; hops < 8; hops++) {
+                const ok = await dispatchStepFromFlow(current.step_key, _vars);
+                dispatchedAny = dispatchedAny || !!ok;
+                console.log(`[custom-step-resolver] chain-emit step=${current.step_key} pos=${current.position} dispatched=${ok}`);
+                const ctype = String(current.step_type || "message");
+                if (ctype !== "message") break;
+                const hasAutoAdvance = Array.isArray(current.transitions) && current.transitions.some((t: any) =>
+                  String(t?.trigger_intent || "").toLowerCase() === "default"
+                  && (!Array.isArray(t?.trigger_phrases) || t.trigger_phrases.length === 0)
+                );
+                if (!hasAutoAdvance) break;
+                const nxt = await findNextActiveFlowStep(supabase, customer.consultant_id, {
+                  afterPosition: Number(current.position) || 0,
+                });
+                if (!nxt) break;
+                // pequeno delay para não atropelar as mensagens
+                await new Promise((r) => setTimeout(r, 1500));
+                current = nxt;
+              }
+              const ntype = String(current.step_type || "message");
+              let nextStepValue: string = current.id;
               if (ntype === "capture_conta") nextStepValue = "aguardando_conta";
               else if (ntype === "capture_documento" || ntype === "capture_doc") nextStepValue = "aguardando_doc_auto";
               else if (ntype === "capture_email") nextStepValue = "ask_email";
               else if (ntype === "confirm_phone") nextStepValue = "ask_phone_confirm";
               else if (ntype === "finalizar_cadastro") nextStepValue = "finalizando";
-              console.log(`[custom-step-resolver] message→advance next=${nextCustom.step_key} type=${ntype} dispatched=${ok}`);
-              return { reply: "", updates: { conversation_step: nextStepValue, __inline_sent: (emittedCurrent || ok) || undefined } as any };
+              console.log(`[custom-step-resolver] message→advance final=${current.step_key} type=${ntype}`);
+              return { reply: "", updates: { conversation_step: nextStepValue, __inline_sent: (emittedCurrent || dispatchedAny) || undefined } as any };
             }
             // Sem próximo passo configurado → finaliza
             console.log(`[custom-step-resolver] sem próximo passo após pos=${stepRow.position} → finalizando`);
