@@ -1017,6 +1017,35 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const text = renderStepText(st);
     const textDelay = Math.max(0, Math.min(60000, st.text_delay_ms ?? 1500));
 
+    // 🛡️ Anti-repetição: se o MESMO step (por step_key OU id) saiu como outbound
+    // nos últimos 10 minutos, não reenvia (texto nem mídia). Evita os disparos
+    // duplicados de "Vou explicar..." / "Deu para entender..." observados nos logs.
+    try {
+      const since = new Date(Date.now() - 10 * 60_000).toISOString();
+      const { data: recent } = await ctx.supabase
+        .from("conversations")
+        .select("conversation_step, created_at")
+        .eq("customer_id", ctx.customer.id)
+        .eq("message_direction", "outbound")
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      const rows: any[] = (recent as any[]) || [];
+      const stepIds = new Set<string>([
+        st.id,
+        st.step_key,
+        `flow:${st.id}`,
+        `flow:${st.step_key}`,
+      ]);
+      const hit = rows.find((r) => stepIds.has(String(r.conversation_step || "")));
+      if (hit) {
+        const ageSec = Math.round((Date.now() - new Date(hit.created_at).getTime()) / 1000);
+        console.log(`[conversational] 🛡️ anti-rep emitStep ${st.step_key} (saiu há ${ageSec}s) — pulando reenvio`);
+        return { replyText: "", inlineSent: true };
+      }
+    } catch (_e) { /* best-effort */ }
+
+
     // Quando é reply final, o texto vai como reply (não inline). Quando é cascade
     // ou quando o consultor pediu texto antes da mídia, mandamos tudo inline aqui.
     const slotKey = st.slot_key || st.step_key || st.id;
