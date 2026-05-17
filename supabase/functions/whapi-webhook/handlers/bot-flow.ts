@@ -690,10 +690,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             messageText,
             "duvida_fora_faq",
           ).catch((e) => console.warn("[notify-handoff] falhou:", (e as Error).message));
-          return {
-            reply: "Vou chamar um especialista humano pra te ajudar com isso, {{nome}}. 🙋 Em instantes alguém vai te responder por aqui.",
-            updates: {},
-          };
+          // Silencioso para o lead: bot pausa e humano assume sem aviso
+          return { reply: "", updates: { __inline_sent: true } as any };
         }
       }
     } else if (
