@@ -80,6 +80,7 @@ export default function WhatsAppClientsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [originTab, setOriginTab] = useState<OriginTab>("whatsapp_lead");
 
   useEffect(() => { loadCustomers(); }, []);
 
@@ -101,13 +102,36 @@ export default function WhatsAppClientsPage() {
     }
   };
 
-  const filteredCustomers = customers.filter((c) => {
+  // Split by origin — never mix
+  const leadsWhatsapp = useMemo(
+    () => customers.filter((c) => (c.customer_origin || "whatsapp_lead") === "whatsapp_lead" || c.customer_origin === "manual"),
+    [customers],
+  );
+  const clientesIgreen = useMemo(
+    () => customers.filter((c) => c.customer_origin === "igreen_sync"),
+    [customers],
+  );
+
+  const activeList = originTab === "whatsapp_lead" ? leadsWhatsapp : clientesIgreen;
+
+  // Reset status filter when switching tab (statuses differ)
+  useEffect(() => { setFilterStatus("all"); }, [originTab]);
+
+  const filteredCustomers = activeList.filter((c) => {
     const matchesSearch = !searchTerm ||
       c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.cpf?.includes(searchTerm) ||
       c.phone_whatsapp?.includes(searchTerm) ||
       c.email?.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesSearch && (filterStatus === "all" || c.status === filterStatus);
+    if (!matchesSearch) return false;
+    if (filterStatus === "all") return true;
+    if (originTab === "igreen_sync") {
+      // For iGreen, status filter applies to status OR andamento_igreen text
+      if (filterStatus === "devolutiva") return !!c.devolutiva || /devolutiva/i.test(c.andamento_igreen || "");
+      return c.status === filterStatus;
+    }
+    return c.status === filterStatus;
+
   });
 
   const exportToCSV = () => {
