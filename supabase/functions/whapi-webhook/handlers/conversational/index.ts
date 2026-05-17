@@ -1494,6 +1494,23 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     return goToStep(nextStep, restoreDetourUpdates);
   };
 
+  // Helper: emite o conteúdo do passo atual (slot/texto) ANTES de pular para o
+  // próximo. Evita pular passos com áudio/vídeo configurados quando o motor
+  // auto-avança por captura/posição/default transition. O anti-rep interno do
+  // emitStep (10 min) protege contra duplicidade se já foi emitido nesta sessão.
+  const emitCurrentBeforeGoto = async (cur: DbStep, next: DbStep) => {
+    if (!cur || !next || cur.id === next.id) return;
+    const hasSlot = !!(cur.slot_key && String(cur.slot_key).trim());
+    const hasText = !!(cur.message_text && String(cur.message_text).trim());
+    if (!hasSlot && !hasText) return;
+    try {
+      console.log(`[emit-before-goto] emitindo "${cur.step_key}" antes de avançar para "${next.step_key}"`);
+      await emitStep(cur, false);
+    } catch (e) {
+      console.warn(`[emit-before-goto] falhou em ${cur.step_key}:`, (e as Error)?.message || e);
+    }
+  };
+
   // 1) A regular rule matched
   if (transition) return _finalize(stepKey, await resolveTransition(transition));
 
