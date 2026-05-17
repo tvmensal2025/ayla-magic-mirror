@@ -1,67 +1,76 @@
-## Correção correta do fluxo
+## Objetivo
 
-Você está certo: eu tinha invertido a interpretação. A regra deve ser:
+Eliminar a página antiga `/admin/fluxos-antigo` (que confunde por ter duas UIs de fluxo) e trazer a seção de **Perguntas & Respostas (FAQ)** para dentro do `/admin/fluxos` (FluxoCamila), mantendo o mesmo comportamento do midflow QA do webhook.
 
-```text
-Sem nome:  Passo 1 (Nome) → Passo 2 → Passo 3 → Passo 4...
-Com nome:  pula Passo 1 → Passo 2 → Passo 3 → Passo 4...
-```
+## O que muda
 
-Ou seja: **Boas Vindas não deve virar passo 1**. O passo 1 é o de nome, e ele é o único passo que pode ser pulado quando o cliente já começou informando o nome.
+### 1. Remover fluxo antigo
 
-## O que está errado hoje
+- Deletar `src/pages/FlowBuilder.tsx`.
+- Em `src/App.tsx`, remover o `lazy import` de `FlowBuilder` e a rota `/admin/fluxos-antigo`.
+- Nenhum outro arquivo referencia o `FlowBuilder` (verificado).
 
-No banco deste fluxo, a ordem ficou assim:
+### 2. Adicionar seção "Perguntas & Respostas" no FluxoCamila
 
-```text
-posição 2 = Boas Vindas
-posição 3 = Nome do cliente
-posição 4 = Valor da conta
-...
-```
+Nova seção, posicionada **após o último passo** e antes do rodapé da página, com o mesmo visual dos cards de passo atuais (glassmorphism, badges verdes, dark mode).
 
-Isso está errado para a regra que você explicou. A ordem correta deve voltar para:
+Estrutura:
 
 ```text
-posição 1 = Nome do cliente
-posição 2 = Boas Vindas
-posição 3 = Valor da conta
-posição 4 = Como funciona / conteúdo seguinte
-posição 5 = Deu para entender?
-posição 6 = Conta de energia
-posição 7 = Cadastro
-posição 8 = Confirmação
+┌─ ❓ Perguntas & Respostas ─────────────────────────┐
+│  Quando o lead perguntar algo no meio do cadastro,│
+│  a IA responde isto e volta para o passo atual.   │
+│                                                    │
+│  [Card FAQ]                                        │
+│    Título: "Preço"                                 │
+│    Quando o cliente disser: [tag] [tag] [+ Enter] │
+│    Resposta: [textarea]                            │
+│    Mídias opcionais: 🎙️ Áudio  🎬 Vídeo            │
+│    [↑] [↓] [🗑️]                                    │
+│                                                    │
+│  [+ Nova dúvida]                                   │
+└────────────────────────────────────────────────────┘
 ```
 
-## Plano de implementação
+Reaproveita exatamente as 3 tabelas já existentes (sem migration):
+- `bot_flow_qa` — pergunta + texto da resposta
+- `bot_flow_qa_triggers` — palavras‑chave/frases
+- `bot_flow_qa_media` — áudio/vídeo opcional (slot_key ou media_id da biblioteca)
 
-1. **Reordenar os passos no banco**
-   - Colocar `Nome do cliente` como primeiro passo real do fluxo.
-   - Colocar `Boas Vindas` imediatamente depois.
-   - Reindexar os demais passos em sequência limpa: 1, 2, 3, 4, 5, 6, 7, 8.
+Operações: load, addQA, updateQA, deleteQA, moveQA, addTrigger, removeTrigger, addMedia, updateMedia, removeMedia — portadas do `FlowBuilder` antigo, sem mudar o schema nem o webhook.
 
-2. **Ajustar a lógica de pular passo**
-   - Hoje a função `resolveLandingStep` não pula o passo de nome se ele tiver `slot_key` ou `message_text`.
-   - Isso conflita com sua regra, porque o passo de nome tem texto e mesmo assim deve ser pulado quando `name_source` for confiável.
-   - Vou ajustar para permitir pular **somente o passo que captura `name`**, mesmo se tiver texto/slot.
-   - Para os outros campos, mantenho a proteção atual para não pular áudio/vídeo/textos importantes.
+### 3. Pré‑popular FAQs comuns (opcional, mesmo passo)
 
-3. **Garantir avanço sempre por posição**
-   - Quando o passo 1 for pulado, o próximo passo será o passo 2 por `position`, não por fallback antigo/invertido.
-   - Isso evita cair no passo errado caso algum `fallback.goto_step_id` esteja desatualizado.
+Após criar a UI, abrir os 10 itens base já no banco para o fluxo da Camila, prontos para o usuário editar:
 
-4. **Validar com dois cenários**
-   - Lead sem nome: deve receber passo 1 e depois seguir para passo 2.
-   - Lead com nome confiável: deve pular passo 1 e começar no passo 2.
+- Preço / mensalidade
+- É seguro / é golpe
+- Como funciona o desconto
+- Preciso trocar de empresa
+- Quanto tempo pra ativar
+- Posso cancelar / multa
+- Continuo recebendo conta da concessionária
+- Qual o desconto exato
+- Atende minha cidade
+- Preciso instalar placa
 
-## Resultado esperado
+(Só inserir se o usuário confirmar; caso contrário ele cadastra os dele.)
 
-```text
-Cliente manda: "Oi"
-Sem nome salvo → pergunta nome primeiro.
+## Comportamento no WhatsApp (já existe, sem mudanças)
 
-Cliente manda: "Sou João"
-Nome capturado → pula pergunta de nome → envia Boas Vindas → segue passo 3, 4, 5...
-```
+`supabase/functions/whapi-webhook/handlers/bot-flow.ts` (linhas 609‑677) já faz:
+1. Detecta pergunta no meio do cadastro.
+2. Busca match em `bot_flow_qa` via `matchQA`.
+3. Envia mídias + texto da FAQ + "gancho" (`getReentryPromptForStep`) repetindo o passo.
+4. **Não altera `conversation_step`** — lead continua exatamente onde estava.
+5. Em 5+ dúvidas seguidas, pausa bot e cria `bot_handoff_alerts`.
 
-Vou mexer apenas nessa correção de ordem e na regra de skip do passo de nome.
+## Arquivos tocados
+
+- `src/App.tsx` — remove import + rota antiga
+- `src/pages/FlowBuilder.tsx` — **deletar**
+- `src/pages/FluxoCamila.tsx` — adiciona seção FAQ + `QACard` interno
+
+## Confirmação necessária
+
+Quer que eu também já insira os 10 FAQs base no banco depois de criar a UI, ou prefere cadastrar tudo do zero pela tela?
