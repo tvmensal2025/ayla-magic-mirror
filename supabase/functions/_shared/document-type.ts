@@ -17,11 +17,31 @@ export type DocumentTypeCanonical = "cnh" | "rg_novo" | "rg_antigo";
  * Default = "rg_antigo" (mais comum/seguro: força frente+verso).
  */
 export function normalizeDocumentType(input: unknown): DocumentTypeCanonical {
-  const raw = String(input || "").trim().toLowerCase();
+  const raw = String(input || "").trim().toLowerCase().replace(/[._-]/g, " ");
   if (!raw) return "rg_antigo";
-  if (/cnh|habilita/.test(raw)) return "cnh";
-  if (/novo/.test(raw)) return "rg_novo";
-  if (/antigo|rg/.test(raw)) return "rg_antigo";
+
+  // Sprint D-B12: whitelist com word boundaries — evita "argo" virar rg, "cnhx" virar cnh, etc.
+  // Ordem importa: CNH primeiro (mais específico), depois RG novo, depois RG antigo.
+
+  // CNH: aceita "cnh", "habilitação", "carteira nacional [de habilitação]", "carteira de motorista"
+  if (/\bcnh\b/.test(raw)) return "cnh";
+  if (/\bhabilita\w*\b/.test(raw)) return "cnh";
+  if (/\bcarteira\s+nacional\b/.test(raw)) return "cnh";
+  if (/\bcarteira\s+de\s+motorista\b/.test(raw)) return "cnh";
+  if (/\bmotorista\b/.test(raw) && /\bcarteira\b/.test(raw)) return "cnh";
+
+  // RG novo: precisa de "novo" explícito junto de rg/identidade
+  if (/\brg\s+novo\b/.test(raw)) return "rg_novo";
+  if (/\bidentidade\s+nova\b/.test(raw)) return "rg_novo";
+  if (/\bnovo\s+(rg|modelo)\b/.test(raw)) return "rg_novo";
+  if (/\bcin\b/.test(raw)) return "rg_novo"; // Carteira de Identidade Nacional (CIN = RG novo unificado)
+
+  // RG antigo: padrão para qualquer menção a rg/identidade/registro geral
+  if (/\brg\b/.test(raw)) return "rg_antigo";
+  if (/\bidentidade\b/.test(raw)) return "rg_antigo";
+  if (/\bregistro\s+geral\b/.test(raw)) return "rg_antigo";
+  if (/\bantigo\b/.test(raw)) return "rg_antigo";
+
   return "rg_antigo";
 }
 
