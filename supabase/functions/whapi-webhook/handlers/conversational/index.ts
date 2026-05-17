@@ -1091,6 +1091,26 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         console.log(`[conversational] 🛡️ anti-rep emitStep ${st.step_key} (saiu há ${ageSec}s) — pulando reenvio`);
         return { replyText: "", inlineSent: true };
       }
+      if (text) {
+        const normalizedText = text.trim().replace(/\s+/g, " ");
+        const { data: recentText } = await ctx.supabase
+          .from("conversations")
+          .select("message_text, created_at")
+          .eq("customer_id", ctx.customer.id)
+          .eq("message_direction", "outbound")
+          .eq("message_type", "text")
+          .gte("created_at", since)
+          .order("created_at", { ascending: false })
+          .limit(10);
+        const duplicateText = ((recentText as any[]) || []).find((r) =>
+          String(r.message_text || "").trim().replace(/\s+/g, " ") === normalizedText,
+        );
+        if (duplicateText) {
+          const ageSec = Math.round((Date.now() - new Date(duplicateText.created_at).getTime()) / 1000);
+          console.log(`[conversational] 🛡️ anti-rep texto step=${st.step_key} (mesmo texto saiu há ${ageSec}s) — pulando reenvio`);
+          return { replyText: "", inlineSent: true };
+        }
+      }
     } catch (_e) { /* best-effort */ }
 
 
