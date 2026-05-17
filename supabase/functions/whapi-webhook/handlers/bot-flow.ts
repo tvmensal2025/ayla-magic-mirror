@@ -1870,6 +1870,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     "ask_complement", "ask_email", "ask_rg", "ask_finalizar",
     "confirmar_titularidade", "validacao_facial", "pos_video",
     "finalizando", "finalizar_cadastro", "complete", "valor_baixo",
+    "cadastro_em_analise", "aguardando_facial",
     "aguardando_humano",
   ]);
   const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
