@@ -95,7 +95,7 @@ R1) Tem texto "CATEGORIA" ou "VALIDADE" ou "HABILITAÇÃO"? → cnh
 R2) Tem QR code claramente grande E CPF impresso na frente? → rg_novo
 R3) Tem cabeçalho "CARTEIRA DE IDENTIDADE NACIONAL" ou "CIN"? → rg_novo
 R4) Aparência de papel laminado antigo, layout vertical, sem QR grande? → rg_antigo
-R5) Em qualquer outra dúvida → rg_antigo (mais seguro porque pede verso)
+R5) Em qualquer outra dúvida → escolha o tipo mais provável mas devolva confianca: 0.3 (o handler vai perguntar ao usuário se for o caso). NUNCA chute "rg_antigo" só por segurança.
 
 ${CHECKLIST}
 
