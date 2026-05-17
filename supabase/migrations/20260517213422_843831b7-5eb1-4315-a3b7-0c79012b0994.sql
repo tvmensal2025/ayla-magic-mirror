@@ -1,0 +1,1 @@
+UPDATE public.customers SET conversation_step='aguardando_doc_auto', updated_at=now() WHERE id='766482df-f231-4a40-b81c-cb527e10d6db';
