@@ -22,6 +22,7 @@ import { handleConnectionUpdate } from "./handlers/connection.ts";
 import { tryInterceptOtp } from "./handlers/otp-intercept.ts";
 import { runBotFlow } from "./handlers/bot-flow.ts";
 import { captureError } from "../_shared/sentry.ts";
+import { notifyNewLead } from "../_shared/notify-consultant.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -232,6 +233,11 @@ Deno.serve(async (req) => {
         }
       } else {
         customer = newCustomer;
+        notifyNewLead(instanceData.consultant_id, {
+          id: newCustomer.id,
+          name: newCustomer.name,
+          phone_whatsapp: newCustomer.phone_whatsapp,
+        }).catch((e) => console.warn("[notify-new-lead] falhou:", (e as Error).message));
       }
     }
 

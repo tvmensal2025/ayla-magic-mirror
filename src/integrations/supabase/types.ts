@@ -1688,6 +1688,7 @@ export type Database = {
           licenciada_cadastro_url: string | null
           license: string
           name: string
+          notification_phone: string | null
           phone: string
           photo_url: string | null
           referred_by: string | null
@@ -1708,6 +1709,7 @@ export type Database = {
           licenciada_cadastro_url?: string | null
           license: string
           name: string
+          notification_phone?: string | null
           phone: string
           photo_url?: string | null
           referred_by?: string | null
@@ -1728,6 +1730,7 @@ export type Database = {
           licenciada_cadastro_url?: string | null
           license?: string
           name?: string
+          notification_phone?: string | null
           phone?: string
           photo_url?: string | null
           referred_by?: string | null

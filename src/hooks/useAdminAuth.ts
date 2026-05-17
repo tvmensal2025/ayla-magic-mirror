@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 
 const DEFAULT_CONSULTANT_FORM = {
-  name: "", license: "", phone: "", cadastro_url: "", igreen_id: "",
+  name: "", license: "", phone: "", notification_phone: "", cadastro_url: "", igreen_id: "",
   licenciada_cadastro_url: "", facebook_pixel_id: "", google_analytics_id: "",
   igreen_portal_email: "", igreen_portal_password: "",
 };
@@ -67,7 +67,9 @@ export function useAdminAuth() {
       const regeneratedLicense = consultantName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || (consultant.license as string) || "";
       setForm({
         ...DEFAULT_CONSULTANT_FORM, name: consultantName, license: regeneratedLicense,
-        phone: (consultant.phone as string) || "", igreen_id: id,
+        phone: (consultant.phone as string) || "",
+        notification_phone: (consultant.notification_phone as string) || "",
+        igreen_id: id,
         cadastro_url: id ? `https://digital.igreenenergy.com.br/?id=${id}&sendcontract=true` : (consultant.cadastro_url as string) || "",
         licenciada_cadastro_url: id ? `https://expansao.igreenenergy.com.br/?id=${id}&checkout=true` : (consultant.licenciada_cadastro_url as string) || "",
         facebook_pixel_id: (consultant.facebook_pixel_id as string) || "", google_analytics_id: (consultant.google_analytics_id as string) || "",

@@ -9,6 +9,7 @@ interface DadosTabProps {
     name: string;
     license: string;
     phone: string;
+    notification_phone: string;
     igreen_id: string;
     cadastro_url: string;
     licenciada_cadastro_url: string;
@@ -72,7 +73,7 @@ export function DadosTab({ form, photoPreview, saving, onFormChange, onPhotoChan
             <p className="text-xs text-muted-foreground">Gerado automaticamente a partir do nome</p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="phone" className="text-sm text-muted-foreground">WhatsApp (com DDD)</Label>
+            <Label htmlFor="phone" className="text-sm text-muted-foreground">WhatsApp principal (IA + divulgação)</Label>
             <div className="flex">
               <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-border bg-muted text-muted-foreground text-sm">+55</span>
               <Input
@@ -87,6 +88,24 @@ export function DadosTab({ form, photoPreview, saving, onFormChange, onPhotoChan
                 required
               />
             </div>
+            <p className="text-xs text-muted-foreground">Número onde a Camila atende seus leads</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="notification_phone" className="text-sm text-muted-foreground">WhatsApp para alertas (humano)</Label>
+            <div className="flex">
+              <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-border bg-muted text-muted-foreground text-sm">+55</span>
+              <Input
+                id="notification_phone"
+                value={form.notification_phone.replace(/^55/, "")}
+                onChange={(e) => {
+                  const raw = e.target.value.replace(/\D/g, "").slice(0, 11);
+                  onFormChange({ notification_phone: raw ? `55${raw}` : "" });
+                }}
+                placeholder="11989000650"
+                className="bg-secondary border-border rounded-l-none"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">Receberá 🎉 novos leads e 🆘 pedidos de atendimento humano. Pode ser o mesmo número.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="igreen_id" className="text-sm text-muted-foreground">ID iGreen</Label>

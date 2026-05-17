@@ -71,6 +71,7 @@ export function useConsultantForm(
       }
       const consultantFields: Database["public"]["Tables"]["consultants"]["Update"] = {
         name: form.name, license: finalLicense, phone: form.phone.replace(/\D/g, ""),
+        notification_phone: form.notification_phone ? form.notification_phone.replace(/\D/g, "") : null,
         cadastro_url: form.cadastro_url, igreen_id: form.igreen_id || null,
         licenciada_cadastro_url: form.licenciada_cadastro_url || null,
         facebook_pixel_id: form.facebook_pixel_id || null, google_analytics_id: form.google_analytics_id || null,
@@ -84,6 +85,7 @@ export function useConsultantForm(
         }
         const insertPayload: Database["public"]["Tables"]["consultants"]["Insert"] = {
           id: userId, name: form.name, license: licenseToSave, phone: form.phone.replace(/\D/g, ""),
+          notification_phone: form.notification_phone ? form.notification_phone.replace(/\D/g, "") : null,
           cadastro_url: form.cadastro_url, igreen_id: form.igreen_id || null,
           licenciada_cadastro_url: form.licenciada_cadastro_url || null,
           facebook_pixel_id: form.facebook_pixel_id || null, google_analytics_id: form.google_analytics_id || null,

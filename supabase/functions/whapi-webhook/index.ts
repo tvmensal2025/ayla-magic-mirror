@@ -19,6 +19,7 @@ import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-nam
 import { captureError } from "../_shared/sentry.ts";
 import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
 import { botRequestStore, isTestPhone, logTestOutbound } from "../_shared/test-mode.ts";
+import { notifyNewLead } from "../_shared/notify-consultant.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -317,6 +318,12 @@ Deno.serve(async (req) => {
         }
       } else {
         customer = newCustomer;
+        // 🎉 Notifica o consultor (fire-and-forget)
+        notifyNewLead(superAdminConsultantId, {
+          id: newCustomer.id,
+          name: newCustomer.name,
+          phone_whatsapp: newCustomer.phone_whatsapp,
+        }).catch((e) => console.warn("[notify-new-lead] falhou:", (e as Error).message));
       }
     }
 
