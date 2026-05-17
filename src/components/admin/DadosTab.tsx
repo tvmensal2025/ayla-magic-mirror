@@ -9,6 +9,7 @@ interface DadosTabProps {
     name: string;
     license: string;
     phone: string;
+    notification_phone: string;
     igreen_id: string;
     cadastro_url: string;
     licenciada_cadastro_url: string;
