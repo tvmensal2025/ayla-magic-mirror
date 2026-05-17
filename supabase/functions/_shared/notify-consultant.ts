@@ -70,40 +70,71 @@ export async function notifyConsultant(
   }
 }
 
-// ─── Envia texto bruto (sem prefixo de ícone) para o número de alertas ──
+// ─── Envia texto bruto para o número de alertas ──
+// Tenta Whapi primeiro (canal ativo hoje); cai em Evolution só se Whapi falhar/não configurado.
 async function sendRawToAlertNumber(consultantId: string, text: string): Promise<boolean> {
+  const admin = adminClient();
+  const { data: consultant } = await admin
+    .from("consultants")
+    .select("phone, notification_phone")
+    .eq("id", consultantId)
+    .maybeSingle();
+  const targetPhone = (consultant as any)?.notification_phone || consultant?.phone;
+  if (!targetPhone) {
+    console.warn("[notify-raw] consultor sem phone:", consultantId);
+    return false;
+  }
+  const digits = String(targetPhone).replace(/\D/g, "");
+  const number = digits.startsWith("55") ? digits : `55${digits}`;
+  const to = `${number}@s.whatsapp.net`;
+
+  // 1) Whapi (canal ativo)
+  const whapiToken = Deno.env.get("WHAPI_TOKEN");
+  const whapiUrl = (Deno.env.get("WHAPI_API_URL") || "https://gate.whapi.cloud").replace(/\/+$/, "");
+  if (whapiToken) {
+    try {
+      const res = await fetch(`${whapiUrl}/messages/text`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${whapiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ to, body: text, typing_time: 1 }),
+      });
+      if (res.ok) {
+        console.log(`✅ [notify-raw] enviado via whapi -> ${number}`);
+        return true;
+      }
+      console.warn("[notify-raw] whapi falhou:", res.status, (await res.text()).slice(0, 200));
+    } catch (e) {
+      console.warn("[notify-raw] whapi erro:", (e as Error).message);
+    }
+  }
+
+  // 2) Fallback Evolution
   try {
     const evolutionUrl = Deno.env.get("EVOLUTION_API_URL");
     const evolutionKey = Deno.env.get("EVOLUTION_API_KEY");
     if (!evolutionUrl || !evolutionKey) return false;
-
-    const admin = adminClient();
-    const { data: consultant } = await admin
-      .from("consultants")
-      .select("phone, notification_phone")
-      .eq("id", consultantId)
-      .maybeSingle();
-    const targetPhone = (consultant as any)?.notification_phone || consultant?.phone;
-    if (!targetPhone) return false;
-
     const { data: inst } = await admin
       .from("whatsapp_instances")
-      .select("instance_name")
+      .select("instance_name, status")
       .eq("consultant_id", consultantId)
       .maybeSingle();
-    if (!inst?.instance_name) return false;
-
-    const digits = String(targetPhone).replace(/\D/g, "");
-    const number = digits.startsWith("55") ? digits : `55${digits}`;
-
+    if (!inst?.instance_name || inst.status === "needs_reconnect") return false;
     const res = await fetch(`${evolutionUrl.replace(/\/+$/, "")}/message/sendText/${inst.instance_name}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", apikey: evolutionKey },
       body: JSON.stringify({ number, text }),
     });
-    return res.ok;
+    if (res.ok) {
+      console.log(`✅ [notify-raw] enviado via evolution -> ${number}`);
+      return true;
+    }
+    console.warn("[notify-raw] evolution falhou:", res.status);
+    return false;
   } catch (e) {
-    console.error("[notify-raw] erro:", (e as Error).message);
+    console.error("[notify-raw] evolution erro:", (e as Error).message);
     return false;
   }
 }

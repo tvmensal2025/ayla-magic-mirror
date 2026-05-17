@@ -1,70 +1,103 @@
 
-Validado: estamos no `whapi-webhook` (o `evolution-webhook` fica para depois). O diagnóstico abaixo é o mesmo, só muda o alvo dos arquivos.
+## Análise completa do atendimento (customer 225cabb8 — Sirlene 5511973125846)
 
-## Diagnóstico (3 bugs reais)
+Cruzei `customers`, `conversations`, `bot_flow_steps`, `consultants`, `whatsapp_instances` e os logs do `whapi-webhook`. São **3 bugs reais e independentes** — não é o mesmo problema de antes.
 
-### 1) Aviso de novo lead não chegou
-`supabase/functions/whapi-webhook/index.ts` (~linha 286) só dispara `notifyNewLead(...)` dentro do branch que executa **somente quando o INSERT em `customers` deu certo** (linha 322). Se o lead já existia (importação Excel, teste anterior, registro reaproveitado pelo fallback nas linhas 299‑313, ou reset/finalizado virando "welcome"), a notificação **nunca** é enviada — foi exatamente o caso.
+### 1) Aviso de novo lead NÃO chegou no 5511989000650
 
-Além disso, mesmo quando dispara, depende de:
-- `consultants.notification_phone || consultants.phone`
-- `whatsapp_instances.instance_name` conectada
+- `consultants.notification_phone = 5511989000650` ✅ configurado certo.
+- Customer foi criado novo às 18:58:11 (linha 286 do `whapi-webhook/index.ts`), então o branch que dispara `notifyNewLead` (linha 322) **foi executado**.
+- Causa raiz: o helper `_shared/notify-consultant.ts → sendRawToAlertNumber` envia **via Evolution** (`/message/sendText/{instance_name}`), mas:
+  - `whatsapp_instances` desse consultor está `status='needs_reconnect'` e o canal ativo hoje é **Whapi**, não Evolution.
+  - A chamada para Evolution falha silenciosamente (`res.ok=false`) e o `.catch` só loga warning.
+- Resultado: notificação nunca chega. Já era assim antes da última rodada — o gatilho foi corrigido, mas o **transporte continua errado**.
 
-### 2) Passos customizados (1, 2, 3, 4, 5, 6, 7) são pulados pela Camila
-Em `whapi-webhook/handlers/bot-flow.ts` linha **2234**, após o lead confirmar os dados da conta, o código chama:
+### 2) Passo "Boas Vindas" (position=3, `6226f6f3`) foi pulado
 
-```ts
-findNextActiveFlowStep(supabase, consultantId, {
-  stepTypeIn: ["capture_documento","capture_doc","finalizar_cadastro"]
-})
+Sequência real:
+```
+18:58:19 OUT "Qual seu nome para eu adicionar aqui?"   step_logged=flow:6226f6f3 (Boas Vindas)
+18:58:33 IN  "Sirlene"
+18:58:42 OUT "Sirlene, qual o valor médio da sua conta?" step=3e7fb4cd (position 4)
 ```
 
-Esse filtro **ignora** todos os outros `step_type` que o editor permite (`message`, `capture_conta`, `capture_email`, `confirm_phone`). Quando o consultor cria passos intermediários (pitch, FAQ, vídeo extra, confirmar telefone, captar e-mail) eles são **saltados**: a Camila pula direto do "SIM dados corretos" para o documento ou para a finalização.
+O bot mandou a pergunta do passo 2 (`Nome do cliente`) e marcou `conversation_step = flow:6226f6f3` (Boas Vindas, position 3, que tem áudio/vídeo configurados). Quando a Sirlene respondeu "Sirlene", o engine **pulou direto** para position=4 (valor da conta) sem disparar a mídia do Boas Vindas.
 
-### 3) Qualquer resposta no meio do fluxo custom reseta o bot
-Quando o `step_type` não é `capture_documento`/`finalizar_cadastro`, a linha 2263 grava `conversation_step = nextCustom.id` (um **UUID**). Na próxima mensagem do lead, o `switch (step)` da linha 1845 não tem `case` para UUID → cai no `default:` (linha 3340) que loga `"Step desconhecido"` e **reseta para `aguardando_conta`**, mandando "envie a foto da conta de luz" do zero.
+Causa: o resolver custom que adicionamos (no `switch (step)` de `bot-flow.ts`) trata steps `message` assumindo que **qualquer resposta avança pro próximo**. Mas quando o passo atual ainda tem mídia/conteúdo **não enviado** (caso do Boas Vindas, que foi só "marcado" como next mas nunca executado), ele precisa **disparar o conteúdo do step atual antes** de avançar.
 
-Os três somados explicam exatamente: aviso não veio, passos novos não rodam, e qualquer pergunta derruba o lead pro Passo 1.
+### 3) "200 mais ou menos" ignorado → bot pediu para repetir 2×
+
+```
+18:59:03 IN  "200 mais ou menos"
+18:59:08 OUT "Pode me responder, por favor? 🙂"          (5s depois!)
+18:59:19 IN  "Sim"
+18:59:23 IN  "200"
+18:59:24 OUT "Pode me responder, por favor? 🙂"
+19:00:53 OUT "Vou explicar como funciona, ok?"           (avança só 1m50s depois)
+```
+
+Causa raiz em `_shared/captureExtractors.ts → extractValor`:
+```ts
+const moneyHint = /r?\$|\breais?\b|\bconta\b|\bluz\b|\bvalor\b|\bpila\b|\bmangos?\b|\bcontos?\b/i.test(t);
+const bareNumber = /^\s*\d{2,5}(?:[.,]\d{1,2})?\s*(?:reais?|pila|...)?\s*$/i.test(t);
+if (moneyHint || bareNumber) { ... }
+```
+- "200 mais ou menos" → `moneyHint=false` (não tem $/reais/conta), `bareNumber=false` (tem texto extra). Retorna `null`.
+- "200" sozinho → `bareNumber=true`. **Deveria ter funcionado**, mas o handler já estava no fluxo de nudge/buffer e a próxima execução do bot consolidou só depois.
+
+Além disso, o nudge "Pode me responder, por favor?" dispara **5 segundos** depois da mensagem do lead e **sem checar** se o que ele mandou **continha um número plausível** quando o contexto é claramente uma pergunta de valor. Falta um fallback "estamos perguntando valor, então tente extrair qualquer número 30–50000 da mensagem".
 
 ---
 
-## O que vou implementar (tudo no whapi)
+## Plano de correção (tudo no Whapi, sem mudar schema)
 
-### A. Notificar novo lead também em reaproveitamento
-`supabase/functions/whapi-webhook/index.ts`:
-- Detectar "primeira mensagem real" = customer recém-criado **OU** customer sem inbound nas últimas 24h **OU** customer vindo de status/step finalizado e reaberto agora.
-- Disparar `notifyNewLead` nesses casos (dedup de 60 s do helper continua válido).
-- Sem alterar a criação — só ampliar quando notifica.
+### A. Notificação de novo lead via Whapi (não Evolution)
 
-### B. Engine genérico para passos customizados do FluxoCamila
-`supabase/functions/whapi-webhook/handlers/bot-flow.ts`:
+`supabase/functions/_shared/notify-consultant.ts`:
+- Reescrever `sendRawToAlertNumber` para detectar o canal ativo do consultor:
+  - Primeiro tentar **Whapi** usando o mesmo helper que `bot-flow.ts` usa (`sendText` do `whapi.ts`/`_helpers.ts`) — porque já está conectado e enviando para clientes.
+  - Só cair em Evolution se Whapi não estiver disponível.
+- Manter dedup de 60s. Logar canal usado.
+- Sem mudança no `whapi-webhook/index.ts` — o gatilho já está correto.
 
-1. **Pós-`confirmando_dados_conta`** (~linha 2234): remover o filtro `stepTypeIn`. Pegar simplesmente o próximo passo ativo por `position`, qualquer `step_type`. Aplicar pipeline especial só quando o tipo for `capture_*` ou `finalizar_cadastro`.
-2. **Início do `switch (step)`** (~linha 1845): antes do switch, resolver step custom. Se `conversation_step` for UUID ou bater com algum `bot_flow_steps.step_key` ativo do consultor:
-   - Carregar `step_type` e `position`.
-   - Se for `capture_conta` → roteia para `aguardando_conta`.
-   - Se for `capture_documento` → roteia para `aguardando_doc_auto`.
-   - Se for `capture_email` → roteia para `ask_email`.
-   - Se for `confirm_phone` → roteia para `ask_phone_confirm`.
-   - Se for `finalizar_cadastro` → roteia para `finalizando`.
-   - Se for `message` → trata como passo informativo: qualquer resposta avança para o próximo passo ativo por `position` via `dispatchStepFromFlow` + atualiza `conversation_step` (UUID do próximo, ou step legado se for capture). Se não houver próximo, cai em `finalizando`.
-3. **`default:` (~linha 3340)**: nunca resetar para `aguardando_conta` se o consultor tem fluxo custom ativo — re-disparar o passo atual (idempotente, anti-rep de 10 min já existe) e logar.
+### B. Não pular passos `message` com mídia pendente
 
-### C. Anti-trava
-- Se `dispatchStepFromFlow` voltar `false` (sem texto/mídia configurado), avança automaticamente para o próximo passo em vez de ficar parado.
-- Mantém anti-repetição de 10 min.
+`supabase/functions/whapi-webhook/handlers/bot-flow.ts`, no resolver custom (logo antes do `switch (step)` ~linha 1845) e no handler de `step_type=message`:
+- Quando `conversation_step` aponta para um step `message` que **ainda não foi emitido** (sem registro outbound recente em `conversations` para esse `conversation_step`), disparar `dispatchStepFromFlow(step)` **antes** de avançar.
+- Só avançar para o próximo `position` depois que o step atual realmente entregou mídia/texto.
+- Critério de "já emitido": consulta a `conversations` por `customer_id` + `conversation_step` + `message_direction='outbound'` nos últimos N minutos (ou flag em memória/lock por step).
+
+### C. extractValor mais tolerante + fallback contextual
+
+1. `supabase/functions/_shared/captureExtractors.ts → extractValor`:
+   - Adicionar expressões "mais ou menos", "uns", "cerca de", "aproximadamente", "uns X", "umas X" ao `moneyHint` (já são pistas de quantia).
+   - Aceitar número seguido de texto qualquer quando vier do contexto "valor da conta" (ver item 2).
+
+2. `bot-flow.ts`, no handler do step `Qual o valor` (`3e7fb4cd` no caso) / `aguardando_conta` / step `message` que perguntou valor:
+   - Se `extractValor` falhar, tentar fallback **permissivo**: primeiro número entre 30 e 50000 na mensagem do lead. Se achar, aceita e avança.
+   - Só dispara o nudge "Pode me responder" se **não houver nenhum dígito** na resposta E após **≥ 30s sem resposta** (não 5s).
+   - Anti-duplicação do nudge: não disparar 2× para o mesmo `conversation_step` em < 60s.
+
+### D. Backstop anti-trava no value capture
+
+- Se o lead já mandou 2 mensagens no mesmo step de valor sem ser entendido, abrir handoff para humano (`notifyHandoff`) ao invés de continuar pedindo. Hoje o lead fica preso.
 
 ---
 
 ## Arquivos alterados
 
-- `supabase/functions/whapi-webhook/index.ts` — ampliar gatilho de `notifyNewLead`.
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — engine de passos custom + `default` seguro.
+- `supabase/functions/_shared/notify-consultant.ts` — enviar via Whapi com fallback Evolution.
+- `supabase/functions/_shared/captureExtractors.ts` — `extractValor` aceita "200 mais ou menos", "uns 300", "cerca de 450".
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — não pular `message` com mídia pendente; fallback permissivo de número no step de valor; nudge com debounce e threshold de tempo; handoff após 2 falhas seguidas no mesmo step.
 
-Sem mudança de schema. `evolution-webhook` fica intocado nessa rodada (espelhamos depois).
+Sem mudança de schema.
 
 ## Validação
 
-1. Reler o trecho editado e confirmar que nenhum caminho cai em `aguardando_conta` quando há fluxo custom.
-2. Rodar `bot-flow_test.ts` + adicionar caso "lead em step UUID responde texto → avança pro próximo, não reseta".
-3. Conferir no log do `whapi-webhook` que `notifyNewLead` foi chamado mesmo com customer pré-existente.
+1. Reler trechos editados e confirmar que: (a) `sendRawToAlertNumber` chama Whapi quando há `whatsapp_instances` Whapi-vinculada; (b) `extractValor("200 mais ou menos") === 200`; (c) step `message` com mídia nunca é pulado.
+2. Adicionar testes em `bot-flow_test.ts`:
+   - "lead em step `message` Boas Vindas responde → mídia do step é emitida ANTES de avançar"
+   - "lead responde '200 mais ou menos' em step de valor → bill_value=200, avança para próximo passo, NÃO envia nudge"
+3. Conferir nos logs do `whapi-webhook` após próximo lead de teste:
+   - `[notify-new-lead] enviado via whapi para 5511989000650`
+   - `emitStep step=6226f6f3` (Boas Vindas) aparecendo entre nome e valor.

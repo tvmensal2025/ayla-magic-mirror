@@ -37,9 +37,11 @@ export function extractValor(text: string): number | null {
   const rx = /(?:r?\$\s*|reais?\s*|conta\s+(?:de|vem|tá|é|cerca de|uns|umas|aproximadamente)?\s*|valor\s+(?:de|é)?\s*)?(\d{2,5}(?:[.,]\d{1,2})?)/i;
   // dispara se houver indício de dinheiro (R$, $, reais, conta, luz, valor, pila)
   // OU se a mensagem for praticamente só um número (resposta direta a "qual o valor?")
+  // OU se contiver expressões de aproximação ("uns 200", "200 mais ou menos", "cerca de 300")
   const moneyHint = /r?\$|\breais?\b|\bconta\b|\bluz\b|\bvalor\b|\bpila\b|\bmangos?\b|\bcontos?\b/i.test(t);
+  const approxHint = /\b(uns|umas|cerca\s+de|aproximadamente|aprox|por\s+volta|em\s+torno|quase|talvez|mais\s+ou\s+menos)\b/i.test(t);
   const bareNumber = /^\s*\d{2,5}(?:[.,]\d{1,2})?\s*(?:reais?|pila|mangos?|contos?|r?\$)?\s*$/i.test(t);
-  if (moneyHint || bareNumber) {
+  if (moneyHint || bareNumber || approxHint) {
     const m = t.match(rx);
     if (m) {
       const v = parseFloat(m[1].replace(/\./g, "").replace(",", "."));
@@ -57,6 +59,18 @@ export function extractValor(text: string): number | null {
       if (total >= 30 && total <= 50000) return total;
     }
   }
+  return null;
+}
+
+/** Fallback permissivo para o contexto "valor da conta": qualquer número 30..50000 na mensagem. */
+export function extractValorPermissivo(text: string): number | null {
+  if (!text) return null;
+  const direct = extractValor(text);
+  if (direct != null) return direct;
+  const m = text.match(/\b(\d{2,5}(?:[.,]\d{1,2})?)\b/);
+  if (!m) return null;
+  const v = parseFloat(m[1].replace(/\./g, "").replace(",", "."));
+  if (!isNaN(v) && v >= 30 && v <= 50000) return v;
   return null;
 }
 
