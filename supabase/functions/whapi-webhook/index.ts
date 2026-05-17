@@ -18,6 +18,7 @@ import { runConversationalFlow, CADASTRO_STEPS } from "./handlers/conversational
 import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
+import { extractMultiField, buildMultiFieldPatch } from "../_shared/multi-field-extractor.ts";
 import { botRequestStore, isTestPhone, logTestOutbound } from "../_shared/test-mode.ts";
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
 
