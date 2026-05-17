@@ -3054,13 +3054,32 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     case "ask_complement": {
-      const lower = (messageText || "").toLowerCase().trim();
-      const skipWords = ["não", "nao", "n", "pular", "skip", "sem complemento", "sem", "nenhum"];
-      if (!skipWords.includes(lower)) {
+      const resp = isButton ? buttonId : (messageText || "").toLowerCase().trim();
+      const skipWords = ["não", "nao", "n", "pular", "skip", "sem complemento", "sem", "nenhum", "skip_complement"];
+
+      // Cliente pediu para adicionar complemento → repete o passo aguardando o texto
+      if (resp === "add_complement") {
+        reply = "✍️ Digite o complemento (ex: Apto 12, Bloco B, Casa 2):";
+        (updates as any).__inline_sent = false;
+        break;
+      }
+
+      // Pular (botão skip_complement OU palavras-chave) → salva vazio
+      if (resp === "skip_complement" || skipWords.includes(String(resp).toLowerCase())) {
+        updates.address_complement = "";
+      } else if (messageText && messageText.trim().length > 0) {
         updates.address_complement = messageText.trim();
       } else {
-        updates.address_complement = "";
+        // Sem texto válido nem botão → reenvia pergunta com botões
+        const sent = await sendOptions(remoteJid, "Tem *complemento*? (ex: Apto 12)", [
+          { id: "add_complement", title: "✍️ Adicionar" },
+          { id: "skip_complement", title: "⏭️ Pular" },
+        ]);
+        if (sent) { reply = ""; (updates as any).__inline_sent = true; }
+        else reply = "Tem complemento? Digite o complemento ou *PULAR* se não tiver.";
+        break;
       }
+
       const merged = { ...customer, ...updates };
       const next = await autoResolveCepIfNeeded(merged, updates);
       updates.conversation_step = next;
