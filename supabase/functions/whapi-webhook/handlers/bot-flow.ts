@@ -1870,6 +1870,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     "ask_complement", "ask_email", "ask_rg", "ask_finalizar",
     "confirmar_titularidade", "validacao_facial", "pos_video",
     "finalizando", "finalizar_cadastro", "complete", "valor_baixo",
+    "cadastro_em_analise", "aguardando_facial",
     "aguardando_humano",
   ]);
   const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2322,6 +2323,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     // ─── 3. CONFIRMANDO DADOS DA CONTA ──────────
     case "confirmando_dados_conta": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
+      console.log(`[post-confirm-conta] ENTER resp="${resp}" customer=${customer.id}`);
       if (resp === "sim_conta" || resp === "sim" || resp === "s" || resp === "1" || resp === "ok" || resp === "correto" || resp === "✅") {
         // FIX 2: garantir que o nome confirmado é o do TITULAR DA CONTA (OCR),
         // não o nome digitado pelo lead no boas-vindas.
@@ -2378,6 +2380,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             afterPosition: _captureContaPos > 0 ? _captureContaPos : undefined,
             stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
           });
+        }
+        // SAFETY-BELT: após SIM, NUNCA enviar outro passo informativo (message).
+        // O fluxo correto é avançar direto para captura de documento/finalização.
+        if (nextCustom && nextCustom.step_type === "message") {
+          const forwardCapture = await findNextActiveFlowStep(supabase, customer.consultant_id, {
+            afterPosition: _captureContaPos > 0 ? _captureContaPos : undefined,
+            stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
+          });
+          if (forwardCapture) {
+            console.warn(`[post-confirm-conta] pulando message "${nextCustom.step_key}" → ${forwardCapture.step_key} (${forwardCapture.step_type})`);
+            nextCustom = forwardCapture;
+          }
         }
         const DOC_FALLBACK = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é.`;
         const FINAL_FALLBACK = `✅ *Todos os dados foram preenchidos!*\n\n1️⃣ Finalizar\n\n_Digite *1* ou *FINALIZAR* para concluir:_`;
@@ -3438,14 +3452,23 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const confirmou = /\b(pronto|prontinho|conclu[ií]do|conclui|conclu[ií]|finalizei|terminei|terminado|finalizado|fiz|feito|feita|ok|okay|okk?|certo|sim|j[aá]\s+(assinei|fiz|tirei|validei|terminei|terminado)|assinei|tirei|validei|selfie|liberado|consegui)\b/i.test(txt);
       if (confirmou && link) {
         updates.facial_confirmed_at = new Date().toISOString();
-        updates.conversation_step = "complete";
+        updates.conversation_step = "cadastro_em_analise";
         updates.status = "cadastro_concluido";
-        reply = "🎉 *Cadastro concluído com sucesso!*\n\nRecebemos a confirmação da sua validação facial. ✅\n\nEm breve você receberá os próximos passos da iGreen Energy. Obrigado por confiar em nós! ☀️💚";
+        const _firstName = String(customer.name || "").trim().split(/\s+/)[0] || "";
+        reply = `🎉 *Validação facial confirmada!*\n\nPrimeiro, parabéns ${_firstName ? _firstName + " " : ""}por dar esse passo rumo à economia! 💚\n\nSeu cadastro foi enviado para a equipe da *iGreen Energy* e agora entra na fila de análise.\n\n⏳ A aprovação costuma sair em *24 a 48 horas úteis*.\n\nAssim que estiver aprovado eu te aviso por aqui com os próximos passos. Pode relaxar — daqui em diante é com a gente. ☀️`;
       } else if (link) {
         reply = "📸 *Última etapa: Validação Facial*\n\n👉 Abra este link no seu celular e siga as instruções:\n" + `${link}\n\n` + "Quando terminar a selfie, me responda *PRONTO* aqui que finalizamos seu cadastro! ✅";
       } else {
         reply = "⏳ Estamos preparando o link da validação facial. Você será notificado em instantes!";
       }
+      break;
+    }
+
+    case "cadastro_em_analise": {
+      // Lead já concluiu a selfie. Aguardando aprovação da iGreen (24-48h).
+      // Não voltar para aguardando_conta nem reiniciar fluxo. Só responder educadamente.
+      const _firstName = String(customer.name || "").trim().split(/\s+/)[0] || "";
+      reply = `Oi${_firstName ? " " + _firstName : ""}! 💚 Seu cadastro ainda está em análise pela equipe da *iGreen Energy*.\n\n⏳ O prazo de aprovação é de *24 a 48 horas úteis* — assim que sair, eu te aviso aqui mesmo.\n\nSe precisar de qualquer coisa enquanto isso, é só chamar! ☀️`;
       break;
     }
 
