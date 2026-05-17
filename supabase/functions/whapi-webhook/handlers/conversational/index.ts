@@ -1029,8 +1029,31 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     }
     try {
       await ctx.sender.sendText(ctx.remoteJid, text);
+      // A1: log cascade text in conversations (was silently sent before)
+      try {
+        if (ctx.customer?.id) {
+          await ctx.supabase.from("conversations").insert({
+            customer_id: ctx.customer.id,
+            message_direction: "outbound",
+            message_text: text,
+            message_type: "text",
+            conversation_step: st.step_key,
+          });
+        }
+      } catch (_) { /* noop */ }
     } catch (e) {
       console.error(`[conversational] cascade sendText falhou step=${st.step_key}:`, (e as Error)?.message || e);
+      try {
+        if (ctx.customer?.id) {
+          await ctx.supabase.from("conversations").insert({
+            customer_id: ctx.customer.id,
+            message_direction: "outbound",
+            message_text: `[failed:text] ${(e as Error)?.message || e}`,
+            message_type: "text_failed",
+            conversation_step: st.step_key,
+          });
+        }
+      } catch (_) { /* noop */ }
     }
     return { replyText: "", inlineSent: true };
   };
