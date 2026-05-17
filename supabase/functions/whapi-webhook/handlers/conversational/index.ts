@@ -1189,9 +1189,14 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
 
     // Decide se este step vai cascatear (wait_for=none). Cascade segue fallback.goto
     // OU, se o consultor deixou repeat/sem goto mas marcou none, próximo por position.
+    // GUARD: passos que capturam dados (name/cpf/valor/telefone) SEMPRE esperam resposta,
+    // mesmo se configurados como wait_for=none — caso contrário o bot pergunta e cascateia.
+    const stepCapturesAnything = Array.isArray(s.captures)
+      && s.captures.some((c: any) => c?.enabled !== false && c?.field);
+    const effectiveWaitFor = stepCapturesAnything ? "reply" : s.wait_for;
     const hasNextActive = !!dbSteps.find((step) => step.is_active && step.position > s.position);
     const gotoTargetId = s.fallback?.mode === "goto" ? s.fallback?.goto_step_id : null;
-    const willCascade = !cadastroStep && s.wait_for === "none"
+    const willCascade = !cadastroStep && effectiveWaitFor === "none"
       && (!!gotoTargetId || hasNextActive);
 
     const first = await emitStep(s, !willCascade);
