@@ -1133,6 +1133,31 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       if (mediaSent === null) {
         console.warn(`[conversational] ⚠️ step=${st.step_key}: mídia falhou e sem texto fallback — continuando cascata`);
       }
+      // 🛟 Fallback anti-pulo-silencioso: se o passo não tem texto, nem mídia foi
+      // enviada (mediaSent !== true), usa o título do passo como mensagem mínima.
+      // Evita que passos "router" (transitions sem conteúdo) avancem invisíveis.
+      if (mediaSent !== true && st.title && String(st.title).trim().length > 0) {
+        const fallbackText = String(st.title).trim();
+        console.warn(`[conversational] 🛟 step=${st.step_key} sem texto/mídia — usando título como fallback: "${fallbackText}"`);
+        if (asReply) {
+          return { replyText: fallbackText, inlineSent: false };
+        }
+        try {
+          await ctx.sender.sendText(ctx.remoteJid, fallbackText);
+          if (ctx.customer?.id) {
+            await ctx.supabase.from("conversations").insert({
+              customer_id: ctx.customer.id,
+              message_direction: "outbound",
+              message_text: fallbackText,
+              message_type: "text",
+              conversation_step: st.step_key,
+            });
+          }
+        } catch (e) {
+          console.error(`[conversational] fallback sendText falhou step=${st.step_key}:`, (e as Error)?.message || e);
+        }
+        return { replyText: "", inlineSent: true };
+      }
       return { replyText: "", inlineSent: inlineMedia };
     }
 
