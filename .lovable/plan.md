@@ -1,87 +1,80 @@
-## Dois bugs reais identificados (com evidência no banco)
+## Problema observado
 
-Lead de teste `Lucas` (`1eac682c-...`) está com:
-- `name = "Lucas"` (digitado), `name_source = "user_confirmed"`
-- `bill_holder_name = "BENEDITA DE JESUS GALVAO"` (OCR da conta)
-- `conversation_step = "duvidas_pos_club"` ← step legado, **não existe no fluxo customizado dele**
+Screenshot do teste:
+1. Bot: "Informe seu e-mail" → user respondeu
+2. Bot: "Qual o seu CEP?" → user respondeu **"Oi me chamo Luciano"** (não era CEP)
+3. Bot: "Qual seu nome para eu adicionar aqui?" → user: "Luciano"
 
-### Bug 1 — "Sim" não avança depois de confirmar a conta
+O sistema **ignorou** "me chamo Luciano" e ainda perguntou o nome no passo seguinte. O `resolveLandingStep` que adicionamos antes deveria pular o passo de nome — mas não pulou porque o nome nunca foi salvo.
 
-Depois do "✅ SIM" na confirmação dos dados da conta, o `bot-flow.ts` (linha 2020) faz:
+## Causa raiz
+
+`extractCaptures` (linha 217 de `supabase/functions/whapi-webhook/handlers/conversational/index.ts`) só tenta extrair nome quando o **step atual** tem `capture.field === "name"` habilitada:
 
 ```ts
-updates.conversation_step = "duvidas_pos_club";
+if (enabled.has("name")) {
+  const n = extractNome(messageText);
+  ...
+}
 ```
 
-Mas o consultor desse lead tem fluxo **customizado** no `/admin/fluxos` (positions 1-10, sem nenhum step chamado `duvidas_pos_club`). Resultado:
-- Conversational engine recebe `stepKey="duvidas_pos_club"` → não acha → cai no branch "unknown step → restart at firstActive"
-- A próxima mensagem do lead ("sim") faz o bot **reiniciar do Passo 1** (boas-vindas) em vez de ir pro próximo passo.
+No step de CEP, `name` não está habilitado → `extractNome` nunca roda → nome não é salvo → no próximo passo (que pergunta nome), `resolveLandingStep` vê `customer.name = null` e mantém o passo. Bot repete a pergunta.
 
-### Bug 2 — Nome digitado venceu o nome do OCR
+Mesmo se rodasse a extração, faltaria gravar `name_source = "self_introduced"` para o `TRUSTED_NAME_SKIP` ativar — hoje a linha 755 só seta `captureUpdates.name`, sem `name_source`.
 
-`safeAssignName` (linha 226 do `bot-flow.ts`) tem uma guarda de similaridade Levenshtein: se o nome atual e o OCR forem muito diferentes (<0.7), **mantém o atual**. Como "Lucas" foi salvo primeiro (capture do step de nome), o OCR "BENEDITA" foi descartado e o cadastro virou um Frankenstein (nome do lead Lucas + titular da conta Benedita).
+## Solução (cirúrgica, só no conversational engine)
 
-Você quer o oposto: **o nome real vem da conta de luz ou do documento**. O que o lead digita é só para a saudação inicial, nunca para o cadastro.
+Arquivo: `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
 
----
+### 1. Sempre tentar extrair nome em texto livre (~linha 233)
 
-## Solução proposta (cirúrgica, sem reescrever fluxo)
+Remover o gate `enabled.has("name")` só para nome. Os outros campos (valor/cpf/telefone) continuam dependendo de configuração do step. A guarda real (lock por OCR/user_confirmed, etc.) já está feita lá em baixo (linha 747).
 
-### Fix 1 — Avanço pós-confirmação respeita o fluxo customizado
+```ts
+// Nome: sempre tenta — guard real fica no consumer (linha 754).
+const n = extractNome(messageText);
+if (n) out.name = n;
+```
 
-No `confirmando_dados_conta` case (linha 1994 de `bot-flow.ts`), em vez de hardcodar `conversation_step = "duvidas_pos_club"`:
+### 2. Gravar `name_source = "self_introduced"` junto com `name` (~linha 754-756)
 
-1. Tentar pegar o **próximo step ativo por position** no fluxo do consultor a partir do step `capture_conta` (ou do step com `step_type='capture_documento'` se existir).
-2. Se achar → `conversation_step = <id_do_próximo>`, dispatcha o conteúdo dele pelo `dispatchStepFromFlow`.
-3. Se NÃO achar (consultor não tem fluxo configurado) → mantém comportamento atual (legado `duvidas_pos_club`).
+```ts
+if (extracted.name && !nameLocked && (stepIsAskName || !ctx.customer.name)) {
+  captureUpdates.name = extracted.name;
+  captureUpdates.name_source = "self_introduced";
+}
+```
 
-Mesmo padrão já é usado em outros pontos (`stepTypeToCadastro`, `findActiveByType`).
+### 3. Re-resolver landing step após captura (~depois da linha 760)
 
-Faz a mesma proteção no `pitch_conexao_club` e no `duvidas_pos_club` cases — quando o fluxo customizado tem step seguinte por position, usa ele.
+Se o cliente acabou de preencher o campo que o próximo step pediria, pular agora:
 
-### Fix 2 — OCR sempre vence sobre nome digitado
+```ts
+if (captureUpdates.name) {
+  (ctx.customer as any).name = captureUpdates.name;
+  (ctx.customer as any).name_source = captureUpdates.name_source;
+  const advanced = resolveLandingStep(currentStep);
+  if (advanced && advanced.id !== currentStep.id) {
+    currentStep = advanced;
+    stepKey = currentStep.id;
+    console.log(`[skip-step] post-capture: jumped to ${currentStep.step_key}`);
+  }
+}
+```
 
-Mudanças mínimas em `safeAssignName` + sites que gravam nome:
+(idem para `electricity_bill_value`/`cpf`/`phone_whatsapp` se quiser — mas o bug reportado é só nome; mantenho o escopo no nome).
 
-1. **`safeAssignName`**: remover a guarda de similaridade quando `currentSource ∈ {self_introduced, user_typed, unknown}`. Só mantém a guarda quando o nome atual veio de outro OCR (`ocr_conta`/`ocr_doc`) ou `user_confirmed` via passo de edição explícito (`editing_*`). Assim, OCR sempre sobrescreve nome digitado.
+### 4. Deploy
 
-2. **Capture de nome em texto livre**: marca como `name_source = "self_introduced"` (já é, em vários sites) — não como `user_confirmed`. O `user_confirmed` deve ser reservado para confirmação **explícita** dos dados do OCR (botão SIM no `confirmando_dados_conta` / `confirmando_dados_doc`). Hoje o SIM no `confirmando_dados_conta` faz `name_source = "user_confirmed"` (linha 1998) — isso continua certo porque o usuário viu os dados do OCR e confirmou. Mas se nesse momento `customer.name` ainda for o nome digitado (e não o do OCR), o SIM "trava" o nome errado.
+Apenas `whapi-webhook`. Testar com o mesmo lead após reset.
 
-3. **Antes de salvar `name_source = "user_confirmed"` no SIM da conta**: se `bill_holder_name` existe e `customer.name` não veio de OCR (`name_source !∈ {ocr_conta, ocr_doc}`), **sobrescreve** `name = bill_holder_name` + `name_source = "ocr_conta"` antes do `user_confirmed`. Garante que o SIM esteja confirmando o titular real.
+## O que NÃO muda
 
-4. **Removendo captura de nome do welcome/early text** (opcional, conservador): a captura de nome no welcome (que adicionei antes) fica, mas só serve pra saudar o lead em texto — não bloqueia OCR. O Fix 1 do safeAssignName já garante isso.
-
-### O que NÃO muda
-
-- Estrutura do fluxo, transitions, captures configuradas pelo consultor
-- Lógica de OCR, edge functions de processamento de imagem
-- RLS, schemas, autenticação
-- Steps de edição manual (`editing_conta_nome`, etc.) continuam podendo trocar nome
-
----
-
-## Arquivos editados
-
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`:
-  - `safeAssignName` — afrouxa guarda quando fonte atual é não-OCR
-  - `case "confirmando_dados_conta"` — antes do SIM, força `name = bill_holder_name` se OCR existe; depois, próximo passo = primeiro step do fluxo customizado com `step_type='capture_documento'` (fallback: legado `duvidas_pos_club`)
-  - `case "pitch_conexao_club"` e `case "duvidas_pos_club"` — quando há fluxo customizado com próximo step por position, vai pra ele; senão mantém legado
-- `supabase/functions/_shared/conversation-helpers.ts`:
-  - Pequeno helper `findNextFlowStepByType(supabase, flowId, fromPosition, stepType)` para evitar duplicar SQL nos 3 cases
-
-## Resultado esperado
-
-| Situação | Hoje | Depois |
-|---|---|---|
-| Lead digita nome "Lucas", OCR da conta lê "BENEDITA" | name=Lucas, bill_holder=BENEDITA (conflito) | name=BENEDITA (OCR vence), Lucas vira só saudação |
-| Lead clica SIM no confirmando_dados_conta | Vai pra `duvidas_pos_club` (step inexistente no fluxo custom) → reseta no Passo 1 | Vai pro próximo `capture_documento` configurado |
-| Consultor sem fluxo customizado | Comportamento legado | **Igual** (mantém legado) |
-| Lead em fluxo customizado responde "sim" no step do consultor | OK | **Igual** (não muda nada nos steps do fluxo) |
+- Fluxo `/admin/fluxos` do consultor
+- `safeAssignName`, lock de OCR/user_confirmed (continua ativo)
+- `bot-flow.ts` (fluxo Camila legado)
+- Schemas, RLS, edge functions
 
 ## Critério de sucesso
 
-1. Lead `1eac682c` (Lucas/Benedita) — depois do fix, próximo SIM avança para `capture_documento` do fluxo customizado e o nome vira "BENEDITA".
-2. Lead em fluxo padrão Camila — comportamento legado preservado.
-3. Logs `[post-confirm-conta] next=<step_id> reason=customflow` ou `legacy`.
-
-Se aprovar, faço só no whapi-webhook primeiro, testo no seu número, depois replico no evolution-webhook.
+Lead manda "Oi me chamo X" em qualquer step do fluxo customizado → nome é gravado com `self_introduced` → no próximo step que pediria nome, `resolveLandingStep` pula automaticamente para o passo seguinte. Log esperado: `[skip-step] post-capture: jumped to <step>`.

@@ -230,7 +230,9 @@ function extractCaptures(messageText: string, configured: DbCapture[]): Extracte
     const c = extractCPF(messageText);
     if (c) out.cpf = c;
   }
-  if (enabled.has("name")) {
+  // Nome: sempre tenta extrair (cliente pode se apresentar em qualquer step).
+  // Guard real (lock por OCR/user_confirmed) fica no consumer (~linha 754).
+  {
     const n = extractNome(messageText);
     if (n) out.name = n;
   }
