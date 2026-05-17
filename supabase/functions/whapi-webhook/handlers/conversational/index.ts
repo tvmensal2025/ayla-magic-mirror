@@ -1027,15 +1027,25 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     }
 
     let cursor: DbStep | null = cadastroStep ? null : s;
+    // Helper para achar próximo step: respeita fallback.goto configurado;
+    // se o consultor deixou fallback=repeat (ou vazio) mas marcou wait_for=none,
+    // o intent claramente é cascatear — então usamos o próximo por position.
+    const findCascadeNext = (cur: DbStep): DbStep | undefined => {
+      const gotoId = cur.fallback?.mode === "goto" ? cur.fallback.goto_step_id : null;
+      if (gotoId) {
+        const byGoto = dbSteps.find((step) => step.id === gotoId && step.is_active);
+        if (byGoto) return byGoto;
+      }
+      return dbSteps.find((step) => step.is_active && step.position > cur.position);
+    };
     for (let guard = 0; cursor?.wait_for === "none" && guard < 6; guard++) {
-      const nextId = cursor.fallback?.mode === "goto" ? cursor.fallback.goto_step_id : null;
-      if (!nextId) {
-        console.log(`[conversational] cascade parou em step=${cursor.step_key} (sem fallback.goto)`);
+      const nextStep = findCascadeNext(cursor);
+      if (!nextStep) {
+        console.log(`[conversational] cascade parou em step=${cursor.step_key} (sem próximo step ativo)`);
         break;
       }
-      const nextStep = dbSteps.find((step) => step.id === nextId && step.is_active);
-      if (!nextStep || nextStep.id === cursor.id) {
-        console.warn(`[conversational] cascade quebrada step=${cursor.step_key} aponta para ${nextId} (inativo/inexistente/self)`);
+      if (nextStep.id === cursor.id) {
+        console.warn(`[conversational] cascade quebrada step=${cursor.step_key} aponta para si mesmo`);
         break;
       }
 
@@ -1043,7 +1053,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
 
       const cascadeCadastroStep = stepTypeToCadastro(nextStep.step_type);
       const nextWillCascade = !cascadeCadastroStep && nextStep.wait_for === "none"
-        && nextStep.fallback?.mode === "goto" && !!nextStep.fallback.goto_step_id;
+        && !!findCascadeNext(nextStep);
       const emit = await emitStep(nextStep, !nextWillCascade);
       if (emit.replyText) replyText = emit.replyText;
       inlineSent = inlineSent || emit.inlineSent;
