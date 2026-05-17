@@ -2344,9 +2344,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         // FIX 1: se o consultor tem fluxo customizado, pula direto pro próximo
         // step de capture_documento (ou finalizar). Evita parar em "duvidas_pos_club"
         // que pode não existir no fluxo dele e causar reset no Passo 1.
-        const nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {
-          stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
-        });
+        // SEM filtro de step_type: pega o PRÓXIMO passo ativo por position,
+        // qualquer tipo (message, capture_*, finalizar_cadastro). Assim os
+        // passos intermediários criados pelo consultor são executados.
+        const nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {});
         const DOC_FALLBACK = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é.`;
         const FINAL_FALLBACK = `✅ *Todos os dados foram preenchidos!*\n\n1️⃣ Finalizar\n\n_Digite *1* ou *FINALIZAR* para concluir:_`;
         const sendFallback = async (text: string, stepStr: string) => {
