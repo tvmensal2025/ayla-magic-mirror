@@ -110,7 +110,12 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
   }, [customers]);
 
   const filteredCustomers = useMemo(() => {
-    let list = customers;
+    // Filtro de origem: NUNCA mistura Leads WhatsApp com Clientes iGreen
+    let list = customers.filter((c) => {
+      const origin = c.customer_origin || "whatsapp_lead";
+      if (originFilter === "igreen_sync") return origin === "igreen_sync";
+      return origin === "whatsapp_lead" || origin === "manual";
+    });
     if (statusFilter === "approved") list = list.filter(c => c.status === "approved");
     else if (statusFilter === "rejected") list = list.filter(c => c.status === "rejected");
     else if (statusFilter === "pending") list = list.filter(c => c.status === "pending");
@@ -128,7 +133,7 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
       );
     }
     return list;
-  }, [customers, statusFilter, devolutivaFilter, licenciadoFilter, searchQuery]);
+  }, [customers, originFilter, statusFilter, devolutivaFilter, licenciadoFilter, searchQuery]);
 
   // Valid/invalid phone counts
   const validCount = useMemo(() => filteredCustomers.filter(c => isValidPhone(c.phone_whatsapp)).length, [filteredCustomers]);
