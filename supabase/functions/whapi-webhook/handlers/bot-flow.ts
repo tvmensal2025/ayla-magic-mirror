@@ -2347,8 +2347,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         };
 
         // FIX: continuar a partir da POSIÇÃO do capture_conta no fluxo custom.
-        // Sem afterPosition, findNextActiveFlowStep retornava o PRIMEIRO passo ativo
-        // (geralmente "Nome do cliente"), regredindo o lead ao início do funil.
+        // Se não conseguir descobrir essa posição, NUNCA usa afterPosition=0,
+        // porque isso retorna o primeiro passo ativo (geralmente "Nome do cliente").
         let _captureContaPos = 0;
         try {
           const { data: _flowRow } = await supabase
@@ -2362,10 +2362,23 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               .order("position", { ascending: true }).limit(1).maybeSingle();
             if (_captureRow?.position != null) _captureContaPos = Number(_captureRow.position) || 0;
           }
-        } catch (_) { /* segue com 0 → primeiro passo, comportamento antigo */ }
-        const nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {
-          afterPosition: _captureContaPos,
-        });
+        } catch (e) {
+          console.warn(`[post-confirm-conta] falha ao localizar capture_conta: ${(e as any)?.message || e}`);
+        }
+        console.log(`[post-confirm-conta] capture_conta_pos=${_captureContaPos || "not_found"}`);
+        let nextCustom = _captureContaPos > 0
+          ? await findNextActiveFlowStep(supabase, customer.consultant_id, { afterPosition: _captureContaPos })
+          : null;
+        if (nextCustom && Number(nextCustom.position || 0) <= _captureContaPos) {
+          console.warn(`[post-confirm-conta] ignorando regressão next=${nextCustom.step_key} pos=${nextCustom.position} capture_pos=${_captureContaPos}`);
+          nextCustom = null;
+        }
+        if (!nextCustom) {
+          nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {
+            afterPosition: _captureContaPos > 0 ? _captureContaPos : undefined,
+            stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
+          });
+        }
         const DOC_FALLBACK = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é.`;
         const FINAL_FALLBACK = `✅ *Todos os dados foram preenchidos!*\n\n1️⃣ Finalizar\n\n_Digite *1* ou *FINALIZAR* para concluir:_`;
         const sendFallback = async (text: string, stepStr: string) => {
@@ -2402,16 +2415,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             updates.conversation_step = nextCustom.id;
           }
         } else {
-          console.log(`[post-confirm-conta] reason=legacy (sem fluxo custom)`);
-          const okPitch = await dispatchStepFromFlow("pitch_conexao_club", _vars);
-          const okDuvidas = await dispatchStepFromFlow("duvidas_pos_club", _vars);
-          if (!okPitch && !okDuvidas) {
-            console.warn(`[post-confirm-conta] legacy dispatch vazio — usando fallback hardcoded de doc`);
-            await sendFallback(DOC_FALLBACK, "aguardando_doc_auto");
-            updates.conversation_step = "aguardando_doc_auto";
-          } else {
-            updates.conversation_step = "duvidas_pos_club";
-          }
+          console.warn(`[post-confirm-conta] nenhum próximo passo seguro — usando fallback de documento`);
+          await sendFallback(DOC_FALLBACK, "aguardando_doc_auto");
+          updates.conversation_step = "aguardando_doc_auto";
         }
         (updates as any).__inline_sent = true;
         reply = "";
