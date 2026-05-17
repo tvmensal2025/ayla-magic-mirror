@@ -67,6 +67,10 @@ export function buildMultiFieldPatch(
     "manual", "ocr_cnh", "ocr_rg", "ocr_doc", "self_introduced",
   ]);
 
+  const strongNameSources = new Set([
+    "manual", "ocr_cnh", "ocr_rg", "ocr_doc", "self_introduced", "freeform_multi",
+  ]);
+  // whatsapp_profile é fraco — qualquer self-intro do lead sobrescreve.
   if (multi.nome && (!customer.name || !strongNameSources.has(String(customer.name_source || "")))) {
     const cur = String(customer.name || "").trim().toLowerCase();
     if (cur !== multi.nome.toLowerCase()) {
