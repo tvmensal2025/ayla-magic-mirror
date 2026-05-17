@@ -1,68 +1,85 @@
-## Diagnóstico
 
-Cliente **Lucas (`62f8aae1`)**, fluxo do consultor com 11 passos. Reconstruí a conversa do banco e os 3 sintomas reportados têm causa raiz identificada:
+## Diagnóstico (com base na conversa real do Lucas)
 
-### 1. "Email real foi bloqueado"
-O cliente digitou `tvmensal153@gmail.com` (Gmail real). O sistema respondeu `❌ Esse e-mail não pode ser usado`.
+Os passos NÃO estão sendo pulados por falta de mídia — todos têm áudio/vídeo configurados. O problema está na **lógica de transições do motor conversacional** (`supabase/functions/whapi-webhook/handlers/conversational/index.ts`, função `resolveTransition`).
 
-Causa: `supabase/functions/_shared/validators.ts` linha 11 tem o regex `/^tvmensal/i` em `PLACEHOLDER_EMAIL_PATTERNS`. Esse padrão estava listado como "placeholder de teste", mas bloqueia qualquer endereço Gmail que comece com "tvmensal". Não é mais necessário (foi de uma importação antiga).
+### O que aconteceu de fato
 
-### 2. "Pulou passo 2 (sem áudio)"
-Passo 2 do fluxo dele = `boas_vindas` (step_key `6226f6f3...`, position 3, slot `boas_vindas`). Esse passo:
-- Não tem `message_text` (só áudio via slot).
-- Tem `transitions: [{ trigger_intent: 'default', goto_step_id: '3e7fb4cd...' }]`.
+Fluxo ativo (consultor 0c2711ad, fluxo 66a19db4):
 
-No `bot-flow.ts`, o resolver custom, ao encontrar `transitions[]` com `default → goto_step_id`, **pula direto para o `goto_step_id` sem chamar `dispatchStepFromFlow(stepKey_atual)`**. Resultado: o áudio de boas-vindas (slot `boas_vindas`) nunca foi disparado. Confirmado em `ai_slot_dispatch_log`: zero envios para esse slot/customer.
+```
+pos 2  Nome do cliente            (texto: "Qual seu nome...")
+pos 3  Boas Vindas                (slot boas_vindas → ÁUDIO)        transitions=[default → pos4]
+pos 4  Qual o valor da conta      (texto)                            transitions=[]
+pos 5  Valor da conta             (slot como_funciona → áudio+vídeo) transitions=[default → pos6]
+pos 6  Como funciona              (slot fazenda_solar → áudio+vídeo+imagem) transitions=[default → pos8]
+pos 7  Quebra de objeção          (slot passo_mpa3yr6a → áudio)      transitions=[]
+pos 8  Deu para entender?         (texto)                            transitions=[]
+```
 
-### 3. "Pulou passo 6 e ficou travado até cliente digitar"
-Olhando a sequência real de passos enviados: o resolver foi do passo 6 (`a71ba814` "Como funciona", position 6) direto para o passo 8 (`559b8f1b` "Deu para entender?", position 8) via transition default — **pulando a position 7** (`passo_mpa3yr6a` "Quebra de objeção").
+Conversa real:
+1. "Oi" → bot envia pos 2 (pergunta nome)
+2. "Osvaldo" → bot envia **pos 4 direto** (pula pos 3 / áudio Boas Vindas)
+3. Valor → pos 5 entra em cena, mídia como_funciona vai, depois transita para **pos 6** (pula texto de pos 5)
+4. Pos 6 envia mídia fazenda_solar, depois **pula direto pra pos 8** (pula pos 7 / áudio Quebra de objeção)
+5. Lead diz "Como faço para cadastrar?" → atalho `quer_cadastrar` → vai pra `aguardando_conta`
 
-E ficou travado porque o passo 8 (`Deu para entender?`) tem `transitions: []` e nenhum capture → não avança por position e fica esperando input livre do cliente.
+### Causa raiz
 
-A causa é a mesma do item 2: o resolver segue cegamente `goto_step_id` quando existe, ignorando se há passos intermediários por position. Quando o passo configurado pula um passo intermediário (intencional ou não), nenhum áudio/vídeo daquele passo é entregue, e se o destino não tem transição de saída, o bot trava.
+Em `resolveTransition` (linha 1466) e no resolver custom de `bot-flow.ts` (linha 1880+), quando o passo atual tem uma transição com `trigger_intent='default'` apontando pra outro passo, o engine **chama `goToStep(nextStep)` sem antes emitir o conteúdo do passo atual**.
 
----
+`goToStep` só renderiza o passo de DESTINO. O passo de origem (que tem áudio configurado) nunca dispara `emitStep`, então a mídia configurada em `ai_media_library` (boas_vindas, como_funciona pos 5, passo_mpa3yr6a) fica órfã.
+
+`default` foi pensado como "qualquer resposta avança", mas o consultor o usa como "depois de mostrar isto, vai pra ali". Hoje as duas semânticas colidem.
+
+### Confirmação nos logs
+
+`ai_slot_dispatch_log` do Lucas:
+- `boas_vindas` — **0 envios** (pulou)
+- `como_funciona` — 2 envios (saíram durante goto para pos 6, não na emissão de pos 5)
+- `fazenda_solar` — 3 envios (idem, durante goto para pos 8)
+- `passo_mpa3yr6a` (Quebra de objeção) — **0 envios** (pulou)
 
 ## Plano de correção
 
-### Mudança 1 — Liberar email `tvmensal*`
-`supabase/functions/_shared/validators.ts`: remover o regex `/^tvmensal/i` de `PLACEHOLDER_EMAIL_PATTERNS`. Manter os demais (que são realmente placeholders: `@lead.igreen`, `@teste`, `teste@`, `noreply@`, `sem_email`, `@example`, `@exemplo`).
+### 1. `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
 
-### Mudança 2 — Dispatch antes de seguir transição
-`supabase/functions/whapi-webhook/handlers/bot-flow.ts`, no bloco do resolver custom que segue `transitions[].goto_step_id`:
+Em `resolveTransition`, antes de chamar `goToStep(nextStep)` para uma transição que veio como **`default`** (não como intent explícita do usuário), emitir o passo atual primeiro **se** ele tiver `slot_key` ou `message_text`. Implementação:
 
-1. Antes de mover `conversation_step` para o `goto_step_id`, chamar `await dispatchStepFromFlow(currentStepKey)` para o passo atual. Isso garante que o áudio/vídeo/texto do passo "router" (como `boas_vindas`) seja enviado.
-2. O dedupe de 10 min já existente em `try_log_media_send` previne re-envio em loops.
+- Passar para `resolveTransition` uma flag `isDefaultTransition` (já dá pra detectar pelo `t.trigger_intent === 'default'`).
+- Quando for default e `currentStep` tem conteúdo (slot ou texto) que ainda não saiu nos últimos 10min (o anti-rep do `emitStep` já cuida), chamar `await emitStep(currentStep, false)` ANTES de `goToStep(nextStep)`.
+- Quando a transição veio de um trigger específico (`afirmacao`, `quer_cadastrar`, etc.), comportamento atual fica igual (não emite o passo atual — o usuário pediu pra pular).
 
-### Mudança 3 — Não pular passos por position
-Quando uma transição `default` aponta para um `goto_step_id` cuja `position` é **maior que `currentPosition + 1`**, em vez de saltar direto:
-1. Disparar o passo atual (Mudança 2).
-2. Avançar para o **próximo passo por position** (currentPosition + 1) — não para o `goto_step_id` distante.
-3. O `goto_step_id` distante só é seguido quando a intent corresponde a um trigger explícito (não `default`), ou quando o próximo por position não existe.
+### 2. `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
 
-Isso resolve passo 7 "Quebra de objeção" sendo pulado, e elimina o travamento no passo 8.
+Mesma correção no `custom-step-resolver` (linhas 1880-1962). Quando segue `default → goto_step_id`, garantir que `dispatchStepFromFlow(stepRow.step_key)` rode antes de avançar — já roda hoje (linha 1926), mas a função `findNextActiveFlowStep(afterPosition)` ignora o `goto_step_id` da transição e pega o próximo por posição. Isso já está correto pra evitar saltos longos. Manter.
 
-### Mudança 4 — Safety net para passos terminais sem capture
-No final do switch principal, se o passo atual tem `transitions: []`, `captures: []` e não é um passo terminal explícito (`cadastro`, `finalizar`, etc.), avançar automaticamente por position após enviar a mídia. Isso impede travamentos futuros para passos mal configurados.
+O ajuste necessário no `bot-flow.ts` é apenas garantir paridade: se a transição era `default` apontando para uma posição distante (> currentPosition+1), forçar avanço por posição (pos atual + 1) em vez de respeitar o `goto_step_id` distante, pra não pular passos intermediários (foi o que aconteceu na transição pos 6 → pos 8, pulando pos 7).
 
-### Mudança 5 — Espelhar em `evolution-webhook`
-Replicar Mudanças 1-4 em `supabase/functions/evolution-webhook/handlers/bot-flow.ts` e seu validator (mesmo módulo `_shared`, então a Mudança 1 já se aplica).
+### 3. `supabase/functions/evolution-webhook/handlers/bot-flow.ts`
 
----
+Espelhar exatamente as mesmas duas mudanças (mesmo arquivo, espelho do whapi).
 
-## Arquivos alterados
+### 4. Sem mudança de schema
 
-- `supabase/functions/_shared/validators.ts` — remove regex tvmensal
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — resolver custom: dispatch antes de pular, avanço por position quando transition pula passos, safety net no fim
-- `supabase/functions/evolution-webhook/handlers/bot-flow.ts` — mesmas mudanças
+Não precisa coluna nova nem migration. É apenas lógica de motor.
 
-Sem migrations. Sem mudança de schema.
+## Resultado esperado
 
----
+Quando o lead responde "Osvaldo" no passo Nome:
+- Bot emite áudio **Boas Vindas** (passo 3) ✓
+- Bot emite texto **"Qual o valor da conta de luz"** (passo 4) ✓ — mesma mensagem, mas precedida do áudio
 
-## Validação após deploy
+Quando o lead responde o valor:
+- Bot emite áudio+vídeo **como_funciona** (passo 5)
+- Bot emite texto+mídia **Como funciona** (passo 6)
+- Bot emite áudio **Quebra de objeção** (passo 7) ✓ (hoje pula)
+- Bot emite texto **Deu para entender?** (passo 8)
 
-1. Resetar o lead `62f8aae1` via `reset_lead_conversation` e refazer o fluxo.
-2. Verificar `ai_slot_dispatch_log` — deve aparecer envio do slot `boas_vindas`.
-3. Verificar `conversations` — deve passar pelas positions 3 → 4 → 5 → 6 → 7 → 8 sequencialmente (sem pular 7).
-4. Tentar email `tvmensal999@gmail.com` em `ask_email` — deve ser aceito.
+A semântica de "vai pra cadastro" via intent explícita (`quer_cadastrar`) continua funcionando — o atalho é desejado quando o lead pede explicitamente.
+
+## Arquivos a modificar
+
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (resolveTransition + goToStep)
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (custom-step-resolver: avanço por position quando default)
+- `supabase/functions/evolution-webhook/handlers/bot-flow.ts` (espelho)
