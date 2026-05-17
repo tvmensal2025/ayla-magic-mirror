@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Loader2, Search, Phone, Mail, MapPin, FileText, Calendar, Download, Users, CheckCircle, AlertTriangle, Clock, ChevronDown, ChevronUp } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Loader2, Search, Phone, Mail, MapPin, FileText, Calendar, Download, Users, CheckCircle, AlertTriangle, Clock, ChevronDown, ChevronUp, MessageCircle, Briefcase } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -32,7 +33,14 @@ interface Customer {
   status: string;
   created_at: string;
   updated_at: string;
+  customer_origin: "igreen_sync" | "whatsapp_lead" | "manual" | null;
+  igreen_code?: string | null;
+  andamento_igreen?: string | null;
+  devolutiva?: string | null;
 }
+
+type OriginTab = "whatsapp_lead" | "igreen_sync";
+
 
 const statusConfig: Record<string, { label: string; color: string; bg: string; border: string }> = {
   pending: { label: "Pendente", color: "text-amber-500", bg: "bg-amber-500/10", border: "border-amber-500/20" },
