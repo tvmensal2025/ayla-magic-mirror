@@ -1,95 +1,46 @@
-## Diagnóstico do que aconteceu
+# Plano: Corrigir ordem dos primeiros passos do fluxo
 
-Analisei o lead mais recente (`17fceeee-...`) e o problema não está mais só no passo da facial. O erro principal agora está no motor do Flow Builder antes da coleta da conta.
+## Diagnóstico
 
-Linha do tempo relevante:
+Olhei o fluxo do consultor `0c2711ad-…` (lead +55 11 96407-9473). A ordem configurada no `/admin/fluxos` está assim:
 
-```text
-14:54:12 OUT  Pergunta valor médio da conta
-14:56:16 OUT  "Vou explicar como funciona, ok?"       <- avançou sozinho sem resposta do cliente
-14:59:35 IN   "Como funciona o boleto?"              <- cliente ficou em dúvida
-15:00:22 OUT  Explicação genérica da iGreen + pede conta
-15:01:40 IN   [foto da conta]
-15:02:45 OUT  "Vou explicar como funciona, ok?"       <- repetiu passo antigo depois da foto
-15:03:20 OUT  "Deu para entender... cadastro?"       <- veio atrasado
-15:03:36 IN   "Sim"
-15:04:12 OUT  "Deu para entender... cadastro?"       <- repetiu de novo
-15:04:24 IN   "Sim"
-15:04:31 OUT  Pede conta novamente
-```
+| position | título | tipo | captura |
+|---|---|---|---|
+| 2 | **Nome do cliente** ("Qual seu nome…") | message | `name` |
+| 3 | **Boas Vindas** (áudio `boas_vindas`) | message | — |
+| 4 | Valor da conta | message | `electricity_bill_value` |
+| 5–7 | Como funciona / explicação | message | — |
+| 8 | Conta de energia | capture_conta | — |
+| 9 | Cadastro | capture_documento | — |
 
-## Causas raiz
+O bot lê por `ORDER BY position ASC`. Então, quando o lead **não** tem nome confiável, ele envia primeiro "Qual seu nome?" (pos 2) e só depois "Boas Vindas" (pos 3) — ordem invertida do que faz sentido. Quando o lead **já** tem nome (caso atual: `name_source=user_confirmed`), o `resolveLandingStep` pula a pos 2 e cai direto na pos 3 (Boas Vindas) — aí parece "passo 2 vindo antes do 1".
 
-1. **O fluxo avança por timeout/follow-up mesmo sem resposta do cliente**
-   - O passo do valor (`3e7fb4cd...`) deveria esperar resposta, mas algum follow-up/fallback avançou para `como_funciona`/`fazenda_solar` sem o cliente responder.
-   - Isso gerou mensagem fora de hora às `14:56:16`.
+Em resumo: **as posições estão trocadas no banco**. Boas Vindas deveria ser a pos 2 (sempre primeiro) e Nome a pos 3 (pulado se já tiver nome).
 
-2. **Mensagem de dúvida no meio do fluxo não preserva o lugar correto**
-   - Quando o cliente perguntou “Como funciona o boleto?”, o bot respondeu a FAQ, mas continuou preso/voltando para o passo de mídia (`80188e5f...`).
-   - Depois que ele mandou a foto da conta, o sistema ainda retomou o fluxo antigo e reenviou `a71ba814`/`559b8f1b`.
+## O que fazer
 
-3. **Imagem enviada em step conversacional não é tratada como conta imediatamente**
-   - O cliente mandou a foto às `15:01:40`, mas o motor conversacional estava no passo `flow:80188e5f...` e não redirecionou a imagem para `aguardando_conta`/OCR.
-   - Por isso a foto ficou registrada como inbound no fluxo antigo e o bot continuou mandando mensagens de explicação.
+### 1. Trocar posições no `bot_flow_steps` (migration)
+- `Boas Vindas` (`6226f6f3-…`) → position **2**
+- `Nome do cliente` (`passo_mp8yc0bp`) → position **3**
 
-4. **A correção anterior de anti-repetição pegou só `dispatchStepFromFlow` do bot determinístico**
-   - A repetição atual vem do `runConversationalFlow` (`supabase/functions/whapi-webhook/handlers/conversational/index.ts`), outro motor.
-   - Então ainda falta anti-repetição e guarda de mídia nesse motor.
+Demais posições (4..N) ficam como estão. O `resolveLandingStep` já cuida de pular o passo de nome quando o nome já está capturado (`name_source ∈ {ocr, user_confirmed, self_introduced, manual}`), então o comportamento desejado fica:
+- Sem nome → Boas Vindas → pergunta Nome → Valor → …
+- Com nome → Boas Vindas → (pula Nome) → Valor → …
 
-## Correção proposta
+### 2. (Defensivo, opcional) Em `conversational/index.ts`, no `resolveLandingStep`
+Garantir que, ao escolher `firstActive`, se o primeiro passo ativo for um "ask de nome puro" sem mídia/texto de boas-vindas, ele continue a busca pelo próximo passo com `slot_key`/`message_text` antes de cair na pergunta. Isso protege contra futuras reordenações erradas no admin. Sem alterar nenhum comportamento já existente para outros campos.
 
-### 1. Tratar arquivo/imagem como conta quando o cliente ainda está antes do cadastro
+## Arquivos
 
-No `runConversationalFlow`, antes de FAQ/classificador/fallback:
+- `supabase/migrations/<timestamp>_reorder_boas_vindas_first.sql` — UPDATE das duas posições (com `WHERE flow_id=... AND step_key=...`).
+- (opcional) `supabase/functions/whapi-webhook/handlers/conversational/index.ts` — pequeno reforço no `resolveLandingStep`.
 
-- Se receber arquivo/imagem/documento em qualquer step conversacional antes da coleta (`flow:*`, `welcome`, `qualificacao`, etc.) e ainda não houver conta processada:
-  - retornar `conversation_step = aguardando_conta`
-  - deixar o `whapi-webhook` reprocessar/encaminhar para o pipeline determinístico de OCR, ou acionar diretamente o texto curto de “conta recebida, analisando”.
+## Validação
 
-Objetivo: foto enviada no meio da explicação vira conta imediatamente, não dispara mais áudio/texto antigo.
+- Disparar mensagem de teste para o consultor `0c2711ad-…` com lead **novo** → primeira mensagem deve ser **Boas Vindas**, depois "Qual seu nome?".
+- Repetir com lead que já tem `name_source=user_confirmed` → deve enviar **Boas Vindas** e pular direto pra "Valor da conta".
+- Conferir nos `conversations` (outbound) a ordem temporal.
 
-### 2. Anti-repetição também no motor conversacional
+## Observações
 
-Adicionar uma guarda em `emitStep/goToStep`:
-
-- Antes de enviar texto/mídia de um step do Flow Builder, consultar outbound recente do mesmo `conversation_step`.
-- Se o mesmo step já foi enviado nos últimos 10 minutos, não reenviar a mesma mensagem/mídia.
-- Avançar para o próximo passo esperado quando for uma confirmação positiva, sem repetir `559b8f1b`.
-
-Objetivo: `a71ba814` e `559b8f1b` não podem sair duas vezes seguidas para o mesmo cliente.
-
-### 3. Corrigir fallback de dúvida para voltar ao próximo passo útil
-
-Quando houver QA/FAQ hit durante um passo do flow:
-
-- Responder a dúvida.
-- Se o cliente já informou valor ou mandou conta, não voltar para `como_funciona`.
-- Manter ou avançar para o próximo estado útil:
-  - com valor mas sem conta: pedir conta;
-  - com foto/arquivo recebido: OCR da conta;
-  - sem valor: voltar para pergunta de valor, não para vídeo/explicação.
-
-Objetivo: dúvida não reinicia nem embaralha o fluxo.
-
-### 4. Bloquear auto-advance silencioso de perguntas que exigem captura
-
-Para steps com `captures` e `wait_for=reply`:
-
-- Se não houve resposta nova do cliente com captura válida, não avançar por fallback automático para mídia/explicação.
-- Repetir/reformular a pergunta, no máximo, sem pular etapa.
-
-Objetivo: o bot não sai do “qual valor da conta?” sem o cliente responder.
-
-### 5. Validar com o histórico real
-
-Depois da implementação, validar no banco com os dois leads:
-
-- `17fceeee-...`: confirmar onde repetiu e que a nova lógica bloquearia.
-- `06a3ed56-...`: confirmar que o fallback pós-SIM continua funcionando.
-
-## Arquivos envolvidos
-
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
-- possivelmente `supabase/functions/whapi-webhook/index.ts` se for necessário reencaminhar arquivo do motor flow para o pipeline OCR determinístico.
-
-Sem mudança de UI e sem alteração de banco.
+Se você quer que esse reordenamento valha para **todos** os consultores (não só o `0c2711ad-…`), me confirma e eu generalizo a migration buscando todo flow ativo onde um passo com `captures.name` aparece antes de um passo com `slot_key='boas_vindas'`.
