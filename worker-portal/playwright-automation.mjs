@@ -634,6 +634,21 @@ async function notificarClienteOTP(customerId) {
     const nome = customer.name?.split(' ')[0] || '';
     const message = `📱 *Código de Verificação*\n\nOlá${nome ? ' ' + nome : ''}! Você vai receber um *código numérico* no WhatsApp enviado pela iGreen Energy.\n\n👉 *Quando receber, digite o código aqui neste chat* para eu finalizar seu cadastro!\n\n⏳ Aguardando o código...`;
     await sendWhatsAppMessage(supabase, customer, message, 'otp_notify');
+
+    // H1: retry automático em 60s se o cliente ainda não digitou o código.
+    // Resolve caso em que a primeira mensagem não chegou (Whapi instável).
+    setTimeout(async () => {
+      try {
+        const { data: chk } = await supabase
+          .from('customers').select('status, otp_code')
+          .eq('id', customerId).maybeSingle();
+        if (chk && chk.status === 'awaiting_otp' && !chk.otp_code) {
+          console.log(`   🔁 [otp-retry] cliente ${customerId} sem OTP após 60s — reenviando pedido`);
+          const retryMsg = `⏰ Você recebeu o código no WhatsApp da iGreen?\n\nSe sim, *digite os 6 dígitos aqui no chat* para eu finalizar.\n\nSe não recebeu, me avise que eu reenvio!`;
+          await sendWhatsAppMessage(supabase, customer, retryMsg, 'otp_notify_retry');
+        }
+      } catch (e) { console.warn(`   ⚠️ [otp-retry] falhou: ${e.message}`); }
+    }, 60_000);
   } catch (e) {
     console.error(`   ❌ notificarClienteOTP erro: ${e.message}`);
   }
@@ -645,7 +660,7 @@ async function sendFacialLinkToCustomer(customerId, facialLink) {
   if (!supabase) { console.error('   ❌ sendFacialLink: Supabase não configurado'); return; }
   try {
     const { data: customer } = await supabase
-      .from('customers').select('id, phone_whatsapp, consultant_id, name')
+      .from('customers').select('id, phone_whatsapp, consultant_id, name, facial_link_sent_at')
       .eq('id', customerId).single();
     if (!customer?.phone_whatsapp) { console.error('   ❌ sendFacialLink: telefone não encontrado'); return; }
     // Normalizar: alguns capturas concatenam o link duas vezes
@@ -656,7 +671,24 @@ async function sendFacialLinkToCustomer(customerId, facialLink) {
     }
     const nome = customer.name?.split(' ')[0] || '';
     const message = `📲 *Última etapa — Validação Facial*\n\nOlá${nome ? ' ' + nome : ''}! Falta apenas a validação facial para concluir seu cadastro.\n\n🔗 Abra o link abaixo *no celular*:\n${cleanLink}\n\n📱 Siga as instruções na tela (selfie + documento).\n\n⚠️ Use boa iluminação e tire o óculos se necessário.\n\n✅ *Quando terminar, responda aqui:* PRONTO\n\nQualquer dúvida, estamos aqui! ☀️`;
-    await sendWhatsAppMessage(supabase, customer, message, 'facial_link');
+    const ok = await sendWhatsAppMessage(supabase, customer, message, 'facial_link');
+    // H1: marca facial_link_sent_at e agenda re-envio em 30s se permanecer null
+    try {
+      await supabase.from('customers').update({ facial_link_sent_at: new Date().toISOString() }).eq('id', customerId);
+    } catch (_) { /* coluna pode não existir; ignora */ }
+
+    setTimeout(async () => {
+      try {
+        const { data: chk } = await supabase
+          .from('customers').select('status, link_facial, facial_link_sent_at')
+          .eq('id', customerId).maybeSingle();
+        if (chk && chk.status === 'aguardando_facial' && chk.link_facial) {
+          // Reenvia se ainda está aguardando depois de 30s
+          console.log(`   🔁 [facial-retry] reenviando link facial para ${customerId}`);
+          await sendWhatsAppMessage(supabase, customer, message, 'facial_link_retry');
+        }
+      } catch (e) { console.warn(`   ⚠️ [facial-retry] falhou: ${e.message}`); }
+    }, 30_000);
   } catch (e) {
     console.error(`   ❌ sendFacialLink erro: ${e.message}`);
   }
