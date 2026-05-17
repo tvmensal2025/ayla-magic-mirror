@@ -859,14 +859,37 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     // passos editing_* explícitos podem trocar (no bot-flow.ts).
     const TRUSTED_LOCK = new Set(["ocr_conta", "ocr_doc", "user_confirmed"]);
     const nameLocked = TRUSTED_LOCK.has(String((ctx.customer as any).name_source || ""));
+    // Detecta pergunta de nome também pela ÚLTIMA outbound — compensa cascade
+    // que avança o currentStep antes do lead responder a pergunta anterior.
+    let lastOutboundWasNameQuestion = false;
+    try {
+      const { data: lastOut } = await ctx.supabase
+        .from("conversations")
+        .select("message_text")
+        .eq("customer_id", ctx.customer.id)
+        .eq("message_direction", "outbound")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const txt = String((lastOut as any)?.message_text || "");
+      lastOutboundWasNameQuestion = /qual\s+(?:é\s+)?(?:o\s+)?(?:seu\s+)?nome|como\s+(?:posso\s+)?(?:te\s+)?(?:chamar|chamo)|me\s+diz\s+(?:seu\s+)?nome/i.test(txt);
+    } catch { /* best-effort */ }
     const stepIsAskName =
+      lastOutboundWasNameQuestion ||
       /\bnome\b|\bchama\b/i.test(String((currentStep as any).title || "")) ||
       /\bnome\b/i.test(String((currentStep as any).slot_key || "")) ||
       (Array.isArray(currentStep.captures) &&
         currentStep.captures.some((c: any) => c?.field === "name" && c?.enabled !== false));
-    if (extracted.name && !nameLocked && (stepIsAskName || !ctx.customer.name)) {
+    // Quando a pergunta foi de nome (passo atual OU última outbound), sobrescreve
+    // mesmo whatsapp_profile/freeform_multi anteriores — o nome digitado é mais confiável.
+    const currentNameSource = String((ctx.customer as any).name_source || "");
+    const weakNameSource = currentNameSource === "" || currentNameSource === "whatsapp_profile" || currentNameSource === "freeform_multi";
+    if (extracted.name && !nameLocked && (stepIsAskName || !ctx.customer.name || weakNameSource)) {
       captureUpdates.name = extracted.name;
       captureUpdates.name_source = "self_introduced";
+      if (stepIsAskName) {
+        console.log(`[name-capture] override "${ctx.customer.name || ""}"(${currentNameSource}) → "${extracted.name}" (askName via ${lastOutboundWasNameQuestion ? "last-outbound" : "current-step"})`);
+      }
     }
 
     if (Object.keys(captureUpdates).length > 0 && ctx.customer.id) {
@@ -1230,28 +1253,10 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       const nextWillCascade = !cascadeCadastroStep && nextStep.wait_for === "none"
         && !!findCascadeNext(nextStep);
 
-      // C1: Promise.race com timeout — se passar de 12s, paramos cascade e
-      // mantemos o lead no último passo bem-sucedido (vira drip no próximo turno).
-      let emit: { replyText: string; inlineSent: boolean };
-      try {
-        emit = await Promise.race([
-          emitStep(nextStep, !nextWillCascade),
-          new Promise<{ replyText: string; inlineSent: boolean }>((_r, rej) =>
-            setTimeout(() => rej(new Error("cascade_hop_timeout")), 12_000),
-          ),
-        ]);
-      } catch (e) {
-        console.warn(`[conversational] ⏱️ cascade hop timeout em ${nextStep.step_key} (mantendo lead em ${cursor.step_key})`);
-        break;
-      }
-
-      if (emit.replyText) replyText = emit.replyText;
-      inlineSent = inlineSent || emit.inlineSent;
+      // PERSIST FIRST: marca o lead já no nextStep ANTES de enviar mídia pesada.
+      // Se o envio demorar e a Edge Function reentrar, não regredimos pro passo
+      // anterior nem reprocessamos a captura.
       nextConversationStep = cascadeCadastroStep || nextStep.id;
-      console.log(`[conversational] auto-cascade ${cursor.step_key} → ${nextStep.step_key} (wait_for=${nextStep.wait_for})`);
-
-      // Persiste o avanço por hop (anti-race: se função timeout ou outro webhook reentrar,
-      // não regride pro passo anterior). Best-effort, ignora falhas.
       if (ctx.customer?.id) {
         try {
           await ctx.supabase
@@ -1260,6 +1265,26 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
             .eq("id", ctx.customer.id);
         } catch (_) { /* noop */ }
       }
+
+      // Timeout ampliado para 30s — vídeos/áudios pesados (boas_vindas/como_funciona)
+      // chegam a levar 15-25s de upload+envio. Se passar de 30s, paramos cascade
+      // mas o lead já está persistido no passo correto.
+      let emit: { replyText: string; inlineSent: boolean };
+      try {
+        emit = await Promise.race([
+          emitStep(nextStep, !nextWillCascade),
+          new Promise<{ replyText: string; inlineSent: boolean }>((_r, rej) =>
+            setTimeout(() => rej(new Error("cascade_hop_timeout")), 30_000),
+          ),
+        ]);
+      } catch (e) {
+        console.warn(`[conversational] ⏱️ cascade hop timeout em ${nextStep.step_key} (lead persistido em ${nextConversationStep})`);
+        break;
+      }
+
+      if (emit.replyText) replyText = emit.replyText;
+      inlineSent = inlineSent || emit.inlineSent;
+      console.log(`[conversational] auto-cascade ${cursor.step_key} → ${nextStep.step_key} (wait_for=${nextStep.wait_for})`);
 
       // G1: telemetria por hop — sem isso parece que pulamos passos.
       try {
@@ -1287,8 +1312,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Isso evita o "disco riscado" que o lead vê quando responde algo fora do esperado.
   const repeatCurrent = async (): Promise<BotResult> => _smartRepeat();
   const _smartRepeat = async (): Promise<BotResult> => {
-    // Debounce: se houve outbound nos últimos 30s, não dispara nudge agora —
-    // evita "Pode me responder, por favor?" 6s depois do lead já ter respondido.
+    // GUARD 0: se este turno extraiu QUALQUER dado válido, NUNCA reformula —
+    // significa que o lead respondeu e devemos avançar via fluxo (não nudge).
+    if (Object.keys(captureUpdates).length > 0) {
+      console.log(`[smart-repeat] skip nudge — captureUpdates=${Object.keys(captureUpdates).join(",")} (avança via fluxo)`);
+      return { reply: "", updates: { conversation_step: currentStep.id, ...captureUpdates, ...restoreDetourUpdates, __inline_sent: true } };
+    }
+    // GUARD 1: debounce — se houve outbound nos últimos 30s, não nudge.
     try {
       const sinceDebounce = new Date(Date.now() - 30_000).toISOString();
       const { count: recentOut } = await ctx.supabase
