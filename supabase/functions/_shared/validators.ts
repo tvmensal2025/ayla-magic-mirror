@@ -9,7 +9,6 @@ export interface ValidationResult {
 // ── Listas de bloqueio (placeholders / contatos do consultor) ──
 const PLACEHOLDER_EMAIL_PATTERNS: RegExp[] = [
   /@lead\.igreen$/i,
-  /^tvmensal/i,
   /@teste/i,
   /^teste@/i,
   /^noreply@/i,
