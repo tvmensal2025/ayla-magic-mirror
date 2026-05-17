@@ -64,10 +64,6 @@ export function buildMultiFieldPatch(
 ): Record<string, any> {
   const patch: Record<string, any> = {};
   const strongNameSources = new Set([
-    "manual", "ocr_cnh", "ocr_rg", "ocr_doc", "self_introduced",
-  ]);
-
-  const strongNameSources = new Set([
     "manual", "ocr_cnh", "ocr_rg", "ocr_doc", "self_introduced", "freeform_multi",
   ]);
   // whatsapp_profile é fraco — qualquer self-intro do lead sobrescreve.
