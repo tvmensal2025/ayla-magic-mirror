@@ -685,8 +685,15 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       if (captured.length === 0) return cur;
       const allFilled = captured.every((f) => isFieldAlreadyCaptured(f, ctx.customer));
       if (!allFilled) return cur;
-      // Se o step tem texto/mídia que não é só pergunta (ex: também envia áudio),
-      // ainda assim pulamos: a UX desejada é não repetir pergunta de dado conhecido.
+      // E2: NÃO pular passo que tem slot_key (provavelmente toca áudio/vídeo
+      // configurado pelo consultor) ou que tem message_text. Pulamos só
+      // perguntas "puras" sem mídia, evitando perder boas_vindas/como_funciona.
+      const hasMediaSlot = !!(cur.slot_key && String(cur.slot_key).trim());
+      const hasText = !!(cur.message_text && String(cur.message_text).trim());
+      if (hasMediaSlot || hasText) {
+        console.log(`[skip-step] mantendo ${cur.step_key} (tem slot_key/texto) mesmo com captura preenchida`);
+        return cur;
+      }
       const next = dbSteps.find((s) => s.is_active && s.position > cur!.position);
       if (!next) return cur;
       console.log(`[skip-step] from=${cur.step_key} → to=${next.step_key} reason=${captured.join(",")}_already_captured`);
