@@ -22,6 +22,7 @@ import { handleConnectionUpdate } from "./handlers/connection.ts";
 import { tryInterceptOtp } from "./handlers/otp-intercept.ts";
 import { runBotFlow } from "./handlers/bot-flow.ts";
 import { captureError } from "../_shared/sentry.ts";
+import { notifyNewLead } from "../_shared/notify-consultant.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
