@@ -172,6 +172,82 @@ Deno.serve(async (req) => {
     const consultorId = consultantData?.igreen_id || "124170";
     console.log(`✅ Whapi super admin: ${nomeRepresentante} (iGreen ID: ${consultorId})`);
 
+    // ─── 🔑 OTP INTERCEPT (antes do bot-flow) ─────────────────────────
+    // Se o cliente está em awaiting_otp/portal_submitting e mandou um código
+    // numérico, capturamos e notificamos o worker. Bypassa o fluxo conversacional.
+    if (messageText && !isButton && !isFile) {
+      const otpDigits = messageText.replace(/\D/g, "");
+      let extractedOtp: string | null = null;
+      const otpPatterns = [
+        /(?:c[oó]digo|code|otp|token|verifica[cç][aã]o)[^\d]*(\d{4,8})/i,
+        /^(\d{4,8})$/,
+      ];
+      for (const pat of otpPatterns) {
+        const m = messageText.match(pat);
+        if (m) { extractedOtp = m[1] || m[0]; break; }
+      }
+      if (!extractedOtp && /^\d{4,8}$/.test(otpDigits)) extractedOtp = otpDigits;
+
+      if (extractedOtp) {
+        const { data: otpCustomer } = await supabase
+          .from("customers")
+          .select("id, name, status")
+          .eq("phone_whatsapp", phone)
+          .eq("consultant_id", superAdminConsultantId)
+          .in("status", ["awaiting_otp", "portal_submitting"])
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (otpCustomer) {
+          console.log(`🔑 [whapi-otp] OTP ${extractedOtp} capturado para ${otpCustomer.name} (${otpCustomer.id})`);
+          await supabase.from("customers").update({
+            otp_code: extractedOtp,
+            otp_received_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq("id", otpCustomer.id);
+
+          const workerUrl = settings.portal_worker_url || Deno.env.get("PORTAL_WORKER_URL") || Deno.env.get("WORKER_PORTAL_URL") || "";
+          const workerSecret = settings.worker_secret || Deno.env.get("WORKER_SECRET") || "";
+          if (workerUrl && workerSecret) {
+            try {
+              const ctrl = new AbortController();
+              const timer = setTimeout(() => ctrl.abort(), 5000);
+              await fetch(`${workerUrl.replace(/\/$/, "")}/confirm-otp`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${workerSecret}` },
+                body: JSON.stringify({ customer_id: otpCustomer.id, otp_code: extractedOtp }),
+                signal: ctrl.signal,
+              });
+              clearTimeout(timer);
+              console.log(`✅ [whapi-otp] OTP enviado ao worker`);
+            } catch (e: any) {
+              console.warn(`⚠️ [whapi-otp] Falha ao notificar worker: ${e?.message}`);
+            }
+          }
+
+          await supabase.from("conversations").insert({
+            customer_id: otpCustomer.id, message_direction: "inbound",
+            message_text: messageText, message_type: "text",
+            conversation_step: "otp_received",
+          });
+          try {
+            const reply = "✅ Código recebido! Estou finalizando seu cadastro, aguarde alguns segundos...";
+            await realSender.sendText(remoteJid, reply);
+            await supabase.from("conversations").insert({
+              customer_id: otpCustomer.id, message_direction: "outbound",
+              message_text: reply, message_type: "text",
+              conversation_step: "otp_received",
+            });
+          } catch (_) {}
+
+          return new Response(JSON.stringify({ ok: true, msg: "otp_intercepted", otp: extractedOtp }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    }
+
     // ─── Find or create customer ────────────────────────────────────
     const statusFinalizados = [
       "data_complete", "portal_submitting", "awaiting_otp", "validating_otp",
