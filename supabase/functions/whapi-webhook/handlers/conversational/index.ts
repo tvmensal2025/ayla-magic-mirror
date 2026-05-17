@@ -723,14 +723,18 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       if (captured.length === 0) return cur;
       const allFilled = captured.every((f) => isFieldAlreadyCaptured(f, ctx.customer));
       if (!allFilled) return cur;
-      // E2: NÃO pular passo que tem slot_key (provavelmente toca áudio/vídeo
-      // configurado pelo consultor) ou que tem message_text. Pulamos só
-      // perguntas "puras" sem mídia, evitando perder boas_vindas/como_funciona.
-      const hasMediaSlot = !!(cur.slot_key && String(cur.slot_key).trim());
-      const hasText = !!(cur.message_text && String(cur.message_text).trim());
-      if (hasMediaSlot || hasText) {
-        console.log(`[skip-step] mantendo ${cur.step_key} (tem slot_key/texto) mesmo com captura preenchida`);
-        return cur;
+      // Regra de pulo: o passo de NOME pode ser pulado SEMPRE que o nome já
+      // estiver capturado (mesmo se tiver texto/slot — é só uma pergunta).
+      // Para os demais campos, preservamos passos com mídia/texto para não
+      // perder áudios como boas_vindas/como_funciona.
+      const onlyAsksName = captured.length === 1 && captured[0] === "name";
+      if (!onlyAsksName) {
+        const hasMediaSlot = !!(cur.slot_key && String(cur.slot_key).trim());
+        const hasText = !!(cur.message_text && String(cur.message_text).trim());
+        if (hasMediaSlot || hasText) {
+          console.log(`[skip-step] mantendo ${cur.step_key} (tem slot_key/texto) mesmo com captura preenchida`);
+          return cur;
+        }
       }
       const next = dbSteps.find((s) => s.is_active && s.position > cur!.position);
       if (!next) return cur;
