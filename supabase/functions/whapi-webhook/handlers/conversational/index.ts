@@ -230,7 +230,9 @@ function extractCaptures(messageText: string, configured: DbCapture[]): Extracte
     const c = extractCPF(messageText);
     if (c) out.cpf = c;
   }
-  if (enabled.has("name")) {
+  // Nome: sempre tenta extrair (cliente pode se apresentar em qualquer step).
+  // Guard real (lock por OCR/user_confirmed) fica no consumer (~linha 754).
+  {
     const n = extractNome(messageText);
     if (n) out.name = n;
   }
@@ -753,10 +755,24 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         currentStep.captures.some((c: any) => c?.field === "name" && c?.enabled !== false));
     if (extracted.name && !nameLocked && (stepIsAskName || !ctx.customer.name)) {
       captureUpdates.name = extracted.name;
+      captureUpdates.name_source = "self_introduced";
     }
 
     if (Object.keys(captureUpdates).length > 0 && ctx.customer.id) {
       await ctx.supabase.from("customers").update(captureUpdates).eq("id", ctx.customer.id);
+      // Reflete no objeto em memória pra re-resolver landing step abaixo.
+      Object.assign(ctx.customer as any, captureUpdates);
+    }
+
+    // Após capturar, re-resolve landing step: se o próximo passo só perguntaria
+    // o dado que acabou de chegar, pula automaticamente.
+    if (Object.keys(captureUpdates).length > 0) {
+      const advanced = resolveLandingStep(currentStep);
+      if (advanced && advanced.id !== currentStep.id) {
+        console.log(`[skip-step] post-capture: ${currentStep.step_key} → ${advanced.step_key}`);
+        currentStep = advanced;
+        stepKey = currentStep.id;
+      }
     }
   } catch (e) {
     console.error("[conversational] capture phase failed", e);
