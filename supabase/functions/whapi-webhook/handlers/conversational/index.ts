@@ -8,7 +8,7 @@ import { CONVERSATIONAL_STEPS, decideTransition, type ConversationalStep } from 
 import { classifyIntent } from "./intent-classifier.ts";
 import { getTemplate, renderTemplate } from "./templates.ts";
 import {
-  extractValor, extractTelefone, extractCPF, extractNome, detectRegexIntents,
+  extractValor, extractValorPermissivo, extractTelefone, extractCPF, extractNome, detectRegexIntents,
 } from "../../../_shared/captureExtractors.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
 import { isTestMode } from "../../../_shared/test-mode.ts";
