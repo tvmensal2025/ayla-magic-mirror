@@ -2081,6 +2081,7 @@ export type Database = {
           otp_code: string | null
           otp_received_at: string | null
           pain_point: string | null
+          pending_flow_switch: string | null
           phone_contact_confirmed: boolean
           phone_landline: string | null
           phone_whatsapp: string
@@ -2190,6 +2191,7 @@ export type Database = {
           otp_code?: string | null
           otp_received_at?: string | null
           pain_point?: string | null
+          pending_flow_switch?: string | null
           phone_contact_confirmed?: boolean
           phone_landline?: string | null
           phone_whatsapp: string
@@ -2299,6 +2301,7 @@ export type Database = {
           otp_code?: string | null
           otp_received_at?: string | null
           pain_point?: string | null
+          pending_flow_switch?: string | null
           phone_contact_confirmed?: boolean
           phone_landline?: string | null
           phone_whatsapp?: string
@@ -2713,6 +2716,57 @@ export type Database = {
           uf?: string
         }
         Relationships: []
+      }
+      flow_router_rules: {
+        Row: {
+          consultant_id: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          priority: number
+          target_flow_key: string
+          target_flow_label: string
+          trigger_keywords: string[]
+          updated_at: string
+        }
+        Insert: {
+          consultant_id?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          priority?: number
+          target_flow_key: string
+          target_flow_label: string
+          trigger_keywords: string[]
+          updated_at?: string
+        }
+        Update: {
+          consultant_id?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          priority?: number
+          target_flow_key?: string
+          target_flow_label?: string
+          trigger_keywords?: string[]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flow_router_rules_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "flow_router_rules_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants_public"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       kanban_stages: {
         Row: {
