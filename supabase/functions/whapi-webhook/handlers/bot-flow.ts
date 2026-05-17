@@ -2346,13 +2346,26 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           "{{economia_anual}}": _fmtBRL(_valor * 0.20 * 12),
         };
 
-        // FIX 1: se o consultor tem fluxo customizado, pula direto pro próximo
-        // step de capture_documento (ou finalizar). Evita parar em "duvidas_pos_club"
-        // que pode não existir no fluxo dele e causar reset no Passo 1.
-        // SEM filtro de step_type: pega o PRÓXIMO passo ativo por position,
-        // qualquer tipo (message, capture_*, finalizar_cadastro). Assim os
-        // passos intermediários criados pelo consultor são executados.
-        const nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {});
+        // FIX: continuar a partir da POSIÇÃO do capture_conta no fluxo custom.
+        // Sem afterPosition, findNextActiveFlowStep retornava o PRIMEIRO passo ativo
+        // (geralmente "Nome do cliente"), regredindo o lead ao início do funil.
+        let _captureContaPos = 0;
+        try {
+          const { data: _flowRow } = await supabase
+            .from("bot_flows").select("id")
+            .eq("consultant_id", customer.consultant_id).eq("is_active", true).maybeSingle();
+          if (_flowRow?.id) {
+            const { data: _captureRow } = await supabase
+              .from("bot_flow_steps").select("position")
+              .eq("flow_id", (_flowRow as any).id).eq("is_active", true)
+              .eq("step_type", "capture_conta")
+              .order("position", { ascending: true }).limit(1).maybeSingle();
+            if (_captureRow?.position != null) _captureContaPos = Number(_captureRow.position) || 0;
+          }
+        } catch (_) { /* segue com 0 → primeiro passo, comportamento antigo */ }
+        const nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {
+          afterPosition: _captureContaPos,
+        });
         const DOC_FALLBACK = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é.`;
         const FINAL_FALLBACK = `✅ *Todos os dados foram preenchidos!*\n\n1️⃣ Finalizar\n\n_Digite *1* ou *FINALIZAR* para concluir:_`;
         const sendFallback = async (text: string, stepStr: string) => {

@@ -1189,9 +1189,14 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
 
     // Decide se este step vai cascatear (wait_for=none). Cascade segue fallback.goto
     // OU, se o consultor deixou repeat/sem goto mas marcou none, próximo por position.
+    // GUARD: passos que capturam dados (name/cpf/valor/telefone) SEMPRE esperam resposta,
+    // mesmo se configurados como wait_for=none — caso contrário o bot pergunta e cascateia.
+    const stepCapturesAnything = Array.isArray(s.captures)
+      && s.captures.some((c: any) => c?.enabled !== false && c?.field);
+    const effectiveWaitFor = stepCapturesAnything ? "reply" : s.wait_for;
     const hasNextActive = !!dbSteps.find((step) => step.is_active && step.position > s.position);
     const gotoTargetId = s.fallback?.mode === "goto" ? s.fallback?.goto_step_id : null;
-    const willCascade = !cadastroStep && s.wait_for === "none"
+    const willCascade = !cadastroStep && effectiveWaitFor === "none"
       && (!!gotoTargetId || hasNextActive);
 
     const first = await emitStep(s, !willCascade);
@@ -1236,9 +1241,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       }
       return dbSteps.find((step) => step.is_active && step.position > cur.position);
     };
-    // C1: guard reduzido (6→3) e cada hop com timeout de 12s — se a Edge Function
+    // C1: guard reduzido (6→3) e cada hop com timeout — se a Edge Function
     // estourar 20s, perdíamos passos no meio da cascata sem deixar rastro.
-    for (let guard = 0; cursor?.wait_for === "none" && guard < 3; guard++) {
+    const cursorCascades = (st: DbStep): boolean => {
+      const caps = Array.isArray(st.captures) && st.captures.some((c: any) => c?.enabled !== false && c?.field);
+      return !caps && st.wait_for === "none";
+    };
+    for (let guard = 0; cursor && cursorCascades(cursor) && guard < 3; guard++) {
       const nextStep = findCascadeNext(cursor);
       if (!nextStep) {
         console.log(`[conversational] cascade parou em step=${cursor.step_key} (sem próximo step ativo)`);
@@ -1594,10 +1603,14 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       return _finalize(stepKey, await goToStep(nextStep, restoreDetourUpdates));
     }
   }
-  // Sprint A2: passo terminal nunca deve cair no fallback AI (risco de jogar lead de volta no funil)
+  // Sprint A2: passo terminal nunca deve cair no fallback AI nem voltar pra cadastro —
+  // o lead já está finalizando. Mantém no passo, sem regredir para documento/conta.
   if (currentStep.step_type === "finalizar_cadastro") {
-    console.log(`[conversational] terminal step ${currentStep.step_key} → forçando cadastro em vez de fallback`);
-    return _finalize(stepKey, await resolveTransition({ goto_special: "cadastro" } as DbTransition));
+    console.log(`[conversational] terminal step ${currentStep.step_key} → mantendo (sem regressão)`);
+    return _finalize(stepKey, {
+      reply: "",
+      updates: { conversation_step: currentStep.id, __inline_sent: true, ...captureUpdates, ...restoreDetourUpdates },
+    });
   }
   if (fb.mode === "ai" && fb.ai_prompt && !strictMode) {
     const candidates = dbSteps.filter(s => s.is_active && s.id !== currentStep.id).map(s => ({ id: s.id, step_key: s.step_key }));

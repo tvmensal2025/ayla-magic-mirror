@@ -369,7 +369,9 @@ Deno.serve(async (req) => {
     // ─── Self-intro: captura nome/CEP/valor da PRIMEIRA mensagem do lead ───
     // Ex: "Oi me chamo Paula", "Sou João, conta 250" — evita re-perguntar o nome.
     // Source `freeform_multi` sobrescreve `whatsapp_profile`.
-    if (messageText && !isFile && customer && !(customer as any).chat_cleared_at) {
+    // Self-intro roda mesmo em chats zerados manualmente — não reaproveita pushName,
+    // mas extrai dados que o lead escreveu explicitamente nas primeiras mensagens.
+    if (messageText && !isFile && customer) {
       try {
         const { count: inboundCount } = await supabase
           .from("conversations")
