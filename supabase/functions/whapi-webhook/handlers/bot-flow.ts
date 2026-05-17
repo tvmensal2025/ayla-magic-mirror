@@ -3073,7 +3073,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "aguardando_assinatura": {
       const link = customer.link_facial || customer.link_assinatura;
       const txt = (messageText || "").toLowerCase().trim();
-      const confirmou = /\b(pronto|prontinho|conclu[ií]do|conclui|conclu[ií]|finalizei|terminei|fiz|feito|ok|certo|sim)\b/.test(txt);
+      const confirmou = /\b(pronto|prontinho|conclu[ií]do|conclui|conclu[ií]|finalizei|terminei|terminado|finalizado|fiz|feito|feita|ok|okay|okk?|certo|sim|j[aá]\s+(assinei|fiz|tirei|validei|terminei|terminado)|assinei|tirei|validei|selfie|liberado|consegui)\b/i.test(txt);
       if (confirmou && link) {
         updates.facial_confirmed_at = new Date().toISOString();
         updates.conversation_step = "complete";
