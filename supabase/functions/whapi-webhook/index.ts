@@ -551,8 +551,18 @@ Deno.serve(async (req) => {
       await new Promise((r) => setTimeout(r, 500));
     }
     if (!lockAcquired) {
-      console.warn(`⏸️ [whapi] customer=${customer.id} ocupado por outra invocação — dropando msg duplicada`);
-      return new Response(JSON.stringify({ ok: true, skipped: "busy" }), {
+      // Em vez de descartar silenciosamente, enfileira a mensagem pra a 1ª
+      // invocação reprocessar quando liberar o lock. Garante zero perda.
+      try {
+        await supabase.rpc("enqueue_pending_inbound", {
+          _customer_id: customer.id,
+          _message_id: messageId || `noid-${Date.now()}`,
+        });
+        console.warn(`📥 [whapi] customer=${customer.id} busy — enfileirado pending_inbound`);
+      } catch (e) {
+        console.error("[whapi] enqueue_pending_inbound falhou:", (e as Error)?.message);
+      }
+      return new Response(JSON.stringify({ ok: true, skipped: "busy_enqueued" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
