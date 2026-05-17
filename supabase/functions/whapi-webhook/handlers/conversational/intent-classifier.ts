@@ -1,7 +1,8 @@
-// Intent classifier — uses Gemini with a strict JSON schema.
+// Intent classifier — regex pre-pass + OpenAI GPT-5-mini (fallback Gemini).
 // NO business logic, NO copy generation. Just label the message.
 
 import type { Intent } from "./state-machine.ts";
+import { openaiChat } from "../../../_shared/openai.ts";
 
 const INTENTS: Intent[] = [
   "saudacao",
@@ -30,7 +31,6 @@ const RX = {
 function regexClassify(text: string): Intent | null {
   const t = text.trim();
   if (!t) return null;
-  // Order matters: high-signal first.
   if (RX.quer_cadastrar.test(t)) return "quer_cadastrar";
   if (RX.quer_humano.test(t)) return "quer_humano";
   if (RX.nao_quer.test(t)) return "nao_quer";
@@ -45,36 +45,65 @@ function regexClassify(text: string): Intent | null {
 export interface ClassifyResult {
   intent: Intent;
   confidence: number;
-  source: "regex" | "llm" | "fallback";
+  source: "regex" | "openai" | "llm" | "fallback";
 }
 
-export async function classifyIntent(
-  text: string,
-  currentStep: string,
-  geminiApiKey: string,
-): Promise<ClassifyResult> {
-  const fast = regexClassify(text);
-  if (fast) return { intent: fast, confidence: 0.95, source: "regex" };
-
-  if (!geminiApiKey || !text.trim()) {
-    return { intent: "outro", confidence: 0, source: "fallback" };
-  }
-
-  const prompt = `Você classifica mensagens de WhatsApp de leads de energia solar.
-Step atual: ${currentStep}
+const PROMPT = (text: string, step: string) => `Você classifica mensagens de WhatsApp de leads de energia solar brasileiros.
+Step atual: ${step}
 Mensagem do lead: "${text.trim().slice(0, 400)}"
 
-Retorne APENAS JSON com a intenção. Opções: ${INTENTS.join(", ")}.
+Considere gírias brasileiras:
+- "tá", "tá bom", "fechou", "bora", "simbora", "pode crer", "pode", "demorou", "blz", "beleza", "ok", "show", "claro" = afirmacao
+- "nem", "nem rola", "nada", "deixa", "passo" = negacao
+- "explica", "como assim", "o que é" = tem_duvida
+
+Opções: ${INTENTS.join(", ")}.
 - saudacao: cumprimentos
 - quer_cadastrar: aceita iniciar cadastro / quer o desconto
 - quer_humano: pede atendente humano
 - tem_duvida: faz pergunta sobre o serviço
 - ja_assistiu_video: confirma que viu o vídeo
 - nao_quer: rejeita ou adia
-- afirmacao: "sim", "ok", "1"
-- negacao: "não", "2"
-- outro: nada acima`;
+- afirmacao: confirmação genérica ("sim", "ok", "tá")
+- negacao: negação genérica ("não", "nem")
+- outro: nada acima
 
+Retorne APENAS JSON: {"intent": "...", "confidence": 0.0-1.0}`;
+
+const SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    intent: { type: "string", enum: INTENTS },
+    confidence: { type: "number" },
+  },
+  required: ["intent", "confidence"],
+};
+
+async function classifyOpenAI(text: string, step: string): Promise<ClassifyResult | null> {
+  try {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 8_000);
+    const res = await openaiChat({
+      model: "gpt-5-mini",
+      temperature: 0,
+      jsonSchema: { name: "intent", schema: SCHEMA },
+      messages: [{ role: "user", content: PROMPT(text, step) }],
+      signal: ctrl.signal,
+    });
+    clearTimeout(to);
+    const parsed = res.json;
+    if (!parsed) return null;
+    const intent: Intent = INTENTS.includes(parsed.intent) ? parsed.intent : "outro";
+    const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0.5;
+    return { intent, confidence, source: "openai" };
+  } catch (e) {
+    console.warn("[classifier] openai failed:", (e as Error).message);
+    return null;
+  }
+}
+
+async function classifyGemini(text: string, step: string, geminiApiKey: string): Promise<ClassifyResult> {
   try {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 8_000);
@@ -85,7 +114,7 @@ Retorne APENAS JSON com a intenção. Opções: ${INTENTS.join(", ")}.
         headers: { "Content-Type": "application/json" },
         signal: ctrl.signal,
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          contents: [{ parts: [{ text: PROMPT(text, step) }] }],
           generationConfig: {
             temperature: 0,
             responseMimeType: "application/json",
@@ -112,6 +141,27 @@ Retorne APENAS JSON com a intenção. Opções: ${INTENTS.join(", ")}.
   } catch {
     return { intent: "outro", confidence: 0, source: "fallback" };
   }
+}
+
+export async function classifyIntent(
+  text: string,
+  currentStep: string,
+  geminiApiKey: string,
+): Promise<ClassifyResult> {
+  const fast = regexClassify(text);
+  if (fast) return { intent: fast, confidence: 0.95, source: "regex" };
+  if (!text.trim()) return { intent: "outro", confidence: 0, source: "fallback" };
+
+  // Prefer OpenAI when configured (better PT-BR slang understanding).
+  if (Deno.env.get("OPENAI_API_KEY")) {
+    const r = await classifyOpenAI(text, currentStep);
+    if (r) return r;
+  }
+
+  // Fallback to Gemini.
+  if (geminiApiKey) return classifyGemini(text, currentStep, geminiApiKey);
+
+  return { intent: "outro", confidence: 0, source: "fallback" };
 }
 
 // Exported for tests
