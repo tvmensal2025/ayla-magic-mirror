@@ -736,12 +736,23 @@ Deno.serve(async (req) => {
       });
     }
 
+    // 🔓 Libera o lock antes de retornar.
+    try { await supabase.rpc("release_customer_processing_lock", { _customer_id: customer.id }); } catch (_) {}
+
     return new Response(JSON.stringify({ ok: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
     console.error("Whapi webhook error:", err);
     captureError(err, { tags: { function: "whapi-webhook" } });
+    // best-effort: tenta liberar lock se foi adquirido
+    try {
+      // @ts-ignore — customer/lockAcquired podem não estar no escopo
+      if (typeof customer !== "undefined" && customer?.id && typeof lockAcquired !== "undefined" && lockAcquired) {
+        // @ts-ignore
+        await supabase.rpc("release_customer_processing_lock", { _customer_id: customer.id });
+      }
+    } catch (_) {}
     return new Response(JSON.stringify({ error: String(err) }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
