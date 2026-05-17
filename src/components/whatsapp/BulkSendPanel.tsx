@@ -19,6 +19,7 @@ interface Customer {
   email?: string | null; cpf?: string | null; address_city?: string | null; address_state?: string | null;
   distribuidora?: string | null; observacao?: string | null; andamento_igreen?: string | null;
   media_consumo?: number | null; registered_by_name?: string | null;
+  customer_origin?: "igreen_sync" | "whatsapp_lead" | "manual" | null;
 }
 interface BulkSendPanelProps {
   instanceName: string; customers: Customer[]; templates: MessageTemplate[];
