@@ -70,7 +70,7 @@ export const CADASTRO_STEPS = new Set([
   "ask_complement", "ask_installation_number", "ask_bill_value",
   "ask_doc_frente_manual", "ask_doc_verso_manual", "ask_finalizar",
   "finalizando", "portal_submitting", "aguardando_otp", "validando_otp",
-  "aguardando_assinatura", "complete", "aguardando_humano",
+  "aguardando_facial", "aguardando_assinatura", "cadastro_em_analise", "complete", "aguardando_humano",
   // Edição pós-OCR (conta de luz)
   "editing_conta_menu","editing_conta_nome","editing_conta_endereco",
   "editing_conta_cep","editing_conta_distribuidora","editing_conta_instalacao","editing_conta_valor",
