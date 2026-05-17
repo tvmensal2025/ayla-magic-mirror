@@ -774,6 +774,11 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         : "";
       if (baseText.trim()) items.push({ kind: "text", text: baseText });
 
+      if (items.length === 0) {
+        console.warn(`[dispatch:${stepKey}] EMPTY — step sem texto nem mídia (slot=${slotKey}). Configure no /admin/fluxos.`);
+        return false;
+      }
+
       // Precedência: UI (consultants.flow_step_media_order[slotKey]) → bot_flow_steps.media_order → default.
       // A UI do /admin/fluxos grava em consultants.flow_step_media_order, então ela vence
       // o default semeado em bot_flow_steps.media_order.
