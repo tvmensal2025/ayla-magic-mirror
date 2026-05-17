@@ -233,6 +233,11 @@ Deno.serve(async (req) => {
         }
       } else {
         customer = newCustomer;
+        notifyNewLead(instanceData.consultant_id, {
+          id: newCustomer.id,
+          name: newCustomer.name,
+          phone_whatsapp: newCustomer.phone_whatsapp,
+        }).catch((e) => console.warn("[notify-new-lead] falhou:", (e as Error).message));
       }
     }
 
