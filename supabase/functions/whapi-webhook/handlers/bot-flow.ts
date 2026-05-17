@@ -236,15 +236,18 @@ function safeAssignName(currentName: string | null | undefined, currentSource: s
   // ser sobrescrita via fluxo de edição. Nome digitado (self_introduced/typed/null)
   // SEMPRE é sobrescrito pelo OCR — é o nome do titular real da conta/doc.
   if (currentName && String(currentName).trim().length >= 3 && TRUSTED_NAME_SOURCES_LOCK.has(src)) {
-    // Exceção: se a fonte atual é user_confirmed mas o nome atual NÃO veio de OCR
-    // (foi um "user_confirmed" travado em cima de nome digitado), deixa o OCR vencer.
-    // Não temos como saber isso aqui sem mais contexto — então mantemos o lock só
-    // para fontes OCR puras. user_confirmed sem OCR prévio é tratado no call-site.
-    if (isOcrSource || src === "user_confirmed") return null;
+    if (isOcrSource || src === "user_confirmed") {
+      // Sprint D-B9: log explícito quando OCR é descartado por lock — antes era silencioso
+      console.warn(`[name-lock] OCR descartado: atual="${currentName}" (src=${src}) novo="${cleaned}" — use editing_*_nome para alterar`);
+      return null;
+    }
   }
   // Nome atual veio de OCR e é muito diferente: mantém (não confiamos no novo OCR)
   if (isOcrSource && currentName && String(currentName).trim().length >= 5) {
-    if (_levSim(currentName, cleaned) < 0.7) return null;
+    if (_levSim(currentName, cleaned) < 0.7) {
+      console.warn(`[name-lock] OCR rejeitado por baixa similaridade: atual="${currentName}" novo="${cleaned}" sim=${_levSim(currentName, cleaned).toFixed(2)}`);
+      return null;
+    }
   }
   return cleaned;
 }
@@ -2764,8 +2767,11 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     case "ask_phone_confirm": {
       const resp = isButton ? buttonId : messageText.toLowerCase().trim();
-      const sim = resp === "sim_phone" || resp === "1" || resp === "sim" || resp === "s";
-      const editar = resp === "editar_phone" || resp === "2" || resp === "editar" || resp === "outro" || resp === "outro número" || resp === "outro numero";
+      // Sprint D-B11: "1"/"2" só valem se vieram do botão. Texto livre exige palavra explícita.
+      const sim = (isButton && (resp === "sim_phone" || resp === "1"))
+        || (!isButton && /^(sim|s|isso|isso\s+mesmo|é\s+meu|eh\s+meu|confirmo|pode|certo|correto|positivo)\b/.test(resp));
+      const editar = (isButton && (resp === "editar_phone" || resp === "2"))
+        || (!isButton && /^(n[aã]o|n|editar|outro|outro\s+n[uú]mero|trocar|mudar|errado)\b/.test(resp));
 
       // ── PROTEÇÃO: Se o phone_whatsapp é o número do consultor/instância,
       // NÃO permitir confirmar — forçar digitar outro número ──
