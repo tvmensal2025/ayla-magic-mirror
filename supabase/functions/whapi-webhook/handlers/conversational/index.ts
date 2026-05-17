@@ -1536,6 +1536,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         });
       }
       try {
+        await emitCurrentBeforeGoto(currentStep, nextByConfig);
         return _finalize(stepKey, await goToStep(nextByConfig, restoreDetourUpdates));
       } catch (e) {
         console.error(`[conversational] 💥 goToStep falhou para ${nextByConfig.step_key}:`, (e as Error)?.message || e);
