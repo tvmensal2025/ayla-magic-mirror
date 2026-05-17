@@ -1,111 +1,95 @@
+## Diagnóstico do que aconteceu
 
-## Diagnóstico (lead Bruna — `06a3ed56-…04b`)
+Analisei o lead mais recente (`17fceeee-...`) e o problema não está mais só no passo da facial. O erro principal agora está no motor do Flow Builder antes da coleta da conta.
 
-Linha do tempo real (tabela `conversations`):
+Linha do tempo relevante:
 
-```
-04:51:57  OUT  aguardando_conta            "Me manda foto da conta…"
-04:52:54  IN   aguardando_conta            [arquivo conta]
-04:53:25  IN   confirmando_dados_conta     "✅ SIM"
-                                           ⛔ silêncio de 2min30s
-04:55:55  IN   aguardando_doc_auto         "Oi"  ← cliente teve que cutucar
-04:56:03  OUT  aguardando_doc_auto         "Me envie a foto do RG ou CNH…"
-```
-
-E mais cedo houve **repetição** do mesmo passo do flow:
-
-```
-04:43:24  OUT  a71ba814 "Vou explicar como funciona, perai"
-04:48:04  IN   "Okay"
-04:49:09  OUT  a71ba814 "Vou explicar como funciona"   ← repetiu
-04:49:45  OUT  559b8f1b "Deu para entender…"
-04:50:09  IN   "Pode ser"
-04:50:46  OUT  559b8f1b "Deu para entender…"           ← repetiu
+```text
+14:54:12 OUT  Pergunta valor médio da conta
+14:56:16 OUT  "Vou explicar como funciona, ok?"       <- avançou sozinho sem resposta do cliente
+14:59:35 IN   "Como funciona o boleto?"              <- cliente ficou em dúvida
+15:00:22 OUT  Explicação genérica da iGreen + pede conta
+15:01:40 IN   [foto da conta]
+15:02:45 OUT  "Vou explicar como funciona, ok?"       <- repetiu passo antigo depois da foto
+15:03:20 OUT  "Deu para entender... cadastro?"       <- veio atrasado
+15:03:36 IN   "Sim"
+15:04:12 OUT  "Deu para entender... cadastro?"       <- repetiu de novo
+15:04:24 IN   "Sim"
+15:04:31 OUT  Pede conta novamente
 ```
 
-### Causa raiz #1 — Dispatch silencioso após "SIM" da conta
+## Causas raiz
 
-Em `bot-flow.ts` (case `confirmando_dados_conta`, linhas 2178-2197):
+1. **O fluxo avança por timeout/follow-up mesmo sem resposta do cliente**
+   - O passo do valor (`3e7fb4cd...`) deveria esperar resposta, mas algum follow-up/fallback avançou para `como_funciona`/`fazenda_solar` sem o cliente responder.
+   - Isso gerou mensagem fora de hora às `14:56:16`.
 
-1. Chama `findNextActiveFlowStep(..., stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"])`.
-2. No fluxo desse consultor (`0c2711ad-…`) o próximo passo é `passo_mp74oztd` (`capture_documento`) — confirmado no banco.
-3. Chama `dispatchStepFromFlow("passo_mp74oztd", _vars)`.
-4. Esse step está cadastrado em `bot_flow_steps` mas com `message_text` vazio e **não tem nenhuma mídia em `ai_media_library`** para esse slot (consulta retornou `[]`).
-5. `dispatchStepFromFlow` monta `items=[]`, o loop não envia nada, retorna `false` silenciosamente.
-6. Mesmo assim o código marca `__inline_sent = true` e seta `conversation_step = "aguardando_doc_auto"` → bot fica mudo esperando a próxima mensagem do cliente.
+2. **Mensagem de dúvida no meio do fluxo não preserva o lugar correto**
+   - Quando o cliente perguntou “Como funciona o boleto?”, o bot respondeu a FAQ, mas continuou preso/voltando para o passo de mídia (`80188e5f...`).
+   - Depois que ele mandou a foto da conta, o sistema ainda retomou o fluxo antigo e reenviou `a71ba814`/`559b8f1b`.
 
-Quando o cliente manda "Oi", aí sim cai no case `aguardando_doc_auto` (linha 2258) que tem o texto hardcoded e finalmente pede o documento.
+3. **Imagem enviada em step conversacional não é tratada como conta imediatamente**
+   - O cliente mandou a foto às `15:01:40`, mas o motor conversacional estava no passo `flow:80188e5f...` e não redirecionou a imagem para `aguardando_conta`/OCR.
+   - Por isso a foto ficou registrada como inbound no fluxo antigo e o bot continuou mandando mensagens de explicação.
 
-O mesmo risco existe nas chamadas legacy (linhas 2193-2194) para `pitch_conexao_club` e `duvidas_pos_club`.
+4. **A correção anterior de anti-repetição pegou só `dispatchStepFromFlow` do bot determinístico**
+   - A repetição atual vem do `runConversationalFlow` (`supabase/functions/whapi-webhook/handlers/conversational/index.ts`), outro motor.
+   - Então ainda falta anti-repetição e guarda de mídia nesse motor.
 
-### Causa raiz #2 — Repetição do mesmo step
+## Correção proposta
 
-O step `a71ba814` foi disparado às 04:43:24 e re-disparado às 04:49:09 após o cliente responder "Okay". O dispatcher de flow não checa se o `step_key` em questão já foi enviado recentemente, então qualquer reentrada no caminho re-envia o mesmo bloco. O mesmo aconteceu com `559b8f1b` depois do "Pode ser".
+### 1. Tratar arquivo/imagem como conta quando o cliente ainda está antes do cadastro
 
----
+No `runConversationalFlow`, antes de FAQ/classificador/fallback:
 
-## Plano de correção
+- Se receber arquivo/imagem/documento em qualquer step conversacional antes da coleta (`flow:*`, `welcome`, `qualificacao`, etc.) e ainda não houver conta processada:
+  - retornar `conversation_step = aguardando_conta`
+  - deixar o `whapi-webhook` reprocessar/encaminhar para o pipeline determinístico de OCR, ou acionar diretamente o texto curto de “conta recebida, analisando”.
 
-### 1. `dispatchStepFromFlow` precisa avisar quando não enviou nada
+Objetivo: foto enviada no meio da explicação vira conta imediatamente, não dispara mais áudio/texto antigo.
 
-Arquivo: `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (função em ~L702).
+### 2. Anti-repetição também no motor conversacional
 
-- Já retorna `boolean`. Vamos usar o retorno no call-site.
-- Quando o step não tem `message_text` nem mídias válidas, logar `[dispatch:${stepKey}] EMPTY — sem texto e sem mídia` e retornar `false`.
+Adicionar uma guarda em `emitStep/goToStep`:
 
-### 2. Fallback obrigatório no "SIM" da conta
+- Antes de enviar texto/mídia de um step do Flow Builder, consultar outbound recente do mesmo `conversation_step`.
+- Se o mesmo step já foi enviado nos últimos 10 minutos, não reenviar a mesma mensagem/mídia.
+- Avançar para o próximo passo esperado quando for uma confirmação positiva, sem repetir `559b8f1b`.
 
-Arquivo: `bot-flow.ts`, case `confirmando_dados_conta` (~L2149-2213).
+Objetivo: `a71ba814` e `559b8f1b` não podem sair duas vezes seguidas para o mesmo cliente.
 
-- Capturar o retorno: `const ok = await dispatchStepFromFlow(nextCustom.step_key, _vars);`
-- Se `ok === false` **e** o próximo step é `capture_documento`/`capture_doc`: enviar imediatamente o prompt hardcoded
-  `"Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é."`
-  via `sendText` + `insert conversations(step="aguardando_doc_auto")`.
-- Se `ok === false` e o próximo é `finalizar_cadastro`: enviar `"✅ *Todos os dados foram preenchidos!*\n\n1️⃣ Finalizar\n\n_Digite *1* ou *FINALIZAR* para concluir:_"`.
-- Aplicar a mesma checagem no ramo legacy (`pitch_conexao_club`/`duvidas_pos_club`): se ambos retornaram `false`, mandar o prompt de doc.
+### 3. Corrigir fallback de dúvida para voltar ao próximo passo útil
 
-### 3. Anti-repetição por `step_key` recente
+Quando houver QA/FAQ hit durante um passo do flow:
 
-Em `dispatchStepFromFlow` (mesma função):
+- Responder a dúvida.
+- Se o cliente já informou valor ou mandou conta, não voltar para `como_funciona`.
+- Manter ou avançar para o próximo estado útil:
+  - com valor mas sem conta: pedir conta;
+  - com foto/arquivo recebido: OCR da conta;
+  - sem valor: voltar para pergunta de valor, não para vídeo/explicação.
 
-- Antes de montar `items`, consultar a última mensagem outbound dessa conversa:
-  ```ts
-  const { data: lastOut } = await supabase
-    .from("conversations")
-    .select("conversation_step, created_at")
-    .eq("customer_id", customer.id)
-    .eq("message_direction", "outbound")
-    .order("created_at", { ascending: false }).limit(1).maybeSingle();
-  ```
-- Se `lastOut?.conversation_step === stepKey` e `Date.now() - new Date(lastOut.created_at).getTime() < 10 * 60_000` (10 min), pular: `console.log("[dispatch:${stepKey}] skip — já enviado há <10min"); return true;`
-- Isso elimina os re-disparos vistos em `a71ba814` e `559b8f1b`.
+Objetivo: dúvida não reinicia nem embaralha o fluxo.
 
-### 4. Aviso operacional no admin
+### 4. Bloquear auto-advance silencioso de perguntas que exigem captura
 
-Adicionar log estruturado (já existe `console.warn`) quando o dispatcher detectar step custom sem conteúdo. Sem mudança de UI — só facilita debug futuro pelos logs de edge function.
+Para steps com `captures` e `wait_for=reply`:
 
-### 5. Recuperar o lead atual (Bruna)
+- Se não houve resposta nova do cliente com captura válida, não avançar por fallback automático para mídia/explicação.
+- Repetir/reformular a pergunta, no máximo, sem pular etapa.
 
-O lead já avançou para `aguardando_facial`. Não precisa de ação extra de fluxo — basta o `/retry-facial-link` planejado anteriormente para o envio do link, que já está implementado no worker-portal.
+Objetivo: o bot não sai do “qual valor da conta?” sem o cliente responder.
 
----
+### 5. Validar com o histórico real
 
-## Arquivos a alterar
+Depois da implementação, validar no banco com os dois leads:
 
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
-  - Função `dispatchStepFromFlow` (anti-repetição + log de vazio)
-  - Case `confirmando_dados_conta` (capturar retorno + fallback hardcoded)
+- `17fceeee-...`: confirmar onde repetiu e que a nova lógica bloquearia.
+- `06a3ed56-...`: confirmar que o fallback pós-SIM continua funcionando.
 
-Nenhuma alteração de UI, banco ou worker. Só edge function.
+## Arquivos envolvidos
 
-## Detalhes técnicos
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
+- possivelmente `supabase/functions/whapi-webhook/index.ts` se for necessário reencaminhar arquivo do motor flow para o pipeline OCR determinístico.
 
-- `findNextActiveFlowStep` continua o mesmo — o problema é a ausência de conteúdo no step, não a busca.
-- A janela anti-repetição de 10 min é conservadora: cobre cliente respondendo lento sem bloquear reentradas legítimas (ex.: cliente envia foto ruim e o flow precisa reagir com outro step).
-- Os textos fallback usam exatamente as strings que já existem no código (case `duvidas_pos_club` L2237 e `aguardando_doc_auto` L2260) → mantém o tom da Camila.
-
-## Critérios de aceitação
-
-1. Em novo lead com mesmo consultor, após `✅ SIM` da conta o bot envia o pedido de documento em ≤3s, sem o cliente precisar mandar "Oi".
-2. Steps `a71ba814` / `559b8f1b` não são disparados duas vezes seguidas em <10 min.
-3. Logs `[dispatch:*] EMPTY` aparecem quando o flow tem step sem conteúdo (sinaliza configuração para o admin).
+Sem mudança de UI e sem alteração de banco.
