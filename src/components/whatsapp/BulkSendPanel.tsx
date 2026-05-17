@@ -19,6 +19,7 @@ interface Customer {
   email?: string | null; cpf?: string | null; address_city?: string | null; address_state?: string | null;
   distribuidora?: string | null; observacao?: string | null; andamento_igreen?: string | null;
   media_consumo?: number | null; registered_by_name?: string | null;
+  customer_origin?: "igreen_sync" | "whatsapp_lead" | "manual" | null;
 }
 interface BulkSendPanelProps {
   instanceName: string; customers: Customer[]; templates: MessageTemplate[];
@@ -95,6 +96,7 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
   const [countdown, setCountdown] = useState(0);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [originFilter, setOriginFilter] = useState<"whatsapp_lead" | "igreen_sync">("igreen_sync");
   const [devolutivaFilter, setDevolutivaFilter] = useState<string>("all");
   const [licenciadoFilter, setLicenciadoFilter] = useState<Set<string>>(new Set());
   const [viewingCustomer, setViewingCustomer] = useState<Customer | null>(null);
@@ -108,7 +110,12 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
   }, [customers]);
 
   const filteredCustomers = useMemo(() => {
-    let list = customers;
+    // Filtro de origem: NUNCA mistura Leads WhatsApp com Clientes iGreen
+    let list = customers.filter((c) => {
+      const origin = c.customer_origin || "whatsapp_lead";
+      if (originFilter === "igreen_sync") return origin === "igreen_sync";
+      return origin === "whatsapp_lead" || origin === "manual";
+    });
     if (statusFilter === "approved") list = list.filter(c => c.status === "approved");
     else if (statusFilter === "rejected") list = list.filter(c => c.status === "rejected");
     else if (statusFilter === "pending") list = list.filter(c => c.status === "pending");
@@ -126,7 +133,7 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
       );
     }
     return list;
-  }, [customers, statusFilter, devolutivaFilter, licenciadoFilter, searchQuery]);
+  }, [customers, originFilter, statusFilter, devolutivaFilter, licenciadoFilter, searchQuery]);
 
   // Valid/invalid phone counts
   const validCount = useMemo(() => filteredCustomers.filter(c => isValidPhone(c.phone_whatsapp)).length, [filteredCustomers]);
@@ -288,6 +295,30 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
             <h3 className="font-heading font-bold text-foreground text-lg">Envio em Massa</h3>
             <p className="text-xs text-muted-foreground">Envie para vários clientes de uma vez</p>
           </div>
+        </div>
+
+        {/* Origem do público — NUNCA mistura Leads WhatsApp com Clientes iGreen */}
+        <div className="flex flex-wrap gap-2 mb-3 p-2 rounded-xl border border-border/50 bg-secondary/20">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground/80 mr-1">
+            <Users className="w-3.5 h-3.5" /> Público:
+          </div>
+          {[
+            { key: "igreen_sync", label: "Clientes iGreen (carteira)" },
+            { key: "whatsapp_lead", label: "Leads WhatsApp (anúncio)" },
+          ].map((o) => (
+            <button
+              key={o.key}
+              onClick={() => setOriginFilter(o.key as any)}
+              disabled={isSending}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                originFilter === o.key
+                  ? "bg-primary/20 border-primary/40 text-primary"
+                  : "bg-card/60 border-border/40 text-muted-foreground hover:bg-card"
+              } ${isSending ? "opacity-50 pointer-events-none" : ""}`}
+            >
+              {o.label}
+            </button>
+          ))}
         </div>
 
         {/* Status filters */}

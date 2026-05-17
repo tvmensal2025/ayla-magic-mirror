@@ -76,7 +76,7 @@ const AdminContent = () => {
     const MAX_ATTEMPTS = 3;
 
     try {
-      const selectFields = "id, name, phone_whatsapp, electricity_bill_value, email, cpf, address_city, address_state, address_street, address_neighborhood, address_complement, address_number, cep, numero_instalacao, data_nascimento, status, created_at, distribuidora, registered_by_name, registered_by_igreen_id, media_consumo, desconto_cliente, andamento_igreen, devolutiva, observacao, igreen_code, data_cadastro, data_ativo, data_validado, status_financeiro, cashback, nivel_licenciado, assinatura_cliente, assinatura_igreen, link_assinatura, customer_referred_by_name, customer_referred_by_phone, tipo_produto";
+      const selectFields = "id, name, phone_whatsapp, electricity_bill_value, email, cpf, address_city, address_state, address_street, address_neighborhood, address_complement, address_number, cep, numero_instalacao, data_nascimento, status, created_at, distribuidora, registered_by_name, registered_by_igreen_id, media_consumo, desconto_cliente, andamento_igreen, devolutiva, observacao, igreen_code, data_cadastro, data_ativo, data_validado, status_financeiro, cashback, nivel_licenciado, assinatura_cliente, assinatura_igreen, link_assinatura, customer_referred_by_name, customer_referred_by_phone, tipo_produto, customer_origin";
       const allRows: Record<string, unknown>[] = [];
       const pageSize = 1000;
       let page = 0;
@@ -120,7 +120,7 @@ const AdminContent = () => {
         data_validado: c.data_validado, status_financeiro: c.status_financeiro,
         cashback: c.cashback, nivel_licenciado: c.nivel_licenciado,
         assinatura_cliente: c.assinatura_cliente, assinatura_igreen: c.assinatura_igreen,
-        link_assinatura: c.link_assinatura,
+        link_assinatura: c.link_assinatura, customer_origin: c.customer_origin,
       }));
       setCustomers(mapped);
       try { sessionStorage.setItem(`customers_cache_${userId}`, JSON.stringify(mapped)); } catch { /* quota */ }
