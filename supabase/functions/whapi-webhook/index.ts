@@ -325,6 +325,29 @@ Deno.serve(async (req) => {
           phone_whatsapp: newCustomer.phone_whatsapp,
         }).catch((e) => console.warn("[notify-new-lead] falhou:", (e as Error).message));
       }
+    } else {
+      // ─── Notificação de "novo lead" também quando o customer já existe ───
+      // Dispara se: (a) não há inbound nas últimas 24h (lead voltou depois de sumir)
+      // ou (b) foi acabado de reativar (automation_failed / RESUMABLE_STATUSES acima).
+      // O helper tem dedup interno de 60s, evita duplicatas em rajada.
+      try {
+        const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+        const { count } = await supabase
+          .from("conversations")
+          .select("id", { count: "exact", head: true })
+          .eq("customer_id", customer.id)
+          .eq("message_direction", "inbound")
+          .gte("created_at", since);
+        if ((count ?? 0) === 0) {
+          notifyNewLead(superAdminConsultantId, {
+            id: customer.id,
+            name: (customer as any).name,
+            phone_whatsapp: (customer as any).phone_whatsapp,
+          }).catch((e) => console.warn("[notify-new-lead reentry] falhou:", (e as Error).message));
+        }
+      } catch (e) {
+        console.warn("[notify-new-lead reentry] check falhou:", (e as Error).message);
+      }
     }
 
     // ─── Backfill: se o customer existe mas ainda não tem nome, usa o pushName do WhatsApp ─
