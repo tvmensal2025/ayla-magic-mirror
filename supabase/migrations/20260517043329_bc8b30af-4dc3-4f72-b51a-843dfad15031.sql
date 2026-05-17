@@ -1,0 +1,1 @@
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS facial_link_sent_at TIMESTAMPTZ;

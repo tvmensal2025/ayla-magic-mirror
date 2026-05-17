@@ -2045,6 +2045,7 @@ export type Database = {
           email: string | null
           error_message: string | null
           facial_confirmed_at: string | null
+          facial_link_sent_at: string | null
           followup_count: number
           id: string
           igreen_code: string | null
@@ -2155,6 +2156,7 @@ export type Database = {
           email?: string | null
           error_message?: string | null
           facial_confirmed_at?: string | null
+          facial_link_sent_at?: string | null
           followup_count?: number
           id?: string
           igreen_code?: string | null
@@ -2265,6 +2267,7 @@ export type Database = {
           email?: string | null
           error_message?: string | null
           facial_confirmed_at?: string | null
+          facial_link_sent_at?: string | null
           followup_count?: number
           id?: string
           igreen_code?: string | null
