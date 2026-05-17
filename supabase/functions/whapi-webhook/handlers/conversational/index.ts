@@ -438,8 +438,31 @@ async function sendStepMedia(
         await ctx.sender.sendText(ctx.remoteJid, item.text);
         textSentInline = true;
         prevForPause = { kind: "text" };
+        // A1: log every inline text in conversations so CRM shows the real step trail
+        try {
+          if (ctx.customer?.id) {
+            await ctx.supabase.from("conversations").insert({
+              customer_id: ctx.customer.id,
+              message_direction: "outbound",
+              message_text: item.text,
+              message_type: "text",
+              conversation_step: step.step_key,
+            });
+          }
+        } catch (_) { /* noop */ }
       } catch (e) {
         console.error(`[conversational] sendText inline falhou step=${step.step_key}:`, (e as Error)?.message || e);
+        try {
+          if (ctx.customer?.id) {
+            await ctx.supabase.from("conversations").insert({
+              customer_id: ctx.customer.id,
+              message_direction: "outbound",
+              message_text: `[failed:text] ${(e as Error)?.message || e}`,
+              message_type: "text_failed",
+              conversation_step: step.step_key,
+            });
+          }
+        } catch (_) { /* noop */ }
       }
       continue;
     }
