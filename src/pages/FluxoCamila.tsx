@@ -1088,14 +1088,31 @@ function auditFlow(steps: Step[]): Issue[] {
   for (const s of active) {
     const label = `${s.position}. ${s.title || s.step_key || s.id.slice(0, 6)}`;
     const hasText = !!(s.message_text && s.message_text.trim());
+    const fb = s.fallback;
+    const hasCaptures = s.captures.some((c) => c.enabled);
+    const hasTransitionGoto = s.transitions.some((t) => !!t.goto_step_id || !!t.goto_special);
 
     // Passo sem texto e sem mídia configurada (slot_key vazio) é silencioso
     if (!hasText && !s.slot_key) {
       issues.push({ severity: "high", step: label, detail: "Sem texto nem mídia (slot vazio). O passo não envia nada." });
     }
 
+    // Sprint B — empty_reply: passo que espera resposta mas tem corpo vazio (sem texto E sem slot)
+    if (!hasText && !s.slot_key && (hasCaptures || hasTransitionGoto)) {
+      issues.push({ severity: "high", step: label, detail: "Espera resposta mas não envia nada para o lead. Adicione texto ou mídia." });
+    }
+
+    // Sprint B — dead_cascade: sem captura, sem transição, fallback=repeat → loop infinito sem saída
+    if (!hasCaptures && !hasTransitionGoto && fb?.mode === "repeat") {
+      issues.push({ severity: "high", step: label, detail: "Cascata morta: sem regra, sem captura e Plano B = repetir. O lead trava aqui." });
+    }
+
+    // Sprint B — terminal_with_ai_fallback: passo final não pode ter fallback IA (pode jogar lead pra trás)
+    if (s.step_type === "finalizar_cadastro" && fb?.mode === "ai") {
+      issues.push({ severity: "medium", step: label, detail: "Passo final com Plano B = IA decide. Pode mandar o lead de volta no funil. Use 'repetir' ou 'ir para'." });
+    }
+
     // Plano B aponta para passo inexistente/inativo
-    const fb = s.fallback;
     if (fb?.mode === "goto" && fb.goto_step_id) {
       const target = byId.get(fb.goto_step_id);
       if (!target) {
@@ -1107,10 +1124,9 @@ function auditFlow(steps: Step[]): Issue[] {
 
     // Passos cascata (wait_for=none) sem Plano B → conversa pode travar
     // (apenas alerta se o passo tem captura: aí pode parar mesmo)
-    if (s.captures.some((c) => c.enabled)) {
+    if (hasCaptures) {
       const hasGoto = fb?.mode === "goto" && !!fb.goto_step_id;
-      const hasTransition = s.transitions.some((t) => !!t.goto_step_id || !!t.goto_special);
-      if (!hasGoto && !hasTransition) {
+      if (!hasGoto && !hasTransitionGoto) {
         issues.push({ severity: "medium", step: label, detail: "Captura dados mas não tem para onde ir depois (sem regra nem Plano B)." });
       }
     }
