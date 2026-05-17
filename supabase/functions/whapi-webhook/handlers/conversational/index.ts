@@ -859,14 +859,37 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     // passos editing_* explícitos podem trocar (no bot-flow.ts).
     const TRUSTED_LOCK = new Set(["ocr_conta", "ocr_doc", "user_confirmed"]);
     const nameLocked = TRUSTED_LOCK.has(String((ctx.customer as any).name_source || ""));
+    // Detecta pergunta de nome também pela ÚLTIMA outbound — compensa cascade
+    // que avança o currentStep antes do lead responder a pergunta anterior.
+    let lastOutboundWasNameQuestion = false;
+    try {
+      const { data: lastOut } = await ctx.supabase
+        .from("conversations")
+        .select("message_text")
+        .eq("customer_id", ctx.customer.id)
+        .eq("message_direction", "outbound")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const txt = String((lastOut as any)?.message_text || "");
+      lastOutboundWasNameQuestion = /qual\s+(?:é\s+)?(?:o\s+)?(?:seu\s+)?nome|como\s+(?:posso\s+)?(?:te\s+)?(?:chamar|chamo)|me\s+diz\s+(?:seu\s+)?nome/i.test(txt);
+    } catch { /* best-effort */ }
     const stepIsAskName =
+      lastOutboundWasNameQuestion ||
       /\bnome\b|\bchama\b/i.test(String((currentStep as any).title || "")) ||
       /\bnome\b/i.test(String((currentStep as any).slot_key || "")) ||
       (Array.isArray(currentStep.captures) &&
         currentStep.captures.some((c: any) => c?.field === "name" && c?.enabled !== false));
-    if (extracted.name && !nameLocked && (stepIsAskName || !ctx.customer.name)) {
+    // Quando a pergunta foi de nome (passo atual OU última outbound), sobrescreve
+    // mesmo whatsapp_profile/freeform_multi anteriores — o nome digitado é mais confiável.
+    const currentNameSource = String((ctx.customer as any).name_source || "");
+    const weakNameSource = currentNameSource === "" || currentNameSource === "whatsapp_profile" || currentNameSource === "freeform_multi";
+    if (extracted.name && !nameLocked && (stepIsAskName || !ctx.customer.name || weakNameSource)) {
       captureUpdates.name = extracted.name;
       captureUpdates.name_source = "self_introduced";
+      if (stepIsAskName) {
+        console.log(`[name-capture] override "${ctx.customer.name || ""}"(${currentNameSource}) → "${extracted.name}" (askName via ${lastOutboundWasNameQuestion ? "last-outbound" : "current-step"})`);
+      }
     }
 
     if (Object.keys(captureUpdates).length > 0 && ctx.customer.id) {
