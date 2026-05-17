@@ -236,15 +236,18 @@ function safeAssignName(currentName: string | null | undefined, currentSource: s
   // ser sobrescrita via fluxo de edição. Nome digitado (self_introduced/typed/null)
   // SEMPRE é sobrescrito pelo OCR — é o nome do titular real da conta/doc.
   if (currentName && String(currentName).trim().length >= 3 && TRUSTED_NAME_SOURCES_LOCK.has(src)) {
-    // Exceção: se a fonte atual é user_confirmed mas o nome atual NÃO veio de OCR
-    // (foi um "user_confirmed" travado em cima de nome digitado), deixa o OCR vencer.
-    // Não temos como saber isso aqui sem mais contexto — então mantemos o lock só
-    // para fontes OCR puras. user_confirmed sem OCR prévio é tratado no call-site.
-    if (isOcrSource || src === "user_confirmed") return null;
+    if (isOcrSource || src === "user_confirmed") {
+      // Sprint D-B9: log explícito quando OCR é descartado por lock — antes era silencioso
+      console.warn(`[name-lock] OCR descartado: atual="${currentName}" (src=${src}) novo="${cleaned}" — use editing_*_nome para alterar`);
+      return null;
+    }
   }
   // Nome atual veio de OCR e é muito diferente: mantém (não confiamos no novo OCR)
   if (isOcrSource && currentName && String(currentName).trim().length >= 5) {
-    if (_levSim(currentName, cleaned) < 0.7) return null;
+    if (_levSim(currentName, cleaned) < 0.7) {
+      console.warn(`[name-lock] OCR rejeitado por baixa similaridade: atual="${currentName}" novo="${cleaned}" sim=${_levSim(currentName, cleaned).toFixed(2)}`);
+      return null;
+    }
   }
   return cleaned;
 }
