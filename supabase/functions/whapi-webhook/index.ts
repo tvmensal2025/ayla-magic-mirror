@@ -366,7 +366,34 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── 🔇 BOT PAUSADO (handoff humano ativo) ────────────────────────
+    // ─── Self-intro: captura nome/CEP/valor da PRIMEIRA mensagem do lead ───
+    // Ex: "Oi me chamo Paula", "Sou João, conta 250" — evita re-perguntar o nome.
+    // Source `freeform_multi` sobrescreve `whatsapp_profile`.
+    if (messageText && !isFile && customer && !(customer as any).chat_cleared_at) {
+      try {
+        const { count: inboundCount } = await supabase
+          .from("conversations")
+          .select("id", { count: "exact", head: true })
+          .eq("customer_id", customer.id)
+          .eq("message_direction", "inbound");
+        const isEarly = (inboundCount ?? 0) <= 2; // 1ª ou 2ª inbound
+        if (isEarly) {
+          const multi = extractMultiField(messageText);
+          const patch = buildMultiFieldPatch(customer, multi);
+          if (Object.keys(patch).length > 0) {
+            // Promove name_source para self_introduced (mais forte que freeform_multi)
+            if (patch.name) patch.name_source = "self_introduced";
+            await supabase.from("customers").update(patch).eq("id", customer.id);
+            Object.assign(customer as any, patch);
+            console.log(`[self-intro] customer=${customer.id} fields=${Object.keys(patch).join(",")} name="${patch.name || ""}"`);
+          }
+        }
+      } catch (e) {
+        console.warn("[self-intro] falhou:", (e as Error).message);
+      }
+    }
+
+
     // Se o consultor tomou conta da conversa, NÃO interferimos por X horas.
     if ((customer as any).bot_paused_until && new Date((customer as any).bot_paused_until) > new Date()) {
       // Loga inbound mas não responde — deixa o consultor responder
