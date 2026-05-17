@@ -1,79 +1,88 @@
-## Diagnóstico dos últimos fluxos
+## Diagnóstico do fluxo atual
 
-O erro se repetiu por três causas principais:
+O último lead analisado (`cf3d7ea4...`) mostra que o problema não é mais só a captura do valor. O fluxo ainda quebra em três pontos:
 
-1. **Captura de nome não sobrescreveu o perfil do WhatsApp**
-   - O cliente respondeu `Lucas`, mas o customer continuou com `name = Sirlene Correa` e `name_source = whatsapp_profile`.
-   - O bot então personalizou mensagens com o nome errado e não tratou `Lucas` como nome confiável.
+1. **Início ainda entra duplicado/confuso**
+   - O lead começou no fluxo customizado, mas o passo inicial de nome ficou com `wait_for=none`.
+   - Mesmo perguntando `Qual seu nome...`, o motor trata como passo sem espera e pode cascatear/avançar fora de hora.
+   - O `self-intro` da primeira mensagem também é ignorado se o chat foi zerado manualmente (`chat_cleared_at`), então mensagens como “sou X” podem não pular o nome durante testes.
 
-2. **O nudge foi disparado mesmo depois de resposta válida**
-   - Depois de `200 mas ou menos`, o valor foi salvo (`electricity_bill_value = 200`), mas o fluxo também enviou `Pode me responder, por favor?`.
-   - Isso indica que, no mesmo turno, a captura salvou dados mas a decisão caiu em repetição/timeout em vez de avançar de forma limpa.
+2. **Depois da confirmação da conta, o sistema volta para o início do fluxo**
+   - Após `✅ SIM` em `confirmando_dados_conta`, o `bot-flow.ts` chama `findNextActiveFlowStep(...)` sem informar a posição atual.
+   - Como a consulta pega o primeiro passo ativo do fluxo, ele retorna a posição 2 (`Nome do cliente`) em vez de continuar na posição 10 (`Cadastro/documento`).
+   - Resultado visto no histórico: depois da conta confirmada, o bot perguntou nome de novo e depois voltou para o passo de valor da conta.
 
-3. **A cascata 5→6→7→8 quebrou por timeout e ordem incorreta de persistência**
-   - O log mostra: `cascade hop timeout em a71ba814... mantendo lead em 80188e5f...`.
-   - A função enviou mídias pesadas, mas só tentava considerar o passo avançado depois do envio terminar. Quando o envio demorava, o lead ficava preso no passo anterior.
-   - Além disso, o passo de posição 5 apontava por fallback para a posição 7, e a posição 7 apontava de volta para a 6. Isso cria ordem confusa e aumenta risco de loop/trava.
+3. **O lead não chega ao final porque os passos de cadastro/documento/finalizar não estão sendo encadeados corretamente**
+   - O fluxo customizado tem:
+     - posição 9: `capture_conta`
+     - posição 10: `capture_documento`
+     - posição 11: `finalizar_cadastro`
+   - Mas o pipeline do cadastro volta para o fluxo customizado sem saber “depois de qual posição” continuar.
+   - Isso causa regressão para o começo e impede avançar até documento/finalização.
 
 ## Plano de correção
 
-### 1. Tornar a captura de nome confiável
+### 1. Corrigir configuração e interpretação dos passos iniciais
 
-- Ajustar a captura em `conversational/index.ts` para que, quando o passo atual for pergunta de nome, uma resposta simples como `Lucas`:
-  - sobrescreva `name` mesmo se já existir `name_source = whatsapp_profile`;
-  - grave `name_source = self_introduced`;
-  - atualize o objeto em memória antes de renderizar a próxima mensagem.
-- Ampliar a regra de pular pergunta de nome para aceitar `freeform_multi` como fonte confiável também.
-- No `whapi-webhook/index.ts`, garantir que a primeira/segunda inbound seja analisada antes do roteamento do fluxo, mas sem depender disso para o passo de nome funcionar.
+- Tratar passo com captura de `name` como passo que espera resposta, mesmo se estiver configurado como `wait_for=none`.
+- No `resolveLandingStep`, continuar pulando pergunta de nome quando o nome já estiver em fonte confiável (`self_introduced`, `user_confirmed`, `ocr_*`, `manual`, `freeform_multi`).
+- Ajustar a captura de primeira mensagem para funcionar também depois de reset manual, mas sem reaproveitar automaticamente o nome do perfil do WhatsApp.
 
-### 2. Bloquear nudge quando houve captura válida
+### 2. Fazer o pós-conta continuar na posição correta do fluxo
 
-- No motor conversacional, se `captureUpdates` tiver algum dado válido (`name`, `electricity_bill_value`, `cpf`, telefone), nunca chamar `_smartRepeat` naquele turno.
-- Se não houver transição explícita, avançar para:
-  1. `fallback.goto_step_id`, se configurado;
-  2. próximo passo ativo por `position`, como fallback.
-- Reforçar `_smartRepeat` para só enviar reformulação se houver silêncio real, validando última inbound e última outbound. Se a inbound for mais recente que a última outbound, não manda nudge.
+- Alterar `findNextActiveFlowStep` para aceitar `afterPosition` e usar isso no bloco `confirmando_dados_conta`.
+- Após confirmar a conta, buscar o próximo passo ativo **depois da posição do `capture_conta`**, não o primeiro passo do fluxo.
+- Para este fluxo, isso deve levar para posição 10 (`capture_documento`) e não para posição 2 (`Nome do cliente`).
 
-### 3. Corrigir a cascata para persistir antes de enviar mídia pesada
+### 3. Criar mapeamento robusto entre cadastro legado e fluxo customizado
 
-- Em `goToStep`, mudar a ordem da cascata:
-  - persistir `customers.conversation_step = nextStep.id` e `last_step_advanced_at` **antes** de chamar `emitStep(nextStep)`;
-  - só depois enviar texto/mídia.
-- Se `emitStep` der timeout, manter o lead no passo já persistido, não no anterior. Assim a próxima mensagem continua do lugar correto.
-- Remover o comportamento atual de “mantendo lead em cursor anterior” quando o próximo passo já começou a ser enviado.
+- Quando o sistema estiver no pipeline legado (`aguardando_conta`, `confirmando_dados_conta`, `aguardando_doc_auto`, `confirmando_dados_doc`, `finalizando`), guardar/descobrir qual passo customizado originou aquela etapa.
+- Regras esperadas:
+  - `capture_conta` concluído → próximo passo por posição depois dele.
+  - `capture_documento` concluído → próximo passo por posição depois dele.
+  - `finalizar_cadastro` → manter no pipeline final, sem voltar ao início.
 
-### 4. Evitar timeout real da Edge Function durante mídia longa
+### 4. Corrigir fallback de `finalizar_cadastro`
 
-- Aumentar o timeout interno por hop de cascata de 12s para um valor compatível com vídeos/áudios reais, mas com hard-limit seguro.
-- Para cascatas com mídia pesada, limitar a quantidade de hops por chamada e deixar o próximo inbound/cron continuar sem duplicar.
-- Não aguardar indefinidamente upload/status do Whapi; envio confirmado pela API já deve ser suficiente para avançar o estado.
+- O passo terminal não deve chamar `resolveTransition({ goto_special: "cadastro" })`, porque isso pode voltar para documento/conta.
+- Se já estiver em `finalizar_cadastro`, deve seguir para `finalizando`/portal quando o lead confirmar, ou repetir só a chamada final quando faltar confirmação.
 
-### 5. Sanear ordem/fallback do fluxo ativo
+### 5. Sanear dados do fluxo ativo no banco
 
-- Corrigir no banco os fallbacks do fluxo ativo para seguir a sequência real por posição:
-  - posição 5 → posição 6
-  - posição 6 → posição 7
-  - posição 7 → posição 8
-  - posição 8 → posição 9/cadastro
-- Isso elimina a ordem atual 5→7→6→8, que está contribuindo para o comportamento confuso.
+- Ajustar `wait_for` do passo `Nome do cliente` para `reply`.
+- Garantir fallbacks em ordem real:
+  - Nome → Boas-vindas
+  - Boas-vindas → Valor
+  - Valor → Como funciona
+  - Como funciona → Quebra de objeção → Deu para entender
+  - Deu para entender → Conta
+  - Conta → Documento
+  - Documento → Finalização
+- Remover qualquer fallback que aponte de volta para passos já concluídos.
 
-### 6. Validação dos três cenários críticos
+### 6. Validar com cenários reais e de teste
 
-- Cenário A: primeira mensagem `Oi, sou Paula`.
-  - Deve salvar `Paula`, pular pergunta de nome e seguir para boas-vindas.
+Validar estes caminhos antes de considerar resolvido:
 
-- Cenário B: resposta ao nome `Lucas`.
-  - Deve trocar `whatsapp_profile` por `Lucas/self_introduced` e usar Lucas nas próximas mensagens.
+- **Início com nome na primeira mensagem:** `Oi, sou Paula` deve salvar `Paula`, pular pergunta de nome e ir para boas-vindas/valor.
+- **Resposta ao nome:** `Lucas` deve sobrescrever `whatsapp_profile` e avançar para valor sem nudge.
+- **Conta confirmada:** depois de `✅ SIM`, não pode voltar para nome; deve ir para documento.
+- **Documento confirmado:** deve avançar para finalização, não voltar para conta/valor.
+- **Finalização:** deve chegar ao estado final esperado sem cair no início do fluxo.
 
-- Cenário C: valor `200 mas ou menos`.
-  - Deve salvar 200, não enviar nudge, avançar para passo 5 e continuar 5→6→7→8 sem travar no passo 5.
-
-## Arquivos a alterar
+## Arquivos/áreas a alterar
 
 - `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
-- `supabase/functions/whapi-webhook/index.ts`
-- Possível migration/data-fix para corrigir os `fallback.goto_step_id` dos passos ativos do fluxo.
+  - Guard de `wait_for` para steps de captura.
+  - Ajuste de terminal `finalizar_cadastro`.
+
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
+  - Corrigir `findNextActiveFlowStep` no pós-confirmação da conta.
+  - Aplicar continuação por posição após conta/documento.
+
+- Banco Supabase
+  - Migration/data-fix para corrigir `wait_for` e fallbacks do fluxo ativo.
 
 ## Resultado esperado
 
-O fluxo passa a ter uma regra simples e robusta: **capturou dado válido, avança; começou a enviar o próximo passo, persiste o próximo passo antes; se mídia demorar, não volta para trás nem repete pergunta.**
+O fluxo deixa de “reiniciar” no meio: captura nome no início, segue valor → vídeos → conta → documento → finalização, e depois da confirmação da conta/documento continua sempre para o próximo passo por posição, nunca para o primeiro passo do fluxo.
