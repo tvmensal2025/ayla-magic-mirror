@@ -606,7 +606,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   }
 
 
-
+  // ═══════════════════════════════════════════════════════════════════
+  // 🤔 MIDFLOW QA — cliente faz pergunta no meio do cadastro
   // Aditivo, gated por env MIDFLOW_QA_ENABLED (default "true").
   // Se a mensagem parece pergunta e casa com a FAQ do consultor:
   //   1) responde a FAQ
