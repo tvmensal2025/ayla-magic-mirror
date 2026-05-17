@@ -21,6 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
+import FaqSection from "@/components/admin/fluxo/FaqSection";
 import { simulateMatch, detectRuleConflicts } from "@/lib/flowSimulator";
 
 // ---------------------------------------------------------------------------
@@ -517,6 +518,8 @@ export default function FluxoCamila() {
         <Button onClick={addStep} className="w-full" variant="outline" size="lg">
           <Plus className="h-4 w-4 mr-2" /> Adicionar passo
         </Button>
+
+        {flowId && <FaqSection flowId={flowId} />}
       </main>
 
       <Dialog open={testOpen} onOpenChange={setTestOpen}>
