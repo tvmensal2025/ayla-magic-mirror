@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 
 const DEFAULT_CONSULTANT_FORM = {
-  name: "", license: "", phone: "", cadastro_url: "", igreen_id: "",
+  name: "", license: "", phone: "", notification_phone: "", cadastro_url: "", igreen_id: "",
   licenciada_cadastro_url: "", facebook_pixel_id: "", google_analytics_id: "",
   igreen_portal_email: "", igreen_portal_password: "",
 };
