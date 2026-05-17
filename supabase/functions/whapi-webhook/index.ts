@@ -393,7 +393,7 @@ Deno.serve(async (req) => {
       }
     }
 
-
+    // ─── 🔇 BOT PAUSADO (handoff humano ativo) ────────────────────────
     // Se o consultor tomou conta da conversa, NÃO interferimos por X horas.
     if ((customer as any).bot_paused_until && new Date((customer as any).bot_paused_until) > new Date()) {
       // Loga inbound mas não responde — deixa o consultor responder
