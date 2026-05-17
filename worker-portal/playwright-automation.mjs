@@ -596,13 +596,7 @@ async function sendFacialLinkToCustomer(customerId, facialLink) {
       .eq('id', customerId).single();
     if (!customer?.phone_whatsapp) { console.error('   ❌ sendFacialLink: telefone não encontrado'); return; }
 
-    let instanceName = null;
-    if (customer.consultant_id) {
-      const { data: inst } = await supabase
-        .from('whatsapp_instances').select('instance_name')
-        .eq('consultant_id', customer.consultant_id).limit(1).single();
-      instanceName = inst?.instance_name;
-    }
+    const instanceName = await pickConnectedInstance(supabase, customer.consultant_id);
 
     const evolutionUrl = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
     const evolutionKey = process.env.EVOLUTION_API_KEY || '';
@@ -633,7 +627,12 @@ async function sendFacialLinkToCustomer(customerId, facialLink) {
         console.log(`   ✅ Link facial enviado via WhatsApp para ${phone}`);
         return;
       }
-      console.warn(`   ⚠️  Evolution falhou: ${res.status}`);
+      console.warn(`   ⚠️  Evolution falhou ao enviar link facial: ${res.status} (instância ${instanceName})`);
+      await markInstanceNeedsReconnect(supabase, instanceName);
+      await flagOfflineInstance(supabase, customerId, customer.consultant_id, `facial_link_http_${res.status}`);
+    } else if (!instanceName) {
+      console.warn('   ⚠️  sendFacialLink: nenhuma instância conectada — registrando alerta');
+      await flagOfflineInstance(supabase, customerId, customer.consultant_id, 'facial_link_no_instance');
     }
     console.warn('   ⚠️  Não foi possível enviar link facial via WhatsApp');
   } catch (e) {
