@@ -501,7 +501,16 @@ async function sendStepMedia(
     }
 
     mediaAttempted = true;
-    const ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
+    // B1: retry media up to 2x with 1500ms gap to ride out Whapi/network blips
+    let ok: any = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
+      if (ok !== false) break;
+      if (attempt === 0) {
+        console.warn(`[conversational] mídia ${kind} falhou (media_id=${m.id}) — retry em 1500ms`);
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
     if (ok !== false) {
       mediaSent = true;
       await ctx.supabase.from("conversations").insert({
@@ -514,7 +523,16 @@ async function sendStepMedia(
       prevForPause = { kind, duration_sec: m.duration_sec };
     } else {
       mediaFailed = true;
-      console.warn(`[conversational] mídia ${kind} retornou false (media_id=${m.id}); reserva mantida`);
+      console.warn(`[conversational] mídia ${kind} falhou após retry (media_id=${m.id}); reserva mantida`);
+      try {
+        await ctx.supabase.from("conversations").insert({
+          customer_id: ctx.customer.id,
+          message_direction: "outbound",
+          message_text: `[failed:${kind}] media_id=${m.id}`,
+          message_type: `${kind}_failed`,
+          conversation_step: step.step_key,
+        });
+      } catch (_) { /* noop */ }
     }
   }
 
