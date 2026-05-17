@@ -2026,6 +2026,7 @@ export type Database = {
           conversational_flow_enabled: boolean | null
           cpf: string | null
           created_at: string
+          customer_origin: string
           customer_referred_by_consultant_id: string | null
           customer_referred_by_name: string | null
           customer_referred_by_phone: string | null
@@ -2137,6 +2138,7 @@ export type Database = {
           conversational_flow_enabled?: boolean | null
           cpf?: string | null
           created_at?: string
+          customer_origin?: string
           customer_referred_by_consultant_id?: string | null
           customer_referred_by_name?: string | null
           customer_referred_by_phone?: string | null
@@ -2248,6 +2250,7 @@ export type Database = {
           conversational_flow_enabled?: boolean | null
           cpf?: string | null
           created_at?: string
+          customer_origin?: string
           customer_referred_by_consultant_id?: string | null
           customer_referred_by_name?: string | null
           customer_referred_by_phone?: string | null
