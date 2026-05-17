@@ -533,13 +533,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           const reentry = getReentryPromptForStep(stepKey, customer);
           const text = [qa.text, reentry].filter(Boolean).join("\n\n");
 
-          // Atualiza detour_count; 3+ → pausa para humano
+          // Sprint C3: threshold 5 (era 3) + handoff alert visível ao consultor
           const detourNext = Number((customer as any).detour_count || 0) + 1;
           const patch: Record<string, any> = { detour_count: detourNext };
-          if (detourNext >= 3) {
+          if (detourNext >= 5) {
             patch.bot_paused = true;
             patch.bot_paused_reason = "muitas_duvidas";
             patch.bot_paused_at = new Date().toISOString();
+            try {
+              await supabase.from("bot_handoff_alerts").insert({
+                customer_id: customer.id,
+                consultant_id: customer.consultant_id,
+                reason: "muitas_duvidas",
+                metadata: { detour_count: detourNext, last_question: messageText.slice(0, 200) },
+              });
+            } catch (e) { console.warn("[midflow-qa] handoff alert falhou:", (e as Error).message); }
           }
           try { await supabase.from("customers").update(patch).eq("id", customer.id); } catch (_) {}
           return { reply: text, updates: { __inline_sent: qa.mediaUrls.length > 0 || undefined } as any };
