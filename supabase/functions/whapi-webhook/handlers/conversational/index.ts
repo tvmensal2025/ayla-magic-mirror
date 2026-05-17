@@ -1236,6 +1236,17 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       nextConversationStep = cascadeCadastroStep || nextStep.id;
       console.log(`[conversational] auto-cascade ${cursor.step_key} → ${nextStep.step_key} (wait_for=${nextStep.wait_for})`);
 
+      // Persiste o avanço por hop (anti-race: se função timeout ou outro webhook reentrar,
+      // não regride pro passo anterior). Best-effort, ignora falhas.
+      if (ctx.customer?.id) {
+        try {
+          await ctx.supabase
+            .from("customers")
+            .update({ conversation_step: nextConversationStep, last_step_advanced_at: new Date().toISOString() })
+            .eq("id", ctx.customer.id);
+        } catch (_) { /* noop */ }
+      }
+
       // G1: telemetria por hop — sem isso parece que pulamos passos.
       try {
         await ctx.supabase.from("bot_step_transitions").insert({
