@@ -1312,8 +1312,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Isso evita o "disco riscado" que o lead vê quando responde algo fora do esperado.
   const repeatCurrent = async (): Promise<BotResult> => _smartRepeat();
   const _smartRepeat = async (): Promise<BotResult> => {
-    // Debounce: se houve outbound nos últimos 30s, não dispara nudge agora —
-    // evita "Pode me responder, por favor?" 6s depois do lead já ter respondido.
+    // GUARD 0: se este turno extraiu QUALQUER dado válido, NUNCA reformula —
+    // significa que o lead respondeu e devemos avançar via fluxo (não nudge).
+    if (Object.keys(captureUpdates).length > 0) {
+      console.log(`[smart-repeat] skip nudge — captureUpdates=${Object.keys(captureUpdates).join(",")} (avança via fluxo)`);
+      return { reply: "", updates: { conversation_step: currentStep.id, ...captureUpdates, ...restoreDetourUpdates, __inline_sent: true } };
+    }
+    // GUARD 1: debounce — se houve outbound nos últimos 30s, não nudge.
     try {
       const sinceDebounce = new Date(Date.now() - 30_000).toISOString();
       const { count: recentOut } = await ctx.supabase
