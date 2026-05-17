@@ -1,46 +1,67 @@
-# Plano: Corrigir ordem dos primeiros passos do fluxo
+## Correção correta do fluxo
 
-## Diagnóstico
+Você está certo: eu tinha invertido a interpretação. A regra deve ser:
 
-Olhei o fluxo do consultor `0c2711ad-…` (lead +55 11 96407-9473). A ordem configurada no `/admin/fluxos` está assim:
+```text
+Sem nome:  Passo 1 (Nome) → Passo 2 → Passo 3 → Passo 4...
+Com nome:  pula Passo 1 → Passo 2 → Passo 3 → Passo 4...
+```
 
-| position | título | tipo | captura |
-|---|---|---|---|
-| 2 | **Nome do cliente** ("Qual seu nome…") | message | `name` |
-| 3 | **Boas Vindas** (áudio `boas_vindas`) | message | — |
-| 4 | Valor da conta | message | `electricity_bill_value` |
-| 5–7 | Como funciona / explicação | message | — |
-| 8 | Conta de energia | capture_conta | — |
-| 9 | Cadastro | capture_documento | — |
+Ou seja: **Boas Vindas não deve virar passo 1**. O passo 1 é o de nome, e ele é o único passo que pode ser pulado quando o cliente já começou informando o nome.
 
-O bot lê por `ORDER BY position ASC`. Então, quando o lead **não** tem nome confiável, ele envia primeiro "Qual seu nome?" (pos 2) e só depois "Boas Vindas" (pos 3) — ordem invertida do que faz sentido. Quando o lead **já** tem nome (caso atual: `name_source=user_confirmed`), o `resolveLandingStep` pula a pos 2 e cai direto na pos 3 (Boas Vindas) — aí parece "passo 2 vindo antes do 1".
+## O que está errado hoje
 
-Em resumo: **as posições estão trocadas no banco**. Boas Vindas deveria ser a pos 2 (sempre primeiro) e Nome a pos 3 (pulado se já tiver nome).
+No banco deste fluxo, a ordem ficou assim:
 
-## O que fazer
+```text
+posição 2 = Boas Vindas
+posição 3 = Nome do cliente
+posição 4 = Valor da conta
+...
+```
 
-### 1. Trocar posições no `bot_flow_steps` (migration)
-- `Boas Vindas` (`6226f6f3-…`) → position **2**
-- `Nome do cliente` (`passo_mp8yc0bp`) → position **3**
+Isso está errado para a regra que você explicou. A ordem correta deve voltar para:
 
-Demais posições (4..N) ficam como estão. O `resolveLandingStep` já cuida de pular o passo de nome quando o nome já está capturado (`name_source ∈ {ocr, user_confirmed, self_introduced, manual}`), então o comportamento desejado fica:
-- Sem nome → Boas Vindas → pergunta Nome → Valor → …
-- Com nome → Boas Vindas → (pula Nome) → Valor → …
+```text
+posição 1 = Nome do cliente
+posição 2 = Boas Vindas
+posição 3 = Valor da conta
+posição 4 = Como funciona / conteúdo seguinte
+posição 5 = Deu para entender?
+posição 6 = Conta de energia
+posição 7 = Cadastro
+posição 8 = Confirmação
+```
 
-### 2. (Defensivo, opcional) Em `conversational/index.ts`, no `resolveLandingStep`
-Garantir que, ao escolher `firstActive`, se o primeiro passo ativo for um "ask de nome puro" sem mídia/texto de boas-vindas, ele continue a busca pelo próximo passo com `slot_key`/`message_text` antes de cair na pergunta. Isso protege contra futuras reordenações erradas no admin. Sem alterar nenhum comportamento já existente para outros campos.
+## Plano de implementação
 
-## Arquivos
+1. **Reordenar os passos no banco**
+   - Colocar `Nome do cliente` como primeiro passo real do fluxo.
+   - Colocar `Boas Vindas` imediatamente depois.
+   - Reindexar os demais passos em sequência limpa: 1, 2, 3, 4, 5, 6, 7, 8.
 
-- `supabase/migrations/<timestamp>_reorder_boas_vindas_first.sql` — UPDATE das duas posições (com `WHERE flow_id=... AND step_key=...`).
-- (opcional) `supabase/functions/whapi-webhook/handlers/conversational/index.ts` — pequeno reforço no `resolveLandingStep`.
+2. **Ajustar a lógica de pular passo**
+   - Hoje a função `resolveLandingStep` não pula o passo de nome se ele tiver `slot_key` ou `message_text`.
+   - Isso conflita com sua regra, porque o passo de nome tem texto e mesmo assim deve ser pulado quando `name_source` for confiável.
+   - Vou ajustar para permitir pular **somente o passo que captura `name`**, mesmo se tiver texto/slot.
+   - Para os outros campos, mantenho a proteção atual para não pular áudio/vídeo/textos importantes.
 
-## Validação
+3. **Garantir avanço sempre por posição**
+   - Quando o passo 1 for pulado, o próximo passo será o passo 2 por `position`, não por fallback antigo/invertido.
+   - Isso evita cair no passo errado caso algum `fallback.goto_step_id` esteja desatualizado.
 
-- Disparar mensagem de teste para o consultor `0c2711ad-…` com lead **novo** → primeira mensagem deve ser **Boas Vindas**, depois "Qual seu nome?".
-- Repetir com lead que já tem `name_source=user_confirmed` → deve enviar **Boas Vindas** e pular direto pra "Valor da conta".
-- Conferir nos `conversations` (outbound) a ordem temporal.
+4. **Validar com dois cenários**
+   - Lead sem nome: deve receber passo 1 e depois seguir para passo 2.
+   - Lead com nome confiável: deve pular passo 1 e começar no passo 2.
 
-## Observações
+## Resultado esperado
 
-Se você quer que esse reordenamento valha para **todos** os consultores (não só o `0c2711ad-…`), me confirma e eu generalizo a migration buscando todo flow ativo onde um passo com `captures.name` aparece antes de um passo com `slot_key='boas_vindas'`.
+```text
+Cliente manda: "Oi"
+Sem nome salvo → pergunta nome primeiro.
+
+Cliente manda: "Sou João"
+Nome capturado → pula pergunta de nome → envia Boas Vindas → segue passo 3, 4, 5...
+```
+
+Vou mexer apenas nessa correção de ordem e na regra de skip do passo de nome.
