@@ -206,9 +206,15 @@ export function buildPromptDocumento(tipo: string, isVerso = false): string {
     return `Você é um especialista em extrair dados do VERSO do REGISTRO GERAL (RG) brasileiro.
 ESTA IMAGEM É DO VERSO (COSTAS) DO RG (RG antigo OU CIN/RG novo).
 
+🎯 PRIORIDADE MÁXIMA — PROCURE O CPF PRIMEIRO:
+O CPF normalmente aparece no TOPO do verso do RG antigo, em uma faixa/cabeçalho à direita,
+muitas vezes ACIMA ou ao LADO de "DATA DE NASCIMENTO". Procure também próximo às palavras
+"CPF" ou "Cadastro de Pessoa Física" em QUALQUER região (topo, meio, rodapé, laterais).
+São 11 dígitos no formato 123.456.789-00. Devolva sempre APENAS os 11 dígitos.
+
 CAMPOS QUE COSTUMAM APARECER NO VERSO:
 - NÚMERO DO RG (Registro Geral): no RG antigo aparece no VERSO rotulado como "REGISTRO GERAL" (frequentemente em VERMELHO), no formato XX.XXX.XXX-X (ex.: 60.070.001-X). Retorne APENAS os dígitos, INCLUINDO o dígito verificador final mesmo quando for letra X (use 'X' literal no fim se aparecer, ex.: "60070001X"). Tamanho típico 7 a 12 caracteres.
-- CPF: 11 dígitos, rotulado "CPF" (geralmente no topo do verso do RG antigo, formato 123.456.789-00). NUNCA confunda com Registro Civil, NIS/PIS/PASEP, Título de Eleitor, CNS, CNH, CTPS.
+- CPF: 11 dígitos, rotulado "CPF" (FREQUENTEMENTE NO TOPO/CABEÇALHO do verso do RG antigo, formato 123.456.789-00). NUNCA confunda com Registro Civil, NIS/PIS/PASEP, Título de Eleitor, CNS, CNH, CTPS.
 - NOME COMPLETO: se estiver legível.
 - DATA DE NASCIMENTO: DD/MM/AAAA.
 - FILIAÇÃO: Nome do Pai e Nome da Mãe (podem estar abreviados).
@@ -216,7 +222,7 @@ CAMPOS QUE COSTUMAM APARECER NO VERSO:
 ⚠️ NÃO confunda o "REGISTRO GERAL" do verso com o número de série/controle que aparece na lateral da FRENTE (esse é apenas um número de controle do documento, NÃO é o RG).
 
 ⚠️ ATENÇÃO CRÍTICA — CPF:
-- O CPF é o campo MAIS IMPORTANTE deste documento. Examine TODA a imagem (cabeçalho, rodapé, laterais, áreas próximas a filiação).
+- O CPF é o campo MAIS IMPORTANTE deste documento. Examine TODA a imagem, COMEÇANDO PELO TOPO (cabeçalho), depois laterais, depois rodapé e áreas próximas a filiação.
 - Aceite formatos com pontuação (123.456.789-00) ou sem (12345678900). Sempre devolva APENAS os 11 dígitos.
 - NÃO confunda com: nº do RG, título eleitoral, PIS/NIS, CNS (cartão SUS, 15 dígitos), CNH, naturalização, certidão de nascimento.
 - Se o CPF estiver borrado, cortado, ilegível ou parcialmente visível, retorne "". NUNCA chute.
