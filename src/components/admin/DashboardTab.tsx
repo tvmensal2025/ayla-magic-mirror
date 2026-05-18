@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { Eye, Users, MousePointerClick, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Megaphone, ChevronDown } from "lucide-react";
+import { Eye, Users, MousePointerClick, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Megaphone, ChevronDown, Trash2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import { useAnalytics } from "@/hooks/useAnalytics";
 import { StatCard } from "./StatCard";
 import { CustomerCharts } from "./CustomerCharts";
 import { AnalyticsCharts } from "./AnalyticsCharts";
+import { PerformanceCharts } from "./PerformanceCharts";
 import { LeadSourceCard } from "./LeadSourceCard";
 import { ResultsDashboard } from "./ads/ResultsDashboard";
 import { WalletChip } from "./ads/WalletChip";
@@ -38,6 +39,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
   const [showCredPassword, setShowCredPassword] = useState(false);
   const dashboardRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState(false);
+  const [resettingPerf, setResettingPerf] = useState(false);
   const [sharedAccountCount, setSharedAccountCount] = useState(0);
 
   useEffect(() => {
