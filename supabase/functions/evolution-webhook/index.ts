@@ -21,6 +21,8 @@ import {
 import { handleConnectionUpdate } from "./handlers/connection.ts";
 import { tryInterceptOtp } from "./handlers/otp-intercept.ts";
 import { runBotFlow } from "./handlers/bot-flow.ts";
+import { runConversationalFlow, CADASTRO_STEPS } from "./handlers/conversational/index.ts";
+import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
 
