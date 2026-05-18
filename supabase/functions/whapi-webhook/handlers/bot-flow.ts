@@ -264,7 +264,7 @@ async function findNextActiveFlowStep(
   supabase: any,
   consultantId: string | null | undefined,
   opts: { afterPosition?: number; stepType?: string; stepTypeIn?: string[] } = {},
-): Promise<{ id: string; step_key: string; step_type: string; position: number; transitions: any[] } | null> {
+): Promise<{ id: string; step_key: string; step_type: string; position: number; transitions: any[]; message_text: string } | null> {
   if (!consultantId) return null;
   try {
     const { data: flow } = await supabase
@@ -272,7 +272,7 @@ async function findNextActiveFlowStep(
       .eq("consultant_id", consultantId).eq("is_active", true).maybeSingle();
     if (!flow?.id) return null;
     let q = supabase.from("bot_flow_steps")
-      .select("id, step_key, step_type, position, transitions")
+      .select("id, step_key, step_type, position, transitions, message_text")
       .eq("flow_id", (flow as any).id).eq("is_active", true)
       .order("position", { ascending: true });
     if (typeof opts.afterPosition === "number") q = q.gt("position", opts.afterPosition);
@@ -280,7 +280,7 @@ async function findNextActiveFlowStep(
     if (opts.stepTypeIn && opts.stepTypeIn.length) q = q.in("step_type", opts.stepTypeIn);
     const { data } = await q.limit(1);
     const row = Array.isArray(data) ? data[0] : null;
-    return row ? { id: String(row.id), step_key: String(row.step_key), step_type: String(row.step_type), position: Number(row.position), transitions: Array.isArray((row as any).transitions) ? (row as any).transitions : [] } : null;
+    return row ? { id: String(row.id), step_key: String(row.step_key), step_type: String(row.step_type), position: Number(row.position), transitions: Array.isArray((row as any).transitions) ? (row as any).transitions : [], message_text: String((row as any).message_text || "") } : null;
   } catch (e) {
     console.warn("[findNextActiveFlowStep] erro:", (e as any)?.message || e);
     return null;
