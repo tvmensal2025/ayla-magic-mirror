@@ -432,7 +432,7 @@ async function sendStepMedia(
     if (item.kind === "text") {
       // ⏱️ Respeita text_delay_ms antes do texto
       if (!isTestMode()) {
-        const wait = Math.max(0, Math.min(item.delayMs, 60_000));
+        const wait = Math.max(0, Math.min(item.delayMs, 120_000));
         if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       }
       try {
@@ -1147,7 +1147,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     asReply: boolean,
   ): Promise<{ replyText: string; inlineSent: boolean }> => {
     const text = renderStepText(st);
-    const textDelay = Math.max(0, Math.min(60000, st.text_delay_ms ?? 1500));
+    const textDelay = Math.max(0, Math.min(120_000, st.text_delay_ms ?? 1500));
 
     // 🛡️ Anti-repetição: se o MESMO step (por step_key OU id) saiu como outbound
     // nos últimos 10 minutos, não reenvia (texto nem mídia). Evita os disparos
