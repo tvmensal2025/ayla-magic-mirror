@@ -632,12 +632,29 @@ export async function ocrDocumentoFrenteVerso(
   const temVerso = !!(versoUrl || versoBase64);
 
   if (!temVerso) {
-    // Sem verso: se faltou CPF, tenta segunda passada focada na frente
+    // Sem verso: roda retries focados em todos os campos críticos na própria frente.
+    const rec: string[] = [];
     if (!d.cpf || d.cpf.length !== 11) {
-      console.log("🔁 OCR Doc (só frente) sem CPF — tentando segunda passada focada");
       const cpf2 = await ocrCpfFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
-      if (cpf2) d.cpf = cpf2;
+      if (cpf2) { d.cpf = cpf2; rec.push("cpf"); }
     }
+    const rgDig = (d.rg || "").replace(/[^\dXx]/g, "");
+    if (!rgDig || rgDig.length < 7) {
+      const rg2 = await ocrRgFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg, "frente");
+      if (rg2) { d.rg = rg2; rec.push("rg"); }
+    }
+    if (!validarNomeOCR(d.nome)) {
+      const n2 = await ocrNomeFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
+      if (n2) { d.nome = n2; rec.push("nome"); }
+    }
+    if (!validarDataNascimento(d.dataNascimento)) {
+      const dt2 = await ocrNascimentoFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
+      if (dt2) { d.dataNascimento = dt2; rec.push("nascimento"); }
+    }
+    const criticos = [d.nome, d.cpf, d.rg, d.dataNascimento];
+    const preenchidos = criticos.filter((v: any) => v && String(v).trim().length > 0).length;
+    d.confianca = Math.round((preenchidos / criticos.length) * 100);
+    if (rec.length > 0) console.log(`🔁 OCR Doc (só frente) recuperou: ${rec.join(", ")} (conf ${d.confianca}%)`);
     console.log("✅ OCR Doc (só frente) OK:", JSON.stringify(d).substring(0, 400));
     return { sucesso: true, dados: d };
   }
