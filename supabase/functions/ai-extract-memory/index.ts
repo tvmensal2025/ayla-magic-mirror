@@ -4,7 +4,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
-import { geminiGenerate, type GeminiTool } from "../_shared/gemini.ts";
+import { aiChat } from "../_shared/ai-gateway.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -20,32 +20,28 @@ const VALID_CATEGORIES = [
   "fato_relevante",  // genérico
 ];
 
-const extractTool: GeminiTool = {
-  functionDeclarations: [{
-    name: "save_memory_facts",
-    description: "Salva fatos persistentes confirmados sobre o lead que devem ser lembrados em conversas futuras. Só inclua fatos NOVOS ou ATUALIZADOS — nunca duplique algo que já está no resumo.",
-    parameters: {
-      type: "object",
-      properties: {
-        facts: {
-          type: "array",
-          description: "Lista de fatos. Vazia se não houver nada novo.",
-          items: {
-            type: "object",
-            properties: {
-              category: { type: "string", enum: VALID_CATEGORIES },
-              key: { type: "string", description: "Chave curta em snake_case (ex: melhor_horario, motivo_recusa, nome_conjuge)" },
-              value: { type: "string", description: "Valor curto e direto (max 200 chars)" },
-              confidence: { type: "number", description: "0.0 a 1.0 — quão confiante você está" },
-              source: { type: "string", enum: ["lead_disse", "ocr", "consultor", "inferido"] },
-            },
-            required: ["category", "key", "value", "confidence", "source"],
-          },
+const FACTS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    facts: {
+      type: "array",
+      description: "Lista de fatos novos. Vazia se não houver nada novo.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          category: { type: "string", enum: VALID_CATEGORIES },
+          key: { type: "string", description: "Chave curta em snake_case" },
+          value: { type: "string", description: "Valor curto e direto (max 200 chars)" },
+          confidence: { type: "number" },
+          source: { type: "string", enum: ["lead_disse", "ocr", "consultor", "inferido"] },
         },
+        required: ["category", "key", "value", "confidence", "source"],
       },
-      required: ["facts"],
     },
-  }],
+  },
+  required: ["facts"],
 };
 
 Deno.serve(async (req) => {
@@ -98,24 +94,22 @@ Deno.serve(async (req) => {
       `${m.message_direction === "inbound" ? "Lead" : "IA"}: ${(m.message_text || "(mídia)").slice(0, 240)}`
     ).join("\n");
 
-    const sys = `Você extrai FATOS PERSISTENTES sobre um lead da iGreen Energy a partir da conversa. Retorne SOMENTE fatos novos ou que mudaram. Ignore small talk, saudações e info já presente em [JÁ SABEMOS]. Categorias: ${VALID_CATEGORIES.join(", ")}. Use snake_case nas chaves. Confidence baixa (<0.5) para inferências; alta (>0.8) só quando o lead afirmou explicitamente.`;
+    const sys = `Você extrai FATOS PERSISTENTES sobre um lead da iGreen Energy a partir da conversa. Retorne SOMENTE fatos novos ou que mudaram. Ignore small talk, saudações e info já presente em [JÁ SABEMOS]. Categorias: ${VALID_CATEGORIES.join(", ")}. Use snake_case nas chaves. Confidence baixa (<0.5) para inferências; alta (>0.8) só quando o lead afirmou explicitamente. Se não houver nada novo, retorne {"facts": []}.`;
 
-    const prompt = `[JÁ SABEMOS]\n${existingLine}\n\n[RESUMO ATUAL]\n${customer.conversation_summary || "(sem resumo)"}\n\n[CONVERSA RECENTE]\n${transcript}\n\nExtraia fatos novos chamando save_memory_facts. Se não houver nada novo, chame com facts: [].`;
+    const prompt = `[JÁ SABEMOS]\n${existingLine}\n\n[RESUMO ATUAL]\n${customer.conversation_summary || "(sem resumo)"}\n\n[CONVERSA RECENTE]\n${transcript}\n\nExtraia fatos novos.`;
 
-    const result = await geminiGenerate({
-      model: "gemini-2.5-flash-lite",
-      system: sys,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      tools: [extractTool],
-      toolChoice: { mode: "ANY" },
+    const result = await aiChat({
+      model: "google/gemini-3-flash-preview",
       temperature: 0.2,
-      maxOutputTokens: 800,
-      functionName: "ai-extract-memory",
-      consultantId: customer.consultant_id,
-      customerId: customer_id,
+      maxTokens: 800,
+      jsonSchema: { name: "extract_facts", schema: FACTS_SCHEMA },
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: prompt },
+      ],
     });
 
-    const facts = (result.toolCall?.args?.facts || []) as any[];
+    const facts = (result.json?.facts || []) as any[];
     let upserted = 0;
     for (const f of facts) {
       if (!f?.category || !f?.key || !f?.value) continue;
