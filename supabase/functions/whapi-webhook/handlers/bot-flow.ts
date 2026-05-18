@@ -453,6 +453,151 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   } = ctx;
 
   // ═══════════════════════════════════════════════════════════════════
+  // 🛟 respondAndReentry — fallback universal pra mensagens fora do esperado.
+  // Responde a dúvida (FAQ → IA → fallback) + reconduz ao passo atual repetindo
+  // SÓ a pergunta final do prompt. Nunca silencia, nunca lança exceção.
+  // Só pausa+handoff após 5 desvios no mesmo lead (com mensagem de cortesia).
+  // ═══════════════════════════════════════════════════════════════════
+  const _extractQuestionTail = (text: string): string => {
+    if (!text) return "";
+    const cleaned = String(text).replace(/^📋\s*\*?Voltando ao seu cadastro:\*?\s*/i, "").trim();
+    const qMatches = cleaned.match(/[^.!?\n]*\?+/g);
+    if (qMatches && qMatches.length > 0) return qMatches[qMatches.length - 1].trim();
+    const sents = cleaned.split(/(?<=[.!?])\s+/).filter(Boolean);
+    return (sents[sents.length - 1] || cleaned).trim();
+  };
+
+  async function respondAndReentry(opts: {
+    reason: "midflow_qa_miss" | "off_topic_collect" | "custom_step_no_match";
+    questionText: string;
+    reentryFull?: string;
+  }): Promise<BotResult> {
+    const { reason, questionText } = opts;
+    const stepNow = String((customer as any).conversation_step || "");
+    const reentryFull = opts.reentryFull || getReentryPromptForStep(stepNow, customer) || "";
+    const reentryTail = _extractQuestionTail(reentryFull);
+
+    let answer = "";
+    let source: "faq" | "ai" | "fallback" = "fallback";
+
+    // 1) FAQ
+    try {
+      const { data: flowRow } = await supabase
+        .from("bot_flows").select("id")
+        .eq("consultant_id", customer.consultant_id)
+        .eq("is_active", true).maybeSingle();
+      if (flowRow?.id) {
+        const qa = await matchQA(supabase, (flowRow as any).id, customer.consultant_id, questionText);
+        if (qa && (qa.text || qa.mediaUrls.length)) {
+          for (const m of qa.mediaUrls) {
+            try { await sendMedia(remoteJid, m.url, "", m.kind); } catch (_) { /* segue */ }
+          }
+          answer = (qa.text || "").trim();
+          source = "faq";
+        }
+      }
+    } catch (e) { console.warn("[respondAndReentry] FAQ falhou:", (e as any)?.message); }
+
+    // 2) IA de vendas (timeout 8s) — só responder, não muda step
+    if (!answer) {
+      try {
+        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 8000);
+        const aiResp = await fetch(`${supabaseUrl}/functions/v1/ai-sales-agent`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceKey}`,
+            apikey: serviceKey,
+          },
+          body: JSON.stringify({
+            customer_id: customer.id,
+            user_input: questionText,
+            mode: "answer_only",
+          }),
+          signal: ctrl.signal,
+        });
+        clearTimeout(tid);
+        if (aiResp.ok) {
+          const body = await aiResp.json().catch(() => ({}));
+          const txt = (body?.decision?.args?.message || body?.reply || body?.message || "").toString().trim();
+          if (txt) { answer = txt; source = "ai"; }
+        }
+      } catch (e) { console.warn("[respondAndReentry] IA falhou:", (e as any)?.message); }
+    }
+
+    // 3) Fallback genérico (nunca silêncio)
+    if (!answer) {
+      answer = "Boa pergunta! Te explico melhor já já 💬";
+      source = "fallback";
+    }
+
+    // Detour + handoff suave após 5 desvios
+    const detourNext = Number((customer as any).detour_count || 0) + 1;
+    const patch: Record<string, any> = { detour_count: detourNext };
+    let courtesyTail = "";
+    if (detourNext >= 5) {
+      patch.bot_paused = true;
+      patch.bot_paused_reason = "muitas_duvidas";
+      patch.bot_paused_at = new Date().toISOString();
+      courtesyTail = "\n\n🙌 Vou chamar alguém do time pra te atender pessoalmente — já já alguém responde por aqui.";
+      try {
+        await supabase.from("bot_handoff_alerts").insert({
+          customer_id: customer.id,
+          consultant_id: customer.consultant_id,
+          reason: "muitas_duvidas",
+          user_message: String(questionText).slice(0, 300),
+          phone: (customer as any).phone_whatsapp || null,
+          metadata: { detour_count: detourNext, source, trigger: reason, step: stepNow },
+        } as any);
+      } catch (e) { console.warn("[respondAndReentry] handoff alert falhou:", (e as any)?.message); }
+      try {
+        notifyHandoff(
+          customer.consultant_id,
+          {
+            id: customer.id,
+            name: (customer as any).name,
+            phone_whatsapp: (customer as any).phone_whatsapp,
+            conversation_step: stepNow,
+          },
+          questionText,
+          "muitas_duvidas",
+        ).catch(() => {});
+      } catch (_) { /* noop */ }
+    }
+    try { await supabase.from("customers").update(patch).eq("id", customer.id); } catch (_) { /* noop */ }
+
+    // Telemetria leve
+    try {
+      await supabase.from("bot_step_transitions").insert({
+        customer_id: customer.id,
+        consultant_id: customer.consultant_id,
+        from_step: stepNow,
+        to_step: stepNow,
+        reason: `recovery:${reason}:${source}`,
+      } as any);
+    } catch (_) { /* noop */ }
+
+    const reentryLine = reentryTail ? `\n\n📋 Voltando: ${reentryTail}` : "";
+    const finalMsg = `${answer}${reentryLine}${courtesyTail}`;
+
+    try { await sendText(remoteJid, finalMsg); } catch (e) {
+      console.warn("[respondAndReentry] sendText falhou:", (e as any)?.message);
+    }
+    try {
+      await supabase.from("conversations").insert({
+        customer_id: customer.id, message_direction: "outbound",
+        message_text: finalMsg, message_type: "text", conversation_step: stepNow,
+      });
+    } catch (_) { /* noop */ }
+
+    console.log(`[respondAndReentry] reason=${reason} source=${source} detour=${detourNext} step=${stepNow}`);
+    return { reply: "", updates: { __inline_sent: true } as any };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // 🔁 AUTO-RESUME: se o bot foi pausado por "lead_nao_pronto" / "lead_quer_pensar"
   // e o lead voltou a falar, despausa automaticamente. Vendedor humano não fica mudo.
   // ═══════════════════════════════════════════════════════════════════
