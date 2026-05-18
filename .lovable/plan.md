@@ -1,108 +1,96 @@
+## Diagnóstico
 
-# Resposta honesta: ainda NÃO está pronto pra escalar pra 100+
+Hoje o motor (`supabase/functions/whapi-webhook/handlers/bot-flow.ts`) tem **3 caminhos diferentes** para mensagem fora do esperado, e dois deles **cortam** o lead (pausam o bot e silenciam):
 
-## O que o banco mostra agora (últimos 30 dias)
 
-| Métrica | Valor | Leitura |
-|---|---|---|
-| Fluxos ativos | 13 | OK |
-| Steps sem `captures` / `transitions` / `fallback` | 0 / 0 / 0 | OK (depois do `repair_bot_flow` de hoje) |
-| Leads novos | 785 | OK |
-| Conversões (`status=active`) | **0** | 🚨 nenhum lead virou cliente |
-| Handoffs registrados | **1** | 🚨 bot nunca escala — ou está mudo, ou está fingindo que entende |
-| Leads em loop detectados pelo lint | 1 (12 msgs no mesmo step) | 🚨 prova que o lint funciona, mas ninguém vê |
-| Bot pausado | 1 | OK |
+| Caminho                                                    | Linhas    | Comportamento atual                                                                                                                             | Problema                                                                                                 |
+| ---------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **A. Midflow QA (steps `ask_*`/`editing_*` de cadastro)**  | 619‑706   | Se a pergunta NÃO casa com a FAQ → pausa o bot (`bot_paused=true`, motivo `duvida_fora_faq`) e devolve `reply:""` (silêncio total para o lead). | Lead fica sem resposta esperando humano que pode demorar. Em escala (100+ consultores) = leads perdidos. |
+| **B. Off‑topic em `ask_/editing_/aguardando_(conta|doc)**` | 1801‑1846 | Se houver QA configurada → responde + reenvia prompt. Se NÃO houver → manda só o reentry seco.                                                  | OK, mas não usa IA quando a QA está vazia — o lead recebe só o prompt repetido.                          |
+| **C. Fluxos custom (passos UUID/`flow:`)**                 | 1975‑2025 | Se a resposta não casa com nenhum `trigger_intent` e não há `default` → 2 tentativas e depois **handoff humano + pausa**.                       | Não tenta responder a pergunta nem reformular — pula direto para humano.                                 |
 
-**Diagnóstico:** o motor não trava mais (isso a gente já consertou), mas ele também não **se vigia sozinho**. Em escala, ninguém vai abrir 100 fluxos pra ver se cada consultor está com lead travado. Hoje, depende de você ou da Camila olharem caso a caso — exatamente o que você quer evitar.
 
----
+Resultado: com muitos leads simultâneos, qualquer pergunta fora do roteiro (“mas e se eu morar de aluguel?”, “qual o desconto exato?”, “já tenho energia solar”) cai em handoff silencioso ou loop de prompt repetido.
 
-## O que vou entregar (5 itens, em ordem)
+## Objetivo
 
-### 1. Auto-handoff por loop em produção (cron)
+Para QUALQUER mensagem inesperada, o bot deve:
 
-A função `lint_bot_flow_consistency()` já detecta lead com 5+ mensagens no mesmo step em 24h. Mas só roda quando alguém pergunta.
+1. **Responder a dúvida** (FAQ → IA com persona/knowledge base como fallback).
+2. **Reconduzir ao passo atual** com o prompt de reentrada (“Voltando ao que eu te perguntei: …”).
+3. **Nunca silenciar** o lead nem **pausar** sem antes esgotar tentativas reais.
+4. Só pausar/escalar para humano após `N` reentradas seguidas sem progresso (e sempre com mensagem de cortesia, não silêncio).
 
-**O que muda:** novo cron a cada 15 min (`bot-loop-watchdog`) que:
-- Roda o lint
-- Para cada `possible_loop`: pausa o bot daquele cliente, cria `bot_handoff_alerts` com `reason=auto_loop_detected`, e dispara `notifyHandoff` pro consultor.
+## Mudanças
 
-Resultado: nenhum lead fica 24h batendo cabeça sem o consultor saber.
+### 1. Unificar fallback em um único helper `respondAndReentry()`
 
-### 2. Painel "Saúde do meu bot" pra cada consultor
+Criar dentro de `bot-flow.ts` (ou em `handlers/conversational/`) uma função:
 
-Página nova `/whatsapp/saude-bot` (ou bloco na home) que mostra, por consultor logado:
-- ⚠️ Alertas abertos (handoffs últimos 7d) com nome, telefone, motivo, botão "Assumir conversa"
-- 📊 Leads parados há +24h no mesmo step (com link pra abrir)
-- 🩹 Status do fluxo: usa `FlowAuditPanel` que já existe + botão "Reparar"
-- 📈 Taxa de avanço por passo (quantos leads passaram de cada step) — pra ver onde o bot perde gente
+```ts
+async function respondAndReentry({
+  customer, step, messageText, remoteJid,
+  reason, // 'midflow_qa_miss' | 'off_topic_collect' | 'custom_step_no_match'
+}): Promise<{ reply: string; updates: any }>
+```
 
-Tudo lido de tabelas que já existem (`bot_handoff_alerts`, `customers`, `bot_step_transitions`).
+Ela faz, em ordem:
 
-### 3. Validação no editor de fluxo (`/admin/fluxos`)
+1. Tenta `matchQA()` (FAQ do consultor) → se hit, usa.
+2. Se miss, chama a **IA de vendas** (já existe em `handlers/conversational/` — `sales-ai` / `request_handoff`) com instrução fixa:
+  > “Responda a dúvida do lead em 1‑2 frases curtas, no tom da Camila, SEM prometer nada fora do script. Depois devolva o lead ao passo atual repetindo a pergunta original.”
+3. Anexa `getReentryPromptForStep(step, customer)`.
+4. Incrementa `detour_count`. Só pausa+handoff quando `detour_count >= 5` (já existe) — e ainda assim manda uma **mensagem de cortesia** (“Vou chamar alguém do time pra te ajudar com essa, tá? Em instantes.”), nunca silêncio.
 
-Hoje o consultor pode salvar um passo `question` sem nenhuma `transition`. Aí trava. O reparo conserta depois, mas o ideal é não deixar entrar lixo.
+### 2. Substituir os 3 caminhos pelo helper
 
-**O que muda no editor:**
-- Botão "Salvar" desabilitado se algum passo `question`/`media_request`/`capture_*` estiver sem `captures` ou `transitions`.
-- Badge vermelho no card do passo com tooltip explicando o que falta.
-- Botão "Reparar agora" inline (mesma RPC `repair_bot_flow`) pra resolver com 1 clique.
+- **A (midflow‑qa miss, linhas 662‑695)**: trocar o bloco que pausa silenciosamente por `await respondAndReentry(..., reason: 'midflow_qa_miss')`.
+- **B (off‑topic collect, 1834‑1843)**: quando não há QA, chamar `respondAndReentry` antes do reentry seco.
+- **C (custom flow no‑match, 1985‑2025)**: antes de incrementar `custom_step_retries` ou escalar, chamar `respondAndReentry`. Só após 3 tentativas reais (não 2) com a IA também falhando → handoff com mensagem de cortesia.
 
-### 4. Métricas globais (admin)
+### 3. Blindagem anti‑erro (não pode dar erro)
 
-Em `/admin` (visível só pra super_admin) um cartão "Saúde da plataforma":
-- Total de fluxos ativos / quebrados (calculado igual ao FlowAuditPanel)
-- Loops detectados nas últimas 24h
-- Handoffs sem resposta há +1h
-- Top 5 passos onde leads mais param (em todos os 13 consultores)
+- Envolver `respondAndReentry` num `try/catch` que, em qualquer falha (IA fora do ar, FAQ quebrada), faz **fallback mínimo garantido**:
+  ```
+  "Boa pergunta! Vou te explicar melhor já já. Antes, me confirma só: <reentry>"
+  ```
+  Nunca lança exceção para o caller.
+- Mesmo tratamento em `dispatchStepFromFlow` (envia mídias do passo): se MinIO/Whapi der erro em uma mídia, logar e seguir para a próxima — não abortar o passo.
+- Adicionar timeout (8s) na chamada da IA para não travar o webhook.
 
-Permite ver, sem ler código, qual passo da Camila é gargalo e ajustar o template global.
+### 4. Telemetria para acompanhar em escala
 
-### 5. Documentar contrato `bot_flow_steps` no DOCUMENTATION.md
+Adicionar uma linha em `bot_step_transitions` (ou tabela nova `bot_recovery_events`) a cada `respondAndReentry`, com:
 
-Hoje a estrutura de `captures`, `transitions`, `fallback`, `step_type` está espalhada em 3978 linhas de `bot-flow.ts`. Pra quem chegar depois (ou IA futura), é caixa-preta.
+- `customer_id`, `consultant_id`, `step`, `reason`, `source` (`faq`|`ai`|`fallback`), `detour_count`.
 
-Vou adicionar seção curta no `DOCUMENTATION.md`:
-- Tipos de step válidos e quando usar cada
-- Schema esperado de `captures` / `transitions` / `fallback`
-- Como o `repair_bot_flow` aplica defaults
-- Anti-loop: como o engine decide retry vs handoff
+Expor um card simples no `/admin/saude-bot` (já existe a página) mostrando:
 
-Sem isso, qualquer mudança futura vira tentativa e erro.
+- “Recuperações automáticas hoje” / “Handoffs evitados” / Top 5 perguntas off‑script (para virarem FAQ).
 
----
+### 5. Limites por consultor (proteção 100+ contas)
 
-## O que NÃO faz parte deste plano
-
-- **Conversão zero (0 de 785).** É problema de copy / oferta / Camila, não de engine. Auditar isso é outro escopo (qualidade da IA).
-- **Refatorar `bot-flow.ts` (3978 linhas).** Grande demais pra fazer agora sem regressão. Marco como dívida técnica e atacamos quando rolar o sprint de simplificação.
-- **Teste automatizado E2E dos 13 fluxos.** Útil, mas eu sugiro deixar pra depois do item 1 e 2 — eles já dão visibilidade suficiente pra detectar regressão em produção.
-
----
+- Cache em memória do edge (`Map<consultor, count/min>`) para limitar chamadas da IA de fallback a, ex., 30/min por consultor — acima disso usa só FAQ + reentry. Evita estourar `LOVABLE_API_KEY` com lead spam.
 
 ## Detalhes técnicos
 
-**Item 1 — `bot-loop-watchdog`:**
-- Nova edge function `supabase/functions/bot-loop-watchdog/index.ts`
-- Cron `*/15 * * * *` via `pg_cron` + `net.http_post`
-- Lógica: `SELECT * FROM lint_bot_flow_consistency() WHERE category IN ('possible_loop','orphan_flow_step')` → para cada row, `UPDATE customers SET bot_paused=true, bot_paused_reason='auto_loop_detected'` + `INSERT bot_handoff_alerts` + chamar `notify-consultant`.
+- A IA de vendas já está implementada (`handlers/conversational/`) e usa Lovable AI Gateway. Reaproveitar o mesmo client, só mudando o prompt do system message para o modo “responder + reconduzir”.
+- `getReentryPromptForStep` já existe e cobre todos os steps de cadastro; para passos custom (`flow:<uuid>`), usar `stepRow.message_text` como reentry.
+- `bot_handoff_alerts` continua sendo criado quando realmente esgota — só muda o gatilho (5 detours efetivos em vez de 1 miss).
+- Sem migração de schema necessária se reusarmos `bot_step_transitions`. Se quisermos `bot_recovery_events`, é 1 migração simples (vai como passo opcional).
 
-**Item 2 — painel:**
-- Nova rota `/whatsapp/saude-bot` em `src/pages/`
-- Componente reutiliza `FlowAuditPanel` já existente em `FluxoCamila.tsx`
-- Queries: `bot_handoff_alerts` filtrado por `consultant_id=auth.uid()`, `customers` agrupado por `conversation_step`
-- Card de "Assumir conversa" reusa o mesmo modal de conversa já existente no CRM
+## Arquivos afetados
 
-**Item 3 — validação no editor:**
-- `/admin/fluxos` (arquivo atual `src/pages/admin/Fluxos.tsx` ou similar) → adicionar `validateStep(step)` que retorna lista de problemas
-- Mostrar badge usando `<Badge variant="destructive">` com tooltip
-- Botão "Reparar" chama mesma RPC `repair_bot_flow`
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (criar helper + substituir 3 trechos)
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (expor função `answerAndReentry` reaproveitando o client da IA)
+- `src/pages/SaudeBot.tsx` (card de recuperações — opcional, pode ficar para depois)
+- (opcional) Migração `bot_recovery_events`
 
-**Item 4 — admin global:**
-- `/admin` (Dashboard.tsx ou Home admin) → novo card `<SystemHealthCard />`
-- Queries SQL agregadas (uso de `bot_step_transitions` para top steps com mais retries)
+## Critério de pronto
 
-**Item 5 — docs:**
-- Append em `DOCUMENTATION.md`, seção nova `## Bot Flow Engine — Contrato`
-
-Sem nova tabela. Sem mudança destrutiva. Tudo aditivo.
+- Lead manda “mas e se eu morar de aluguel?” no meio do cadastro → recebe resposta curta da Camila + reentry, **sem pausa**.
+- IA fora do ar → recebe fallback genérico + reentry, **sem erro**.
+- Lead manda 5 perguntas off‑script seguidas → recebe mensagem de cortesia e handoff é criado (não silêncio).
+- Nenhum caminho retorna `reply:""` sem antes ter enviado algo via `sendText`/`sendMedia`.  
+quando voltar ao fluxo tem que analisar se for uma pergunta vai ter que repetir apenas o final, analise para consturir
+-   
