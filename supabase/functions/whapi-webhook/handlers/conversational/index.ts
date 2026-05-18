@@ -1260,11 +1260,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       } else if (cadastroStep === "aguardando_doc_auto") {
         replyText = "📸 Agora preciso do seu *documento com foto* (RG ou CNH).\n\nEnvie a *frente* do documento.";
       } else if (cadastroStep === "ask_email") {
-        replyText = "📧 Qual seu *e-mail*?";
+        replyText = "📧 Me passa seu *e-mail* (pode ser de qualquer provedor — Gmail, Outlook, iCloud, Yahoo...).";
       } else if (cadastroStep === "ask_phone_confirm") {
         replyText = "📞 Esse número é seu telefone de contato?\n\n1️⃣ ✅ Sim\n2️⃣ 📱 Outro número";
       } else if (cadastroStep === "ask_finalizar") {
-        replyText = "✅ Tudo pronto! Digite *1* ou *FINALIZAR* para concluir.";
+        replyText = "✅ Tudo pronto! Toque no botão *Finalizar* ou responda *FINALIZAR* para concluir.";
       }
     }
 
