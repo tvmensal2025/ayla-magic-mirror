@@ -779,6 +779,130 @@ export async function retryFacialLinkForCustomer(customerId) {
   return { ok, reason: ok ? 'sent' : 'send_failed' };
 }
 
+const IGREEN_API_BASE = 'https://api-voffice.igreenenergy.com.br/v1';
+const normDigits = (v) => String(v || '').replace(/\D/g, '');
+const normLower = (v) => String(v || '').trim().toLowerCase();
+const pickField = (obj, keys) => {
+  for (const key of keys) {
+    if (obj?.[key] != null && obj[key] !== '') return obj[key];
+    const found = Object.keys(obj || {}).find(k => k.toLowerCase() === key.toLowerCase());
+    if (found && obj[found] != null && obj[found] !== '') return obj[found];
+  }
+  return null;
+};
+
+function namesLookRelated(a, b) {
+  const tokenize = (s) => normLower(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/\s+/).filter(t => t.length > 2 && !['dos','das','de','da','do'].includes(t));
+  const aa = tokenize(a);
+  const bb = tokenize(b);
+  if (!aa.length || !bb.length) return false;
+  const overlap = aa.filter(t => bb.includes(t)).length;
+  return overlap >= 2 || (aa[0] === bb[0] && overlap >= 1);
+}
+
+async function buscarCadastroExistenteIgreen(cliente, data, consultorId) {
+  const supabase = getSupabase();
+  const { data: cred } = await supabase
+    .from('consultants')
+    .select('igreen_id, igreen_portal_email, igreen_portal_password')
+    .eq('id', cliente.consultant_id)
+    .maybeSingle();
+
+  const emailLogin = cred?.igreen_portal_email || process.env.IGREEN_PORTAL_EMAIL;
+  const senhaLogin = cred?.igreen_portal_password || process.env.IGREEN_PORTAL_PASSWORD;
+  const apiConsultorId = cred?.igreen_id || consultorId;
+  if (!emailLogin || !senhaLogin || !apiConsultorId) {
+    console.warn('   ⚠️ Busca iGreen existente sem credenciais/consultorId suficientes');
+    return null;
+  }
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Origin': 'https://escritorio.igreenenergy.com.br',
+    'Referer': 'https://escritorio.igreenenergy.com.br/',
+  };
+  const loginRes = await fetch(`${IGREEN_API_BASE}/login`, {
+    method: 'POST', headers, body: JSON.stringify({ email: emailLogin, password: senhaLogin }), signal: AbortSignal.timeout(30000),
+  });
+  if (!loginRes.ok) {
+    console.warn(`   ⚠️ Login API iGreen falhou (${loginRes.status}) ao buscar cadastro existente`);
+    return null;
+  }
+  const loginData = await loginRes.json();
+  const token = loginData.accessToken || loginData.token || loginData.access_token;
+  if (!token) return null;
+
+  const authHeaders = { ...headers, Authorization: `Bearer ${token}` };
+  const alvoCpf = normDigits(data.cpfDigits || cliente.cpf);
+  const alvoInst = normDigits(data.numeroInstalacao || cliente.numero_instalacao);
+  const alvoEmail = normLower(data.email || cliente.email);
+  const alvoPhone = normDigits(data.whatsapp || cliente.phone_whatsapp).slice(-11);
+  const alvoNome = data.nomeCompleto || cliente.name || '';
+
+  for (let page = 1; page <= 20; page++) {
+    const res = await fetch(`${IGREEN_API_BASE}/customer-map/${apiConsultorId}?page=${page}&pageSize=500`, { headers: authHeaders, signal: AbortSignal.timeout(45000) });
+    if (!res.ok) break;
+    const raw = await res.json();
+    const rows = Array.isArray(raw) ? raw : (raw.data || []);
+    if (!rows.length) break;
+    for (const row of rows) {
+      const cpf = normDigits(pickField(row, ['cpf', 'CPF', 'documento', 'Documento']));
+      const inst = normDigits(pickField(row, ['instalacao', 'numeroInstalacao', 'numero_instalacao', 'Instalação', 'NumeroInstalacao']));
+      const email = normLower(pickField(row, ['email', 'Email', 'E-mail']));
+      const phone = normDigits(pickField(row, ['celular', 'telefone', 'phone', 'whatsapp', 'Celular', 'Telefone'])).slice(-11);
+      const nome = String(pickField(row, ['nomeCliente', 'nome', 'Nome', 'name', 'Nome do Cliente']) || '');
+      const cpfExact = alvoCpf && cpf && cpf === alvoCpf;
+      const instExact = alvoInst && inst && inst === alvoInst;
+      const emailExact = alvoEmail && email && email === alvoEmail;
+      const phoneExact = alvoPhone && phone && phone === alvoPhone;
+      const nameOk = namesLookRelated(alvoNome, nome);
+      if (!cpfExact && !(nameOk && (instExact || emailExact || phoneExact)) && !(instExact && (emailExact || phoneExact))) continue;
+
+      const codigo = String(pickField(row, ['codigoIgreen', 'codigoCliente', 'codigo', 'Código', 'id']) || '').trim();
+      if (!codigo) continue;
+      const andamento = String(pickField(row, ['andamento', 'Andamento', 'status']) || '').trim();
+      const link = `https://digital.igreenenergy.com.br/validacao-codigo/${codigo}?id=${apiConsultorId}&sendcontract=true`;
+      return { codigo, link, andamento, match: { cpfExact, instExact, emailExact, phoneExact, nameOk, nome } };
+    }
+    const total = Number(raw.total || 0);
+    if (rows.length < 500 || (total && page * 500 >= total)) break;
+  }
+  return null;
+}
+
+async function assumirCadastroExistente(customerId, cliente, data, consultorId, motivo) {
+  console.log(`   ♻️ Cadastro já existente detectado (${motivo}). Buscando código/link iGreen...`);
+  const existente = await buscarCadastroExistenteIgreen(cliente, data, consultorId).catch((e) => {
+    console.warn(`   ⚠️ Busca de cadastro existente falhou: ${e.message}`);
+    return null;
+  });
+  if (!existente?.link) {
+    const msg = `Cliente já existe no portal iGreen, mas não consegui localizar o código/link facial automaticamente (${motivo}).`;
+    await getSupabase().from('customers').update({
+      status: 'installation_duplicate',
+      error_message: msg,
+      updated_at: new Date().toISOString(),
+    }).eq('id', customerId);
+    return { handled: true, link: null, message: msg };
+  }
+
+  await getSupabase().from('customers').update({
+    igreen_code: existente.codigo,
+    link_facial: existente.link,
+    link_assinatura: existente.link,
+    andamento_igreen: existente.andamento || 'Falta assinatura/validação facial',
+    conversation_step: 'aguardando_facial',
+    status: 'awaiting_signature',
+    error_message: null,
+    updated_at: new Date().toISOString(),
+  }).eq('id', customerId);
+  console.log(`   ✅ Cadastro existente localizado: código=${existente.codigo} match=${JSON.stringify(existente.match)}`);
+  await sendFacialLinkToCustomer(customerId, existente.link);
+  return { handled: true, link: existente.link, codigo: existente.codigo, message: 'existing_registration_link_sent' };
+}
+
 let _whapiSettings = null;
 async function getWhapiSettings() {
   if (_whapiSettings) return _whapiSettings;
@@ -1874,6 +1998,23 @@ export async function executarAutomacao(customerId, options = {}) {
       const validationErrors = await page.locator('.MuiFormHelperText-root.Mui-error, .field-error, .validation-error, [class*="error"]').allTextContents().catch(() => []);
       if (validationErrors.length > 0) {
         console.error(`   🚨 ERROS DE VALIDAÇÃO: ${validationErrors.filter(e => e.trim()).join(' | ')}`);
+      }
+      const combinedPortalError = [erroPortal, ...validationErrors].filter(Boolean).join(' | ');
+      const duplicateDifferentCpf = /n[úu]mero de instala[cç][aã]o, telefone ou email existente para outro cpf|existente para outro cpf/i.test(combinedPortalError);
+      if (duplicateDifferentCpf) {
+        const existingResult = await assumirCadastroExistente(customerId, cliente, data, consultorId, combinedPortalError);
+        if (existingResult.link) {
+          activeBrowser = null;
+          const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+          console.log(`\n${'='.repeat(70)}`);
+          console.log(`✅ CADASTRO EXISTENTE ASSUMIDO. Link facial enviado. Tempo: ${duration}s`);
+          console.log('='.repeat(70));
+          return { success: true, duration: parseFloat(duration), existingRegistration: true, pageUrl: existingResult.link };
+        }
+        activeBrowser = null;
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        console.warn(`   ⚠️ Cadastro existente assumido, mas link facial não localizado automaticamente.`);
+        return { success: true, duration: parseFloat(duration), existingRegistration: true, linkMissing: true };
       }
       
       let otpConfirmadoNoPortal = false;
