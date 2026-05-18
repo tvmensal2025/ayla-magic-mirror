@@ -481,7 +481,11 @@ export default function FluxoCamila() {
           </Card>
         )}
 
-        <FlowAuditPanel steps={orderedSteps} />
+        <FlowAuditPanel
+          steps={orderedSteps}
+          flowId={flowId}
+          onRepaired={() => userId && reload(userId)}
+        />
 
         {/* Atalhos */}
         <Card className="p-4 sm:p-5 border-amber-500/30 bg-amber-500/5">
