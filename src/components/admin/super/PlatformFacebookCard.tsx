@@ -96,7 +96,7 @@ export function PlatformFacebookCard() {
       const prev = JSON.stringify({
         a: status?.ad_account_id,
         p: status?.pixel_id,
-        v: status?.last_validated_at,
+        v: status?.token_expires_at, u: status?.fb_user_name,
       });
       const interval = setInterval(async () => {
         if (popup.closed || Date.now() - started > 5 * 60_000) {
@@ -110,7 +110,7 @@ export function PlatformFacebookCard() {
           const now = JSON.stringify({
             a: s?.ad_account_id,
             p: s?.pixel_id,
-            v: s?.last_validated_at,
+            v: s?.token_expires_at, u: s?.fb_user_name,
           });
           if (now !== prev) {
             setStatus(s);
