@@ -56,10 +56,14 @@ export function ResultsDashboard({
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [metrics, setMetrics] = useState<DailyMetric[]>([]);
   const [acquired, setAcquired] = useState<number>(0);
+  const [realLeads, setRealLeads] = useState<number>(0);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
+      const since = new Date(Date.now() - range * 86400_000).toISOString();
+      const sinceDate = since.slice(0, 10);
+
       const { data: camps } = await supabase
         .from("facebook_campaigns")
         .select("id,name,status,cities,distribuidora,daily_budget_cents,created_at")
@@ -69,30 +73,35 @@ export function ResultsDashboard({
       setCampaigns(list);
 
       if (list.length > 0) {
-        const since = new Date(Date.now() - range * 86400_000).toISOString().slice(0, 10);
         const { data: ms } = await supabase
           .from("facebook_metrics_daily")
           .select("campaign_id,date,spend_cents,impressions,clicks,leads,messaging_conversations_started,complete_registrations,customers_acquired")
           .in("campaign_id", list.map(c => c.id))
-          .gte("date", since)
+          .gte("date", sinceDate)
           .order("date", { ascending: true });
         setMetrics((ms || []) as DailyMetric[]);
-
-        // clientes atribuíveis a anúncios: SÓ leads WhatsApp (customer_origin) com lead_source de origem ads.
-        // Nunca contar clientes sincronizados do portal iGreen aqui.
-        const { count } = await supabase
-          .from("customers")
-          .select("id", { count: "exact", head: true })
-          .eq("consultant_id", consultantId)
-          .eq("status", "active")
-          .in("customer_origin", ["whatsapp_lead", "manual"])
-          .in("lead_source", ["meta_ads", "google_ads", "facebook_ads", "instagram_ads"])
-          .gte("created_at", since);
-        setAcquired(count || 0);
       } else {
         setMetrics([]);
-        setAcquired(0);
       }
+
+      // REAL leads: contatos que entraram no WhatsApp no período (independente do lead_source)
+      const { count: leadsCount } = await supabase
+        .from("customers")
+        .select("id", { count: "exact", head: true })
+        .eq("consultant_id", consultantId)
+        .eq("customer_origin", "whatsapp_lead")
+        .gte("created_at", since);
+      setRealLeads(leadsCount || 0);
+
+      // REAL aprovados: deals em stage 'aprovado' no período
+      const { count: approvedCount } = await supabase
+        .from("crm_deals")
+        .select("id", { count: "exact", head: true })
+        .eq("consultant_id", consultantId)
+        .eq("stage", "aprovado")
+        .gte("created_at", since);
+      setAcquired(approvedCount || 0);
+
       setLoading(false);
     })();
   }, [consultantId, range]);
@@ -126,9 +135,10 @@ export function ResultsDashboard({
     return t;
   }, [filteredMetrics]);
 
-  const cpl = totals.leads > 0 ? totals.spend / totals.leads / 100 : 0;
-  const cpa = totals.registrations > 0 ? totals.spend / totals.registrations / 100 : 0;
-  const convRate = totals.leads > 0 ? (totals.registrations / totals.leads) * 100 : 0;
+  // CPL/CPA usam os dados REAIS do CRM (não os reportados pela Meta, que dependem do Pixel)
+  const cpl = realLeads > 0 ? totals.spend / realLeads / 100 : 0;
+  const cpa = acquired > 0 ? totals.spend / acquired / 100 : 0;
+  const convRate = realLeads > 0 ? (acquired / realLeads) * 100 : 0;
   const roiMensal = (acquired * TICKET_MEDIO_MENSAL) - (totals.spend / 100);
 
   const chartData = useMemo(() => {
@@ -217,7 +227,7 @@ export function ResultsDashboard({
       <CostExplainerCard
         spendCents={totals.spend}
         clicks={totals.clicks}
-        leads={totals.leads}
+        leads={realLeads}
         approved={acquired}
       />
 
@@ -231,9 +241,9 @@ export function ResultsDashboard({
       {/* Saúde geral + insights da IA */}
       <HealthSummaryCard
         spend_cents={totals.spend}
-        leads={totals.leads}
+        leads={realLeads}
         impressions={totals.impressions}
-        registrations={totals.registrations}
+        registrations={acquired}
       />
       <InsightCards consultantId={consultantId} />
 
@@ -242,8 +252,8 @@ export function ResultsDashboard({
         <StatCard icon={<DollarSign className="w-4 h-4" />} label="Quanto gastou" metric="spend" value={`R$ ${(totals.spend / 100).toFixed(2)}`} accent />
         <StatCard icon={<Eye className="w-4 h-4" />} label="Pessoas que viram" metric="impressions" value={totals.impressions.toLocaleString("pt-BR")} />
         <StatCard icon={<Hand className="w-4 h-4" />} label="Tocaram no anúncio" metric="clicks" value={totals.clicks.toString()} />
-        <StatCard icon={<Users className="w-4 h-4" />} label="Conversas no zap" metric="leads" value={totals.leads.toString()} sub={`R$ ${cpl.toFixed(2)} cada`} />
-        <StatCard icon={<FileCheck2 className="w-4 h-4" />} label="Viraram cliente" metric="registrations" value={totals.registrations.toString()} sub={`${convRate.toFixed(1)}% das conversas`} />
+        <StatCard icon={<Users className="w-4 h-4" />} label="Leads no WhatsApp" metric="leads" value={realLeads.toString()} sub={cpl > 0 ? `R$ ${cpl.toFixed(2)} cada` : "—"} />
+        <StatCard icon={<FileCheck2 className="w-4 h-4" />} label="Viraram cliente" metric="registrations" value={acquired.toString()} sub={realLeads > 0 ? `${convRate.toFixed(1)}% dos leads` : "—"} />
         <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Lucro estimado/mês" value={`R$ ${roiMensal.toFixed(0)}`} accent={roiMensal >= 0} />
       </div>
 
