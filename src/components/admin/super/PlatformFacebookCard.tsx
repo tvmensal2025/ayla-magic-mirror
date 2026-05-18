@@ -77,24 +77,53 @@ export function PlatformFacebookCard() {
   }
 
 
-  async function handleConnect() {
-    setConnecting(true);
-    try {
-      const res = await startFacebookOAuth({ scope: "platform" });
-      window.location.href = res.url;
-    } catch (e: any) {
-      toast({ title: "Erro ao iniciar conexão", description: e?.message, variant: "destructive" });
-      setConnecting(false);
+  async function openOAuthInNewTab(mode: "connect" | "switch" | "rerequest") {
+    const popup = window.open("about:blank", "fb_oauth", "width=600,height=750");
+    if (!popup) {
+      toast({
+        title: "Pop-up bloqueado",
+        description: "Permita pop-ups deste site no navegador e tente de novo.",
+        variant: "destructive",
+      });
+      return;
     }
-  }
-
-  async function handleRerequest() {
     setConnecting(true);
     try {
-      const res = await startFacebookOAuth({ scope: "platform", mode: "rerequest" });
-      window.location.href = res.url;
+      const res = await startFacebookOAuth({ scope: "platform", mode });
+      popup.location.href = res.url;
+
+      const started = Date.now();
+      const prev = JSON.stringify({
+        a: status?.ad_account_id,
+        p: status?.pixel_id,
+        v: status?.last_validated_at,
+      });
+      const interval = setInterval(async () => {
+        if (popup.closed || Date.now() - started > 5 * 60_000) {
+          clearInterval(interval);
+          setConnecting(false);
+          await loadStatus();
+          return;
+        }
+        try {
+          const s = await getPlatformFacebookStatus();
+          const now = JSON.stringify({
+            a: s?.ad_account_id,
+            p: s?.pixel_id,
+            v: s?.last_validated_at,
+          });
+          if (now !== prev) {
+            setStatus(s);
+            if (s?.configured) loadBalance();
+            clearInterval(interval);
+            setConnecting(false);
+            try { popup.close(); } catch { /* ignore */ }
+          }
+        } catch { /* keep polling */ }
+      }, 3000);
     } catch (e: any) {
-      toast({ title: "Erro ao re-solicitar permissões", description: e?.message, variant: "destructive" });
+      try { popup.close(); } catch { /* ignore */ }
+      toast({ title: "Erro ao iniciar OAuth", description: e?.message, variant: "destructive" });
       setConnecting(false);
     }
   }
