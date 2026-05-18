@@ -576,9 +576,7 @@ Deno.serve(async (req) => {
     const stepToSend = updates.conversation_step || stepBefore;
     // GARANTIA: nunca deixar o cliente sem resposta. Se reply vazio E nenhum botão foi enviado dentro do handler,
     // injeta uma mensagem padrão de "continue" para evitar bot em silêncio.
-    const handlerSentInline = reply === "" && (Object.keys(updates).length > 0 || (updates as any).__inline_sent);
-    // Limpar marcador interno antes de persistir
-    delete (updates as any).__inline_sent;
+    const handlerSentInline = reply === "" && (Object.keys(updates).length > 0 || __inline_sent_flag);
     let finalReply = reply;
     if (!finalReply && !handlerSentInline) {
       // Sem resposta do bot E nada inline foi enviado.
