@@ -366,8 +366,9 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
       };
       const sparkViews = buildDailySpark(views);
       const sparkClicks = buildDailySpark(events.filter((e) => e.event_type === "click"));
-      const sparkLeads = buildDailySpark(allCustomers as Array<{ created_at: string }>);
-      const approvedRows = allCustomers.filter((c: any) => c.status === "approved" || c.status === "active");
+      const sparkLeads = buildDailySpark(leadCustomers as Array<{ created_at: string }>);
+      // "Aprovados" KPI = carteira iGreen sincronizada com status ativo/aprovado (não leads)
+      const approvedRows = walletCustomers.filter((c: any) => c.status === "approved" || c.status === "active");
       const sparkApproved = buildDailySpark(approvedRows as Array<{ created_at: string }>);
       const curApproved = approvedRows.filter((c: any) => new Date(c.created_at).getTime() >= curStart).length;
       const prevApproved = approvedRows.filter((c: any) => {
