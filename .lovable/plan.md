@@ -1,46 +1,65 @@
-## Problema — duplicação de mensagem e botão
+# Auditoria — Conversas do Bot (últimas 24h)
 
-Quando a Camila (fluxo custom) avança para um passo de **captura** (`capture_conta`, `capture_documento`, `confirm_phone`) ou de **confirmação**, dois prompts são enviados ao cliente: o texto que VOCÊ escreveu no editor, seguido do prompt hardcoded antigo. Visível nos prints:
+Analisei 3 conversas reais ativas (Oiii, Franciele, Lucas) + a estrutura do fluxo ativo (`bot_flow_steps`) + FAQ (`bot_flow_qa`). Há problemas reais que estão afundando a taxa de conversão.
 
-- IMG-WA0198: "me manda foto da conta de luz" (custom) + "me manda uma foto (ou PDF) da sua conta..." (legacy)
-- IMG-WA0203: "me manda foto da frente do documento" (custom) + "Me envie a foto da frente do seu RG ou CNH..." (legacy)
-- IMG-WA0200: "Está tudo correto?" + "Os dados estão corretos?" (duas confirmações consecutivas)
+## Problemas encontrados
 
-## Causa
+### 1. FAQ vazia — perguntas do lead caem no vazio
+A tabela `bot_flow_qa` tem intents cadastradas ("Como funciona", "Quanto custa", "Tem fidelidade?" etc.) mas **`text_response` é NULL** em quase todas. Resultado:
+- Franciele perguntou *"O que é isso imposto?"*, *"Não tem custo mesmo?"*, *"Não consigo ver vídeo"* → bot ignorou e seguiu empurrando o roteiro.
+- Só "Boas-vindas" tem resposta preenchida.
 
-No `bot-flow.ts`, o resolver custom (linhas 1937-1970) dispara o conteúdo do passo `capture_*` via `dispatchStepFromFlow` e seta `conversation_step` para o legacy correspondente (`aguardando_conta`, `aguardando_doc_auto`, `ask_phone_confirm`). Quando o cliente responde com texto, o `switch` legacy entra no case e dispara o prompt padrão hardcoded (linhas 2155, 365, 378-379).
+### 2. FAQ duplicado por consultor
+Há **12 cópias** idênticas de cada intent (uma por flow ativo). Quando o admin edita uma, as outras ficam desatualizadas. Vira ruído operacional.
 
-## Solução
+### 3. Fluxo avança sem capturar resposta
+Step 4 ("Qual o valor da conta") tem `capture electricity_bill_value` mas `fallback.mode = goto`. Quando Franciele respondeu *"Queria saber um pouco mais sobre essa questão"*, o bot:
+- respondeu *"Pode me responder, por favor? 🙂"* (genérico, sem entender a dúvida);
+- depois avançou mesmo assim, ignorando "100/150" e a pergunta sobre imposto.
 
-Adicionar uma flag transitória `custom_prompt_emitted_at` (timestamp em memória de execução / passada via `updates`) que sinaliza ao switch legacy: "o passo custom já mandou a pergunta, não re-pergunte; apenas trate a resposta".
+Devia ser `fallback: repeat` + roteamento por intenção (dúvida → FAQ; valor → capturar).
 
-### Implementação concreta
+### 4. Pergunta sem ramo de negação
+Step 6 ("posso estar explicando abaixo?") tem só `trigger_intent: afirmacao` (ok/sim/pode/claro/manda/beleza). Se o lead responde "não", "ainda não", "espera" → fica travado em `repeat` e o bot insiste.
 
-1. **No resolver custom (linha ~1970)** — ao retornar com `nextStepValue` apontando para um legacy de captura/confirmação, marcar no `updates` um campo:
-   ```ts
-   updates: { conversation_step: nextStepValue, __custom_prompted: true, __inline_sent: true }
-   ```
+### 5. Steps "fantasma" sendo pulados
+Steps 5 (`80188e5f` "Valor da conta") e 6 (`bdc7ebb3`) têm `message_text` vazio/quase vazio. Lucas pulou direto de pos 4 → pos 7 sem passar pelo "posso explicar?". O resolver custom está saltando passos com texto vazio mesmo quando eles têm propósito (gate/transição).
 
-2. **No handler chamador (whapi-webhook/index.ts)** — quando `__custom_prompted=true`, salvar `last_custom_prompt_at = now()` no customer.
+### 6. Texto com erro no step de explicação
+Step 7 (`a71ba814` "Como funciona"): *"É simples, mas vou mandar um audio e um  para ficar mais facil de entender"* — falta a palavra ("um vídeo"/"uma imagem"), espaço duplo, sem pontuação. É a primeira impressão técnica que o lead recebe.
 
-3. **Nos cases legacy** `aguardando_conta` (linha 2124), `aguardando_doc_auto`, `ask_phone_confirm`, `confirmando_dados_conta`, `confirmando_dados_doc`:
-   - Se `customer.last_custom_prompt_at` foi nos últimos 5 minutos AND o cliente NÃO enviou arquivo/resposta válida, **não re-prompt** — apenas retorne `reply: ""` (silêncio, espera).
-   - Se enviou arquivo válido / "sim" / "não" → processa normalmente (OCR, avança, etc).
+### 7. Sem debounce/agrupamento de inbound
+Franciele mandou 4 mensagens em ~80s; o bot reagiu à 1ª e ignorou as outras 3. O processamento é por mensagem individual, sem aguardar fim da rajada.
 
-4. **Confirmação dupla** ("Está tudo correto?" + "Os dados estão corretos?") — investigar onde o segundo confirm dispara. Provavelmente em `post-confirm-conta` (linha 2395) que avança para próximo passo e esse próximo passo é outro confirm. Remover o confirm hardcoded quando há fluxo custom ativo.
+### 8. Bot não detecta objeção real ("Não consigo ver vídeo", "Não tem custo mesmo?")
+Não há regras em `bot_flow_rules` cobrindo esses casos comuns nem handoff para humano configurado.
 
-### Migration de schema
+---
 
-Adicionar coluna `last_custom_prompt_at TIMESTAMPTZ` na tabela `customers`.
+## Plano de correção (priorizado)
 
-## Arquivos a editar
+### Fase 1 — Quick wins (impacto alto, baixo risco)
+1. **Preencher `text_response` de todas as intents de FAQ** (Como funciona, Quanto custa, Tem fidelidade, Tem multa, Como cancelar, Não consigo ver vídeo, etc.). Entregar 1 resposta canônica por intent.
+2. **Consolidar FAQ duplicado**: manter 1 conjunto global (consultant_id null) ou de-duplicar para o flow ativo principal. Reduz manutenção e divergência.
+3. **Corrigir texto do step "Como funciona"** ("É simples, vou te mandar um áudio e uma imagem rapidinha pra ficar mais fácil 👇").
+4. **Adicionar ramo de negação** no step 6 → vai para step de "quebra de objeção" em vez de repetir.
 
-- `supabase/migrations/<nova>.sql` — ADD COLUMN `last_custom_prompt_at`
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — marcar flag + guards nos 5 cases legacy
-- `supabase/functions/whapi-webhook/index.ts` — persistir `last_custom_prompt_at` quando flag presente
+### Fase 2 — Lógica de fluxo
+5. **Mudar fallback do step 4 (valor da conta) para `repeat`** + adicionar transição por intent (`pergunta`/`duvida` → roteia ao FAQ, mantém step).
+6. **Não pular steps com `message_text` vazio** se eles têm `transitions` por intent (servem de gate). Ajustar resolver em `bot-flow.ts` para tratar texto vazio como "não emite, mas aguarda input".
+7. **Agrupar inbound em rajada** (debounce 8–12s): juntar mensagens consecutivas do mesmo lead antes de processar — usa `whatsapp_message_buffer` que já existe.
 
-## Risco
+### Fase 3 — Cobertura de objeções
+8. **Criar `bot_flow_rules` globais** para intents recorrentes: "não tem custo", "não consigo ver vídeo/áudio", "vou pensar", "depois te falo", "é golpe?", "preciso instalar?". Cada uma com resposta + comportamento (`stay` ou `goto`).
+9. **Handoff automático** quando lead manda 2+ perguntas seguidas sem o bot conseguir responder → pausa bot + `notifyHandoff` ao consultor (mecanismo já existe).
 
-Baixo. O guard só silencia o prompt legacy quando o passo custom acabou de perguntar. Lead que não responder em 5 min volta a receber prompts normais (fallback de stuck-recovery).
+### Fase 4 — Observabilidade
+10. **Dashboard de "perguntas não respondidas"**: agregar inbound em `aguardando_*` que não bateu em nenhuma rule/FAQ, ordenado por frequência, para alimentar Fase 3 continuamente.
 
-Posso aplicar?
+---
+
+## O que eu preciso de você para começar
+
+Posso seguir direto com **Fase 1 + 4** (correções de conteúdo + texto + ramo de negação) sem risco, ou prefere que eu mostre antes as respostas que vou escrever em cada intent de FAQ pra você validar o tom?
+
+Também: quer que eu **consolide o FAQ duplicado** em um único conjunto global (recomendado) ou mantenho um por consultor?
