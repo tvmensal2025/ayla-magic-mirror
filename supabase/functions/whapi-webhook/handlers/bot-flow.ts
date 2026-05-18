@@ -2051,12 +2051,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             const _loadStepById = async (id: string) => {
               const { data } = await supabase
                 .from("bot_flow_steps")
-                .select("id, step_key, step_type, position, transitions")
+                .select("id, step_key, step_type, position, transitions, message_text")
                 .eq("flow_id", flow.id).eq("id", id).eq("is_active", true).maybeSingle();
               return data ? {
                 id: String(data.id), step_key: String(data.step_key),
                 step_type: String(data.step_type), position: Number(data.position),
                 transitions: Array.isArray((data as any).transitions) ? (data as any).transitions : [],
+                message_text: String((data as any).message_text || ""),
               } : null;
             };
             const _resolveNextFromTransitions = async (txns: any[], msg: string) => {
