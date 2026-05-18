@@ -794,8 +794,15 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   if (currentStep && currentStepRaw && currentStep.id !== currentStepRaw.id) {
     stepKey = currentStep.id;
   }
-  // Registra a pergunta do passo atual para o fallback de _finalize.
-  _setTurnStepQuestion(currentStep?.message_text || "");
+  // Registra a pergunta do passo atual + vars para o fallback de _finalize.
+  const _turnVars = {
+    nome: ctx.customer.name,
+    representante: ctx.nomeRepresentante,
+    valor_conta: (ctx.customer as any).electricity_bill_value,
+    telefone: ctx.customer.phone_whatsapp,
+    cpf: (ctx.customer as any).cpf,
+  };
+  _setTurnStepQuestion(currentStep?.message_text || "", _turnVars);
   if (!currentStep) {
     // Unknown/legacy step → restart no primeiro step ativo.
     // REGRA DE OURO: SEMPRE seguir o /admin/fluxos. NUNCA inventar texto.
