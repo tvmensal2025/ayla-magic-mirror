@@ -626,10 +626,12 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
     }
   }
 
-  async function handleSaveAsTemplate() {
+  async function handleSaveAsTemplate(meta: { title: string; description: string }) {
     if (!headline.trim() || !primaryText.trim())
       return toast({ title: "Preencha headline e texto antes", variant: "destructive" });
-    if (totalFiles === 0) return toast({ title: "Adicione ao menos 1 imagem", variant: "destructive" });
+    if (totalFiles === 0 && pickedLibrary.length === 0)
+      return toast({ title: "Adicione ao menos 1 imagem", variant: "destructive" });
+    if (!meta.title.trim()) return toast({ title: "Informe um nome para o template", variant: "destructive" });
     setSavingTemplate(true);
     try {
       const tagged: { file: AdFile; format: AdFormat }[] = [
@@ -637,10 +639,16 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
         ...filesByFormat.vertical.map((f) => ({ file: f, format: "vertical" as const })),
         ...filesByFormat.story.map((f) => ({ file: f, format: "story" as const })),
       ].filter((x) => isFileValidAny(x.file));
-      const photoUrls = await uploadAdPhotos(consultantId, tagged.map((t) => t.file.file));
-      const photos = photoUrls.map((url, i) => ({ url, format: tagged[i].format }));
+      const photoUrls = tagged.length
+        ? await uploadAdPhotos(consultantId, tagged.map((t) => t.file.file), { formats: tagged.map((t) => t.format) })
+        : [];
+      const photos = [
+        ...photoUrls.map((url, i) => ({ url, format: tagged[i].format })),
+        ...pickedLibrary.map((it) => ({ url: it.url, format: it.format as AdFormat })),
+      ];
       await upsertAdTemplate({
-        title: `${distribuidoraPrimary || "Multi"} — ${headline.slice(0, 40)}`,
+        title: meta.title.trim(),
+        description: meta.description.trim() || null,
         photos,
         headline,
         primary_text: primaryText,
@@ -655,6 +663,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
         title: "Template salvo ✓",
         description: isSuperAdmin ? "Publicado para todos os consultores." : "Salvo como rascunho pessoal.",
       });
+      setSaveTplOpen(false);
     } catch (e: any) {
       toast({ title: "Erro ao salvar template", description: e?.message || "Tente novamente", variant: "destructive" });
     } finally {
