@@ -3735,8 +3735,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       await sendText(remoteJid,
         "✅ *Todos os dados coletados com sucesso!* 🎉\n\n" +
         "⏳ Estamos processando seu cadastro no portal...\n\n" +
-        "📱 Em breve você receberá um *código de verificação no WhatsApp*. Quando receber, *digite aqui*!\n\n" +
-        "Obrigado pela confiança! ☀️🌱"
+        "📱 Em breve você receberá um *código de verificação no WhatsApp*. Quando receber, *digite aqui*!"
       );
 
       console.log(`✅ Lead completo: ${merged.name} (${merged.id}) - disparando worker-portal`);

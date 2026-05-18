@@ -147,7 +147,7 @@ Deno.serve(async (req) => {
 
       case "registration_complete": {
         updates.status = "registered_igreen";
-        updates.conversation_step = "complete";
+        updates.conversation_step = "cadastro_em_analise";
         if (body.igreen_code) updates.igreen_code = body.igreen_code;
         if (body.igreen_link) updates.igreen_link = body.igreen_link;
         await supabase.from("customers").update(updates).eq("id", customer_id);

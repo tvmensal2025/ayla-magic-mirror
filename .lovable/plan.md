@@ -1,61 +1,85 @@
-## Ajustes finos de copy + botão no fluxo WhatsApp
+## Bug: bot re-envia áudio de boas-vindas após o cadastro estar finalizado
 
-Apenas alterações em `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (strings + 1 chamada de envio). Sem mudança de lógica.
+### Causa raiz (confirmada no código)
 
-### 1. `ask_email` — aceitar qualquer provedor
+Em `supabase/functions/whapi-webhook/index.ts:253-298`:
 
-Hoje a copy reforça Gmail e dá impressão de que só Gmail serve. Ajustar:
+```ts
+const statusFinalizados = [
+  "data_complete", "portal_submitting", "awaiting_otp", "validating_otp",
+  "awaiting_manual_submit", "portal_submitted", "registered_igreen",
+  "awaiting_signature", "complete",
+];
 
-- **Linha 355** (`getReplyForStep` → `ask_email`):
-  - Antes: `qual é o seu *e-mail*?`
-  - Depois: `me passa seu *e-mail* (pode ser de qualquer provedor — Gmail, Outlook, iCloud, Yahoo, etc.) 📧`
-- **Linha 3286** (fallback "não tenho"): remover a indicação exclusiva de Gmail; trocar por algo neutro tipo `pode criar um agora em qualquer serviço (Gmail, Outlook, iCloud...) — leva 1 minuto`.
-- **Linhas 3291, 3295, 3306** (mensagens de erro): manter exemplo, mas adicionar texto deixando claro "qualquer provedor serve" e variar exemplo (`maria@outlook.com`, `joao@hotmail.com`).
+// Busca customer EXCLUINDO esses status
+let { data: activeRecords } = await supabase
+  .from("customers")
+  .select("*")
+  .eq("phone_whatsapp", phone)
+  .eq("consultant_id", superAdminConsultantId)
+  .not("status", "in", `(${statusFinalizados.join(",")})`)
+  ...
+let customer = activeRecords?.[0] || null;
+...
+if (!customer) {
+  // 🚨 cria customer NOVO com conversation_step: "welcome"
+}
+```
 
-Também atualizar o texto inicial em `conversational/index.ts:1263` (`📧 Qual seu *e-mail*?`) para a mesma copy nova.
+Quando o `worker-callback` marca `status=registered_igreen` (ou `awaiting_signature`, `awaiting_otp`, etc.) e o lead manda qualquer mensagem depois:
 
-### 2. Aviso de nome — só quando há divergência real entre conta e documento
+1. A query exclui o customer (status está na lista de "finalizados").
+2. `customer = null` → cai no `if (!customer)` e **cria um customer NOVO** com `conversation_step: "welcome"`.
+3. O welcome dispara o áudio inicial → exatamente o bug que a Fran viu.
 
-Hoje a tela de confirmação pós-OCR do documento mostra os dados extraídos sem contexto. O aviso de "tem que ser titular da conta" **só deve aparecer quando há mismatch** entre nome da conta de luz e nome do documento (já existe `name_mismatch_flag`).
+Isso afeta TODOS os leads em qualquer estado pós-portal: `awaiting_otp`, `awaiting_signature`, `registered_igreen`, `portal_submitting`, `complete`, etc.
 
-- **Linha 2791** (`mismatchWarn`): trocar a copy atual por uma versão mais bonita/clara, mantendo a condição `updates.name_mismatch_flag`:
-  ```
-  ⚠️ *Atenção: notei uma diferença de nome*
+### Correção
 
-  📄 Conta de luz: *{bill_holder}*
-  🪪 Documento:   *{doc_nome}*
+#### 1. `whapi-webhook/index.ts` — nunca recriar customer com status pós-cadastro
 
-  Para o cadastro funcionar, o documento precisa ser do *mesmo titular da conta de luz*. 
+Trocar a lógica de busca + criação:
 
+- **Buscar sempre o customer mais recente desse telefone** (sem filtrar por status). Se existir, usa ele.
+- Só criar customer novo se realmente não existir nenhum registro para o telefone.
+- Se o customer encontrado estiver em estado pós-finalização (`awaiting_otp`, `validating_otp`, `awaiting_signature`, `awaiting_facial`, `portal_submitting`, `portal_submitted`, `registered_igreen`, `complete`, `data_complete`, ou step `complete`/`cadastro_em_analise`/`aguardando_otp`/`aguardando_assinatura`/`aguardando_facial`), **mantém o step atual** — não reseta para `welcome`. O bot-flow já tem handlers polidos para cada um deles (linhas 3467, 3472, 3510, 3528, 3536) que apenas respondem com status/aviso sem disparar mídia.
+- Manter o caso `automation_failed` (já existe — esse pode resetar para `welcome` porque é falha técnica que precisa recomeçar).
+- Manter `RESUMABLE_STATUSES` (`abandoned`, `stuck_finalizar`, `stuck_contact`, `email_pendente_revisao`) — esses são leads travados que devem retomar.
 
-  ```
-- **Não adicionar nenhum aviso quando os nomes batem** (já é o comportamento atual, manter).
+Resultado: lead pós-portal manda mensagem → cai no handler de `aguardando_otp`/`aguardando_assinatura`/`cadastro_em_analise`/`complete`, que responde com texto educado e sem mídia.
 
-### 3. Finalizar cadastro — usar botão de verdade, não "digite 1"
+#### 2. `worker-callback/index.ts:148-159` — alinhar com o handler existente
 
-Existem dois pontos em que o texto pede para "digitar 1":
+Hoje, em `registration_complete`, o worker:
+- Seta `status = "registered_igreen"`, `conversation_step = "complete"`.
+- Envia direto via WhatsApp uma mensagem "🎉 Parabéns..."
 
-**3a. `FINAL_FALLBACK` (linha 2423)** — usado pelo `post-confirm-conta` quando o passo de finalização não tem dispatch:
+Trocar `conversation_step` por `cadastro_em_analise` (que tem handler educado no bot-flow para mensagens subsequentes) — mantém a mensagem de parabéns enviada uma única vez no callback.
 
-- Hoje: `✅ *Todos os dados foram preenchidos!*\n\n1️⃣ Finalizar\n\n_Digite *1* ou *FINALIZAR* para concluir:_`
-- Trocar `sendFallback(FINAL_FALLBACK, ...)` por um envio com botão, igual ao `ask_finalizar`:
-  ```ts
-  await sendOptions(remoteJid, "✅ *Tudo pronto!*\n\nSeus dados foram preenchidos. Vamos finalizar seu cadastro no portal iGreen?", [
-    { id: "btn_finalizar", title: "✅ Finalizar cadastro" },
-  ]);
-  ```
-  E gravar o outbound em `conversations` (manter o pattern do `sendFallback`). Definir o próximo step como `ask_finalizar` (não `finalizar_cadastro` direto) para que o clique no botão seja capturado pelo handler existente na linha 3443.
+#### 3. Remover "Obrigado pela confiança! ☀️🌱"
 
-**3b. Fallback de erro em `ask_finalizar` (linha 3453)** — usado quando `sendOptions` falha:
+Em `bot-flow.ts:3739`, apagar a última linha do bloco `await sendText(remoteJid, ...)`:
 
-- Hoje: `Digite *FINALIZAR* ou *1* para confirmar o cadastro:`
-- Trocar para: `Toque no botão *✅ Finalizar* acima — ou responda *FINALIZAR* para concluir.` (remover o "1", deixar mais natural já que botão é a via primária).
+```ts
+await sendText(remoteJid,
+  "✅ *Todos os dados coletados com sucesso!* 🎉\n\n" +
+  "⏳ Estamos processando seu cadastro no portal...\n\n" +
+  "📱 Em breve você receberá um *código de verificação no WhatsApp*. Quando receber, *digite aqui*!"
+);
+```
+
+(Apenas remoção da linha — sem mexer em mais nada.)
+
+### Verificação
+
+Após o deploy, simular o caso: setar manualmente um customer de teste com `status=registered_igreen` e `conversation_step=complete`/`cadastro_em_analise`, mandar mensagem pelo WhatsApp e confirmar nos logs do `whapi-webhook` que:
+- Nenhum customer novo é inserido.
+- A resposta vem do handler `cadastro_em_analise` (texto educado, sem áudio).
 
 ### Arquivos afetados
 
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (linhas 355, 2422-2446, 2791, 3286, 3291, 3295, 3306, 3453)
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (linha 1263)
+- `supabase/functions/whapi-webhook/index.ts` (linhas 253-328 — refator da lógica find-or-create)
+- `supabase/functions/worker-callback/index.ts` (linha 150 — trocar step para `cadastro_em_analise`)
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (linha 3739 — remover "Obrigado pela confiança")
 
-### Deploy
-
-Após a aprovação: deploy de `whapi-webhook`.
+Deploy: `whapi-webhook` e `worker-callback`.
