@@ -251,37 +251,56 @@ Deno.serve(async (req) => {
     }
 
     // ─── Find or create customer ────────────────────────────────────
-    const statusFinalizados = [
-      "data_complete", "portal_submitting", "awaiting_otp", "validating_otp",
-      "awaiting_manual_submit", "portal_submitted", "registered_igreen",
-      "awaiting_signature", "complete",
-    ];
-    // Comparações com conversation_step usam stripPrefix() para tolerar valores legacy + namespaced.
-    const stepsFinalizados = ["complete", "portal_submitting"];
-
+    // 🚨 NUNCA filtrar a busca por status — se filtrarmos, leads em
+    // awaiting_otp/awaiting_signature/registered_igreen/complete ficam
+    // "invisíveis" e o código cria um customer NOVO com step=welcome,
+    // disparando o áudio inicial de novo. Sempre buscar o registro mais
+    // recente do telefone e decidir o que fazer baseado no status.
     let { data: activeRecords } = await supabase
       .from("customers")
       .select("*")
       .eq("phone_whatsapp", phone)
       .eq("consultant_id", superAdminConsultantId)
-      .not("status", "in", `(${statusFinalizados.join(",")})`)
       .order("created_at", { ascending: false })
       .limit(1);
 
     let customer = activeRecords?.[0] || null;
 
+    // Status pós-cadastro — manter como está; handlers de bot-flow
+    // (aguardando_otp / aguardando_assinatura / cadastro_em_analise / complete)
+    // já respondem educadamente sem disparar mídia.
+    const POST_CADASTRO_STATUSES = new Set([
+      "data_complete", "portal_submitting", "awaiting_otp", "validating_otp",
+      "awaiting_manual_submit", "portal_submitted", "registered_igreen",
+      "awaiting_signature", "awaiting_facial", "complete",
+      "cadastro_concluido", "active", "approved",
+    ]);
     const RESUMABLE_STATUSES = new Set(["abandoned", "stuck_finalizar", "stuck_contact", "email_pendente_revisao"]);
+
     if (customer && customer.status === "automation_failed") {
+      // Falha técnica — pode recomeçar do welcome.
       await supabase.from("customers").update({ conversation_step: "welcome", status: "pending", error_message: null }).eq("id", customer.id);
       customer.conversation_step = "welcome";
       customer.status = "pending";
     } else if (customer && RESUMABLE_STATUSES.has(customer.status)) {
       await supabase.from("customers").update({ status: "pending", error_message: null, rescue_attempts: 0 }).eq("id", customer.id);
       customer.status = "pending";
-    }
-
-    if (customer && stepsFinalizados.includes(stripPrefix(customer.conversation_step || ""))) {
-      customer = null;
+    } else if (customer && POST_CADASTRO_STATUSES.has(customer.status)) {
+      // ✅ NÃO resetar. Garante que o step esteja em algum handler educado.
+      const curStep = stripPrefix(customer.conversation_step || "");
+      const safeSteps = new Set([
+        "aguardando_otp", "validando_otp", "aguardando_assinatura",
+        "aguardando_facial", "cadastro_em_analise", "complete",
+        "portal_submitting",
+      ]);
+      if (!safeSteps.has(curStep)) {
+        // Step legacy/desconhecido em customer já finalizado → coloca em cadastro_em_analise.
+        await supabase.from("customers")
+          .update({ conversation_step: "cadastro_em_analise" })
+          .eq("id", customer.id);
+        customer.conversation_step = "cadastro_em_analise";
+      }
+      console.log(`[find-customer] customer ${customer.id} pós-cadastro (status=${customer.status}, step=${customer.conversation_step}) — mantendo, sem reset`);
     }
 
     if (!customer) {
@@ -306,11 +325,7 @@ Deno.serve(async (req) => {
           .limit(1)
           .maybeSingle();
         if (fallback) {
-          if (stepsFinalizados.includes(stripPrefix(fallback.conversation_step || "")) || statusFinalizados.includes(fallback.status)) {
-            await supabase.from("customers").update({ conversation_step: "welcome", status: "pending" }).eq("id", fallback.id);
-            fallback.conversation_step = "welcome";
-            fallback.status = "pending";
-          }
+          // Mesma regra do bloco principal: NÃO resetar leads pós-cadastro para welcome.
           customer = fallback;
         } else {
           return new Response(JSON.stringify({ error: "Failed to create customer" }), {
