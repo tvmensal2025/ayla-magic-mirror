@@ -21,6 +21,8 @@ import {
 import { handleConnectionUpdate } from "./handlers/connection.ts";
 import { tryInterceptOtp } from "./handlers/otp-intercept.ts";
 import { runBotFlow } from "./handlers/bot-flow.ts";
+import { runConversationalFlow, CADASTRO_STEPS } from "./handlers/conversational/index.ts";
+import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
 
@@ -86,7 +88,7 @@ Deno.serve(async (req) => {
 
     const { data: consultantData } = await supabase
       .from("consultants")
-      .select("id, name, igreen_id")
+      .select("id, name, igreen_id, conversational_flow_enabled")
       .eq("id", instanceData.consultant_id)
       .single();
 
@@ -238,6 +240,27 @@ Deno.serve(async (req) => {
           name: newCustomer.name,
           phone_whatsapp: newCustomer.phone_whatsapp,
         }).catch((e) => console.warn("[notify-new-lead] falhou:", (e as Error).message));
+      }
+    } else {
+      // Reentrada: cliente já existe mas voltou após >24h sem inbound → notifica novamente.
+      // O helper tem dedup interno de 60s.
+      try {
+        const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+        const { count } = await supabase
+          .from("conversations")
+          .select("id", { count: "exact", head: true })
+          .eq("customer_id", customer.id)
+          .eq("message_direction", "inbound")
+          .gte("created_at", since);
+        if ((count ?? 0) === 0) {
+          notifyNewLead(instanceData.consultant_id, {
+            id: customer.id,
+            name: (customer as any).name,
+            phone_whatsapp: (customer as any).phone_whatsapp,
+          }).catch((e) => console.warn("[notify-new-lead reentry] falhou:", (e as Error).message));
+        }
+      } catch (e) {
+        console.warn("[notify-new-lead reentry] check falhou:", (e as Error).message);
       }
     }
 
@@ -404,22 +427,73 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── 8) Run bot flow ───────────────────────────────────────────────
-    const stepBefore = customer.conversation_step || "welcome";
+    // ─── 8) Run bot flow — engine routing (sys vs flow) ───────────────
+    // Roteamento por prefixo: "flow:<id>" → conversational; nome cru → bot-flow determinístico.
+    // Compat reversa: UUIDs/"passo_xxx" sem prefixo são tratados como flow.
+    const rawStep = customer.conversation_step || null;
+    const stepBefore = stripPrefix(rawStep);
+    (customer as any).conversation_step = stepBefore;
+
     let reply = "";
     let updates: Record<string, any> = {};
+    let engineUsed: "sys" | "flow" = "sys";
     try {
-      const result = await runBotFlow({
-        supabase, sender, customer, consultorId, nomeRepresentante,
-        remoteJid, phone, messageText, buttonId, isFile, isButton,
-        hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
-        fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
-      });
+      const customerOverride = (customer as any).conversational_flow_enabled;
+      const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
+
+      let engine = routeEngine(rawStep);
+      if (engine === "flow" && (!consultantFlag || customerOverride === false)) {
+        engine = "sys";
+        (customer as any).conversation_step = "welcome";
+      }
+
+      // 🚀 FONTE ÚNICA DE VERDADE: Fluxo da Camila (DB) controla TODO step
+      // que não pertence ao pipeline de cadastro. Se houver fluxo ativo + steps,
+      // força engine=flow mesmo que o step legacy esteja setado.
+      const currentStepRaw = stripPrefix((customer as any).conversation_step || "");
+      const isCadastroStep = CADASTRO_STEPS.has(currentStepRaw);
+      if (engine === "sys" && !isCadastroStep && consultantFlag && customerOverride !== false) {
+        try {
+          const { data: activeFlow } = await supabase
+            .from("bot_flows")
+            .select("id")
+            .eq("consultant_id", instanceData.consultant_id)
+            .eq("is_active", true)
+            .maybeSingle();
+          if ((activeFlow as any)?.id) {
+            const { count } = await supabase
+              .from("bot_flow_steps")
+              .select("id", { count: "exact", head: true })
+              .eq("flow_id", (activeFlow as any).id)
+              .eq("is_active", true);
+            if ((count || 0) > 0) {
+              engine = "flow";
+              (customer as any).conversation_step = null;
+              console.log(`🚀 [router] forçado para flow (consultor=${instanceData.consultant_id}, step legado="${stepBefore}")`);
+            }
+          }
+        } catch (e) {
+          console.warn("[router] falha ao verificar flow ativo:", (e as any)?.message);
+        }
+      }
+      engineUsed = engine;
+
+      const result = engine === "flow"
+        ? await runConversationalFlow({
+            supabase, sender, customer, consultorId, nomeRepresentante,
+            remoteJid, phone, messageText, buttonId, isFile, isButton,
+            hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
+            fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
+          })
+        : await runBotFlow({
+            supabase, sender, customer, consultorId, nomeRepresentante,
+            remoteJid, phone, messageText, buttonId, isFile, isButton,
+            hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
+            fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
+          });
       reply = result.reply;
       updates = result.updates;
     } catch (botErr: any) {
-      // GARANTIA FINAL: Se o bot quebrar (exceção), o cliente NUNCA fica sem resposta.
-      // Logamos o erro, registramos no lead, e mandamos uma mensagem amigável pedindo pra repetir.
       console.error(`💥 [bot-flow crash] step=${stepBefore} customer=${customer.id}:`, botErr);
       captureError(botErr, {
         tags: { function: "evolution-webhook", kind: "bot_flow_crash" },
@@ -427,7 +501,6 @@ Deno.serve(async (req) => {
       });
       reply = "🤖 Tive um probleminha técnico ao processar sua mensagem. Pode me enviar novamente, por favor? Se continuar, me responda *MENU* para recomeçarmos juntos. 🙏";
       updates = {};
-      // Garante que o lead não fica preso em status confuso
       try {
         await supabase
           .from("customers")
@@ -437,6 +510,12 @@ Deno.serve(async (req) => {
           })
           .eq("id", customer.id);
       } catch (_) { /* não bloquear o reply ao cliente */ }
+    }
+
+    // Normaliza conversation_step de saída — flow ganha prefixo, sys vai cru.
+    if (updates.conversation_step) {
+      const prefixed = normalizeOutgoing(String(updates.conversation_step), engineUsed);
+      if (prefixed) updates.conversation_step = prefixed;
     }
 
     // ─── 9) Persist updates ────────────────────────────────────────────
@@ -467,9 +546,12 @@ Deno.serve(async (req) => {
       (updates as any).rescue_attempts = 0;
       console.log(`♻️ [auto-resume] ${customer.id}: status "${customer.status}" → "pending" (cliente respondeu, bot avançando)`);
     }
+    // Strip TODAS as chaves internas "__*" antes do update — previne erros de coluna inexistente.
+    const __inline_sent_flag = (updates as any).__inline_sent === true;
+    for (const k of Object.keys(updates)) {
+      if (k.startsWith("__")) delete (updates as any)[k];
+    }
     if (Object.keys(updates).length > 0) {
-      // Limpar marcador interno ANTES de persistir no banco
-      delete (updates as any).__inline_sent;
       console.log(`📝 Salvando updates para ${customer.id}:`, JSON.stringify(updates).substring(0, 500));
       const { error: updateError } = await supabase.from("customers").update(updates).eq("id", customer.id).select();
       if (updateError) {
@@ -479,13 +561,13 @@ Deno.serve(async (req) => {
           extra: { customer_id: customer.id, updates_keys: Object.keys(updates) },
         });
       }
-      if (updates.conversation_step && updates.conversation_step !== stepBefore) {
+      if (updates.conversation_step && stripPrefix(updates.conversation_step) !== stepBefore) {
         await logStepTransition(supabase, {
           customer_id: customer.id,
           consultant_id: instanceData.consultant_id,
           phone,
           from_step: stepBefore,
-          to_step: updates.conversation_step,
+          to_step: stripPrefix(updates.conversation_step),
         });
       }
     }
@@ -494,9 +576,7 @@ Deno.serve(async (req) => {
     const stepToSend = updates.conversation_step || stepBefore;
     // GARANTIA: nunca deixar o cliente sem resposta. Se reply vazio E nenhum botão foi enviado dentro do handler,
     // injeta uma mensagem padrão de "continue" para evitar bot em silêncio.
-    const handlerSentInline = reply === "" && (Object.keys(updates).length > 0 || (updates as any).__inline_sent);
-    // Limpar marcador interno antes de persistir
-    delete (updates as any).__inline_sent;
+    const handlerSentInline = reply === "" && (Object.keys(updates).length > 0 || __inline_sent_flag);
     let finalReply = reply;
     if (!finalReply && !handlerSentInline) {
       // Sem resposta do bot E nada inline foi enviado.

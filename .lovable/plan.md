@@ -1,66 +1,85 @@
-# Separação total: Leads × Clientes iGreen × Rede
+## Diagnóstico — Evolution NÃO está 100%
 
-## Problema
-Hoje há vazamento entre 3 universos que precisam ser estanques:
+Auditei a parte de WhatsApp ponta a ponta (webhook, bot, frontend) comparando com o caminho Whapi (super-admin). Encontrei lacunas críticas. Como está hoje, **um consultor novo conecta a instância e o QR aparece, mas o bot vai engasgar em produção** porque o webhook do Evolution é uma versão antiga/reduzida do bot, e o painel de conversas só lê do Whapi.
 
-1. **Leads WhatsApp** — chegam pelo anúncio / link da LP, conversam com o bot. (`customers.customer_origin = 'whatsapp_lead' | 'manual'`)
-2. **Clientes iGreen** — vêm da sincronização diária do portal/escritório virtual. Já são clientes, não leads. (`customer_origin = 'igreen_sync'`)
-3. **Rede / Licenciados** — vêm da sincronização da rede (`network_members`). São clientes da rede, não leads.
+### O que está duplicado e funcionando
 
-Pontos onde ainda misturam:
-- **Kanban CRM** — só filtra `igreen_sync` fora; manuais e qualquer cliente sem origem viram card de funil de lead.
-- **Dashboard / Performance / Analytics charts** — contam `customers` totais como se fossem leads.
-- **Envio em massa** — abas existem mas filtros de status e "Aprovado + Devolutiva" continuam misturando carteira com leads.
-- **Coluna Aprovado** do Kanban — mistura lead aprovado com cliente vindo da sincronização que entrou ali por upsert antigo.
-- **Rede** — alguns KPIs de "novos clientes" estão somando licenciados da rede.
+- Edge functions `evolution-proxy` e `evolution-webhook` existem.
+- `src/services/evolutionApi.ts` cria instância já com webhook apontando para `/functions/v1/evolution-webhook` e eventos `MESSAGES_UPSERT` + `CONNECTION_UPDATE`.
+- `messageSender.ts` envia por Evolution por padrão; só usa Whapi se `isWhapi=true` (super admin).
+- `handlers/connection.ts`, `handlers/otp-intercept.ts` e o esqueleto do bot existem.
+- `notifyNewLead` está plugado no fluxo de criação de cliente.
 
-## Decisão (validada com você)
-- Cliente `igreen_sync` → **isolado completo**. Some do Kanban, do envio em massa de leads, de toda métrica de lead.
-- Sincronizados e Rede → **novo funil "Pós-venda / Carteira"**, separado do funil de leads.
-- Coluna "Aprovado" do Kanban de leads → **só** leads WhatsApp que avançaram pelo bot.
-- Anúncios = só `lead_source ∈ ads`. WhatsApp = só `whatsapp_lead`. Sem cruzamento.
+### O que está faltando / divergente (bloqueia uso real)
 
-## Escopo da implementação
+1. **Motor de fluxo customizado (`bot_flow_steps`) não existe no Evolution.**
+   - `whapi-webhook/handlers/bot-flow.ts` = 4217 linhas, com resolver de `bot_flow_steps` (UUID/`flow:<id>`/`passo_<ts>`), `dispatchStepFromFlow`, transitions por `trigger_phrases`, anti-duplicação via `last_custom_prompt_at`, FAQ (`matchQA`), `notifyHandoff`, módulo `conversational/` (intent-classifier, rules-engine, state-machine, templates), `step-namespace`.
+   - `evolution-webhook/handlers/bot-flow.ts` = 1582 linhas. Sem `bot_flow_steps`, sem `matchQA`, sem `notifyHandoff`, sem `dispatchStepFromFlow`, sem `conversational/`, sem `step-namespace`, sem `last_custom_prompt_at`. → **O FluxoCamila configurado no /admin/fluxos NÃO roda no Evolution.** Vai usar só os steps legacy hardcoded.
 
-### 1. Banco (migration)
-- Garantir coluna `customers.customer_origin` com default `'whatsapp_lead'` e backfill:
-  - Quem tem `igreen_code` ou veio do sync diário → `igreen_sync`.
-  - Quem tem `network_member_id` (ou veio da rede) → `network`.
-  - Restante mantém `whatsapp_lead` / `manual`.
-- Adicionar valor `'network'` ao tipo lógico (`customer_origin text` já permite).
-- Apagar do `crm_deals` todo deal cujo customer tem `customer_origin in ('igreen_sync','network')` (limpeza única).
-- Trigger `prevent_non_lead_deals`: bloqueia INSERT em `crm_deals` se o customer for `igreen_sync`/`network`.
-- Nova tabela leve `pos_venda_deals` (ou view) para o funil de pós-venda de carteira.
+2. **Tests e arquivos auxiliares ausentes** no Evolution: `bot-flow_test.ts`, `step-namespace.ts`, pasta `handlers/conversational/` inteira.
 
-### 2. Frontend — Kanban
-- `useKanbanDeals`: filtro endurecido `customer_origin === 'whatsapp_lead' || 'manual'` (já existe parcial — completar e remover deals órfãos que escapam).
-- Coluna "Aprovado" passa a aceitar **apenas** deals com `deal_origin = 'aprovado'` originados de lead.
-- Novo board "Pós-venda" para `igreen_sync + network` com colunas: Onboarding · Ativo · Devolutiva · Inativo.
+3. **Painel de conversas do consultor (frontend) é Whapi-only para listar/ler.**
+   - `useChats.ts` e `useMessages.ts` chamam `whapiListChats/whapiListMessages/whapiGetProfilePicture` quando NÃO é super-admin — mas o Whapi token é único do super-admin. Consultor comum vai ver lista vazia ou erro 401.
+   - Já existe `findChats/findContacts/getProfilePicture` em `evolutionApi.ts` importados mas só usados no branch super-admin invertido. A lógica de roteamento está espelhada.
 
-### 3. Frontend — Envio em massa
-- `BulkSendPanel`: na aba **Leads WhatsApp**, esconder filtros que envolvem `andamento_igreen`, `devolutiva`, `cashback`, `nível licenciado` (são campos de carteira).
-- Na aba **Clientes iGreen**, esconder filtros de funil de lead (etapa do bot, `conversation_step`).
-- Aba nova **Rede** (network_members) com filtros próprios.
+4. **`evolution-webhook` não tem o reentry/notify-handoff** quando o cliente volta após >24h sem inbound, nem pausa por pergunta fora do FAQ (regras hoje vivas no Whapi — ver `mem/features/lead-notifications-and-handoff` e `mem/features/custom-flow-step-engine`).
 
-### 4. Frontend — Dashboard / Charts
-- `PerformanceCharts`, `AnalyticsCharts`, `CustomerCharts`, `LeadSourceCard`, `HeroKpis`: toda query de "leads" passa a filtrar `customer_origin in ('whatsapp_lead','manual')`.
-- KPIs de "Clientes ativos" e "Carteira" filtram `igreen_sync`.
-- KPIs de "Rede" só usam `network_members` (já isolado).
+5. **Pitch Conexão Club + dúvidas pós-club** dependem de `dispatchStepFromFlow` (ordem text→audio→video→image) — não vão disparar via Evolution.
 
-### 5. Página Clientes WhatsApp
-- Já tem abas — ao clicar num cliente da aba "Clientes iGreen", esconder campos/badges de funil de lead (status do bot, `conversation_step`, etapa Kanban). Mostrar só dados de carteira (andamento, devolutiva, assinaturas, cashback, link).
+6. **Variáveis `EVOLUTION_API_URL` / `EVOLUTION_API_KEY`** precisam estar configuradas como secrets das edge functions (o arquivo `URGENTE_CONFIGURAR_AGORA.md` confirma que historicamente faltavam). Vale revalidar.
 
-### 6. Anúncios
-- `ResultsDashboard` e `LeadSourceCard`: contar como conversão **só** customers com `customer_origin='whatsapp_lead'` E `lead_source` de origem ads. Nunca somar sincronizados.
+7. **Connection update / `connected_phone`**: precisa garantir que ao conectar a instância o webhook `CONNECTION_UPDATE` grava `connected_phone` em `whatsapp_instances` (`useInstancePhone` depende disso para o BulkSend e filtros).
 
-## Fora do escopo
-- Não mexer em WhatsApp connection / Whapi / Evolution.
-- Não alterar fluxos do bot.
-- Não mudar layout de LP.
+8. **Trigger de mensagem outbound**: ao consultor mandar manualmente pelo painel, `sendWhatsAppMessage` usa `instanceName` — precisa confirmar que `useChats/useMessages/BulkSendPanel` passam `instanceName` correto (o do consultor logado, padrão `igreen-{slug}`).
 
-## Detalhes técnicos
-- Migrations + RLS: trigger usa `SECURITY DEFINER` e `search_path=public`.
-- Tipos TS regenerados automaticamente pelo Supabase após migration.
-- Memory atualizado: estender `mem://features/customer-origin-separation` cobrindo Dashboard/Charts/Pós-venda board.
+### Plano de execução (ordem obrigatória)
 
-Quer que eu implemente nessa ordem (banco → Kanban → Dashboards → BulkSend → Anúncios → Pós-venda board)? Ou prefere começar pelo Kanban + Dashboards (impacto visual imediato) e deixar o board de Pós-venda numa segunda leva?
+**Fase 1 — Paridade do webhook (crítico)**
+1. Copiar para `evolution-webhook/handlers/`:
+   - `conversational/` (intent-classifier, rules-engine, state-machine, templates + tests)
+   - `step-namespace.ts` (+ test)
+2. Reescrever `evolution-webhook/handlers/bot-flow.ts` espelhando 100% o do Whapi, trocando apenas a camada de envio (usar `ctx.sender` que já é o `createEvolutionSender`) e o download de mídia (já é `sender.downloadMedia`). O resto (resolver de `bot_flow_steps`, `dispatchStepFromFlow`, `matchQA`, `notifyHandoff`, anti-rep `last_custom_prompt_at`, intent transitions, chain) é idêntico.
+3. Em `evolution-webhook/index.ts` adicionar: notifyNewLead em reentrada (sem inbound 24h) e roteamento `runConversationalFlow` antes do legacy switch — igual ao Whapi.
+
+**Fase 2 — Frontend multi-provider**
+4. `useChats.ts` / `useMessages.ts`: quando o consultor NÃO é super-admin (a maioria), buscar a instância do consultor e usar `findChats`/`findContacts`/`getProfilePicture`/`findMessages` do `evolutionApi.ts`. Manter Whapi só no branch super-admin.
+5. Garantir que `messageSender` recebe `instanceName` correto em todos os pontos (`useChats`, `useMessages`, `BulkSendPanel`, templates, CRM auto-reply).
+
+**Fase 3 — Connection lifecycle**
+6. Confirmar/ajustar `handlers/connection.ts` para gravar `connected_phone`, `status='connected'`, limpar QR ao parear, e marcar `disconnected` em logout. Testar com instância nova (`igreen-{slug}`).
+
+**Fase 4 — Validação E2E por consultor novo**
+7. Criar consultor de teste → seed automático do FluxoCamila já existe (`seed_camila_flow_on_consultant_insert`). Verificar:
+   - Conectar QR via /admin/whatsapp.
+   - Receber mensagem real → cai no `welcome` do `bot_flow_steps` (não no hardcoded).
+   - Avançar até `capture_conta` → OCR → confirmação → cadastro_portal → OTP.
+   - `notifyNewLead` chega no `notification_phone`.
+   - Pergunta fora do FAQ pausa bot e dispara `notifyHandoff`.
+   - Painel /admin/whatsapp lista o chat e o histórico via Evolution (não Whapi).
+   - BulkSend para esse consultor usa a instância dele.
+
+**Fase 5 — Limpeza**
+8. Documentar em `mem/whatsapp/evolution-parity.md` que `whapi-webhook` continua só para super-admin e `evolution-webhook` é o caminho default; remover/depreciar arquivos `.md` confusos (`URGENTE_CONFIGURAR_AGORA.md`, duplicatas de RESUMO/STATUS) num passo opcional.
+
+### Detalhes técnicos
+
+- O resolver de `bot_flow_steps` no Whapi (`bot-flow.ts` linha ~1845) precisa ser portado **textualmente** — qualquer divergência quebra transitions custom.
+- `conversational/index.ts` usa `customer.consultant_id` para buscar `bot_flow_steps` — funciona igual no Evolution.
+- `notifyHandoff` e `notifyNewLead` já existem em `_shared/notify-consultant.ts` (compartilhado).
+- Não há mudança de schema necessária — todas as colunas (`last_custom_prompt_at`, `bot_paused`, `pending_inbound_message_id`, `notification_phone`) já existem.
+- Risco: o `bot-flow.ts` do Whapi tem 4217 linhas; portar para Evolution é cópia + adaptação da camada `sender`. Vou validar com `bot-flow_test.ts`.
+
+### Fora de escopo
+
+- Mudanças na LP, CRM Kanban, Anúncios, MinIO.
+- Migração definitiva super-admin Whapi → Evolution (fica para depois; por ora coexistem).
+
+### Resposta direta à pergunta
+
+**Hoje, NÃO está 100%.** Um consultor novo conecta o QR mas:
+- o bot ignora o FluxoCamila customizado (usa só legacy hardcoded),
+- o painel de chats fica vazio (lê Whapi do super-admin),
+- não há handoff/FAQ/anti-dup,
+- pitch Conexão Club / dúvidas não disparam.
+
+Aplicando as Fases 1–4 acima, fica 100%.
