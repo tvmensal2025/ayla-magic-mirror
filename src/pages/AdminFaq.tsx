@@ -46,7 +46,7 @@ async function extractTextFromPDF(file: File): Promise<string> {
   return parts.join("\n\n");
 }
 
-export default function AdminFaq() {
+export default function AdminFaq({ embedded = false }: { embedded?: boolean } = {}) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
