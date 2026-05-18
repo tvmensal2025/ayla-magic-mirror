@@ -352,7 +352,7 @@ function getReentryPromptForStep(step: string, customer: any): string {
     "ask_birth_date": `${v}qual sua *data de nascimento*? (DD/MM/AAAA)`,
     "ask_phone": `${v}me confirma seu *telefone* (com DDD)?`,
     "ask_phone_confirm": `${v}me confirma seu *telefone* (com DDD)?`,
-    "ask_email": `${v}me passa seu *e-mail* 📧 (pode ser de qualquer provedor — Gmail, Outlook, iCloud, Yahoo...)`,
+    "ask_email": `${v}me passa seu *e-mail* 📧 (qualquer um que você usa no dia a dia)`,
     "ask_cep": `${v}qual o *CEP* da sua casa? (8 dígitos)`,
     "ask_number": `${v}qual o *número* da sua casa?`,
     "ask_complement": `${v}tem *complemento*? (apto, bloco) — ou diga "não".`,
