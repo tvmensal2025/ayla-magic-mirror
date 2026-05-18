@@ -423,7 +423,7 @@ Deno.serve(async (req) => {
       // Estratégia 0: hash cacheado em ad_image_library — pula chamada à Meta.
       try {
         const { data: cached } = await adminImg
-          .from("ad_image_library").select("id, fb_image_hash")
+          .from("ad_image_library").select("id, fb_image_hash, usage_count")
           .eq("consultant_id", auth.id).eq("url", url).maybeSingle();
         if (cached?.fb_image_hash) {
           hash = cached.fb_image_hash;
