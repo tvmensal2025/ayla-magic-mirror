@@ -546,9 +546,12 @@ Deno.serve(async (req) => {
       (updates as any).rescue_attempts = 0;
       console.log(`♻️ [auto-resume] ${customer.id}: status "${customer.status}" → "pending" (cliente respondeu, bot avançando)`);
     }
+    // Strip TODAS as chaves internas "__*" antes do update — previne erros de coluna inexistente.
+    const __inline_sent_flag = (updates as any).__inline_sent === true;
+    for (const k of Object.keys(updates)) {
+      if (k.startsWith("__")) delete (updates as any)[k];
+    }
     if (Object.keys(updates).length > 0) {
-      // Limpar marcador interno ANTES de persistir no banco
-      delete (updates as any).__inline_sent;
       console.log(`📝 Salvando updates para ${customer.id}:`, JSON.stringify(updates).substring(0, 500));
       const { error: updateError } = await supabase.from("customers").update(updates).eq("id", customer.id).select();
       if (updateError) {
@@ -558,13 +561,13 @@ Deno.serve(async (req) => {
           extra: { customer_id: customer.id, updates_keys: Object.keys(updates) },
         });
       }
-      if (updates.conversation_step && updates.conversation_step !== stepBefore) {
+      if (updates.conversation_step && stripPrefix(updates.conversation_step) !== stepBefore) {
         await logStepTransition(supabase, {
           customer_id: customer.id,
           consultant_id: instanceData.consultant_id,
           phone,
           from_step: stepBefore,
-          to_step: updates.conversation_step,
+          to_step: stripPrefix(updates.conversation_step),
         });
       }
     }
