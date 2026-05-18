@@ -3563,7 +3563,6 @@ export type Database = {
           id: string
           instance_name: string
           last_health_check_at: string | null
-          slot: number
           status: string
           updated_at: string
         }
@@ -3574,7 +3573,6 @@ export type Database = {
           id?: string
           instance_name: string
           last_health_check_at?: string | null
-          slot?: number
           status?: string
           updated_at?: string
         }
@@ -3585,7 +3583,6 @@ export type Database = {
           id?: string
           instance_name?: string
           last_health_check_at?: string | null
-          slot?: number
           status?: string
           updated_at?: string
         }
