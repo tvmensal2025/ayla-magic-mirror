@@ -2863,7 +2863,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           updates.document_front_url = fileUrl.startsWith("http") ? fileUrl : "evolution-media:pending";
         }
         updates.conversation_step = "ask_tipo_documento";
-        await sendOptions(remoteJid, "✅ Foto recebida! Só pra eu processar certinho — esse documento é:", [
+        await sendOptions(remoteJid, "✅ Foto recebida! Só pra confirmar — esse documento é:", [
           { id: "rg", title: "🪪 RG" },
           { id: "cnh", title: "🚗 CNH" },
         ]);
