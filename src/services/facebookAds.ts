@@ -22,8 +22,8 @@ async function throwFunctionError(error: any): Promise<never> {
   throw error;
 }
 
-export interface OAuthStartResult { url: string; logout_url?: string; mode: "connect" | "switch"; scope: "user" | "platform" }
-export type OAuthStartOptions = { mode?: "connect" | "switch"; scope?: "user" | "platform" };
+export interface OAuthStartResult { url: string; logout_url?: string; mode: "connect" | "switch" | "rerequest"; scope: "user" | "platform" }
+export type OAuthStartOptions = { mode?: "connect" | "switch" | "rerequest"; scope?: "user" | "platform" };
 export async function startFacebookOAuth(opts: OAuthStartOptions | "connect" | "switch" = {}): Promise<OAuthStartResult> {
   const o: OAuthStartOptions = typeof opts === "string" ? { mode: opts } : opts;
   const mode = o.mode ?? "connect";
