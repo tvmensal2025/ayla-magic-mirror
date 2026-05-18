@@ -2927,8 +2927,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       } catch (e) {
         console.warn(`[doc-auto] OCR falhou:`, (e as Error).message);
       }
-      // CNH → vai direto pra confirmação. RG → pede verso.
+      // CNH → vai direto pra confirmação (ou ask_cpf se faltar CPF). RG → pede verso.
       if (detectedType === "cnh") {
+        const _cpfOcr = String(updates.cpf || customer.cpf || "").replace(/\D/g, "");
+        if (_cpfOcr.length !== 11) {
+          updates.conversation_step = "ask_cpf";
+          const _nome = updates.name || customer.name || "";
+          const _rg = updates.rg || customer.rg || "";
+          const _resumo = [_nome ? `👤 Nome: *${_nome}*` : "", _rg ? `📄 RG: *${_rg}*` : ""].filter(Boolean).join("\n");
+          reply = `📋 Consegui ler sua CNH:\n\n${_resumo}\n\nSó preciso do seu *CPF* pra continuar (apenas números):`;
+          break;
+        }
         updates.conversation_step = "confirmando_dados_doc";
         const nome = updates.name || customer.name || "—";
         const cpf = updates.cpf || customer.cpf || "—";
