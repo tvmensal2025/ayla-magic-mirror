@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, MessageSquare, Video, ArrowDown, Sparkles, UserCheck, FileText,
-  ChevronUp, ChevronDown, Plus, Trash2, FlaskConical, X, Target, Database, Bot, HelpCircle,
+  ChevronUp, ChevronDown, Plus, Trash2, FlaskConical, X, Target, Database, Bot, HelpCircle, BookOpen,
   AlertTriangle, Play,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
