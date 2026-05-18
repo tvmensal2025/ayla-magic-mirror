@@ -1,4 +1,4 @@
-import { Eye, MousePointerClick, Users, CheckCircle2, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Eye, MousePointerClick, Users, Wallet, TrendingUp, TrendingDown, Minus, Lock } from "lucide-react";
 import { Sparkline } from "./Sparkline";
 
 interface KpiData {
@@ -6,6 +6,7 @@ interface KpiData {
   previous: number;
   change: number;
   spark: number[];
+  isSnapshot?: boolean;
 }
 
 interface Props {
@@ -14,70 +15,110 @@ interface Props {
     clicks: KpiData;
     leads: KpiData;
     approved: KpiData;
+    periodDays?: number;
   };
+  walletSnapshot?: { totalApproved: number; totalWallet: number; receitaPotencial: number };
 }
 
-function ChangeBadge({ value }: { value: number }) {
+function DeltaPill({ value }: { value: number }) {
   const flat = Math.abs(value) < 1;
   const up = value >= 0;
   const Icon = flat ? Minus : up ? TrendingUp : TrendingDown;
-  const color = flat
-    ? "text-muted-foreground bg-muted/40"
+  const cls = flat
+    ? "border-border/40 text-muted-foreground"
     : up
-    ? "text-primary bg-primary/15"
-    : "text-destructive bg-destructive/15";
+    ? "border-primary/40 text-primary"
+    : "border-destructive/40 text-destructive";
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${color}`}>
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-semibold tracking-wider ${cls}`}>
       <Icon className="w-3 h-3" />
       {flat ? "0%" : `${Math.abs(value).toFixed(0)}%`}
     </span>
   );
 }
 
-const ITEMS = [
-  { key: "views", label: "Visitas", icon: Eye, color: "hsl(130, 100%, 45%)" },
-  { key: "clicks", label: "Cliques", icon: MousePointerClick, color: "hsl(30, 100%, 55%)" },
-  { key: "leads", label: "Novos Leads", icon: Users, color: "hsl(200, 100%, 55%)" },
-  { key: "approved", label: "Aprovados", icon: CheckCircle2, color: "hsl(160, 80%, 50%)" },
-] as const;
+const formatBRL = (n: number) =>
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(n);
 
-export function HeroKpis({ kpis }: Props) {
+export function HeroKpis({ kpis, walletSnapshot }: Props) {
+  const period = kpis?.periodDays ?? 30;
+  const items = [
+    { key: "views" as const, label: "Visitas", icon: Eye, accent: "hsl(142 76% 48%)", data: kpis?.views },
+    { key: "clicks" as const, label: "Cliques CTA", icon: MousePointerClick, accent: "hsl(38 92% 55%)", data: kpis?.clicks },
+    { key: "leads" as const, label: "Novos Leads", icon: Users, accent: "hsl(200 100% 60%)", data: kpis?.leads },
+    {
+      key: "approved" as const,
+      label: "Carteira Ativa",
+      icon: Wallet,
+      accent: "hsl(142 76% 48%)",
+      data: kpis?.approved,
+      sublabel: walletSnapshot ? formatBRL(walletSnapshot.receitaPotencial) + " / mês" : undefined,
+    },
+  ];
+
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-background p-5 sm:p-6">
-      {/* Decorative glow */}
-      <div className="absolute -top-24 -right-24 w-64 h-64 rounded-full bg-primary/20 blur-3xl pointer-events-none" />
-      <div className="relative">
-        <div className="mb-4">
-          <h2 className="font-heading font-bold text-lg text-foreground">Painel de Performance</h2>
-          <p className="text-xs text-muted-foreground">Resumo dos últimos 7 dias vs. os 7 anteriores</p>
+    <section className="relative overflow-hidden rounded-2xl border border-border/60 bg-[hsl(0_0%_4%)] dark:bg-[hsl(0_0%_4%)]">
+      {/* header strip */}
+      <div className="flex items-baseline justify-between gap-4 px-5 sm:px-7 pt-5 pb-3 border-b border-border/40">
+        <div>
+          <h2 className="font-heading font-black text-base sm:text-lg tracking-tight text-foreground">
+            Painel de Performance
+          </h2>
+          <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground mt-0.5">
+            Últimos {period} dias <span className="text-border mx-1">·</span> vs. {period} anteriores
+          </p>
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          {ITEMS.map(({ key, label, icon: Icon, color }) => {
-            const data = kpis?.[key];
-            return (
-              <div
-                key={key}
-                className="group relative bg-card/60 backdrop-blur border border-border/40 rounded-xl p-4 hover:border-primary/40 transition-colors"
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div className="p-2 rounded-xl bg-primary/10 text-primary">
-                    <Icon className="w-4 h-4" />
-                  </div>
-                  {data && <ChangeBadge value={data.change} />}
-                </div>
-                <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">{label}</p>
-                <p className="text-2xl sm:text-3xl font-bold font-heading text-foreground leading-none">
-                  {data?.current ?? 0}
-                </p>
-                <div className="flex items-end justify-between mt-3">
-                  <span className="text-[10px] text-muted-foreground">Antes: {data?.previous ?? 0}</span>
-                  {data && <Sparkline data={data.spark} color={color} width={70} height={22} />}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <span className="hidden sm:inline-flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+          Ao vivo
+        </span>
       </div>
-    </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-border/40">
+        {items.map(({ key, label, icon: Icon, accent, data, sublabel }) => {
+          const isSnap = data?.isSnapshot;
+          return (
+            <div key={key} className="relative px-5 sm:px-6 py-5 sm:py-6 group">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Icon className="w-3.5 h-3.5" strokeWidth={2.25} />
+                  <span className="text-[10px] uppercase tracking-[0.22em] font-bold">{label}</span>
+                </div>
+                {isSnap ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-border/40 text-[10px] text-muted-foreground">
+                    <Lock className="w-2.5 h-2.5" /> total
+                  </span>
+                ) : data ? (
+                  <DeltaPill value={data.change} />
+                ) : null}
+              </div>
+
+              <div className="flex items-end justify-between gap-3">
+                <div className="min-w-0">
+                  <p
+                    className="font-heading font-black tracking-tight text-foreground leading-[0.95]"
+                    style={{ fontSize: "clamp(2.25rem, 5vw, 3.5rem)" }}
+                  >
+                    {data?.current ?? 0}
+                  </p>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground mt-2 truncate">
+                    {sublabel ?? (isSnap ? "Aprovados / Ativos" : `Antes: ${data?.previous ?? 0}`)}
+                  </p>
+                </div>
+                {data?.spark && (
+                  <Sparkline data={data.spark} color={accent} width={92} height={38} variant="line" />
+                )}
+              </div>
+
+              {/* hover accent line */}
+              <span
+                className="absolute left-0 top-0 h-full w-px opacity-0 group-hover:opacity-100 transition-opacity"
+                style={{ background: accent }}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }

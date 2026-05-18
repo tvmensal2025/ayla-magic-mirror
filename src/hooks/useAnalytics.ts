@@ -266,23 +266,24 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
         day: weekdayNames[d], views: v.views, clicks: v.clicks,
       }));
 
-      // === WEEK COMPARISON (current 7 days vs previous 7) ===
+      // === PERIOD COMPARISON (segue periodDays — janela atual vs anterior do mesmo tamanho) ===
       const now = Date.now();
       const day = 24 * 60 * 60 * 1000;
-      const curStart = now - 7 * day;
-      const prevStart = now - 14 * day;
-      const curViews = views.filter((v) => new Date(v.created_at).getTime() >= curStart).length;
-      const prevViews = views.filter((v) => {
-        const t = new Date(v.created_at).getTime();
-        return t >= prevStart && t < curStart;
-      }).length;
-      const curClicks = events.filter((e) => e.event_type === "click" && new Date(e.created_at).getTime() >= curStart).length;
-      const prevClicks = events.filter((e) => e.event_type === "click" && new Date(e.created_at).getTime() >= prevStart && new Date(e.created_at).getTime() < curStart).length;
-      const curLeads = leadCustomers.filter((c) => new Date(c.created_at).getTime() >= curStart).length;
-      const prevLeads = leadCustomers.filter((c) => {
-        const t = new Date(c.created_at).getTime();
-        return t >= prevStart && t < curStart;
-      }).length;
+      const curStart = now - periodDays * day;
+      const prevStart = now - 2 * periodDays * day;
+      const inCur = (ts: number) => ts >= curStart;
+      const inPrev = (ts: number) => ts >= prevStart && ts < curStart;
+
+      const curViews = views.filter((v) => inCur(new Date(v.created_at).getTime())).length;
+      const prevViews = views.filter((v) => inPrev(new Date(v.created_at).getTime())).length;
+      // Cliques = só CTAs de conversão (whatsapp/cadastro), alinhado ao funil
+      const isCtaClick = (e: any) =>
+        e.event_type === "click" && e.event_target &&
+        (e.event_target.includes("whatsapp") || e.event_target.includes("cadastro"));
+      const curClicks = events.filter((e) => isCtaClick(e) && inCur(new Date(e.created_at).getTime())).length;
+      const prevClicks = events.filter((e) => isCtaClick(e) && inPrev(new Date(e.created_at).getTime())).length;
+      const curLeads = leadCustomers.filter((c) => inCur(new Date(c.created_at).getTime())).length;
+      const prevLeads = leadCustomers.filter((c) => inPrev(new Date(c.created_at).getTime())).length;
       const pctChange = (cur: number, prev: number) => prev === 0 ? (cur > 0 ? 100 : 0) : ((cur - prev) / prev) * 100;
       const weekComparison = {
         views: { current: curViews, previous: prevViews, change: pctChange(curViews, prevViews) },
@@ -290,7 +291,7 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
         leads: { current: curLeads, previous: prevLeads, change: pctChange(curLeads, prevLeads) },
       };
 
-      // === TOP CAMPAIGNS (utm_source breakdown with conversions) ===
+      // === TOP CAMPAIGNS ===
       const campaignMap = new Map<string, { views: number; clicks: number; leads: number }>();
       for (const v of views) {
         const key = v.utm_source || "direto";
@@ -305,29 +306,17 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
         }
       }
       const topCampaigns = Array.from(campaignMap.entries())
-        .map(([source, v]) => ({
-          source,
-          ...v,
-          conversionRate: v.views > 0 ? (v.clicks / v.views) * 100 : 0,
-        }))
+        .map(([source, v]) => ({ source, ...v, conversionRate: v.views > 0 ? (v.clicks / v.views) * 100 : 0 }))
         .sort((a, b) => b.views - a.views)
         .slice(0, 8);
 
-      // === PER-CTA TIME SERIES (sparklines + week comparison) ===
-      // For each click target, build a 7-day series + current/previous week totals.
+      // === PER-CTA TIME SERIES ===
       const allTargets = Array.from(new Set(
         events.filter((e) => e.event_type === "click" && e.event_target).map((e) => e.event_target as string)
       ));
-      const clicksByTargetDetailed: Record<string, {
-        total: number;
-        spark: number[];
-        current: number;
-        previous: number;
-        change: number;
-      }> = {};
+      const clicksByTargetDetailed: Record<string, { total: number; spark: number[]; current: number; previous: number; change: number; }> = {};
       for (const t of allTargets) {
         const targetEvents = events.filter((e) => e.event_type === "click" && e.event_target === t);
-        // 7-day sparkline (oldest -> newest)
         const spark: number[] = [];
         for (let i = 6; i >= 0; i--) {
           const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0); dayStart.setDate(dayStart.getDate() - i);
@@ -337,21 +326,11 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
             return ts >= dayStart.getTime() && ts < dayEnd.getTime();
           }).length);
         }
-        const cur = targetEvents.filter((e) => new Date(e.created_at).getTime() >= curStart).length;
-        const prv = targetEvents.filter((e) => {
-          const ts = new Date(e.created_at).getTime();
-          return ts >= prevStart && ts < curStart;
-        }).length;
-        clicksByTargetDetailed[t] = {
-          total: targetEvents.length,
-          spark,
-          current: cur,
-          previous: prv,
-          change: pctChange(cur, prv),
-        };
+        const cur = targetEvents.filter((e) => inCur(new Date(e.created_at).getTime())).length;
+        const prv = targetEvents.filter((e) => inPrev(new Date(e.created_at).getTime())).length;
+        clicksByTargetDetailed[t] = { total: targetEvents.length, spark, current: cur, previous: prv, change: pctChange(cur, prv) };
       }
 
-      // Daily views sparkline (last 7 days) for hero KPI
       const buildDailySpark = (rows: Array<{ created_at: string }>) => {
         const out: number[] = [];
         for (let i = 6; i >= 0; i--) {
@@ -365,29 +344,51 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
         return out;
       };
       const sparkViews = buildDailySpark(views);
-      const sparkClicks = buildDailySpark(events.filter((e) => e.event_type === "click"));
+      const sparkClicks = buildDailySpark(events.filter((e) => isCtaClick(e)) as any);
       const sparkLeads = buildDailySpark(leadCustomers as Array<{ created_at: string }>);
-      // "Aprovados" KPI = carteira iGreen sincronizada com status ativo/aprovado (não leads)
-      const approvedRows = walletCustomers.filter((c: any) => c.status === "approved" || c.status === "active");
-      const sparkApproved = buildDailySpark(approvedRows as Array<{ created_at: string }>);
-      const curApproved = approvedRows.filter((c: any) => new Date(c.created_at).getTime() >= curStart).length;
-      const prevApproved = approvedRows.filter((c: any) => {
-        const t = new Date(c.created_at).getTime();
-        return t >= prevStart && t < curStart;
-      }).length;
+
+      // === Carteira iGreen — SNAPSHOT (não janela), inclui receita potencial ===
+      const approvedWallet = walletCustomers.filter((c: any) => c.status === "approved" || c.status === "active");
+      const walletSnapshot = {
+        totalApproved: approvedWallet.length,
+        totalWallet: walletCustomers.length,
+        receitaPotencial: approvedWallet.reduce((s: number, c: any) => s + (Number(c.electricity_bill_value) || 0), 0),
+      };
+      const sparkApproved = buildDailySpark(approvedWallet as Array<{ created_at: string }>);
+
       const heroKpis = {
         views: { ...weekComparison.views, spark: sparkViews },
         clicks: { ...weekComparison.clicks, spark: sparkClicks },
         leads: { ...weekComparison.leads, spark: sparkLeads },
-        approved: { current: curApproved, previous: prevApproved, change: pctChange(curApproved, prevApproved), spark: sparkApproved },
+        approved: {
+          current: walletSnapshot.totalApproved,
+          previous: walletSnapshot.totalApproved,
+          change: 0,
+          spark: sparkApproved,
+          isSnapshot: true as const,
+        },
+        periodDays,
       };
+
+      // === HEATMAP hora × dia da semana ===
+      const heatMap = new Map<string, number>();
+      for (const v of views) {
+        const d = new Date(v.created_at);
+        heatMap.set(`${d.getDay()}-${d.getHours()}`, (heatMap.get(`${d.getDay()}-${d.getHours()}`) || 0) + 1);
+      }
+      const heatmap: Array<{ day: number; hour: number; value: number }> = [];
+      for (let dy = 0; dy < 7; dy++) {
+        for (let hr = 0; hr < 24; hr++) {
+          heatmap.push({ day: dy, hour: hr, value: heatMap.get(`${dy}-${hr}`) || 0 });
+        }
+      }
 
       return {
         totalClient, totalLicenciada, total, totalClicks, clicksByTarget, clicksByPage,
         daily, hourly, devices, utmSources, totalCustomers, customersByStatus,
         totalKw, avgKw, topLicenciados, weeklyNewCustomers, conversionRate, allCustomers,
         funnel, weekday, weekComparison, topCampaigns,
-        clicksByTargetDetailed, heroKpis,
+        clicksByTargetDetailed, heroKpis, walletSnapshot, heatmap, periodDays,
       };
 
     },

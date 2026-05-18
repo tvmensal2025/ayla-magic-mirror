@@ -239,7 +239,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
       </div>
 
       {/* HERO KPIs */}
-      <HeroKpis kpis={(analytics as any)?.heroKpis} />
+      <HeroKpis kpis={(analytics as any)?.heroKpis} walletSnapshot={(analytics as any)?.walletSnapshot} />
 
       {/* TABS */}
       <Tabs defaultValue="visao" className="w-full">

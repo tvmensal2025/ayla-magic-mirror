@@ -1,59 +1,75 @@
-## Diagnóstico
+## Diagnóstico — por que os números estão "errados"
 
-Olhei os logs do webhook e fiz uma query nos últimos 14 dias de leads:
+Comparando o que aparece na tela com `useAnalytics.ts`:
 
-- **7 leads novos hoje** (18/05) entraram com a frase: `"Olá! Tenho interesse e queria mais informações, por favor."`
-- **Todos com `lead_source = NULL`** → nenhum foi marcado como `meta_ads`.
+| KPI topo | Valor exibido | Origem real | Problema |
+|---|---|---|---|
+| Visitas | 16 | últimos **7 dias** | Ignora o seletor "Últimos 30 dias" → funil mostra 39 |
+| Cliques | 0 | últimos 7 dias | Mesma janela fixa; funil mostra 3 cliques CTA em 30d |
+| Novos Leads | 10 | `customer_origin = whatsapp_lead/manual`, últimos 7 dias | Coincide com funil só por acaso |
+| Aprovados | 24 | `walletCustomers` aprovados com `created_at >= 7d` | Usa data de **sincronização** da carteira iGreen, não a data real de aprovação → todo sync inicial vira "aprovado essa semana" |
 
-Essa frase é o **texto pré-preenchido padrão do Click-to-WhatsApp (CTWA) do Meta Ads em PT-BR**. Ou seja, esses leads vieram do anúncio, mas o regex atual no `whapi-webhook/index.ts` (linha 485) não detecta esse padrão — ele só procura palavras como "anúncio", "facebook", "instagram", "patrocinado", "reels", "stories". A frase padrão do CTWA não bate em nada disso.
+**Causa raiz:** `HeroKpis` está hardcoded em "7d vs 7d anteriores" enquanto o resto do dashboard respeita `periodDays`. E "Aprovados" usa `created_at` do registro sincronizado (não `approved_at`).
 
-## Solução
+---
 
-Duas camadas de detecção, em ordem de confiabilidade:
+## Plano
 
-### 1. Detectar via `referral` / `context` do Whapi (mais confiável)
-O Whapi entrega no payload da mensagem CTWA um objeto `referral` (ou `context.referred_product`) contendo `source_url`, `source_id`, `ctwa_clid`, `headline`, `body`. Quando esse campo existe, é prova de que veio de anúncio Meta — marca `lead_source = "meta_ads"` independente do texto.
+### 1. Corrigir dados (useAnalytics.ts)
 
-Precisamos:
-- Inspecionar 1-2 payloads reais do Whapi (logs) para confirmar o nome exato do campo (`referral` vs `context.referred_product`).
-- Logar o payload bruto se nenhum campo for encontrado, para iterar.
+- `heroKpis` passa a respeitar `periodDays` (compara período atual vs período anterior de mesmo tamanho).
+- Renomear card "Aprovados" para **"Carteira iGreen"** com o total real de `walletCustomers` aprovados (snapshot atual, não delta por janela) — é o número que o consultor quer ver de verdade.
+- Adicionar KPI novo de **"Receita potencial"** = soma de `electricity_bill_value` da carteira aprovada (formato BRL).
+- "Cliques" passa a contar só CTAs de conversão (`whatsapp*`, `cadastro*`), alinhado ao funil.
+- Subtítulo do hero passa a refletir o período real ("Últimos 30 dias vs. 30 anteriores").
 
-### 2. Ampliar o regex de texto (fallback)
-Adicionar ao regex existente os padrões pré-preenchidos do CTWA:
-- `tenho interesse.*mais informa[çc][õo]es`
-- `gostaria de saber mais sobre`
-- `quero saber mais`
-- `vi seu an[uú]ncio`
+### 2. Redesign visual — Editorial high-contrast
 
-Isso pega os 7 leads de hoje (e os históricos com a mesma frase).
+Direção: preto puro, tipografia gigante, accent verde esmeralda + amarelo âmbar, sem glow/glass.
 
-### 3. Backfill dos leads históricos
-Rodar uma migration única que marca `lead_source = 'meta_ads'` para todos `customers` onde:
-- `lead_source IS NULL`
-- A primeira mensagem inbound bate com a frase padrão do CTWA
+**Hero KPIs (refeito)**
+- Grid 4 colunas, fundo `#0a0a0a`, borda fina `#1f1f1f`.
+- Número em **font-heading 5xl-6xl**, tracking apertado.
+- Label minúscula em maiúsculas com tracking largo (estilo NYT).
+- Sparkline maior (110×36) na lateral direita.
+- Delta como pill outline (verde/âmbar/cinza), não preenchido.
+- Separadores verticais finos entre cards (não quatro caixas isoladas).
 
-Isso reidrata o dashboard de Performance com os ~7 leads de hoje e qualquer outro histórico antes de a correção entrar.
+**Valor de cada clique (ClickValueGrid)**
+- Vira tabela editorial com ranking numerado (#1, #2…).
+- Número grande do total + sparkline inline + delta.
+- Linha do CTA com mais cliques recebe fundo `#111` e barra âmbar à esquerda.
 
-## Mudanças
+**Funil de Conversão**
+- Cascata visual (cada etapa mais estreita, alinhada ao centro), no estilo Linear.
+- Mostra `count`, `% do topo`, e `% da etapa anterior` em colunas tipográficas.
+- Linhas conectoras tracejadas entre etapas indicando drop-off.
 
-**`supabase/functions/whapi-webhook/index.ts`** (linha ~480-497)
-- Antes do regex de texto, checar `msg.referral` / `msg.context?.referred_product` no payload Whapi. Se existir → `lead_source = "meta_ads"` + log do `source_id`/`ctwa_clid`.
-- Ampliar regex com os padrões CTWA pré-preenchidos.
-- Manter o `.is("lead_source", null)` para não sobrescrever.
+**Gráficos novos (substituem o bloco "Tráfego LP" colapsável)**
+- **Tendência diária** (AreaChart minimalista, sem gradiente espesso): Visitas + Cliques no período inteiro.
+- **Heatmap hora × dia da semana**: identifica horários quentes (substitui o bar chart de weekday).
+- **Top origens de tráfego**: mantém tabela mas com barra horizontal embutida na linha.
 
-**Migration**
-```sql
-UPDATE customers SET lead_source = 'meta_ads'
-WHERE lead_source IS NULL
-  AND id IN (
-    SELECT DISTINCT customer_id FROM conversations
-    WHERE message_direction = 'inbound'
-      AND message_text ~* 'tenho interesse.*mais informa[çc][õo]es|gostaria de saber mais|vi seu an[uú]ncio|do an[uú]ncio'
-  );
-```
+### 3. Componentes afetados
 
-## Resultado esperado
+- `src/hooks/useAnalytics.ts` — refatorar `heroKpis` e `weekComparison` por `periodDays`; novo campo `walletSnapshot`.
+- `src/components/admin/dashboard/HeroKpis.tsx` — redesign completo.
+- `src/components/admin/dashboard/ClickValueGrid.tsx` — redesign tabela editorial.
+- `src/components/admin/PerformanceCharts.tsx` — funil em cascata + heatmap novo.
+- `src/components/admin/dashboard/Sparkline.tsx` — variante "large" sem fill.
+- `src/components/admin/DashboardTab.tsx` — limpar bloco "Tráfego detalhado" colapsável (passa para dentro do redesign).
 
-- Leads CTWA passam a ser marcados automaticamente no primeiro inbound.
-- Dashboard de Performance volta a mostrar números reais (leads, aprovados, CPL, CPA) só de Meta Ads.
-- Histórico recente recuperado pelo backfill.
+### 4. Fora do escopo
+
+- Aba "Anúncios & Origem" e "Clientes iGreen" — só "Visão Geral" é redesenhada agora.
+- Toolbar e WalletChip permanecem.
+
+---
+
+## Detalhes técnicos
+
+- Mantém Tailwind tokens (sem cores hardcoded fora de variáveis HSL no `index.css`).
+- Adiciona tokens `--editorial-ink: 0 0% 4%`, `--editorial-line: 0 0% 12%`, `--editorial-amber: 38 92% 50%`.
+- Recharts: tooltip black/border-amber, grid praticamente invisível, sem axisLine.
+- Heatmap construído como grid CSS (`grid-cols-25`) com células `bg-primary/X` por intensidade — sem libs novas.
+- `framer-motion` (já no projeto) para fade-in dos números no mount.
