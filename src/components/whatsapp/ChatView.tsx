@@ -41,6 +41,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const [isCustomer, setIsCustomer] = useState(false);
+  const [customerId, setCustomerId] = useState<string | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [kanbanStages, setKanbanStages] = useState<Tables<"kanban_stages">[]>([]);
   const [sendingToCrm, setSendingToCrm] = useState(false);
@@ -108,18 +109,22 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
 
   // Check if this contact is already a customer
   useEffect(() => {
-    if (!chat) { setIsCustomer(false); return; }
+    if (!chat) { setIsCustomer(false); setCustomerId(null); return; }
     const phone = chat.remoteJid.split("@")[0];
     supabase
       .from("customers")
       .select("id")
       .eq("phone_whatsapp", phone)
       .maybeSingle()
-      .then(({ data }) => setIsCustomer(!!data));
+      .then(({ data }) => {
+        setIsCustomer(!!data);
+        setCustomerId(data?.id || null);
+      });
   }, [chat]);
 
-  const handleCustomerAdded = useCallback(() => {
+  const handleCustomerAdded = useCallback((newCustomerId?: string) => {
     setIsCustomer(true);
+    if (newCustomerId) setCustomerId(newCustomerId);
   }, []);
 
   // Auto-scroll to bottom on new messages
@@ -249,6 +254,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         onSend={sendMessage}
         initialMessage={initialMessage}
         consultantId={consultantId}
+        customerId={customerId || undefined}
         customerJid={chat?.remoteJid}
         customerName={chat?.name}
         onSendAudio={async (base64) => {
