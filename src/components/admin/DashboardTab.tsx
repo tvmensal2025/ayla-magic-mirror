@@ -78,7 +78,10 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
   const licenciadoOptions = useMemo(() => {
     if (!analytics?.allCustomers) return [];
     const names = new Set<string>();
-    for (const c of analytics.allCustomers) { if (c.registered_by_name) names.add(c.registered_by_name); }
+    for (const c of analytics.allCustomers) {
+      if (c.customer_origin !== "igreen_sync") continue;
+      if (c.registered_by_name) names.add(c.registered_by_name);
+    }
     return Array.from(names).sort();
   }, [analytics?.allCustomers]);
 
