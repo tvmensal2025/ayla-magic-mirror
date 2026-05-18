@@ -8,6 +8,8 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { MetricTooltip } from "./MetricTooltip";
 import { HealthSummaryCard } from "./HealthSummaryCard";
 import { InsightCards } from "./InsightCards";
+import { CostExplainerCard } from "./CostExplainerCard";
+import { FunnelWithCosts } from "./FunnelWithCosts";
 
 type Range = 7 | 30 | 90;
 
@@ -210,6 +212,21 @@ export function ResultsDashboard({
           </select>
         )}
       </div>
+
+      {/* Explicação clara: Click vs Lead vs Cliente */}
+      <CostExplainerCard
+        spendCents={totals.spend}
+        clicks={totals.clicks}
+        leads={totals.leads}
+        approved={acquired}
+      />
+
+      {/* Funil de conversão com custo por etapa */}
+      <FunnelWithCosts
+        consultantId={consultantId}
+        spendCents={totals.spend}
+        periodDays={range}
+      />
 
       {/* Saúde geral + insights da IA */}
       <HealthSummaryCard

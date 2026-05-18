@@ -1,0 +1,193 @@
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { Card } from "@/components/ui/card";
+import { Loader2, Filter as FilterIcon } from "lucide-react";
+
+interface Props {
+  consultantId: string;
+  spendCents: number;
+  periodDays: number;
+}
+
+interface StageRow {
+  stage_key: string;
+  label: string;
+  position: number;
+}
+
+// Estágios que fazem parte do funil de aquisição (excluem retenção 30/60/90/120d e reprovado)
+const FUNNEL_STAGE_KEYS = [
+  "novo_lead",
+  "qualificando",
+  "valor_conta",
+  "conta_enviada",
+  "doc_enviado",
+  "finalizando",
+  "aprovado",
+];
+
+const STAGE_COLORS: Record<string, string> = {
+  novo_lead: "from-slate-500 to-slate-400",
+  qualificando: "from-indigo-500 to-indigo-400",
+  valor_conta: "from-teal-500 to-teal-400",
+  conta_enviada: "from-cyan-500 to-cyan-400",
+  doc_enviado: "from-blue-500 to-blue-400",
+  finalizando: "from-pink-500 to-pink-400",
+  aprovado: "from-emerald-500 to-emerald-400",
+};
+
+/**
+ * Funil visual: mostra quantos leads estão em cada estágio do CRM
+ * e o custo por lead em cada etapa (gasto ÷ leads naquela etapa).
+ */
+export function FunnelWithCosts({ consultantId, spendCents, periodDays }: Props) {
+  const [loading, setLoading] = useState(true);
+  const [stages, setStages] = useState<StageRow[]>([]);
+  const [countsByStage, setCountsByStage] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const since = new Date(Date.now() - periodDays * 86_400_000).toISOString();
+
+      // 1) buscar estágios do consultor (com fallback para defaults)
+      const { data: stagesData } = await supabase
+        .from("kanban_stages")
+        .select("stage_key, label, position")
+        .eq("consultant_id", consultantId)
+        .in("stage_key", FUNNEL_STAGE_KEYS)
+        .order("position", { ascending: true });
+
+      const stagesList: StageRow[] =
+        stagesData && stagesData.length > 0
+          ? (stagesData as StageRow[])
+          : FUNNEL_STAGE_KEYS.map((k, i) => ({
+              stage_key: k,
+              label: defaultLabel(k),
+              position: i,
+            }));
+      setStages(stagesList);
+
+      // 2) contar deals/leads em cada estágio (de WhatsApp + período)
+      const { data: dealsData } = await supabase
+        .from("crm_deals")
+        .select("stage")
+        .eq("consultant_id", consultantId)
+        .gte("created_at", since);
+
+      const counts: Record<string, number> = {};
+      (dealsData || []).forEach((d: any) => {
+        if (d.stage) counts[d.stage] = (counts[d.stage] || 0) + 1;
+      });
+      setCountsByStage(counts);
+      setLoading(false);
+    })();
+  }, [consultantId, periodDays]);
+
+  const totalLeads = useMemo(
+    () => Object.values(countsByStage).reduce((s, n) => s + n, 0),
+    [countsByStage]
+  );
+  const maxCount = Math.max(1, ...Object.values(countsByStage));
+  const spend = spendCents / 100;
+
+  if (loading) {
+    return (
+      <Card className="p-6 flex justify-center">
+        <Loader2 className="w-5 h-5 animate-spin text-primary" />
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div>
+          <h3 className="font-heading font-bold text-base text-foreground flex items-center gap-2">
+            <FilterIcon className="w-4 h-4 text-primary" />
+            Funil de conversão com custos
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Onde estão seus {totalLeads} leads e quanto custou cada etapa nos últimos{" "}
+            {periodDays} dias
+          </p>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] uppercase text-muted-foreground">Gasto no período</div>
+          <div className="text-sm font-bold font-mono text-foreground">
+            R$ {spend.toFixed(2)}
+          </div>
+        </div>
+      </div>
+
+      {totalLeads === 0 ? (
+        <div className="text-center py-10 text-sm text-muted-foreground">
+          Nenhum lead no período. Quando os contatos começarem a entrar pelo WhatsApp,
+          o funil aparece aqui automaticamente.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {stages.map((s) => {
+            const count = countsByStage[s.stage_key] || 0;
+            const pct = (count / maxCount) * 100;
+            const costPerLead = count > 0 ? spend / count : 0;
+            const gradient =
+              STAGE_COLORS[s.stage_key] || "from-muted-foreground to-muted";
+
+            return (
+              <div key={s.stage_key} className="group">
+                <div className="flex items-center gap-3">
+                  <div className="w-28 sm:w-36 shrink-0">
+                    <div className="text-xs font-semibold text-foreground truncate">
+                      {s.label}
+                    </div>
+                  </div>
+
+                  <div className="flex-1 relative h-9 bg-secondary/40 rounded-lg overflow-hidden">
+                    <div
+                      className={`h-full bg-gradient-to-r ${gradient} rounded-lg transition-all flex items-center px-3`}
+                      style={{ width: `${Math.max(pct, count > 0 ? 8 : 0)}%` }}
+                    >
+                      <span className="text-xs font-bold text-white drop-shadow">
+                        {count}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="w-24 sm:w-28 shrink-0 text-right">
+                    <div className="text-[10px] text-muted-foreground">
+                      {s.stage_key === "aprovado" ? "CPA" : "custo/lead"}
+                    </div>
+                    <div className="text-xs font-mono font-bold text-foreground">
+                      {costPerLead > 0 ? `R$ ${costPerLead.toFixed(2)}` : "—"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="mt-4 pt-4 border-t border-border/40 text-[11px] text-muted-foreground">
+        <strong className="text-foreground">CPL</strong> = custo de cada lead que entrou
+        no WhatsApp · <strong className="text-foreground">CPA</strong> = custo real de
+        cada cliente aprovado. Quanto mais cedo no funil, mais barato; quanto mais perto
+        de "Aprovado", mais caro (porque menos pessoas chegam lá).
+      </div>
+    </Card>
+  );
+}
+
+function defaultLabel(key: string): string {
+  const map: Record<string, string> = {
+    novo_lead: "Novo Lead",
+    qualificando: "Qualificando",
+    valor_conta: "Valor da Conta",
+    conta_enviada: "Conta Enviada",
+    doc_enviado: "Doc Enviado",
+    finalizando: "Finalizando",
+    aprovado: "Aprovado",
+  };
+  return map[key] || key;
+}
