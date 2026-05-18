@@ -86,7 +86,7 @@ async function classifyOpenAI(text: string, step: string): Promise<ClassifyResul
     const to = setTimeout(() => ctrl.abort(), 8_000);
     const res = await openaiChat({
       model: "gpt-5-mini",
-      temperature: 0,
+      // gpt-5-mini rejeita temperature != 1; usar default.
       jsonSchema: { name: "intent", schema: SCHEMA },
       messages: [{ role: "user", content: PROMPT(text, step) }],
       signal: ctrl.signal,
