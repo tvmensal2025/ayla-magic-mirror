@@ -427,22 +427,73 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── 8) Run bot flow ───────────────────────────────────────────────
-    const stepBefore = customer.conversation_step || "welcome";
+    // ─── 8) Run bot flow — engine routing (sys vs flow) ───────────────
+    // Roteamento por prefixo: "flow:<id>" → conversational; nome cru → bot-flow determinístico.
+    // Compat reversa: UUIDs/"passo_xxx" sem prefixo são tratados como flow.
+    const rawStep = customer.conversation_step || null;
+    const stepBefore = stripPrefix(rawStep);
+    (customer as any).conversation_step = stepBefore;
+
     let reply = "";
     let updates: Record<string, any> = {};
+    let engineUsed: "sys" | "flow" = "sys";
     try {
-      const result = await runBotFlow({
-        supabase, sender, customer, consultorId, nomeRepresentante,
-        remoteJid, phone, messageText, buttonId, isFile, isButton,
-        hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
-        fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
-      });
+      const customerOverride = (customer as any).conversational_flow_enabled;
+      const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
+
+      let engine = routeEngine(rawStep);
+      if (engine === "flow" && (!consultantFlag || customerOverride === false)) {
+        engine = "sys";
+        (customer as any).conversation_step = "welcome";
+      }
+
+      // 🚀 FONTE ÚNICA DE VERDADE: Fluxo da Camila (DB) controla TODO step
+      // que não pertence ao pipeline de cadastro. Se houver fluxo ativo + steps,
+      // força engine=flow mesmo que o step legacy esteja setado.
+      const currentStepRaw = stripPrefix((customer as any).conversation_step || "");
+      const isCadastroStep = CADASTRO_STEPS.has(currentStepRaw);
+      if (engine === "sys" && !isCadastroStep && consultantFlag && customerOverride !== false) {
+        try {
+          const { data: activeFlow } = await supabase
+            .from("bot_flows")
+            .select("id")
+            .eq("consultant_id", instanceData.consultant_id)
+            .eq("is_active", true)
+            .maybeSingle();
+          if ((activeFlow as any)?.id) {
+            const { count } = await supabase
+              .from("bot_flow_steps")
+              .select("id", { count: "exact", head: true })
+              .eq("flow_id", (activeFlow as any).id)
+              .eq("is_active", true);
+            if ((count || 0) > 0) {
+              engine = "flow";
+              (customer as any).conversation_step = null;
+              console.log(`🚀 [router] forçado para flow (consultor=${instanceData.consultant_id}, step legado="${stepBefore}")`);
+            }
+          }
+        } catch (e) {
+          console.warn("[router] falha ao verificar flow ativo:", (e as any)?.message);
+        }
+      }
+      engineUsed = engine;
+
+      const result = engine === "flow"
+        ? await runConversationalFlow({
+            supabase, sender, customer, consultorId, nomeRepresentante,
+            remoteJid, phone, messageText, buttonId, isFile, isButton,
+            hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
+            fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
+          })
+        : await runBotFlow({
+            supabase, sender, customer, consultorId, nomeRepresentante,
+            remoteJid, phone, messageText, buttonId, isFile, isButton,
+            hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
+            fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
+          });
       reply = result.reply;
       updates = result.updates;
     } catch (botErr: any) {
-      // GARANTIA FINAL: Se o bot quebrar (exceção), o cliente NUNCA fica sem resposta.
-      // Logamos o erro, registramos no lead, e mandamos uma mensagem amigável pedindo pra repetir.
       console.error(`💥 [bot-flow crash] step=${stepBefore} customer=${customer.id}:`, botErr);
       captureError(botErr, {
         tags: { function: "evolution-webhook", kind: "bot_flow_crash" },
@@ -450,7 +501,6 @@ Deno.serve(async (req) => {
       });
       reply = "🤖 Tive um probleminha técnico ao processar sua mensagem. Pode me enviar novamente, por favor? Se continuar, me responda *MENU* para recomeçarmos juntos. 🙏";
       updates = {};
-      // Garante que o lead não fica preso em status confuso
       try {
         await supabase
           .from("customers")
@@ -460,6 +510,12 @@ Deno.serve(async (req) => {
           })
           .eq("id", customer.id);
       } catch (_) { /* não bloquear o reply ao cliente */ }
+    }
+
+    // Normaliza conversation_step de saída — flow ganha prefixo, sys vai cru.
+    if (updates.conversation_step) {
+      const prefixed = normalizeOutgoing(String(updates.conversation_step), engineUsed);
+      if (prefixed) updates.conversation_step = prefixed;
     }
 
     // ─── 9) Persist updates ────────────────────────────────────────────
