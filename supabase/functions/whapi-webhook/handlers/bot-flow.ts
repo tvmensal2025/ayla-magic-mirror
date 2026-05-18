@@ -3093,6 +3093,24 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           if (d.dataNascimento) updates.data_nascimento = d.dataNascimento;
           if (d.nomePai) updates.nome_pai = d.nomePai;
           if (d.nomeMae) updates.nome_mae = d.nomeMae;
+
+          // Se OCR não trouxe CPF, pula confirmação e pede CPF direto (sem perder nome/RG/nascimento).
+          const _cpfOcr = String(updates.cpf || customer.cpf || "").replace(/\D/g, "");
+          if (_cpfOcr.length !== 11) {
+            console.log(`📋 OCR doc sem CPF — salvando demais campos e indo direto para ask_cpf`);
+            updates.conversation_step = "ask_cpf";
+            const _nome = updates.name || customer.name || "";
+            const _rg = updates.rg || customer.rg || "";
+            const _nasc = updates.data_nascimento || customer.data_nascimento || "";
+            const _resumo = [
+              _nome ? `👤 Nome: *${_nome}*` : "",
+              _rg ? `📄 RG: *${_rg}*` : "",
+              _nasc ? `🎂 Nascimento: *${_nasc}*` : "",
+            ].filter(Boolean).join("\n");
+            reply = `📋 Consegui ler seu documento:\n\n${_resumo}\n\nSó preciso do seu *CPF* pra continuar (apenas números):`;
+            break;
+          }
+
           updates.conversation_step = "confirmando_dados_doc";
           const mismatchWarn = updates.name_mismatch_flag
             ? `\n\n━━━━━━━━━━━━━━━\n⚠️ *Atenção: notei uma diferença de nome*\n\n📄 Conta de luz: *${customer.bill_holder_name || updates.bill_holder_name}*\n🪪 Documento: *${d.nome}*\n\nPara o cadastro no portal iGreen funcionar, o documento precisa ser do *mesmo titular da conta de luz*.\n\nSe for cônjuge, pai/mãe ou outro parente, tudo bem 💚 — eu confirmo isso com você antes de finalizar.\n━━━━━━━━━━━━━━━`
