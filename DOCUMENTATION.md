@@ -463,3 +463,97 @@ Credenciais → edge function → autentica API iGreen → pagina clientes → b
 
 ### `src/lib/utils.ts`
 `cn(...inputs)` → merge de classes Tailwind (clsx + tailwind-merge).
+
+---
+
+## 14. Bot Flow Engine — Contrato
+
+O motor `supabase/functions/whapi-webhook/handlers/bot-flow.ts` é orientado por dados na tabela `bot_flow_steps`. Quem chegar depois deve respeitar este contrato pra evitar regressões.
+
+### Tipos de step (`step_type`)
+
+| Tipo | Quando usar | Precisa `captures`? | Precisa `transitions`? |
+|---|---|---|---|
+| `message` | Mensagem informativa sem esperar resposta específica | Não (mas pode capturar texto livre se terminar com `?`) | Sim, ao menos `default` → próximo |
+| `question` | Pergunta que aguarda resposta categorizada | **Sim** | **Sim** |
+| `media_request` | Pede foto/PDF (conta de luz, doc) | **Sim** (`kind: media`) | **Sim** (`media_received`) |
+| `capture_conta` | Captura foto da conta de luz | **Sim** (`name: imagem_conta`) | Sim |
+| `capture_documento` | Captura RG/CNH/selfie | **Sim** (`name: documento_cliente`) | Sim |
+| `cadastro` / `finalizar_cadastro` | Aciona pipeline interno (OCR, portal iGreen) | **Sim** (`kind: system`) | Não — fallback handoff |
+
+### Schema de `captures` (jsonb array)
+
+```json
+[{
+  "name": "valor_conta",          // identificador interno
+  "kind": "currency|text|media|system",
+  "regex": "(?:r\\$\\s*)?\\d+(?:[.,]\\d{1,2})?",  // opcional, valida formato
+  "accepts": ["image","document"],                // opcional, para kind=media
+  "required": true,
+  "retry_text": "Não entendi, manda só o número 😊",
+  "enabled": true
+}]
+```
+
+### Schema de `transitions` (jsonb array)
+
+```json
+[{
+  "trigger_intent": "afirmacao|negacao|tem_duvida|media_received|default",
+  "trigger_phrases": ["sim","quero","manda"],
+  "goto_step_id": "uuid-do-proximo-passo",
+  "goto_special": null            // ou "cadastro", "repeat", "handoff"
+}]
+```
+
+Toda regra que não casa cai no `default` ou no `fallback`.
+
+### Schema de `fallback` (jsonb object)
+
+```json
+{
+  "mode": "retry|advance|goto|repeat|handoff|ai",
+  "max_retries": 2,
+  "on_fail": "handoff|next|repeat",
+  "goto_step_id": null,
+  "handoff_reason": "step_misconfigured_or_lead_off_topic"
+}
+```
+
+### Anti-loop (engine)
+
+Quando um lead manda resposta inválida em um passo com `transitions` (sem `default`):
+
+1. **1ª tentativa**: repete a pergunta com texto suave (`"Desculpa, não entendi 🙈"`)
+2. **2ª tentativa**: versão ainda mais curta (`"Pra eu te ajudar, só sim ou não 😊"`)
+3. **3ª+**: pausa o bot (`bot_paused=true`, `bot_paused_reason='custom_step_no_match_retries_exhausted'`), cria `bot_handoff_alerts` e notifica o consultor via `notifyHandoff`.
+
+Contadores: `customers.custom_step_retries` (int) + `customers.custom_step_retries_step` (texto). Resetam quando o lead avança de passo.
+
+### Auto-reparo (`repair_bot_flow` RPC)
+
+Função SECURITY DEFINER que conserta passos quebrados de um fluxo em um clique:
+- Preenche `captures` default por tipo (currency p/ valor, media p/ conta/doc, text p/ pergunta)
+- Cria `transitions` para o próximo passo quando não há (`default` ou `media_received`)
+- Define `fallback` com `mode=retry, max_retries=2, on_fail=handoff`
+- **Não sobrescreve** o que o consultor já configurou.
+
+Disponível no botão "Reparar automaticamente" do `FlowAuditPanel` em `/admin/fluxos`.
+
+### Watchdog (`bot-loop-watchdog` edge function)
+
+Cron `*/15 * * * *` que roda `lint_bot_flow_consistency()`. Para cada `possible_loop` (5+ msgs no mesmo step em 24h) ou `orphan_flow_step` (lead em passo deletado):
+
+1. Pausa o bot (`bot_paused_reason='auto_loop_detected'`)
+2. Cria registro em `bot_handoff_alerts` com `metadata.detected_by='bot-loop-watchdog'`
+3. Dispara `notifyHandoff` ao consultor
+4. Anti-spam: pula se já houve alerta nas últimas 6h pra esse customer
+
+### Painel "Saúde do bot" (`/admin/saude-bot`)
+
+Onde o consultor vê tudo que precisa de atenção:
+- Alertas de handoff abertos com botões "Reativar bot" e "Resolvi"
+- Leads parados +24h no mesmo step
+- Distribuição atual de leads por passo (gargalos visuais)
+
+Atua como UI única pra escala — em 100+ consultores, ninguém precisa olhar log SQL.

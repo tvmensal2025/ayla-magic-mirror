@@ -17,6 +17,7 @@ const Auth = lazy(() => import("./pages/Auth"));
 const Admin = lazy(() => import("./pages/Admin"));
 
 const FluxoCamila = lazy(() => import("./pages/FluxoCamila"));
+const SaudeBot = lazy(() => import("./pages/SaudeBot"));
 const AdminKnowledge = lazy(() => import("./pages/AdminKnowledge"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
 const NotFound = lazy(() => import("./pages/NotFound"));
@@ -48,6 +49,7 @@ const App = () => (
               <Route path="/admin" element={<Admin />} />
               <Route path="/admin/whatsapp-clients" element={<WhatsAppClientsPage />} />
               <Route path="/admin/fluxos" element={<FluxoCamila />} />
+              <Route path="/admin/saude-bot" element={<SaudeBot />} />
               <Route path="/admin/conhecimento" element={<AdminKnowledge />} />
               <Route path="/admin/faq" element={<Navigate to="/admin/conhecimento?tab=ia" replace />} />
               <Route path="/admin/fluxos-antigo" element={<Navigate to="/admin/fluxos" replace />} />

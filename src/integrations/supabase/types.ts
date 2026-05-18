@@ -1381,6 +1381,7 @@ export type Database = {
           created_at: string
           customer_id: string | null
           id: string
+          metadata: Json | null
           phone: string | null
           reason: string | null
           resolved_at: string | null
@@ -1392,6 +1393,7 @@ export type Database = {
           created_at?: string
           customer_id?: string | null
           id?: string
+          metadata?: Json | null
           phone?: string | null
           reason?: string | null
           resolved_at?: string | null
@@ -1403,6 +1405,7 @@ export type Database = {
           created_at?: string
           customer_id?: string | null
           id?: string
+          metadata?: Json | null
           phone?: string | null
           reason?: string | null
           resolved_at?: string | null

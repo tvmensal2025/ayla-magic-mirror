@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bot, MessagesSquare, Library, Loader2, Brain, Mic, FileText, BookOpen, Workflow } from "lucide-react";
+import { Bot, MessagesSquare, Library, Loader2, Brain, Mic, FileText, BookOpen, Workflow, Activity } from "lucide-react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
@@ -98,6 +98,13 @@ export function AIAgentTab({ userId }: { userId: string }) {
             Atendimento humanizado 24/7. Quando você assumir, ela pausa automaticamente.
           </p>
         </div>
+        <Link
+          to="/admin/saude-bot"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 text-xs font-medium transition-colors"
+        >
+          <Activity className="w-3.5 h-3.5" />
+          Saúde do bot
+        </Link>
         <Link
           to="/admin/fluxos"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/40 bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors"
