@@ -2170,8 +2170,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             }
 
             if (nextCustom) {
-              // Chain: avança automaticamente passos message que tenham default sem phrases.
-              // Honra goto_step_id quando presente; caso contrário usa next-by-position.
+              // Heurística: passo cujo texto termina em "?" é uma pergunta — aguarda resposta.
+              const _looksLikeQuestion = (s: any) =>
+                String(s?.message_text || "").trim().replace(/[\s\u200B-\u200D\uFEFF]+$/g, "").endsWith("?");
+
+              // Chain: avança automaticamente passos message que tenham default sem phrases
+              // E que NÃO sejam perguntas (texto não termina em "?").
               let current = nextCustom;
               let dispatchedAny = false;
               for (let hops = 0; hops < 8; hops++) {
@@ -2180,6 +2184,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 console.log(`[custom-step-resolver] chain-emit step=${current.step_key} pos=${current.position} dispatched=${ok}`);
                 const ctype = String(current.step_type || "message");
                 if (ctype !== "message") break;
+                if (_looksLikeQuestion(current)) {
+                  console.log(`[chain-stop] pos=${current.position} step=${current.step_key} motivo=pergunta(text ends with ?)`);
+                  break;
+                }
                 const ctxns = Array.isArray(current.transitions) ? current.transitions : [];
                 const defTxn = ctxns.find((t: any) =>
                   String(t?.trigger_intent || "").toLowerCase() === "default"
@@ -2194,6 +2202,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   });
                 }
                 if (!nxt) break;
+                // Pre-check do próximo: se já parece pergunta, dispara e para
+                if (_looksLikeQuestion(nxt)) {
+                  await new Promise((r) => setTimeout(r, 1500));
+                  const okQ = await dispatchStepFromFlow(nxt.step_key, _vars);
+                  dispatchedAny = dispatchedAny || !!okQ;
+                  console.log(`[chain-stop] pos=${nxt.position} step=${nxt.step_key} motivo=proxima-eh-pergunta dispatched=${okQ}`);
+                  current = nxt;
+                  break;
+                }
+                console.log(`[chain-skip] from=${current.position} to=${nxt.position} motivo=default-no-phrases`);
                 await new Promise((r) => setTimeout(r, 1500));
                 current = nxt;
               }
