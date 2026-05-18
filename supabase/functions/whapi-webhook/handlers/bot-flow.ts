@@ -3623,18 +3623,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "ask_email": {
       const txt = (messageText || "").trim();
       const lower = txt.toLowerCase();
-      // ⚠️ Email é OBRIGATÓRIO no portal iGreen. Não aceitar PULAR — repetir até cliente fornecer email real.
+      // ⚠️ Email é OBRIGATÓRIO no portal iGreen. Não aceitar PULAR.
       if (["pular", "skip", "não tenho", "nao tenho", "sem email", "sem e-mail", "n", "não", "nao"].includes(lower)) {
-        reply = "📧 Preciso de um *e-mail* pra liberar seu cadastro no portal iGreen.\n\nPode ser qualquer e-mail seu — do trabalho, pessoal, antigo, novo. Se não tiver nenhum agora, crie um rapidinho (leva 1 minuto) em qualquer provedor.\n\nQuando tiver, é só mandar aqui.";
+        reply = "📧 Preciso de um *e-mail seu* — é por ele que o portal manda o código.\n\nSe não tiver, crie um rapidinho em qualquer provedor.";
         break;
       }
-      // ── Validação dura: formato + placeholder + email do consultor ──
       if (!isValidEmailFormat(txt)) {
-        reply = "❌ Não consegui ler esse e-mail. Confere se digitou certinho (precisa ter @ e o domínio, ex: *seunome@dominio.com*) e me manda de novo:";
+        reply = "❌ E-mail inválido. Confere o *@* e o domínio (ex: *seunome@gmail.com*):";
         break;
       }
       if (isPlaceholderEmail(txt)) {
-        reply = "❌ Esse e-mail parece de teste. Me manda o e-mail *que você usa de verdade* — é por ele que o portal vai mandar o código:";
+        reply = "❌ Esse e-mail parece de teste. Me manda o seu *de verdade*:";
         break;
       }
       // Bloquear email do consultor dono
@@ -3645,7 +3644,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           .eq("id", consultorId)
           .maybeSingle();
         if (cons?.igreen_portal_email && isSameContact(txt, cons.igreen_portal_email)) {
-          reply = "❌ Esse é o e-mail do consultor. Preciso de um e-mail *seu, diferente desse* — pode ser qualquer provedor:";
+          reply = "❌ Esse é o e-mail do consultor. Preciso de um e-mail *seu*:";
           break;
         }
       } catch (_) { /* segue */ }
@@ -3654,9 +3653,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const next = await autoResolveCepIfNeeded(merged, updates);
       updates.conversation_step = next;
       if (next === "ask_email") {
-        // Algum validador secundário ainda recusa esse e-mail. Em vez de
-        // repetir a pergunta padrão, explicar e pedir um e-mail diferente.
-        reply = "❌ Esse e-mail não foi aceito pelo sistema. Me manda um *outro e-mail seu* — qualquer provedor (Outlook, iCloud, Yahoo, Gmail...):";
+        reply = "❌ E-mail não aceito. Me manda *outro e-mail seu* (qualquer provedor):";
       } else {
         reply = getReplyForStep(next, merged);
       }
