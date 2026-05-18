@@ -17,7 +17,7 @@ export function PerformanceTab({ consultantId, onGoToCentral }: Props) {
             Performance dos Anúncios
           </h2>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            Visão clara dos seus resultados: cliques, leads no WhatsApp, clientes convertidos e custo real por etapa.
+            Mostra <strong className="text-foreground">apenas leads e clientes atribuídos ao Meta Ads</strong> — ignora contatos por indicação, importação ou LP orgânica.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
