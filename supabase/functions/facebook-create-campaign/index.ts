@@ -521,9 +521,9 @@ Deno.serve(async (req) => {
     if (hasMultiFormat) {
       const images: any[] = [];
       if (squareHashes.length || verticalHashes.length) {
-        for (const h of [...squareHashes, ...verticalHashes]) images.push({ hash: h, image_label_name: "feed" });
+        for (const h of [...squareHashes, ...verticalHashes]) images.push({ hash: h, adlabels: [{ name: "feed" }] });
       }
-      for (const h of storyHashes) images.push({ hash: h, image_label_name: "story" });
+      for (const h of storyHashes) images.push({ hash: h, adlabels: [{ name: "story" }] });
       const assetFeedSpec = {
         images,
         bodies: (() => {
