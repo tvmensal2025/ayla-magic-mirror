@@ -2080,6 +2080,8 @@ export type Database = {
           last_bot_reply_at: string | null
           last_custom_prompt_at: string | null
           last_followup_at: string | null
+          last_handoff_notified_at: string | null
+          last_new_lead_notified_at: string | null
           last_rescue_at: string | null
           last_rule_fire_at: string | null
           last_rule_id: string | null
@@ -2199,6 +2201,8 @@ export type Database = {
           last_bot_reply_at?: string | null
           last_custom_prompt_at?: string | null
           last_followup_at?: string | null
+          last_handoff_notified_at?: string | null
+          last_new_lead_notified_at?: string | null
           last_rescue_at?: string | null
           last_rule_fire_at?: string | null
           last_rule_id?: string | null
@@ -2318,6 +2322,8 @@ export type Database = {
           last_bot_reply_at?: string | null
           last_custom_prompt_at?: string | null
           last_followup_at?: string | null
+          last_handoff_notified_at?: string | null
+          last_new_lead_notified_at?: string | null
           last_rescue_at?: string | null
           last_rule_fire_at?: string | null
           last_rule_id?: string | null

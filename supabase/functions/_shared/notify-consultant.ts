@@ -165,12 +165,50 @@ function shouldSend(key: string, ttlMs = 60_000): boolean {
   return true;
 }
 
+// Dedup persistente via DB. O Map in-memory acima morre a cada cold-boot
+// das Edge Functions (acontece a cada poucos segundos), então sem persistir
+// o consultor recebia "NOVO LEAD CHEGOU" a cada mensagem do mesmo lead.
+async function shouldSendPersisted(
+  customerId: string | undefined,
+  column: "last_new_lead_notified_at" | "last_handoff_notified_at",
+  windowMs: number,
+): Promise<boolean> {
+  if (!customerId) return true; // sem id, deixa o cache em memória decidir
+  try {
+    const admin = adminClient();
+    const { data } = await admin
+      .from("customers")
+      .select(column)
+      .eq("id", customerId)
+      .maybeSingle();
+    const lastIso = (data as any)?.[column] as string | null | undefined;
+    if (lastIso) {
+      const last = new Date(lastIso).getTime();
+      if (Date.now() - last < windowMs) return false;
+    }
+    await admin
+      .from("customers")
+      .update({ [column]: new Date().toISOString() } as any)
+      .eq("id", customerId);
+    return true;
+  } catch (e) {
+    console.warn("[notify dedup] erro, deixando passar:", (e as Error).message);
+    return true;
+  }
+}
+
 export async function notifyNewLead(
   consultantId: string,
   lead: { id?: string; name?: string | null; phone_whatsapp?: string | null },
 ): Promise<boolean> {
-  const key = `newlead:${consultantId}:${lead.id || lead.phone_whatsapp || ""}`;
-  if (!shouldSend(key)) return false;
+  // Cache rápido em memória (evita dupla chamada no mesmo isolate)
+  const memKey = `newlead:${consultantId}:${lead.id || lead.phone_whatsapp || ""}`;
+  if (!shouldSend(memKey, 60_000)) return false;
+  // Persistente: 24h por lead
+  if (!(await shouldSendPersisted(lead.id, "last_new_lead_notified_at", 24 * 60 * 60_000))) {
+    console.log(`[notify-new-lead] skip dedup-db lead=${lead.id}`);
+    return false;
+  }
   const text =
     `🎉 *NOVO LEAD CHEGOU!*\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
@@ -188,8 +226,13 @@ export async function notifyHandoff(
   lastQuestion: string,
   reason = "duvida_fora_faq",
 ): Promise<boolean> {
-  const key = `handoff:${consultantId}:${lead.id || lead.phone_whatsapp || ""}`;
-  if (!shouldSend(key, 5 * 60_000)) return false;
+  const memKey = `handoff:${consultantId}:${lead.id || lead.phone_whatsapp || ""}`;
+  if (!shouldSend(memKey, 5 * 60_000)) return false;
+  // Persistente: 30 min por lead
+  if (!(await shouldSendPersisted(lead.id, "last_handoff_notified_at", 30 * 60_000))) {
+    console.log(`[notify-handoff] skip dedup-db lead=${lead.id}`);
+    return false;
+  }
   const stepHuman = String(lead.conversation_step || "").replace(/^(ask_|aguardando_|editing_)/, "").replace(/_/g, " ") || "cadastro";
   const reasonLabel = reason === "duvida_fora_faq" ? "não soube responder a dúvida" : reason;
   const text =
