@@ -13,6 +13,7 @@ import {
 import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
 import { isTestMode } from "../../../_shared/test-mode.ts";
 import { evaluateRules, logRuleFire, _consumeCustomerRateLimit } from "./rules-engine.ts";
+import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
