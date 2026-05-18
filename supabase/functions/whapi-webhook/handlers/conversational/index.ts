@@ -1343,7 +1343,17 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       } catch (_) { /* best-effort */ }
     }
 
-    let cursor: DbStep | null = cadastroStep ? null : s;
+    // Se o passo `message` não tem texto E não enviou nada inline (sem mídia válida),
+    // não devemos cascatear silenciosamente — isso faz o lead "perder" passos.
+    // Persistimos o lead nele e paramos; a próxima inbound dispara repeat e emite mídia anexada.
+    const firstIsSilentEmpty = !cadastroStep
+      && !replyText
+      && !inlineSent
+      && !String(s.message_text || "").trim();
+    if (firstIsSilentEmpty) {
+      console.log(`[cascade-stop] pos=${s.position} step=${s.step_key} motivo=step-vazio-sem-midia`);
+    }
+    let cursor: DbStep | null = (cadastroStep || firstIsSilentEmpty) ? null : s;
     // Helper para achar próximo step: respeita fallback.goto configurado;
     // se o consultor deixou fallback=repeat (ou vazio) mas marcou wait_for=none,
     // o intent claramente é cascatear — então usamos o próximo por position.
