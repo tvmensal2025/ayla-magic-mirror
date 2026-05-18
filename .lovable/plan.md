@@ -1,82 +1,82 @@
-# Diagnóstico do fluxo atual (Rafael Ferreira, 18/05 00:33-00:35)
+## Diagnóstico
 
-Analisei os logs do `whapi-webhook` e do CRM. A IA está falhando por 4 motivos independentes, todos visíveis no caso do Rafael:
+Olhando as `bot_step_transitions` do lead 92433086 (consultor 0c2711ad), o bot registrou:
 
-## Bug 1 — Coluna `__ai_faq` não existe (quebra silencioso após FAQ AI)
-```
-❌ ERRO ao salvar updates: Could not find the '__ai_faq' column of 'customers'
-```
-`handlers/conversational/index.ts:991` adiciona `__ai_faq: true` nos updates, mas `index.ts:728` só remove `__intent`, `__confidence` e `__inline_sent` antes do `update()`. Resultado: sempre que a IA responde uma dúvida via Lovable AI, o update do customer falha — `detour_count`, `conversation_step`, restore de step etc. não salvam. Lead fica preso no mesmo estado.
+- pos 2 → pos 4 (pulou 3)
+- pos 4 → pos 7 (pulou 5 e 6)
 
-## Bug 2 — Classifier OpenAI quebrado (gpt-5-mini rejeita temperature=0)
-```
-[classifier] openai failed: 'temperature' does not support 0 with this model. Only the default (1) value is supported.
-```
-`intent-classifier.ts:89` e `:119` enviam `temperature: 0`. Em todo turno o OpenAI falha, cai pro Gemini (mais lento, e às vezes classifica errado). Quando volta `intent="outro"` em vez de `tem_duvida`, o lead pula o ramo AI FAQ e vai pra rota default — que dispara o Bug 3.
+### Por que o passo 5 foi pulado
 
-## Bug 3 — Motor `conversational` ainda silencia (`reply vazio bloqueado`)
-```
-[conversational] fallback goto bloqueado: step=33be... exige captura antes de 6226...
-[conversational] ⚠️ reply vazio bloqueado em step=33be...
-```
-O fix anterior do `respondAndReentry` foi aplicado só em `handlers/bot-flow.ts`. Mas leads em welcome/qualificação/`flow:*` rodam por `handlers/conversational/index.ts`, que tem seu próprio caminho de "fallback goto bloqueado" e devolve `reply:""` → silêncio total. Foi exatamente o que aconteceu na mensagem das 00:33 do Rafael.
+O passo 5 ("Valor da conta") está configurado assim no fluxo:
 
-## Bug 4 — Spam de "NOVO LEAD CHEGOU" a cada minuto
-Cada áudio do Rafael disparou uma notificação nova. O dedup do `_shared/notify-consultant.ts:155` (`recentAlerts = new Map`, TTL 60s) **só funciona dentro do mesmo isolate**. Edge Functions reiniciam ("booted" aparece a cada poucos segundos no log), então o Map sempre nasce vazio e o `shouldSend` deixa passar.
+- `step_type: message`
+- `message_text: ""` (vazio — só envia mídia/áudio anexado)
+- `transitions: [{ trigger_intent: "default", trigger_phrases: [] }]` apontando direto para o passo 6
 
----
+O resolver custom em `bot-flow.ts` (linhas 2171-2198) tem um loop de **chain automático** que diz: "se o próximo passo é `message` e tem uma transição `default` sem `trigger_phrases`, dispara ele e avança de novo, até 8 hops, com 1.5s de delay entre cada".
 
-# Plano de correção
+Resultado: quando o cliente responde no passo 4, o bot:
+1. Dispara o passo 5 (que não tem texto, só áudio/mídia anexada — e se o slot estiver vazio, o cliente nem percebe que algo foi enviado)
+2. Como o passo 5 é `message` + default-only, **chain continua** sem esperar resposta
+3. Dispara o passo 6 ("posso estar explicando?")
+4. O passo 6 tem transição `afirmacao` (com phrases), não `default` → chain para aqui
 
-## 1. Sanitização genérica de chaves `__*` (resolve Bug 1 e previne novos)
-Em `supabase/functions/whapi-webhook/index.ts`, antes do `supabase.from("customers").update(updates)`:
+A transição gravada (4→7) sugere que em algum caso o passo 6 também avança via fallback `findNextActiveFlowStep`. Mas o problema central é: **o chain trata todo passo `message` com default-only como "auto-avança"**, mesmo quando ele é uma pergunta esperando resposta humana.
+
+### Por que isso vai acontecer com muitos leads
+
+Hoje o motor só "para e espera resposta" quando o passo tem:
+- `trigger_phrases` não-vazias (ex.: `afirmacao` com `["sim","ok","pode"]`), OU
+- `step_type` ≠ `message` (question / capture_*)
+
+Qualquer passo `message` que o usuário criou com transição `default` simples é considerado mensagem informativa de chain. Isso quebra fluxos onde o consultor quer só uma confirmação livre ("manda a conta de luz", "qual seu valor?", etc.) sem listar todas as variações possíveis.
+
+## Plano
+
+### 1. Mudar a heurística do chain em `bot-flow.ts` (linhas 2171-2198)
+
+O loop só deve fazer auto-advance quando o passo for **claramente informativo**. Critérios para parar o chain (passar a esperar resposta):
+
+- `message_text` (depois de trim) termina com `?` → é uma pergunta
+- `message_text` é vazio mas o passo tem **mídia anexada** com kind=`audio` e o áudio é uma pergunta (heurística: `transcript` termina com `?`) — opcional, fase 2
+- O passo tem `wait_for_reply: true` (nova flag, fase 2)
+- **Default seguro**: `message` com `message_text` vazio E sem mídia que pareça pergunta → continua o chain (caso da mídia decorativa)
+
+Implementação mínima (fase 1): no loop de chain, antes do `break` por falta de default, adicionar:
+
 ```ts
-for (const k of Object.keys(updates)) if (k.startsWith("__")) delete (updates as any)[k];
+const txt = String(current.message_text || "").trim();
+if (txt.endsWith("?")) break;  // espera resposta
 ```
-Substitui os `delete` manuais por uma varredura única. Preserva `__intent`/`__confidence` em variáveis locais antes da limpeza (como já é feito).
 
-## 2. Remover `temperature` dos classifiers (resolve Bug 2)
-- `intent-classifier.ts:89`: remover `temperature: 0` (gpt-5-mini só aceita default).
-- `intent-classifier.ts:119` (Gemini): manter `temperature: 0` (Gemini suporta) ou trocar pra `0.1`. Apenas o OpenAI é o problema.
-- Auditar `bot-flow.ts:1106` (outro `temperature: 0`) — checar qual modelo é; se for gpt-5*, remover também.
+E também aplicar a mesma checagem no **passo recém-resolvido** antes de entrar no loop: se o `nextCustom` já termina em `?`, dispara e para (não chain).
 
-## 3. Portar `respondAndReentry` para o motor conversational (resolve Bug 3)
-No `handlers/conversational/index.ts`, em todo ponto que hoje retorna `_finalize(stepKey, { reply:"", ... })` por "fallback goto bloqueado" ou por miss de QA/AI:
-- Chamar o mesmo helper `respondAndReentry` já criado em `bot-flow.ts` (extrair pra `_shared/respond-and-reentry.ts` para reuso).
-- Fluxo: tenta `matchQA` → tenta `answerFaqWithAI` (já existe aqui, ampliar para qualquer intent) → fallback genérico ("Boa pergunta! Já te explico — antes me confirma: <pergunta do step atual>") → após 5 deviations, handoff cortês + `bot_handoff_alerts` + `notifyHandoff`.
-- Garante que **nunca** retornamos `reply:""` quando não houve mídia inline.
+### 2. Tratar passo `message` com `message_text` vazio + sem mídia
 
-## 4. Dedup persistente de notificações (resolve Bug 4)
-Migration nova:
-```sql
-alter table customers add column if not exists last_new_lead_notified_at timestamptz;
-alter table customers add column if not exists last_handoff_notified_at timestamptz;
+Hoje pos 5 dispara "nada visível" e ainda assim avança. Mudar `dispatchStepFromFlow`:
+- se o passo não tem texto E não tem nenhuma mídia válida vinculada → loga warn e **não conta como dispatch**, mas chain continua (não regride). Isso evita silêncio percebido pelo lead.
+
+### 3. Sanity-check na UI `/admin/fluxos`
+
+Quando o consultor salva um passo `message` cujo texto termina em `?` e a única transição é `default` sem phrases, mostrar aviso:
+
+> "Este passo parece ser uma pergunta. Sem `trigger_phrases`, o bot vai continuar sozinho. Adicione frases-gatilho (sim/não/etc.) ou marque 'Aguardar resposta'."
+
+### 4. Telemetria
+
+Adicionar log estruturado em `bot-flow.ts` quando o chain pula um passo:
+```ts
+console.log("[chain-skip]", { from: prev.position, to: current.position, reason: "default-no-phrases" });
 ```
-Em `_shared/notify-consultant.ts`:
-- `notifyNewLead`: antes de enviar, ler `customers.last_new_lead_notified_at`. Se < 24h, abortar. Após enviar, gravar `now()`.
-- `notifyHandoff`: mesma lógica com janela de 30 min.
-- Manter o Map em memória como cache rápido (TTL 60s) só pra evitar duas chamadas no mesmo isolate.
+Para conseguir auditar em prod via `edge_function_logs`.
 
-Isso elimina o spam mesmo com cold-boot constante.
+### Arquivos afetados
 
-## 5. Telemetria de recuperação
-Reusar a tabela `bot_recovery_events` já planejada: registrar `source: "conversational"` quando o motor cair no `respondAndReentry`. Card `/admin/saude-bot` já vai mostrar.
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (chain loop + pre-loop check ~linhas 2165-2198)
+- `supabase/functions/whapi-webhook/handlers/_shared/dispatch-step-from-flow.ts` (skip vazio sem mídia)
+- `src/pages/admin/fluxos/...` componente do editor de passo (aviso na UI)
 
----
+### Fora de escopo desta correção
 
-# Arquivos afetados
-
-| Arquivo | Mudança |
-|---|---|
-| `supabase/functions/whapi-webhook/index.ts` | Loop de strip `__*` antes do update |
-| `supabase/functions/whapi-webhook/handlers/conversational/intent-classifier.ts` | Remover `temperature: 0` do OpenAI |
-| `supabase/functions/whapi-webhook/handlers/bot-flow.ts` | Auditar `temperature: 0` na linha 1106 |
-| `supabase/functions/whapi-webhook/handlers/conversational/index.ts` | Substituir `_finalize(...,reply:"")` por `respondAndReentry` |
-| `supabase/functions/_shared/respond-and-reentry.ts` | **novo** — extrair helper compartilhado |
-| `supabase/functions/_shared/notify-consultant.ts` | Dedup via colunas em `customers` |
-| Migration | `last_new_lead_notified_at`, `last_handoff_notified_at` em `customers` |
-
-# Não-objetivos
-- Não mexer em UI/CRM (apenas backend).
-- Não alterar fluxos do `/admin/fluxos`.
-- Não trocar provider de IA (continua OpenAI + Gemini fallback).
+- Mudar manualmente o passo 5 do consultor no banco (decisão dele via UI).
+- Re-classificação por IA do que é "pergunta vs mensagem" — heurística do `?` resolve 95%.
