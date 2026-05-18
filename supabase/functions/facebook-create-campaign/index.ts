@@ -536,7 +536,7 @@ Deno.serve(async (req) => {
           const all = [body.headline, ...((v || []).filter((x) => x && x !== body.headline))].slice(0, 5);
           return all.map((text) => ({ text }));
         })(),
-        descriptions: [{ text: description }],
+        descriptions: body.description ? [{ text: body.description }] : [],
         link_urls: [{ website_url: waLink }],
         call_to_action_types: ["WHATSAPP_MESSAGE"],
         ad_formats: ["SINGLE_IMAGE"],
