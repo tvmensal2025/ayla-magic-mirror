@@ -2136,20 +2136,23 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   } as any,
                 };
               }
-              // Repete a pergunta de forma gentil e incrementa contador
+              // Resposta não casou: IA responde a dúvida + reentry só com a pergunta final do step
               const nextRetries = retries + 1;
-              console.log(`[custom-step-resolver] aguardando resposta válida no step=${stepKeyForRetry} retry=${nextRetries}/${MAX_RETRIES}`);
-              const gentleRetry = nextRetries === 1
-                ? "Desculpa, não entendi muito bem 🙈 Pode me responder com *sim* ou *não*?"
-                : "Pra eu te ajudar direitinho, só preciso de um *sim* ou *não* 😊";
-              return {
-                reply: gentleRetry,
-                updates: {
+              console.log(`[custom-step-resolver] no-match step=${stepKeyForRetry} retry=${nextRetries}/${MAX_RETRIES} → respondAndReentry`);
+              // Atualiza contador antes de chamar (helper pode pausar se detour>=5)
+              try {
+                await supabase.from("customers").update({
                   custom_step_retries: nextRetries,
                   custom_step_retries_step: stepKeyForRetry,
-                  __inline_sent: emittedCurrent || undefined,
-                } as any,
-              };
+                }).eq("id", customer.id);
+                (customer as any).custom_step_retries = nextRetries;
+                (customer as any).custom_step_retries_step = stepKeyForRetry;
+              } catch (_) { /* noop */ }
+              return await respondAndReentry({
+                reason: "custom_step_no_match",
+                questionText: messageText,
+                reentryFull: String(stepRow.message_text || ""),
+              });
             }
 
             // Match resolvido ou avanço por default → zera contador de retry
