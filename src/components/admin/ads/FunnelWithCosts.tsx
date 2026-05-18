@@ -70,14 +70,14 @@ export function FunnelWithCosts({ consultantId, spendCents, periodDays }: Props)
 
       // 2) contar deals/leads em cada estágio (de WhatsApp + período)
       const { data: dealsData } = await supabase
-        .from("deals")
-        .select("stage_key")
+        .from("crm_deals")
+        .select("stage")
         .eq("consultant_id", consultantId)
         .gte("created_at", since);
 
       const counts: Record<string, number> = {};
       (dealsData || []).forEach((d: any) => {
-        counts[d.stage_key] = (counts[d.stage_key] || 0) + 1;
+        if (d.stage) counts[d.stage] = (counts[d.stage] || 0) + 1;
       });
       setCountsByStage(counts);
       setLoading(false);
