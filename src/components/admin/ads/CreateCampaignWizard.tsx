@@ -445,7 +445,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
       if (cities.length === 0) return toast({ title: "Selecione pelo menos 1 cidade", variant: "destructive" });
       setStep(2);
     } else if (step === 2) {
-      if (totalFiles < 1) return toast({ title: "Adicione pelo menos 1 foto válida", variant: "destructive" });
+      if (totalFiles + pickedLibrary.length < 1) return toast({ title: "Adicione pelo menos 1 foto válida", variant: "destructive" });
       setStep(3);
       if (!copy) generateCopyForCities();
     } else if (step === 3) {
