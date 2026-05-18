@@ -150,23 +150,46 @@ export async function createCampaign(body: CreateCampaignBody) {
   return data as { ok: true; campaign_id: string; adset_id: string; ad_ids: string[]; ads_count: number };
 }
 
+// Lê o File para um ArrayBuffer em memória. Se a referência do arquivo do
+// usuário ficou stale (NotReadableError — comum quando o arquivo passou tempo
+// no input ou foi alterado no disco), damos uma mensagem clara em PT.
+async function readFileBytes(f: File): Promise<ArrayBuffer> {
+  try {
+    return await f.arrayBuffer();
+  } catch (err: any) {
+    const name = err?.name || "";
+    if (name === "NotReadableError" || /could not be read|permission/i.test(String(err?.message || ""))) {
+      throw new Error(
+        `Não consegui ler "${f.name}". O arquivo perdeu a referência (acontece quando ele fica parado por muito tempo ou é movido). Remova e selecione novamente.`
+      );
+    }
+    throw err;
+  }
+}
+
 async function uploadOne(consultantId: string, f: File): Promise<{ url: string; path: string | null }> {
   const safe = f.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const path = `${consultantId}/ads/${Date.now()}-${safe}`;
+  const contentType = f.type || "image/jpeg";
+  // Lê os bytes UMA vez para uma cópia em memória. Isso evita o
+  // NotReadableError quando o handle do File do usuário ficou inválido,
+  // e permite reusar os mesmos bytes no fallback via edge function.
+  const bytes = await readFileBytes(f);
+  const blob = new Blob([bytes], { type: contentType });
   try {
-    const { error } = await supabase.storage.from("consultant-photos").upload(path, f, { upsert: true, contentType: f.type });
+    const { error } = await supabase.storage
+      .from("consultant-photos")
+      .upload(path, blob, { upsert: true, contentType });
     if (error) throw error;
     const { data } = supabase.storage.from("consultant-photos").getPublicUrl(path);
     return { url: data.publicUrl, path };
   } catch (directUploadError) {
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = () => reject(reader.error || new Error("Falha ao ler imagem."));
-      reader.readAsDataURL(f);
-    });
+    // Fallback: manda base64 pra edge function. Convertendo a partir dos bytes
+    // já lidos (não tocamos mais no File original).
+    const base64 = arrayBufferToBase64(bytes);
+    const dataUrl = `data:${contentType};base64,${base64}`;
     const { data, error } = await supabase.functions.invoke("upload-ad-photo", {
-      body: { consultant_id: consultantId, filename: f.name, content_type: f.type, data_base64: dataUrl },
+      body: { consultant_id: consultantId, filename: f.name, content_type: contentType, data_base64: dataUrl },
     });
     if (error) await throwFunctionError(error);
     if ((data as any)?.error || !(data as any)?.url) {
@@ -174,6 +197,16 @@ async function uploadOne(consultantId: string, f: File): Promise<{ url: string; 
     }
     return { url: (data as any).url, path: (data as any).path || null };
   }
+}
+
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)) as any);
+  }
+  return btoa(binary);
 }
 
 function readDim(f: File): Promise<{ w: number; h: number }> {
