@@ -786,6 +786,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   if (currentStep && currentStepRaw && currentStep.id !== currentStepRaw.id) {
     stepKey = currentStep.id;
   }
+  // Registra a pergunta do passo atual para o fallback de _finalize.
+  _setTurnStepQuestion(currentStep?.message_text || "");
   if (!currentStep) {
     // Unknown/legacy step → restart no primeiro step ativo.
     // REGRA DE OURO: SEMPRE seguir o /admin/fluxos. NUNCA inventar texto.
