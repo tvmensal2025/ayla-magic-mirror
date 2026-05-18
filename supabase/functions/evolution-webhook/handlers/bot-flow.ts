@@ -787,6 +787,23 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           if (d.dataNascimento) updates.data_nascimento = d.dataNascimento;
           if (d.nomePai) updates.nome_pai = d.nomePai;
           if (d.nomeMae) updates.nome_mae = d.nomeMae;
+
+          // Se OCR não trouxe CPF, pula confirmação e pede CPF direto
+          const _cpfOcr = String(updates.cpf || customer.cpf || "").replace(/\D/g, "");
+          if (_cpfOcr.length !== 11) {
+            updates.conversation_step = "ask_cpf";
+            const _nome = updates.name || customer.name || "";
+            const _rg = updates.rg || customer.rg || "";
+            const _nasc = updates.data_nascimento || customer.data_nascimento || "";
+            const _resumo = [
+              _nome ? `👤 Nome: *${_nome}*` : "",
+              _rg ? `📄 RG: *${_rg}*` : "",
+              _nasc ? `🎂 Nascimento: *${_nasc}*` : "",
+            ].filter(Boolean).join("\n");
+            reply = `📋 Consegui ler seu documento:\n\n${_resumo}\n\nSó preciso do seu *CPF* pra continuar (apenas números):`;
+            break;
+          }
+
           updates.conversation_step = "confirmando_dados_doc";
           reply = "📋 *Confirme seus dados pessoais:*\n\n" +
             `👤 *Nome:* ${d.nome || "❌ não encontrado"}\n` +
