@@ -2158,6 +2158,15 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }
         }
 
+        // ANTI-DUP: se o passo custom acabou de perguntar, NÃO duplica o prompt legacy.
+        // Apenas espera o cliente mandar a foto/PDF (ou valor).
+        const _lastCustom = (customer as any).last_custom_prompt_at;
+        if (_lastCustom && (Date.now() - new Date(_lastCustom).getTime()) < 10 * 60 * 1000) {
+          console.log(`[anti-dup] aguardando_conta: passo custom já perguntou (${_lastCustom}) — silenciando re-prompt`);
+          reply = "";
+          break;
+        }
+
         reply = `${v}me manda uma *foto* (ou PDF) da sua conta de luz, por favor 📸\n\nSe estiver sem a conta agora, é só me dizer o valor médio que você paga que eu já te calculo a economia.`;
         break;
       }
