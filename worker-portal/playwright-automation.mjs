@@ -489,7 +489,20 @@ async function atualizarStatus(customerId, status, errorMsg = null) {
   const updates = { status, updated_at: new Date().toISOString() };
   if (errorMsg) updates.error_message = errorMsg;
   if (status === 'registered_igreen') updates.portal_submitted_at = new Date().toISOString();
-  if (status === 'awaiting_otp') updates.otp_code = null;
+  if (status === 'awaiting_otp') {
+    const { data: existingOtp } = await getSupabase()
+      .from('customers')
+      .select('otp_code, otp_received_at')
+      .eq('id', customerId)
+      .maybeSingle()
+      .catch(() => ({ data: null }));
+    const receivedAt = existingOtp?.otp_received_at ? Date.parse(existingOtp.otp_received_at) : 0;
+    if (!existingOtp?.otp_code || !receivedAt || Date.now() - receivedAt > 10 * 60 * 1000) {
+      updates.otp_code = null;
+    } else {
+      console.log('   🔐 OTP recente já existe no banco — não limpar ao entrar em awaiting_otp');
+    }
+  }
   await getSupabase().from('customers').update(updates).eq('id', customerId);
 }
 
@@ -1276,6 +1289,99 @@ async function aguardarOTP(customerId, timeoutMs = 120000) {
   throw new Error(`Timeout aguardando OTP (${timeoutMs / 1000}s)`);
 }
 
+async function localizarCampoOTP(page) {
+  const selectors = [
+    'input[autocomplete="one-time-code"]',
+    'input[name="token"], input[name="otp"], input[name="otpCode"], input[name="code"], input[name="verificationCode"]',
+    'input[id*="token" i], input[id*="otp" i], input[id*="codigo" i], input[id*="código" i], input[id*="code" i]',
+    'input[aria-label*="código" i], input[aria-label*="codigo" i], input[aria-label*="OTP" i], input[aria-label*="token" i]',
+    'input[placeholder*="código" i], input[placeholder*="codigo" i], input[placeholder*="OTP" i], input[placeholder*="token" i]',
+    'input[maxlength="6"], input[maxlength="4"], input[maxlength="8"]',
+    'input[type="tel"], input[inputmode="numeric"], input[inputmode="decimal"]',
+  ];
+  for (const sel of selectors) {
+    const loc = page.locator(sel).first();
+    if (await loc.count() > 0 && await loc.isVisible().catch(() => false)) return loc;
+  }
+  const index = await page.evaluate(() => {
+    const known = ['documentNumber','name','birthDate','phone','phoneConfirm','email','emailConfirm','cep','address','number','neighborhood','city','state','complement','installationNumber','energyBillPassword'];
+    const inputs = Array.from(document.querySelectorAll('input'));
+    for (let i = 0; i < inputs.length; i++) {
+      const inp = inputs[i];
+      if (inp.offsetParent === null) continue;
+      const n = inp.getAttribute('name') || '';
+      const t = inp.getAttribute('type') || '';
+      if (t === 'file' || t === 'radio' || t === 'hidden' || t === 'checkbox') continue;
+      if (known.includes(n)) continue;
+      if (!inp.value || inp.value.trim() === '') return i;
+    }
+    return -1;
+  }).catch(() => -1);
+  return index >= 0 ? page.locator('input').nth(index) : null;
+}
+
+async function preencherEConfirmarOTP(page, customerId, otpCode) {
+  const codeClean = String(otpCode || '').replace(/\D/g, '');
+  if (codeClean.length < 4 || codeClean.length > 8) throw new Error(`OTP inválido recebido: ${otpCode}`);
+  const beforeUrl = page.url();
+  const beforeText = (await page.textContent('body').catch(() => '') || '').replace(/\s+/g, ' ').slice(0, 600);
+  const otpField = await localizarCampoOTP(page);
+  if (!otpField || await otpField.count() === 0) {
+    await screenshot(page, customerId, '11-OTP-FALHOU-campo-nao-encontrado');
+    throw new Error('Campo OTP não encontrado no portal');
+  }
+  await otpField.scrollIntoViewIfNeeded().catch(() => {});
+  await otpField.click({ timeout: 5000 });
+  await otpField.evaluate((input) => { input.focus(); input.select?.(); }).catch(() => {});
+  await page.keyboard.press('Control+A').catch(() => {});
+  await page.keyboard.press('Backspace').catch(() => {});
+  await otpField.type(codeClean, { delay: 90 });
+  await otpField.evaluate((input) => {
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
+  }).catch(() => {});
+  const typed = await otpField.inputValue().catch(() => '');
+  if (typed.replace(/\D/g, '') !== codeClean) {
+    await screenshot(page, customerId, '11-OTP-FALHOU-valor-divergente');
+    throw new Error(`OTP não ficou no campo correto. Esperado=${codeClean} lido=${typed}`);
+  }
+  console.log(`   ✅ OTP digitado e validado no input: ${codeClean}`);
+
+  let clickedLabel = null;
+  for (const label of ['Confirmar', 'Verificar', 'Enviar', 'Validar', 'Continuar']) {
+    try {
+      const btn = page.locator(`button:has-text("${label}"), [role="button"]:has-text("${label}"), a:has-text("${label}")`).first();
+      if (await btn.count() > 0 && await btn.isVisible().catch(() => false) && await btn.isEnabled().catch(() => true)) {
+        await btn.scrollIntoViewIfNeeded().catch(() => {});
+        await btn.click({ timeout: 8000 });
+        clickedLabel = label;
+        console.log(`   ✅ Clique de confirmação OTP: "${label}"`);
+        break;
+      }
+    } catch (_) {}
+  }
+  if (!clickedLabel) {
+    await screenshot(page, customerId, '11-OTP-FALHOU-botao-nao-encontrado');
+    throw new Error('Botão Confirmar OTP não encontrado');
+  }
+
+  await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+  await delay(5000);
+  const afterUrl = page.url();
+  const afterText = (await page.textContent('body').catch(() => '') || '').replace(/\s+/g, ' ');
+  const stillOnOtp = /confirma[cç][aã]o de c[oó]digo|reenviar c[oó]digo|c[oó]digo\s*\*/i.test(afterText)
+    && await localizarCampoOTP(page).then(async (f) => !!f && await f.isVisible().catch(() => false)).catch(() => false);
+  const hasError = /c[oó]digo inv[aá]lido|token inv[aá]lido|erro|incorreto|expirad|obrigat[oó]rio/i.test(afterText);
+  const changed = afterUrl !== beforeUrl || afterText.slice(0, 600) !== beforeText;
+  await screenshot(page, customerId, '11-apos-otp');
+  if (hasError || stillOnOtp || !changed) {
+    throw new Error(`OTP não confirmou no portal. stillOnOtp=${stillOnOtp} hasError=${hasError} url=${afterUrl}`);
+  }
+  console.log('   ✅ OTP confirmado no portal; tela avançou após Confirmar');
+  return true;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // AUTOMAÇÃO PRINCIPAL
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1770,70 +1876,36 @@ export async function executarAutomacao(customerId, options = {}) {
         console.error(`   🚨 ERROS DE VALIDAÇÃO: ${validationErrors.filter(e => e.trim()).join(' | ')}`);
       }
       
+      let otpConfirmadoNoPortal = false;
+
       // Verificar se apareceu OTP
       if (/código|OTP|verificação|whatsapp|token/i.test(pageText)) {
         console.log('   📱 OTP detectado - aguardando código...');
         await atualizarStatus(customerId, 'awaiting_otp');
-        
-        // Enviar mensagem pedindo o OTP ao cliente via WhatsApp
-        await notificarClienteOTP(customerId);
+        const { data: otpAtual } = await getSupabase()
+          .from('customers')
+          .select('otp_code, otp_received_at')
+          .eq('id', customerId)
+          .maybeSingle()
+          .catch(() => ({ data: null }));
+        const otpRecente = otpAtual?.otp_code && otpAtual?.otp_received_at && Date.now() - Date.parse(otpAtual.otp_received_at) <= 10 * 60 * 1000;
+
+        // Enviar mensagem pedindo OTP só se ainda não existe código recente salvo.
+        if (otpRecente) console.log('   🔐 OTP recente já salvo — vou digitar direto no portal, sem pedir novamente ao cliente');
+        else await notificarClienteOTP(customerId);
         
         try {
           // Timeout 5 min — cliente leva tempo até olhar o WhatsApp.
           const otpCode = await aguardarOTP(customerId, 300000);
-          // Preencher campo OTP — buscar por múltiplos seletores
-          let otpField = page.locator('input[name="token"], input[name="otp"], input[name="otpCode"], input[name="code"], input[name="verificationCode"]').first();
-          if (!(await otpField.count() > 0 && await otpField.isVisible().catch(() => false))) {
-            otpField = page.locator('input[maxlength="6"], input[maxlength="4"], input[maxlength="8"]').first();
-          }
-          if (!(await otpField.count() > 0 && await otpField.isVisible().catch(() => false))) {
-            otpField = page.locator('input[placeholder*="código" i], input[placeholder*="OTP" i], input[placeholder*="token" i], input[type="tel"]').first();
-          }
-          // Fallback: qualquer input visível vazio que não seja dos campos anteriores
-          if (!(await otpField.count() > 0 && await otpField.isVisible().catch(() => false))) {
-            otpField = await page.evaluate(() => {
-              const known = ['documentNumber','name','birthDate','phone','phoneConfirm','email','emailConfirm','cep','address','number','neighborhood','city','state','complement','installationNumber','energyBillPassword'];
-              const inputs = Array.from(document.querySelectorAll('input'));
-              for (const inp of inputs) {
-                if (inp.offsetParent === null) continue;
-                const n = inp.getAttribute('name') || '';
-                const t = inp.getAttribute('type') || '';
-                if (t === 'file' || t === 'radio' || t === 'hidden' || t === 'checkbox') continue;
-                if (known.includes(n)) continue;
-                if (!inp.value || inp.value.trim() === '') return true;
-              }
-              return false;
-            }) ? page.locator('input:visible').filter({ hasNot: page.locator('[type="file"],[type="radio"],[type="hidden"]') }).last() : null;
-          }
-          if (otpField && await otpField.count() > 0) {
-            await otpField.scrollIntoViewIfNeeded().catch(() => {});
-            await otpField.click();
-            await otpField.type(otpCode, { delay: 100 });
-            console.log(`   ✅ OTP digitado: ${otpCode}`);
-            await delay(1000);
-            
-            // Confirmar OTP
-            // Confirmar OTP — clicar em qualquer botão de confirmação (sem helper externo)
-            let confirmOtpClicked = false;
-            for (const label of ['Confirmar', 'Verificar', 'Enviar', 'Validar', 'Continuar']) {
-              try {
-                const btn = page.locator(`button:has-text("${label}")`).first();
-                if (await btn.count() > 0 && await btn.isVisible().catch(() => false)) {
-                  await btn.click({ timeout: 5000 });
-                  console.log(`   ✅ OTP confirmado (botão "${label}")`);
-                  confirmOtpClicked = true;
-                  break;
-                }
-              } catch (_) {}
-            }
-            if (!confirmOtpClicked) console.log('   ⚠️  Nenhum botão de confirmar OTP encontrado (auto-submit?)');
-            
-            await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-            await delay(3000);
-            await screenshot(page, customerId, '11-apos-otp');
-          }
+          otpConfirmadoNoPortal = await preencherEConfirmarOTP(page, customerId, otpCode);
         } catch (otpErr) {
-          console.warn(`   ⚠️  OTP falhou: ${otpErr.message}`);
+          console.error(`   ❌ OTP falhou: ${otpErr.message}`);
+          await atualizarStatus(customerId, 'automation_failed', `otp_not_confirmed: ${otpErr.message}`).catch(() => {});
+          await getSupabase().from('customers').update({
+            conversation_step: 'otp_falhou',
+            updated_at: new Date().toISOString(),
+          }).eq('id', customerId).catch(() => {});
+          throw new Error(`OTP não confirmado no portal: ${otpErr.message}`);
         }
       }
       
@@ -1927,6 +1999,9 @@ export async function executarAutomacao(customerId, options = {}) {
       // Estratégia 5 (FALLBACK CONSTRUTIVO): se portal mostra sucesso mas nenhum link foi achado,
       // construir URL canônica a partir de igreen_code do customer + igreen_id do consultor.
       if (!facialLink && /código validado|codigo validado|cadastro concluíd|cadastro concluid|cadastro realizado|cadastro finalizado|sucesso/i.test(finalPageText)) {
+        if (/código|OTP|verificação|whatsapp|token/i.test(pageText) && !otpConfirmadoNoPortal) {
+          throw new Error('Fallback de link facial bloqueado: OTP apareceu, mas não foi confirmado no portal');
+        }
         try {
           const supabase = getSupabase();
           if (supabase) {

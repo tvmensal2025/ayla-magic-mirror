@@ -392,7 +392,7 @@ const NO_QA_STEPS = new Set([
   "ask_email", "ask_cep", "ask_number", "ask_complement",
   "ask_installation_number", "ask_bill_value",
   "ask_doc_frente_manual", "ask_doc_verso_manual", "ask_finalizar",
-  "finalizando", "portal_submitting", "aguardando_otp", "validando_otp",
+  "finalizando", "portal_submitting", "aguardando_otp", "validando_otp", "otp_falhou",
   "aguardando_assinatura", "complete", "aguardando_humano",
   "editing_conta_menu", "editing_conta_nome", "editing_conta_endereco",
   "editing_conta_cep", "editing_conta_distribuidora", "editing_conta_instalacao", "editing_conta_valor",
@@ -1986,7 +1986,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     "ask_complement", "ask_email", "ask_rg", "ask_finalizar",
     "confirmar_titularidade", "validacao_facial", "pos_video",
     "finalizando", "finalizar_cadastro", "complete", "valor_baixo",
-    "cadastro_em_analise", "aguardando_facial",
+    "cadastro_em_analise", "aguardando_facial", "otp_falhou",
     "aguardando_humano",
   ]);
   const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -3842,6 +3842,33 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     case "validando_otp": {
       reply = "⏳ Estamos validando seu código no portal. Aguarde um momento...\n\nSe já passou mais de 2 minutos, digite o código novamente.";
+      break;
+    }
+
+    case "otp_falhou": {
+      const otpCode = messageText.replace(/\D/g, "");
+      if (otpCode.length >= 4 && otpCode.length <= 8) {
+        updates.otp_code = otpCode;
+        updates.otp_received_at = new Date().toISOString();
+        updates.conversation_step = "aguardando_otp";
+        updates.status = "awaiting_otp";
+        reply = `✅ Código *${otpCode}* recebido. Vou validar novamente agora — aguarde um instante.`;
+        try {
+          const baseUrl = Deno.env.get("SUPABASE_URL");
+          const srk = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+          if (baseUrl && srk) {
+            fetch(`${baseUrl}/functions/v1/submit-otp`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${srk}` },
+              body: JSON.stringify({ customer_id: customer.id, otp_code: otpCode }),
+            }).catch((e) => console.warn("[otp_falhou] submit-otp dispatch falhou:", (e as Error).message));
+          }
+        } catch (e) {
+          console.warn("[otp_falhou] submit-otp dispatch erro:", (e as Error).message);
+        }
+      } else {
+        reply = "O código anterior não confirmou. Me envie o *novo código numérico* que aparecer no WhatsApp para eu validar novamente.";
+      }
       break;
     }
 
