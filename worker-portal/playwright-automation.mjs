@@ -2011,7 +2011,10 @@ export async function executarAutomacao(customerId, options = {}) {
           console.log('='.repeat(70));
           return { success: true, duration: parseFloat(duration), existingRegistration: true, pageUrl: existingResult.link };
         }
-        throw new Error(existingResult.message || 'Cadastro existente no portal sem link facial localizado');
+        activeBrowser = null;
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        console.warn(`   ⚠️ Cadastro existente assumido, mas link facial não localizado automaticamente.`);
+        return { success: true, duration: parseFloat(duration), existingRegistration: true, linkMissing: true };
       }
       
       let otpConfirmadoNoPortal = false;
