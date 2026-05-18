@@ -412,9 +412,10 @@ Deno.serve(async (req) => {
     }
 
     // ─── 🔇 BOT PAUSADO (handoff humano ativo) ────────────────────────
-    // Se o consultor tomou conta da conversa, NÃO interferimos por X horas.
-    if ((customer as any).bot_paused_until && new Date((customer as any).bot_paused_until) > new Date()) {
-      // Loga inbound mas não responde — deixa o consultor responder
+    // Respeita tanto bot_paused boolean (humano assumiu manualmente) quanto bot_paused_until (timer).
+    const _pausedByFlag = (customer as any).bot_paused === true;
+    const _pausedUntil = (customer as any).bot_paused_until && new Date((customer as any).bot_paused_until) > new Date();
+    if (_pausedByFlag || _pausedUntil) {
       await supabase.from("conversations").insert({
         customer_id: customer.id,
         message_direction: "inbound",
@@ -422,8 +423,9 @@ Deno.serve(async (req) => {
         message_type: hasAudio ? "audio" : (isFile ? "image" : "text"),
         conversation_step: customer.conversation_step,
       });
-      console.log(`🔇 Bot pausado para ${phone} até ${(customer as any).bot_paused_until} — ignorando msg`);
-      return new Response(JSON.stringify({ ok: true, msg: "bot_paused", paused_until: (customer as any).bot_paused_until }), {
+      const _reason = (customer as any).bot_paused_reason || (_pausedUntil ? "paused_until" : "manual");
+      console.log(`🔇 Bot pausado para ${phone} (flag=${_pausedByFlag}, until=${(customer as any).bot_paused_until || "—"}, reason=${_reason}) — ignorando msg`);
+      return new Response(JSON.stringify({ ok: true, msg: "bot_paused", reason: _reason, paused_until: (customer as any).bot_paused_until || null }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
