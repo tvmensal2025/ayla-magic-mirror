@@ -1,10 +1,11 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { Eye, Users, MousePointerClick, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle } from "lucide-react";
+import { Eye, Users, MousePointerClick, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Megaphone, ChevronDown } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -13,6 +14,8 @@ import { StatCard } from "./StatCard";
 import { CustomerCharts } from "./CustomerCharts";
 import { AnalyticsCharts } from "./AnalyticsCharts";
 import { LeadSourceCard } from "./LeadSourceCard";
+import { ResultsDashboard } from "./ads/ResultsDashboard";
+import { WalletChip } from "./ads/WalletChip";
 import { Eye as EyeIcon, EyeOff } from "lucide-react";
 
 interface DashboardTabProps {
