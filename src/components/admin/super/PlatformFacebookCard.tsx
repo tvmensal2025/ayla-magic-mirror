@@ -48,6 +48,26 @@ export function PlatformFacebookCard() {
   const [manualAdAccount, setManualAdAccount] = useState("");
   const [manualPage, setManualPage] = useState("");
   const [manualPixel, setManualPixel] = useState("");
+  const [ensuringPixel, setEnsuringPixel] = useState(false);
+
+  async function ensurePixel() {
+    setEnsuringPixel(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("facebook-ensure-pixel", { body: {} });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      toast({
+        title: (data as any)?.created ? "Pixel igreen-tag-site criado" : "Pixel igreen-tag-site já existia",
+        description: `ID: ${(data as any)?.pixel_id}`,
+      });
+      await loadStatus();
+    } catch (e: any) {
+      toast({ title: "Falha ao garantir pixel", description: e?.message, variant: "destructive" });
+    } finally {
+      setEnsuringPixel(false);
+    }
+  }
+
 
   async function handleConnect() {
     setConnecting(true);
