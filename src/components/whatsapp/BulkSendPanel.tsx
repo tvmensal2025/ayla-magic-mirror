@@ -308,7 +308,13 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
           ].map((o) => (
             <button
               key={o.key}
-              onClick={() => setOriginFilter(o.key as any)}
+              onClick={() => {
+                setOriginFilter(o.key as any);
+                setStatusFilter("all");
+                setDevolutivaFilter("all");
+                setLicenciadoFilter(new Set());
+                setSelectedIds(new Set());
+              }}
               disabled={isSending}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
                 originFilter === o.key
