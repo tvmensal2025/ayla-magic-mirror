@@ -1354,10 +1354,19 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       console.log(`[cascade-stop] pos=${s.position} step=${s.step_key} motivo=step-vazio-sem-midia`);
     }
     let cursor: DbStep | null = (cadastroStep || firstIsSilentEmpty) ? null : s;
-    // Helper para achar próximo step: respeita fallback.goto configurado;
-    // se o consultor deixou fallback=repeat (ou vazio) mas marcou wait_for=none,
-    // o intent claramente é cascatear — então usamos o próximo por position.
+    // Helper para achar próximo step. ORDEM DE PRIORIDADE:
+    //   1) transitions[default].goto_step_id — configuração explícita do consultor
+    //   2) fallback.goto_step_id — somente se não houver transition default
+    //   3) próximo por position — último recurso
+    // (Antes priorizávamos fallback, o que fazia 5 → 7 pular o 6.)
     const findCascadeNext = (cur: DbStep): DbStep | undefined => {
+      const defaultT = Array.isArray(cur.transitions)
+        ? cur.transitions.find((t: any) => t?.trigger_intent === "default" && t?.goto_step_id)
+        : null;
+      if (defaultT?.goto_step_id) {
+        const byDefault = dbSteps.find((step) => step.id === defaultT.goto_step_id && step.is_active);
+        if (byDefault) return byDefault;
+      }
       const gotoId = cur.fallback?.mode === "goto" ? cur.fallback.goto_step_id : null;
       if (gotoId) {
         const byGoto = dbSteps.find((step) => step.id === gotoId && step.is_active);
@@ -1374,9 +1383,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         .trim()
         .replace(/[\s\u200B-\u200D\uFEFF]+$/g, "")
         .endsWith("?");
+    // Captura textual (kind=text) ou com field — qualquer uma exige espera por resposta.
+    const _hasTextCapture = (st: DbStep): boolean =>
+      Array.isArray(st.captures) && st.captures.some((c: any) =>
+        c?.enabled !== false && (c?.field || c?.kind === "text" || c?.name === "resposta_texto")
+      );
     const cursorCascades = (st: DbStep): boolean => {
-      const caps = Array.isArray(st.captures) && st.captures.some((c: any) => c?.enabled !== false && c?.field);
-      if (caps) return false;
+      if (_hasTextCapture(st)) return false;
       if (st.wait_for !== "none") return false;
       if (_looksLikeQuestion(st)) return false;
       return true;
