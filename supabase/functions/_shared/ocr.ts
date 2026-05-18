@@ -268,7 +268,10 @@ ANALISE ESTA IMAGEM DA FRENTE do RG (pode ser RG antigo OU CIN/RG novo em polica
 
 Na frente do RG brasileiro:
 - NOME COMPLETO: nome do titular (campo "Nome", "Nome do Titular" ou no topo).
-- RG (Registro Geral): número do documento no formato XX.XXX.XXX-X ou só dígitos (campo "RG", "Número", "Número do Documento" ou "Registro Geral"). Retorne APENAS os dígitos (7 a 12).
+- RG (Registro Geral):
+  • RG NOVO/CIN (policarbonato): número rotulado claramente como "RG" ou "Registro Geral", formato XX.XXX.XXX-X. Retorne os dígitos.
+  • RG ANTIGO (cartão verde papel): na FRENTE geralmente NÃO aparece o número do Registro Geral — o número da lateral (próximo a "VÁLIDO" ou abaixo da foto, ex.: 59684750, 8284-2) é apenas um nº de SÉRIE/CONTROLE, NÃO É o RG. NESSE CASO, retorne "" no campo rg e o sistema buscará o RG no verso.
+  • Preserve o 'X' final (dígito verificador) se houver. 7 a 12 caracteres.
 - CPF: 11 dígitos. No RG novo/CIN o CPF QUASE SEMPRE aparece impresso na FRENTE, rotulado como "CPF". No RG antigo, geralmente fica no VERSO — se não estiver claramente visível na frente, use "".
 - DATA DE NASCIMENTO: DD/MM/AAAA (campo "Nascimento", "Data de Nasc." ou "Nascimento").
 - NOME DO PAI e NOME DA MÃE: se aparecerem na frente.
