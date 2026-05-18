@@ -55,7 +55,7 @@ export function extractMultiField(text: string): MultiFieldResult {
  *
  * Regras:
  * - `name`: só preenche se vazio OU se source atual for `whatsapp_profile`/`freeform`
- *   (NÃO sobrescreve `manual`, `ocr_cnh`, `ocr_rg`, `ocr_doc`, `self_introduced`).
+ *   (NÃO sobrescreve OCR, manual ou confirmação explícita do cliente).
  * - Outros campos: só preenche se estiverem vazios/null.
  */
 export function buildMultiFieldPatch(
@@ -64,7 +64,7 @@ export function buildMultiFieldPatch(
 ): Record<string, any> {
   const patch: Record<string, any> = {};
   const strongNameSources = new Set([
-    "manual", "ocr_cnh", "ocr_rg", "ocr_doc", "self_introduced", "freeform_multi",
+    "manual", "ocr_cnh", "ocr_rg", "ocr_doc", "ocr_conta", "self_introduced", "user_confirmed", "freeform_multi",
   ]);
   // whatsapp_profile é fraco — qualquer self-intro do lead sobrescreve.
   if (multi.nome && (!customer.name || !strongNameSources.has(String(customer.name_source || "")))) {
