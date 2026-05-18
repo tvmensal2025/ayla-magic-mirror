@@ -220,7 +220,7 @@ export function PlatformFacebookCard() {
                 <Settings2 className="w-3.5 h-3.5" />
                 Definir principal
               </Button>
-              <Button size="sm" variant="outline" onClick={handleConnect} disabled={connecting} className="ml-auto gap-1.5">
+              <Button size="sm" variant="outline" onClick={() => openOAuthInNewTab("switch")} disabled={connecting} className="ml-auto gap-1.5">
                 {connecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                 Reconectar / trocar conta
               </Button>
@@ -293,7 +293,7 @@ export function PlatformFacebookCard() {
                   <span className="font-medium">Permissões Meta {balance.permissions.all_ok ? "(todas concedidas)" : `(${balance.permissions.missing.length} faltando)`}</span>
                 </div>
                 {!balance.permissions.all_ok && (
-                  <Button size="sm" variant="outline" onClick={handleRerequest} disabled={connecting} className="gap-1.5">
+                  <Button size="sm" variant="outline" onClick={() => openOAuthInNewTab("rerequest")} disabled={connecting} className="gap-1.5">
                     {connecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
                     Solicitar permissões faltando
                   </Button>
@@ -322,7 +322,7 @@ export function PlatformFacebookCard() {
               <p className="text-muted-foreground">Conecte a conta Facebook Business da plataforma para que os consultores possam criar campanhas.</p>
             </div>
           </div>
-          <Button onClick={handleConnect} disabled={connecting} className="w-full gap-2">
+          <Button onClick={() => openOAuthInNewTab("switch")} disabled={connecting} className="w-full gap-2">
             {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Facebook className="w-4 h-4" />}
             Conectar Facebook Business
           </Button>
