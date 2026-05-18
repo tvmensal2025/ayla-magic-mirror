@@ -967,7 +967,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
           continue;
         }
       }
-      try { await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", m.kind); } catch (_) {}
+      try { await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", m.kind, Number((m as any).duration_sec || 0) || undefined); } catch (_) {}
     }
     return _finalize(stepKey, {
       reply: renderTemplate(qaHit.text || "", {
