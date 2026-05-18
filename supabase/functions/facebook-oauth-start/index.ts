@@ -73,14 +73,15 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Modo: 'connect' (padrão) ou 'switch' (forçar troca de conta)
+    // Modo: 'connect' (padrão), 'switch' (forçar troca de conta) ou 'rerequest' (re-pedir permissões negadas)
     // Escopo: 'user' (consultor) ou 'platform' (conta única da plataforma — só super admin).
-    let mode: "connect" | "switch" = "connect";
+    let mode: "connect" | "switch" | "rerequest" = "connect";
     let scope: "user" | "platform" = "user";
     let body: any = {};
     try {
       body = await req.json().catch(() => ({}));
       if (body?.mode === "switch") mode = "switch";
+      else if (body?.mode === "rerequest") mode = "rerequest";
       if (body?.scope === "platform") scope = "platform";
     } catch (_) { /* sem body */ }
 
