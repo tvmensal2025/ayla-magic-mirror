@@ -111,7 +111,7 @@ export function getReplyForStep(step: string, c: any): string {
       return `📞 Esse é o seu *telefone de contato*?\n\n*${fmt}*`;
     }
     case "ask_phone": return "Informe seu *telefone* com DDD (ex: 11999998888):";
-    case "ask_email": return "📧 *Seu e-mail*\n_O portal envia um código por ele._";
+    case "ask_email": return "📧 *Qual o seu melhor e-mail?*\n\n_Vou usar pra liberar o seu acesso ao app *iGreen Club* 📱_\n_(onde você acompanha cashback, faturas e indicações)_\n\nPode ser Gmail, Outlook, iCloud…";
     case "ask_cep": return "Qual o seu *CEP*? (8 dígitos)";
     case "ask_number": return `📍 Endereço: *${c.address_street || ""}*\n\nQual o *número* da residência?`;
     case "ask_complement": return "🏠 *Tem complemento no endereço?*\n_Apto, bloco, casa, fundos, etc._";
