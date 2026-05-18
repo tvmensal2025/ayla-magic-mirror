@@ -41,6 +41,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const [isCustomer, setIsCustomer] = useState(false);
+  const [customerId, setCustomerId] = useState<string | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [kanbanStages, setKanbanStages] = useState<Tables<"kanban_stages">[]>([]);
   const [sendingToCrm, setSendingToCrm] = useState(false);
