@@ -2,7 +2,7 @@ import React, { useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, BarChart3, LinkIcon, Settings, Monitor, MessageSquare, LayoutGrid, Users, Copy, Download, X, History, Sparkles, FolderDown, Network, Eye, EyeOff, Megaphone } from "lucide-react";
+import { LogOut, BarChart3, LinkIcon, Settings, Monitor, MessageSquare, LayoutGrid, Users, Copy, Download, X, History, Sparkles, FolderDown, Network, Eye, EyeOff, Megaphone, TrendingUp } from "lucide-react";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { PrivacyModeProvider, usePrivacyMode } from "@/contexts/PrivacyModeContext";
 import { useQueryClient } from "@tanstack/react-query";
@@ -27,7 +27,8 @@ const AutoMessageLog = lazy(() => import("@/components/whatsapp/AutoMessageLog")
 const MaterialsTab = lazy(() => import("@/components/admin/MaterialsTab").then(m => ({ default: m.MaterialsTab })));
 const NetworkPanel = lazy(() => import("@/components/admin/NetworkPanel").then(m => ({ default: m.NetworkPanel })));
 const PanfletoModal = lazy(() => import("@/components/admin/PanfletoModal").then(m => ({ default: m.PanfletoModal })));
-const AdsTab = lazy(() => import("@/components/admin/ads/AdsTab").then(m => ({ default: m.AdsTab })));
+const PerformanceTab = lazy(() => import("@/components/admin/ads/PerformanceTab").then(m => ({ default: m.PerformanceTab })));
+const AdsCentralTab = lazy(() => import("@/components/admin/ads/AdsCentralTab").then(m => ({ default: m.AdsCentralTab })));
 import { SupportChatButton } from "@/components/support/SupportChatButton";
 
 const AdminContent = () => {
@@ -37,10 +38,11 @@ const AdminContent = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "dados" | "links" | "preview" | "whatsapp" | "crm" | "clientes" | "historico" | "rede" | "anuncios">(() => {
+  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "dados" | "links" | "preview" | "whatsapp" | "crm" | "clientes" | "historico" | "rede" | "performance" | "central-anuncios">(() => {
     if (typeof window !== "undefined") {
       const tab = new URLSearchParams(window.location.search).get("tab");
-      if (tab === "anuncios") return "anuncios";
+      if (tab === "performance" || tab === "anuncios") return "performance";
+      if (tab === "central-anuncios") return "central-anuncios";
       if (tab === "agente") return "whatsapp";
     }
     return "dashboard";
@@ -161,11 +163,12 @@ const AdminContent = () => {
     { id: "clientes" as const, label: "Clientes", icon: Users },
     { id: "rede" as const, label: "Rede", icon: Network },
     { id: "whatsapp" as const, label: "WhatsApp", icon: MessageSquare },
-    { id: "anuncios" as const, label: "Anúncios", icon: Megaphone },
+    { id: "performance" as const, label: "Performance", icon: TrendingUp },
     { id: "historico" as const, label: "Histórico", icon: History },
     { id: "links" as const, label: "Links", icon: LinkIcon },
     { id: "dados" as const, label: "Dados", icon: Settings },
     { id: "materiais" as const, label: "Materiais", icon: FolderDown },
+    { id: "central-anuncios" as const, label: "Central de Anúncios", icon: Megaphone },
   ];
 
   if (loading) {
@@ -336,8 +339,12 @@ const AdminContent = () => {
             <AutoMessageLog consultantId={userId} />
           )}
 
-          {userId && activeTab === "anuncios" && (
-            <AdsTab consultantId={userId} />
+          {userId && activeTab === "performance" && (
+            <PerformanceTab consultantId={userId} onGoToCentral={() => setActiveTab("central-anuncios")} />
+          )}
+
+          {userId && activeTab === "central-anuncios" && (
+            <AdsCentralTab consultantId={userId} />
           )}
 
           {activeTab === "preview" && (
