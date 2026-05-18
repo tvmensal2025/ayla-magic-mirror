@@ -18,8 +18,11 @@ import { PerformanceCharts } from "./PerformanceCharts";
 import { LeadSourceCard } from "./LeadSourceCard";
 import { ResultsDashboard } from "./ads/ResultsDashboard";
 import { WalletChip } from "./ads/WalletChip";
-import { HeroKpis } from "./dashboard/HeroKpis";
-import { ClickValueGrid } from "./dashboard/ClickValueGrid";
+import { TerminalTicker } from "./dashboard/TerminalTicker";
+import { MainChart } from "./dashboard/MainChart";
+import { CpcPanel } from "./dashboard/CpcPanel";
+import { RecentClicks } from "./dashboard/RecentClicks";
+import { FunnelStrip } from "./dashboard/FunnelStrip";
 import { Eye as EyeIcon, EyeOff } from "lucide-react";
 
 interface DashboardTabProps {
@@ -238,8 +241,8 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
         </div>
       </div>
 
-      {/* HERO KPIs */}
-      <HeroKpis kpis={(analytics as any)?.heroKpis} walletSnapshot={(analytics as any)?.walletSnapshot} />
+      {/* TERMINAL TICKER — 3 KPIs slim, sem Carteira */}
+      <TerminalTicker kpis={(analytics as any)?.heroKpis} />
 
       {/* TABS */}
       <Tabs defaultValue="visao" className="w-full">
@@ -256,9 +259,15 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
         </TabsList>
 
         {/* === VISÃO GERAL === */}
-        <TabsContent value="visao" className="space-y-6 mt-6">
-          <ClickValueGrid data={(analytics as any)?.clicksByTargetDetailed} />
-          <PerformanceCharts analytics={analytics} />
+        <TabsContent value="visao" className="space-y-4 mt-6">
+          <MainChart data={(analytics as any)?.dailyMain} />
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <CpcPanel data={(analytics as any)?.cpcByTarget} totalCtaClicks={(analytics as any)?.totalCtaClicks} />
+            <RecentClicks clicks={(analytics as any)?.recentClicks} />
+          </div>
+
+          <FunnelStrip funnel={(analytics as any)?.funnel} />
 
           {/* Tráfego LP — colapsável */}
           <Collapsible>
@@ -279,6 +288,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
                 <StatCard icon={<MousePointerClick className="w-5 h-5" />} label="Cliques nos Botões" value={analytics?.totalClicks ?? 0} color="accent" />
               </div>
               <AnalyticsCharts chartData={chartData} periodDays={periodDays} analytics={analytics} weeklyNewCustomers={filteredMetrics?.weeklyNewCustomers} />
+              <PerformanceCharts analytics={analytics} />
             </CollapsibleContent>
           </Collapsible>
         </TabsContent>

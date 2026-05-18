@@ -1,75 +1,75 @@
-## Diagnóstico — por que os números estão "errados"
+## Diagnóstico do que está ruim
 
-Comparando o que aparece na tela com `useAnalytics.ts`:
+Olhando a tela atual:
+- **Carteira Ativa** ocupa 1/4 do hero mas é número estático que confunde junto com KPIs de período
+- **Visual editorial** ficou polido demais, sem "wow" — você quer terminal denso
+- **Funil + Heatmap + Origens** empilhados verticalmente = muito scroll, pouca informação por tela
+- **Não tem o gráfico de evolução grande** que mostra o pulso do negócio
+- **Cliques** estão diluídos numa lista — você quer destaque para CPC, quem clicou, quantos clientes únicos
 
-| KPI topo | Valor exibido | Origem real | Problema |
-|---|---|---|---|
-| Visitas | 16 | últimos **7 dias** | Ignora o seletor "Últimos 30 dias" → funil mostra 39 |
-| Cliques | 0 | últimos 7 dias | Mesma janela fixa; funil mostra 3 cliques CTA em 30d |
-| Novos Leads | 10 | `customer_origin = whatsapp_lead/manual`, últimos 7 dias | Coincide com funil só por acaso |
-| Aprovados | 24 | `walletCustomers` aprovados com `created_at >= 7d` | Usa data de **sincronização** da carteira iGreen, não a data real de aprovação → todo sync inicial vira "aprovado essa semana" |
+## Nova direção: Bloomberg Terminal
 
-**Causa raiz:** `HeroKpis` está hardcoded em "7d vs 7d anteriores" enquanto o resto do dashboard respeita `periodDays`. E "Aprovados" usa `created_at` do registro sincronizado (não `approved_at`).
+Paleta travada:
+- Fundo: `#000000` puro
+- Painéis: `#0a0f0a` com borda `#1a2e1a` (1px hairline)
+- Verde fósforo: `#22c55e` (dados positivos / volume)
+- Âmbar: `#fbbf24` (alertas / CTAs secundários)
+- Cinza terminal: `#3f3f3f` (labels), `#737373` (axis)
+- Tipo: **JetBrains Mono** para todos os números (tabular, terminal vibe). Heading Montserrat preto para títulos de painel.
+- Sem gradientes, sem glow, sem rounded-2xl. Tudo `rounded-sm` ou reto. Tickers e separadores `│`.
 
----
+## Layout novo (top → bottom)
 
-## Plano
+```text
+┌─ STATUS BAR ────────────────────────────────────────┐
+│ ● LIVE  PERIOD: 30D  │  21:34 BRT  │  [Sync] [PDF]  │
+├─ TICKER STRIP (3 KPIs slim, sem Carteira) ──────────┤
+│ VISITAS 39 ▲12%  │  CLIQUES 14 ▲40%  │  LEADS 10 ▬ │
+├─ MAIN CHART (60vh) ─────────────────────────────────┤
+│  EVOLUÇÃO DIÁRIA — visitas/cliques/leads sobrepostos│
+│  linhas finas, grid invisível, eixos mono, crosshair│
+├─ CLIQUES PANEL (2 colunas) ─────────────────────────┤
+│ ┌─ CPC POR CTA ──────┐ ┌─ CLIENTES QUE CLICARAM ──┐│
+│ │ #1 WhatsApp  R$2.14│ │ • João Silva  3 cliques  ││
+│ │    9 cliques  64%  │ │ • Maria Souza 2 cliques  ││
+│ │ #2 Cadastro  R$3.80│ │ • +12 anônimos           ││
+│ │    5 cliques  36%  │ │ Total único: 14 visitantes││
+│ └────────────────────┘ └──────────────────────────┘│
+├─ FUNIL HORIZONTAL (slim) ───────────────────────────┤
+│ VISITAS 39 → CLIQUES 14 (36%) → LEADS 10 (71%) → APR 0 (0%)
+└─────────────────────────────────────────────────────┘
+```
 
-### 1. Corrigir dados (useAnalytics.ts)
+Carteira Ativa, Receita Potencial e KPIs de cliente vão para aba **"Clientes iGreen"** (já existe). Visão Geral foca 100% em **tráfego e conversão da landing page**.
 
-- `heroKpis` passa a respeitar `periodDays` (compara período atual vs período anterior de mesmo tamanho).
-- Renomear card "Aprovados" para **"Carteira iGreen"** com o total real de `walletCustomers` aprovados (snapshot atual, não delta por janela) — é o número que o consultor quer ver de verdade.
-- Adicionar KPI novo de **"Receita potencial"** = soma de `electricity_bill_value` da carteira aprovada (formato BRL).
-- "Cliques" passa a contar só CTAs de conversão (`whatsapp*`, `cadastro*`), alinhado ao funil.
-- Subtítulo do hero passa a refletir o período real ("Últimos 30 dias vs. 30 anteriores").
+## Componentes afetados
 
-### 2. Redesign visual — Editorial high-contrast
+- `src/components/admin/dashboard/HeroKpis.tsx` — vira **TickerStrip** (3 colunas slim, sem Carteira, fonte mono).
+- `src/components/admin/dashboard/MainChart.tsx` (**novo**) — Recharts AreaChart minimal preto/verde/âmbar, altura ~360px, crosshair customizado, tooltip terminal-style.
+- `src/components/admin/dashboard/CpcPanel.tsx` (**novo**) — Custo por clique por CTA. Pega gasto total do `ResultsDashboard`/Facebook Ads (já tem `WalletChip`) e divide por cliques da CTA. Se não houver gasto, mostra "—".
+- `src/components/admin/dashboard/ClickerList.tsx` (**novo**) — Lista de clientes que clicaram (join `page_events.click` com `customers` via session_id/phone), agrupado por cliente com count de cliques. Anônimos agregados.
+- `src/components/admin/PerformanceCharts.tsx` — vira **FunnelStrip** horizontal compacto (uma linha só) + Origens vira tabela densa mono. Heatmap movido para baixo / collapsable.
+- `src/components/admin/DashboardTab.tsx` — reorganiza ordem e remove `ClickValueGrid` antigo, adiciona status bar terminal no topo.
+- `src/index.css` — adiciona tokens `--terminal-bg`, `--terminal-line`, `--terminal-green`, `--terminal-amber`; importa **JetBrains Mono** do Google Fonts.
+- `tailwind.config.ts` — registra `font-mono: ['JetBrains Mono', ...]`.
 
-Direção: preto puro, tipografia gigante, accent verde esmeralda + amarelo âmbar, sem glow/glass.
+## Hook `useAnalytics.ts`
 
-**Hero KPIs (refeito)**
-- Grid 4 colunas, fundo `#0a0a0a`, borda fina `#1f1f1f`.
-- Número em **font-heading 5xl-6xl**, tracking apertado.
-- Label minúscula em maiúsculas com tracking largo (estilo NYT).
-- Sparkline maior (110×36) na lateral direita.
-- Delta como pill outline (verde/âmbar/cinza), não preenchido.
-- Separadores verticais finos entre cards (não quatro caixas isoladas).
+Adicionar:
+- `uniqueClickers`: contagem distinta de `session_id` em `page_events` tipo click no período.
+- `clickerList`: top N (`session_id` + telefone/nome se houver customer match) com count.
+- `cpcByTarget`: para cada CTA, divide gasto (precisa de input do Facebook Ads — se ausente, retorna `null`).
 
-**Valor de cada clique (ClickValueGrid)**
-- Vira tabela editorial com ranking numerado (#1, #2…).
-- Número grande do total + sparkline inline + delta.
-- Linha do CTA com mais cliques recebe fundo `#111` e barra âmbar à esquerda.
+Manter `walletSnapshot` mas **não consumir mais** na Visão Geral (fica para tab Clientes).
 
-**Funil de Conversão**
-- Cascata visual (cada etapa mais estreita, alinhada ao centro), no estilo Linear.
-- Mostra `count`, `% do topo`, e `% da etapa anterior` em colunas tipográficas.
-- Linhas conectoras tracejadas entre etapas indicando drop-off.
+## Dados ainda errados — confirmar
 
-**Gráficos novos (substituem o bloco "Tráfego LP" colapsável)**
-- **Tendência diária** (AreaChart minimalista, sem gradiente espesso): Visitas + Cliques no período inteiro.
-- **Heatmap hora × dia da semana**: identifica horários quentes (substitui o bar chart de weekday).
-- **Top origens de tráfego**: mantém tabela mas com barra horizontal embutida na linha.
+Os KPIs já respeitam `periodDays` desde a última iteração. Se ainda parece errado, o mais provável é:
+1. `page_views` zerados porque GA não dispara em preview — verificar contagem real no Supabase.
+2. Cliques não atribuídos a leads (sem `session_id` no `customers`). Esse plano expõe isso na lista de clickers.
 
-### 3. Componentes afetados
+Vou rodar uma query rápida em `page_views` + `page_events` antes de implementar para confirmar volumes reais.
 
-- `src/hooks/useAnalytics.ts` — refatorar `heroKpis` e `weekComparison` por `periodDays`; novo campo `walletSnapshot`.
-- `src/components/admin/dashboard/HeroKpis.tsx` — redesign completo.
-- `src/components/admin/dashboard/ClickValueGrid.tsx` — redesign tabela editorial.
-- `src/components/admin/PerformanceCharts.tsx` — funil em cascata + heatmap novo.
-- `src/components/admin/dashboard/Sparkline.tsx` — variante "large" sem fill.
-- `src/components/admin/DashboardTab.tsx` — limpar bloco "Tráfego detalhado" colapsável (passa para dentro do redesign).
-
-### 4. Fora do escopo
-
-- Aba "Anúncios & Origem" e "Clientes iGreen" — só "Visão Geral" é redesenhada agora.
-- Toolbar e WalletChip permanecem.
-
----
-
-## Detalhes técnicos
-
-- Mantém Tailwind tokens (sem cores hardcoded fora de variáveis HSL no `index.css`).
-- Adiciona tokens `--editorial-ink: 0 0% 4%`, `--editorial-line: 0 0% 12%`, `--editorial-amber: 38 92% 50%`.
-- Recharts: tooltip black/border-amber, grid praticamente invisível, sem axisLine.
-- Heatmap construído como grid CSS (`grid-cols-25`) com células `bg-primary/X` por intensidade — sem libs novas.
-- `framer-motion` (já no projeto) para fade-in dos números no mount.
+## Fora do escopo
+- Abas Anúncios e Clientes iGreen ficam intocadas nesta rodada.
+- Heatmap pode virar collapsible no rodapé (manter só se você quiser).

@@ -383,12 +383,68 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
         }
       }
 
+      // === RECENT CLICKS — timeline editorial ===
+      const recentClicks = events
+        .filter((e) => e.event_type === "click" && e.event_target)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 20)
+        .map((e) => ({
+          target: e.event_target as string,
+          page: e.page_type as string,
+          device: (e.device_type as string) || "—",
+          source: (e.utm_source as string) || "direto",
+          created_at: e.created_at,
+        }));
+
+      // === CPC POR CTA — share + (placeholder de gasto) ===
+      const totalCtaClicks = Object.entries(clicksByTarget)
+        .filter(([t]) => t.includes("whatsapp") || t.includes("cadastro"))
+        .reduce((s, [, n]) => s + n, 0);
+      const cpcByTarget = Object.entries(clicksByTarget)
+        .map(([target, clicks]) => ({
+          target,
+          clicks,
+          share: totalCtaClicks > 0 ? (clicks / totalCtaClicks) * 100 : 0,
+          cpc: null as number | null,
+        }))
+        .sort((a, b) => b.clicks - a.clicks);
+
+      // === DAILY MAIN SERIES — visitas + cliques CTA + novos leads ===
+      const dailyMain: Array<{ date: string; label: string; visitas: number; cliques: number; leads: number }> = [];
+      for (let i = periodDays - 1; i >= 0; i--) {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - i);
+        dailyMain.push({
+          date: d.toISOString().split("T")[0],
+          label: d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
+          visitas: 0,
+          cliques: 0,
+          leads: 0,
+        });
+      }
+      const dailyIdx = new Map(dailyMain.map((r, i) => [r.date, i]));
+      for (const v of views) {
+        const i = dailyIdx.get(v.created_at.split("T")[0]);
+        if (i != null) dailyMain[i].visitas++;
+      }
+      for (const e of events) {
+        if (!isCtaClick(e)) continue;
+        const i = dailyIdx.get(e.created_at.split("T")[0]);
+        if (i != null) dailyMain[i].cliques++;
+      }
+      for (const l of leadCustomers) {
+        const i = dailyIdx.get(l.created_at.split("T")[0]);
+        if (i != null) dailyMain[i].leads++;
+      }
+
       return {
         totalClient, totalLicenciada, total, totalClicks, clicksByTarget, clicksByPage,
         daily, hourly, devices, utmSources, totalCustomers, customersByStatus,
         totalKw, avgKw, topLicenciados, weeklyNewCustomers, conversionRate, allCustomers,
         funnel, weekday, weekComparison, topCampaigns,
         clicksByTargetDetailed, heroKpis, walletSnapshot, heatmap, periodDays,
+        recentClicks, cpcByTarget, totalCtaClicks, dailyMain,
       };
 
     },
