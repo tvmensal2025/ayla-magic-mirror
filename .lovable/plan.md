@@ -1,91 +1,61 @@
-# Causa raiz: detector de CNH/RG está **silenciosamente quebrado**
+## Ajustes finos de copy + botão no fluxo WhatsApp
 
-## O que está acontecendo (provado pelos logs)
+Apenas alterações em `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (strings + 1 chamada de envio). Sem mudança de lógica.
 
-Olhei os logs reais do `whapi-webhook` nas últimas horas:
+### 1. `ask_email` — aceitar qualquer provedor
 
-```
-🤖 [detectDoc] pass1 ambíguo (no-parse) — pass2 com 2.5-pro
-🤖 [detectDoc] pass2 ambíguo — pass3 desempate
-⚠️ [detectDoc] sem parse — fallback rg_antigo
-🤖 [doc-auto] tipo detectado pela IA: rg_antigo
-```
+Hoje a copy reforça Gmail e dá impressão de que só Gmail serve. Ajustar:
 
-**As 3 passadas do Gemini estão retornando vazio (`no-parse`)** e o código cai no fallback final `tipo: "rg_antigo"`. Resultado: **TODO documento — CNH, RG novo, RG antigo — está sendo classificado como `rg_antigo`**, então o bot sempre pede o verso. O classificador "profissional" de 3 passadas hoje nunca funcionou.
+- **Linha 355** (`getReplyForStep` → `ask_email`):
+  - Antes: `qual é o seu *e-mail*?`
+  - Depois: `me passa seu *e-mail* (pode ser de qualquer provedor — Gmail, Outlook, iCloud, Yahoo, etc.) 📧`
+- **Linha 3286** (fallback "não tenho"): remover a indicação exclusiva de Gmail; trocar por algo neutro tipo `pode criar um agora em qualquer serviço (Gmail, Outlook, iCloud...) — leva 1 minuto`.
+- **Linhas 3291, 3295, 3306** (mensagens de erro): manter exemplo, mas adicionar texto deixando claro "qualquer provedor serve" e variar exemplo (`maria@outlook.com`, `joao@hotmail.com`).
 
-## Por que as 3 passadas retornam vazio
+Também atualizar o texto inicial em `conversational/index.ts:1263` (`📧 Qual seu *e-mail*?`) para a mesma copy nova.
 
-`supabase/functions/_shared/detect-doc-type.ts:154`:
+### 2. Aviso de nome — só quando há divergência real entre conta e documento
 
-```ts
-generationConfig: { temperature: 0, maxOutputTokens: 400, responseMimeType: "application/json" }
-```
+Hoje a tela de confirmação pós-OCR do documento mostra os dados extraídos sem contexto. O aviso de "tem que ser titular da conta" **só deve aparecer quando há mismatch** entre nome da conta de luz e nome do documento (já existe `name_mismatch_flag`).
 
-Dois problemas combinados:
+- **Linha 2791** (`mismatchWarn`): trocar a copy atual por uma versão mais bonita/clara, mantendo a condição `updates.name_mismatch_flag`:
+  ```
+  ⚠️ *Atenção: notei uma diferença de nome*
 
-1. **`gemini-2.5-flash` e `gemini-2.5-pro` têm "thinking" ligado por default.** Os tokens de raciocínio entram no mesmo orçamento de `maxOutputTokens`. Com 400 tokens, o thinking consome tudo e a parte visível (`candidates[0].content.parts[0].text`) volta vazia.
-2. **`responseMimeType: "application/json"` força JSON estrito** — qualquer "pensamento" no meio quebra ou é cortado pelo limite.
+  📄 Conta de luz: *{bill_holder}*
+  🪪 Documento:   *{doc_nome}*
 
-A função `parseDetectJson` então recebe `""`, retorna `null`, e cada pass é marcado como "no-parse". O fallback final `rg_antigo` sempre vence.
+  Para o cadastro funcionar, o documento precisa ser do *mesmo titular da conta de luz*. 
 
-## Diferença entre RG antigo, RG novo e CNH (o checklist já está bom)
 
-O `CHECKLIST` no arquivo já cobre corretamente as diferenças visuais:
-- **CNH**: horizontal, "CATEGORIA"/"VALIDADE"/"HABILITAÇÃO", sem verso útil.
-- **RG novo (CIN)**: policarbonato, QR grande, CPF na frente, horizontal.
-- **RG antigo**: papel laminado vertical, sem QR grande, sem CPF na frente.
+  ```
+- **Não adicionar nenhum aviso quando os nomes batem** (já é o comportamento atual, manter).
 
-O problema **não é** o prompt nem a distinção — é que o Gemini nunca responde nada parseável.
+### 3. Finalizar cadastro — usar botão de verdade, não "digite 1"
 
-## Plano de correção
+Existem dois pontos em que o texto pede para "digitar 1":
 
-### 1. Desligar thinking explicitamente e aumentar orçamento
+**3a. `FINAL_FALLBACK` (linha 2423)** — usado pelo `post-confirm-conta` quando o passo de finalização não tem dispatch:
 
-Em `callGemini` (detect-doc-type.ts):
+- Hoje: `✅ *Todos os dados foram preenchidos!*\n\n1️⃣ Finalizar\n\n_Digite *1* ou *FINALIZAR* para concluir:_`
+- Trocar `sendFallback(FINAL_FALLBACK, ...)` por um envio com botão, igual ao `ask_finalizar`:
+  ```ts
+  await sendOptions(remoteJid, "✅ *Tudo pronto!*\n\nSeus dados foram preenchidos. Vamos finalizar seu cadastro no portal iGreen?", [
+    { id: "btn_finalizar", title: "✅ Finalizar cadastro" },
+  ]);
+  ```
+  E gravar o outbound em `conversations` (manter o pattern do `sendFallback`). Definir o próximo step como `ask_finalizar` (não `finalizar_cadastro` direto) para que o clique no botão seja capturado pelo handler existente na linha 3443.
 
-```ts
-generationConfig: {
-  temperature: 0,
-  maxOutputTokens: 2048,                         // antes 400
-  responseMimeType: "application/json",
-  thinkingConfig: { thinkingBudget: 0 },         // 🚨 sem thinking
-},
-```
+**3b. Fallback de erro em `ask_finalizar` (linha 3453)** — usado quando `sendOptions` falha:
 
-Isso aplica nas 3 passadas (flash e pro). Sem thinking, o modelo gera o JSON direto e o `text` volta preenchido.
+- Hoje: `Digite *FINALIZAR* ou *1* para confirmar o cadastro:`
+- Trocar para: `Toque no botão *✅ Finalizar* acima — ou responda *FINALIZAR* para concluir.` (remover o "1", deixar mais natural já que botão é a via primária).
 
-### 2. Log da resposta crua quando o parse falha
+### Arquivos afetados
 
-Hoje o log diz só "no-parse" — não dá pra debugar. Adicionar:
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (linhas 355, 2422-2446, 2791, 3286, 3291, 3295, 3306, 3453)
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (linha 1263)
 
-```ts
-if (!parsed1) console.warn("[detectDoc] pass1 raw:", raw1.substring(0, 300));
-```
+### Deploy
 
-Idem pass2 e pass3. Sem isso, qualquer regressão futura fica invisível de novo.
-
-### 3. Fallback inteligente em vez de assumir `rg_antigo`
-
-Quando as 3 passadas falham (caso raro após o fix), em vez de empurrar `rg_antigo` (que sempre pede verso e quebra UX de CNH), o bot deve **perguntar** uma única vez: "É RG ou CNH?" e seguir com a resposta. Isso vai no `case "aguardando_doc_auto"` em `bot-flow.ts:2519`.
-
-Implementação:
-- `detectDocumentTypeDetailed` ganha campo `confianca: 0, source: "fallback"` (já existe).
-- No handler, se `confianca === 0 && source === "fallback"`, em vez de prosseguir, salva `document_front_*`, vai para `ask_tipo_documento` (que já existe — linha 2620) e pergunta "RG ou CNH?".
-
-### 4. Ajuste do fallback "rg_antigo é mais seguro" no PROMPT_PASS3
-
-Hoje a regra R5 do pass3 ("em dúvida → rg_antigo") **incentiva** o modelo a chutar RG mesmo quando viu CATEGORIA/VALIDADE. Trocar por "em dúvida → responda com `confianca: 0.3`" e deixar o handler aplicar o fallback humano do item 3.
-
-## Arquivos afetados
-
-- `supabase/functions/_shared/detect-doc-type.ts` (itens 1, 2, 4)
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (item 3, no case `aguardando_doc_auto`)
-
-## Verificação
-
-Depois de deploy:
-1. Esperar próximo lead enviar CNH ou RG.
-2. Conferir logs: deve aparecer `pass1 confiante: cnh (0.90+)` em vez de `no-parse`.
-3. Conferir que CNH não dispara mais "envie o verso".
-
-Sem mudar UX visível para o lead — a correção é só fazer o classificador realmente funcionar.
+Após a aprovação: deploy de `whapi-webhook`.
