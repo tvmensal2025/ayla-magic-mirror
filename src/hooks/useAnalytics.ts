@@ -278,8 +278,8 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
       }).length;
       const curClicks = events.filter((e) => e.event_type === "click" && new Date(e.created_at).getTime() >= curStart).length;
       const prevClicks = events.filter((e) => e.event_type === "click" && new Date(e.created_at).getTime() >= prevStart && new Date(e.created_at).getTime() < curStart).length;
-      const curLeads = allCustomers.filter((c) => new Date(c.created_at).getTime() >= curStart).length;
-      const prevLeads = allCustomers.filter((c) => {
+      const curLeads = leadCustomers.filter((c) => new Date(c.created_at).getTime() >= curStart).length;
+      const prevLeads = leadCustomers.filter((c) => {
         const t = new Date(c.created_at).getTime();
         return t >= prevStart && t < curStart;
       }).length;
