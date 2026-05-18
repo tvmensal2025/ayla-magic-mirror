@@ -1,72 +1,91 @@
-## Objetivo
+## Problema
 
-Quando o lead mandar uma saudação ("bom dia", "boa tarde", "boa noite", "oi", "olá"), o bot **responde a saudação no mesmo tom** ("Bom dia! …", "Boa tarde! …", "Boa noite! …") e **continua o fluxo exatamente onde estava** — sem resetar, sem repetir o passo, sem cair em fallback. Para qualquer outra mensagem, nada muda.
+1. **IA não obedece o "Assumir"**: clicar em "Assumir" no painel "IA ao vivo" seta `customers.bot_paused = true`, mas os webhooks (`whapi-webhook/index.ts` e `evolution-webhook/index.ts`) só checam `bot_paused_until` (timestamp). O boolean é ignorado → bot continua respondendo.
+2. **Sem template rápido dos passos do fluxo**: hoje `/comando` no chat só busca templates manuais; não inclui os passos configurados em `/admin/fluxos`.
+3. **Sem envio passo-a-passo manual**: quando assumo, quero escolher um passo do fluxo e disparar peça por peça (áudio → imagem → texto), confirmando cada uma.
 
-## Diagnóstico do que existe hoje
+## Mudanças
 
-Em `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (linhas 1066–1145) há dois blocos de saudação:
+### 1. Respeitar `bot_paused` em todos os webhooks
 
-1. **`isSaudacao && currentStep.id === firstActive.id`** — repete a pergunta do 1º passo.
-2. **`isSaudacao && currentStep.id !== firstActive.id`** — **reseta para o Passo 1** e cascateia mídias de novo. É isso que está causando o "voltei pro começo" toda vez que o lead manda "Boa noite" no meio da conversa.
+Arquivos:
+- `supabase/functions/whapi-webhook/index.ts` (~linha 414)
+- `supabase/functions/evolution-webhook/index.ts` (bloco equivalente)
 
-Ambos os blocos tratam saudação como evento que muda o fluxo. O usuário quer o oposto: saudação é apenas cortesia.
+Antes do bloco de `bot_paused_until`, adicionar:
 
-## Mudanças (somente `conversational/index.ts`)
+```text
+if (customer.bot_paused === true) {
+  // loga inbound, não responde
+  insert conversations { inbound, messageText, step }
+  return 200 { ok: true, msg: "bot_paused_manual" }
+}
+```
 
-### 1. Helper de saudação contextual
+Isso vale para qualquer motivo (`humano_assumiu`, `lead_pediu_humano`, `muitas_duvidas`, etc.). Cobre o caso reportado: assumi → IA cala.
 
-Adicionar função local `greetingPrefix(text: string): string` que detecta:
+Também adicionar a mesma guarda no início de `runConversationalFlow` e no início de `processBotFlow` (defesa em profundidade, caso alguma rota chame direto).
 
-- `/bom dia/i` → `"Bom dia!"`
-- `/boa tarde/i` → `"Boa tarde!"`
-- `/boa noite/i` → `"Boa noite!"`
-- `/\b(oi+|ol[áa]|opa|e a[íi]|eai|hello|hi)\b/i` → `"Oi!"`
-- nenhum match → `""`
+### 2. Painel "IA ao vivo": botão "Enviar passo" quando humano assumiu
 
-### 2. Remover o bloco de restart por saudação
+Arquivo: `src/components/admin/AIAgentTab/LiveConversationsPanel.tsx`
 
-Apagar as linhas 1103–1145 (o `if (isSaudacao && currentStep.id !== firstActive.id) { … restart … }`). Saudação no meio do fluxo **não reseta mais nada**.
+Na linha de cada lead em "Você está atendendo", além de "Devolver para…", adicionar **"Enviar passo do fluxo"**:
 
-### 3. Simplificar o bloco do firstActive
+- Abre um dialog listando todos os `bot_flow_steps` ativos (já temos `flowSteps` no estado).
+- Ao escolher um passo, mostra preview do conteúdo (texto + mídias associadas: áudio, imagem, vídeo).
+- Botões: **"Enviar tudo agora"** (sequencial com delays) **e** **"Enviar 1 a 1"** — neste modo o dialog vira uma fila: cada item tem botão "Enviar próximo", o usuário dispara um por um sem fechar a tela.
+- Cada envio chama uma nova edge function `manual-step-send` (abaixo). **Não despausa o bot** — segue pausado até o usuário clicar "Devolver para…".
 
-Substituir as linhas 1066–1102 por: **não tratar saudação de forma especial aqui**. Deixar o fluxo seguir o caminho normal (classificar intenção, executar passo, etc.). O prefixo será aplicado na saída.
+### 3. Edge function `manual-step-send`
 
-### 4. Prefixar a saudação na resposta final
+Nova função `supabase/functions/manual-step-send/index.ts`:
 
-Em `_finalize`, antes de retornar o `reply`:
+Entrada:
+```text
+{ consultantId, customerId, stepId, partIndex }
+```
+- `partIndex` indica qual peça enviar (0=áudio, 1=imagem/vídeo, 2=texto), ou `"all"` para sequencial.
+- Resolve o passo, baixa mídias, envia via Whapi/Evolution (usa o sender já existente).
+- Loga em `conversations` como `outbound` com `sent_by = "human_via_step"`.
+- **Não altera `conversation_step`** (humano não está avançando o fluxo, só usando como template).
+- Mantém `bot_paused = true`.
 
-- Calcular `prefix = greetingPrefix(ctx.messageText || "")`.
-- Se `prefix` e `r.reply` existem **e** `r.reply` ainda não começa com o mesmo prefixo, prepender: `r.reply = \`${prefix} ${r.reply}\``.
-- Se `prefix` existe mas `r.reply` está vazio (turno sem texto, ex.: só mídia), enviar `prefix` sozinho como reply curto ("Boa noite! 👋") — assim o lead recebe resposta à saudação, e a mídia continua sendo enviada inline.
+### 4. Quick reply "/" inclui passos do fluxo
 
-Isso cobre todos os caminhos (cadastro, valor conta, OCR, dúvidas, pitch club, etc.) sem precisar editar cada handler.
+Arquivo: `src/components/whatsapp/QuickReplyMenu.tsx` + `MessageComposer.tsx`
 
-### 5. Limpeza
-
-- Remover `saudacaoRegex` e `isSaudacao` (não usados mais).
-- A intent `"saudacao"` continua classificada normalmente; só não dispara mais lógica de restart.
+- Carregar `bot_flow_steps` ativos do consultor junto com os templates.
+- No menu, adicionar seção **"Passos do fluxo"** abaixo de "Respostas rápidas".
+- Selecionar um passo:
+  - Se só texto → cola no composer (comportamento atual de template).
+  - Se tem mídias → abre um mini-prompt: "Enviar áudio? Imagem? Texto?" com checkboxes e botão "Enviar selecionados" (reaproveita `manual-step-send`).
 
 ## Fora de escopo
 
-- Não mexer em `state-machine.ts`, OCR, cadastro, painel admin, schema, ou `bot-flow.ts`.
-- Não mudar comportamento de nenhum outro intent (`quer_cadastrar`, `quer_humano`, FAQ, etc.).
-- Não mudar tom/conteúdo dos passos no painel.
+- Não muda lógica do fluxo automático.
+- Não muda `bot_paused_until` (handoff por tempo continua igual).
+- Não muda intents, OCR, cadastro, schema (exceto se faltar `sent_by` na enum de `conversations` — verifico ao implementar).
 
 ## Validação mental
 
-- Lead em `aguardando_valor_conta` manda "Boa noite, quanto eu economizo?" → bot responde "Boa noite! [resposta normal do FAQ ou pergunta do passo]" e **continua em `aguardando_valor_conta`**.
-- Lead manda só "Bom dia" no firstActive → bot responde "Bom dia! [pergunta do passo 1]".
-- Lead manda "Tem que pagar?" (sem saudação) → comportamento idêntico ao de hoje, sem prefixo.
-- Lead manda "Boa tarde" durante OCR → bot responde "Boa tarde!" e a etapa de OCR segue intacta.
+- Clico "Assumir" → mando msg pelo WhatsApp → bot **não responde**. ✅
+- Clico "Enviar passo > pitch_conexao_club > 1 a 1" → áudio sai, espero, clico "próximo" → imagem sai, clico "próximo" → texto sai. Bot continua pausado. ✅
+- No chat, digito `/pitch` → vejo o passo na lista, escolho, envio o áudio sozinho. ✅
+- Clico "Devolver para… > Continuar de onde parou" → bot volta ao normal. ✅
 
 ## Arquivos
 
 ```text
-supabase/functions/whapi-webhook/handlers/conversational/index.ts
-├─ + greetingPrefix(text)           helper local
-├─ ~ _finalize                      prefixa reply com saudação contextual
-├─ − bloco isSaudacao firstActive   removido (deixa seguir fluxo)
-└─ − bloco isSaudacao restart       removido (sem reset)
+supabase/functions/whapi-webhook/index.ts            ~ guarda bot_paused
+supabase/functions/evolution-webhook/index.ts        ~ guarda bot_paused
+supabase/functions/whapi-webhook/handlers/conversational/index.ts  ~ guarda defensiva
+supabase/functions/whapi-webhook/handlers/bot-flow.ts              ~ guarda defensiva
+supabase/functions/manual-step-send/index.ts         + nova função
+src/components/admin/AIAgentTab/LiveConversationsPanel.tsx         ~ dialog "Enviar passo"
+src/components/admin/AIAgentTab/ManualStepDialog.tsx               + novo componente
+src/components/whatsapp/QuickReplyMenu.tsx                         ~ seção "Passos do fluxo"
+src/components/whatsapp/MessageComposer.tsx                        ~ carregar steps + handler
 ```
 
 Posso seguir?
