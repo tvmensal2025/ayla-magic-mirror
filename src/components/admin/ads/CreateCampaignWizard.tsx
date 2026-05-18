@@ -994,50 +994,74 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
                   </div>
                 </div>
 
-                <div className={`border-2 border-dashed rounded-xl p-6 text-center ${adFiles.length >= PER_FORMAT_LIMIT ? "opacity-50 pointer-events-none" : ""}`}>
-                  <input type="file" accept="image/jpeg,image/png,image/webp" multiple id="photos-input" className="hidden"
-                    onChange={e => { handleFiles(e.target.files); e.currentTarget.value = ""; }} />
-                  <label htmlFor="photos-input" className="cursor-pointer space-y-2 block">
-                    <Upload className="w-8 h-8 text-primary mx-auto" />
-                    <div className="text-sm font-medium">Clique para enviar fotos {FORMAT_SPEC[format].label} ({adFiles.length}/{PER_FORMAT_LIMIT})</div>
-                    <div className="text-xs text-muted-foreground">
-                      Tamanho exigido: <strong className="text-foreground">{FORMAT_SPEC[format].w}×{FORMAT_SPEC[format].h}</strong> · JPG/PNG/WebP · até 8 MB
-                    </div>
-                  </label>
-                </div>
-
-                {adFiles.length > 0 && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {adFiles.map((a, i) => {
-                      const ok = isFileValid(a);
-                      return (
-                        <div key={i} className={`relative group rounded-lg overflow-hidden border-2 ${ok ? "border-primary/50" : "border-amber-500/60"} bg-muted`}>
-                          <div className={FORMAT_SPEC[format].ratio === 0.5625 ? "aspect-[9/16]" : FORMAT_SPEC[format].ratio === 0.8 ? "aspect-[4/5]" : "aspect-square"}>
-                            <img src={a.url} alt="" className="w-full h-full object-cover" />
-                          </div>
-                          <div className="absolute bottom-0 inset-x-0 bg-black/70 text-[10px] text-white px-1.5 py-1 flex items-center justify-between">
-                            <span>{a.w}×{a.h}</span>
-                            {ok ? <span className="text-primary">✓</span> : (
-                              <div className="flex gap-1.5">
-                                <button type="button" onClick={() => handleCrop(i)} className="text-amber-300 underline">Cortar</button>
-                                <button type="button" onClick={() => handleAiResize(i)} disabled={aiResizingIdx === i}
-                                  className="text-emerald-300 underline flex items-center gap-0.5">
-                                  {aiResizingIdx === i ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Wand2 className="w-2.5 h-2.5" />}
-                                  IA
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          <button onClick={() => removeFile(i)} className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition">
-                            <X className="w-3 h-3" />
-                          </button>
+                <Tabs value={photoTab} onValueChange={(v) => setPhotoTab(v as any)}>
+                  <TabsList className="grid grid-cols-2 w-full">
+                    <TabsTrigger value="upload">🆕 Enviar novo</TabsTrigger>
+                    <TabsTrigger value="library">📁 Minhas imagens</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="upload" className="space-y-3 mt-3">
+                    <div className={`border-2 border-dashed rounded-xl p-6 text-center ${adFiles.length >= PER_FORMAT_LIMIT ? "opacity-50 pointer-events-none" : ""}`}>
+                      <input type="file" accept="image/jpeg,image/png,image/webp" multiple id="photos-input" className="hidden"
+                        onChange={e => { handleFiles(e.target.files); e.currentTarget.value = ""; }} />
+                      <label htmlFor="photos-input" className="cursor-pointer space-y-2 block">
+                        <Upload className="w-8 h-8 text-primary mx-auto" />
+                        <div className="text-sm font-medium">Clique para enviar fotos {FORMAT_SPEC[format].label} ({adFiles.length}/{PER_FORMAT_LIMIT})</div>
+                        <div className="text-xs text-muted-foreground">
+                          Tamanho exigido: <strong className="text-foreground">{FORMAT_SPEC[format].w}×{FORMAT_SPEC[format].h}</strong> · JPG/PNG/WebP · até 8 MB
                         </div>
-                      );
-                    })}
+                      </label>
+                    </div>
+                    {adFiles.length > 0 && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {adFiles.map((a, i) => {
+                          const ok = isFileValid(a);
+                          return (
+                            <div key={i} className={`relative group rounded-lg overflow-hidden border-2 ${ok ? "border-primary/50" : "border-amber-500/60"} bg-muted`}>
+                              <div className={FORMAT_SPEC[format].ratio === 0.5625 ? "aspect-[9/16]" : FORMAT_SPEC[format].ratio === 0.8 ? "aspect-[4/5]" : "aspect-square"}>
+                                <img src={a.url} alt="" className="w-full h-full object-cover" />
+                              </div>
+                              <div className="absolute bottom-0 inset-x-0 bg-black/70 text-[10px] text-white px-1.5 py-1 flex items-center justify-between">
+                                <span>{a.w}×{a.h}</span>
+                                {ok ? <span className="text-primary">✓</span> : (
+                                  <div className="flex gap-1.5">
+                                    <button type="button" onClick={() => handleCrop(i)} className="text-amber-300 underline">Cortar</button>
+                                    <button type="button" onClick={() => handleAiResize(i)} disabled={aiResizingIdx === i}
+                                      className="text-emerald-300 underline flex items-center gap-0.5">
+                                      {aiResizingIdx === i ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Wand2 className="w-2.5 h-2.5" />}
+                                      IA
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                              <button onClick={() => removeFile(i)} className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition">
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </TabsContent>
+                  <TabsContent value="library" className="mt-3">
+                    <AdImageLibraryPanel
+                      consultantId={consultantId}
+                      format={format}
+                      selectedUrls={new Set(pickedLibrary.map((it) => it.url))}
+                      onPick={(it) => setPickedLibrary((prev) =>
+                        prev.find((x) => x.url === it.url)
+                          ? prev.filter((x) => x.url !== it.url)
+                          : [...prev, it]
+                      )}
+                    />
+                  </TabsContent>
+                </Tabs>
+                {pickedLibrary.length > 0 && (
+                  <div className="text-[11px] text-emerald-400">
+                    📁 {pickedLibrary.length} imagem(ns) da biblioteca selecionada(s) — sem novo upload.
                   </div>
                 )}
                 <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-                  <Smartphone className="w-3 h-3" /> Total: <strong className="text-foreground">{totalFiles}</strong> foto(s). Você pode misturar formatos — Meta usa cada um no posicionamento ideal.
+                  <Smartphone className="w-3 h-3" /> Total: <strong className="text-foreground">{totalFiles + pickedLibrary.length}</strong> foto(s). Misture formatos — Meta usa cada um no posicionamento ideal.
                 </div>
               </div>
             )}
