@@ -1294,6 +1294,14 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
           </div>
         )}
       </DialogContent>
+      <SaveTemplateDialog
+        open={saveTplOpen}
+        onClose={() => setSaveTplOpen(false)}
+        defaultTitle={`${distribuidoraPrimary || "Multi"} — ${headline.slice(0, 40)}`}
+        saving={savingTemplate}
+        isSuperAdmin={isSuperAdmin}
+        onConfirm={(meta) => handleSaveAsTemplate(meta)}
+      />
     </Dialog>
   );
 }
