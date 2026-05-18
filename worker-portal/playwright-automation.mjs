@@ -489,7 +489,20 @@ async function atualizarStatus(customerId, status, errorMsg = null) {
   const updates = { status, updated_at: new Date().toISOString() };
   if (errorMsg) updates.error_message = errorMsg;
   if (status === 'registered_igreen') updates.portal_submitted_at = new Date().toISOString();
-  if (status === 'awaiting_otp') updates.otp_code = null;
+  if (status === 'awaiting_otp') {
+    const { data: existingOtp } = await getSupabase()
+      .from('customers')
+      .select('otp_code, otp_received_at')
+      .eq('id', customerId)
+      .maybeSingle()
+      .catch(() => ({ data: null }));
+    const receivedAt = existingOtp?.otp_received_at ? Date.parse(existingOtp.otp_received_at) : 0;
+    if (!existingOtp?.otp_code || !receivedAt || Date.now() - receivedAt > 10 * 60 * 1000) {
+      updates.otp_code = null;
+    } else {
+      console.log('   🔐 OTP recente já existe no banco — não limpar ao entrar em awaiting_otp');
+    }
+  }
   await getSupabase().from('customers').update(updates).eq('id', customerId);
 }
 
