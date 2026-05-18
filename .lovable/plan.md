@@ -1,81 +1,61 @@
-# Permissões Meta extras + Saldo real preciso
+# Problema
 
-## Diagnóstico
+No `/admin` o botão **"Reconectar / trocar conta"** não faz nada quando clicado. Investigação:
 
-**Permissões atuais** (`facebook-oauth-start`):
-`ads_management, ads_read, pages_show_list, email, public_profile`
+1. O handler atual (`handleConnect` em `PlatformFacebookCard.tsx`) chama `startFacebookOAuth({ scope: "platform" })` **sem `mode: "switch"`** — ou seja, mesmo se funcionasse, o Facebook reutilizaria a sessão atual e voltaria pra mesma conta sem permitir trocar.
+2. Ele faz `window.location.href = res.url`. Como o preview do Lovable roda dentro de **iframe**, o Facebook (`facebook.com/dialog/oauth`) bloqueia carregamento em iframe via `X-Frame-Options` → a navegação é silenciosamente bloqueada e nada acontece visualmente. Por isso "clico e não faz nada".
+3. O mesmo bug afeta o botão "Solicitar permissões faltando" e o "Conectar Facebook Business" inicial — todos usam `window.location.href`.
 
-Está OK para criar/ler campanhas, **mas falta** o que dá mais sinal pra IA aprender e pra controlar mídia:
+# Solução
 
-| Falta | Pra quê |
-|---|---|
-| `business_management` | Ler/gerenciar a BM (assets, usuários, contas) — necessário pra IA enxergar tudo da sua BM única |
-| `leads_retrieval` | Puxar leads do Lead Ads em tempo real (hoje só conta lead, não lê o conteúdo) |
-| `pages_read_engagement` + `pages_manage_metadata` | Ler comentários/reactions dos posts patrocinados (sinal forte de criativo bom/ruim) |
-| `pages_manage_ads` | Promover posts da página dentro da BM |
-| `instagram_basic` + `instagram_manage_insights` | Métricas IG (hoje só FB) |
-| `read_insights` | Insights da página (alcance orgânico) |
-| `catalog_management` (opcional) | Só se for usar Advantage+ Catalog |
+Fazer o OAuth abrir em **nova aba** (com `window.open` disparado direto no clique, preservando o gesto do usuário pra não cair em popup blocker) e usar o **modo correto** em cada botão:
 
-**Saldo real** (`facebook-platform-balance` + `facebook-sync-metrics`):
-- Hoje lê `balance` e `amount_spent` da conta — **mas só roda quando alguém abre o card** ou quando o cron de sync passa.
-- Não há **webhook** da Meta avisando débito → saldo no dashboard fica defasado.
-- `wallet_transactions` debita pelo `spend` das insights (delta), o que tem latência de ~15min–3h da Meta.
-- Sem `Conversions API` configurada com `actions_data_processing_options` → algumas compras/leads não chegam → CPL fica errado → IA otimiza com dado ruim.
+- "Reconectar / trocar conta" → `mode: "switch"` (Facebook força re-login e mostra seletor de conta)
+- "Solicitar permissões faltando" → `mode: "rerequest"` (já correto)
+- "Conectar Facebook Business" (estado desconectado) → `mode: "connect"`
 
-## Plano
+Depois que a nova aba completar o OAuth (`facebook-oauth-callback` já redireciona pro `return_origin`), a aba do admin precisa recarregar o status. Solução simples: ao abrir a nova aba, iniciar um **polling de 3s** chamando `loadStatus()` enquanto a aba popup estiver aberta (`popup.closed === false`) ou por até 5 min, e parar quando detectar mudança em `last_validated_at` / `pixel_id` / `ad_account_id`.
 
-### 1. Ampliar scopes OAuth
-Editar `supabase/functions/facebook-oauth-start/index.ts` adicionando ao `SCOPES`:
-```
-business_management, leads_retrieval, pages_read_engagement,
-pages_manage_metadata, pages_manage_ads,
-instagram_basic, instagram_manage_insights, read_insights
-```
-Você precisa **reconectar a BM uma vez** depois (botão "Reconectar Facebook" no card admin) pra aceitar as novas permissões.
+# Arquivos alterados
 
-### 2. App Review da Meta (manual, fora do código)
-Permissions avançadas exigem revisão:
-- `leads_retrieval`, `pages_read_engagement`, `pages_manage_ads`, `instagram_manage_insights` → submeter no **App Dashboard → App Review → Permissions and Features** com vídeo mostrando uso.
-- Enquanto não aprovar, funcionam só pra admins/devs do app (você já é, então funciona no seu BM imediatamente).
+**`src/components/admin/super/PlatformFacebookCard.tsx`** (única alteração de UI/lógica):
 
-### 3. Saldo real em tempo (quase) real
-Criar `facebook-balance-webhook` (edge function) + assinar webhook da Meta:
-- Inscrever campos `account` no objeto `ad_account` → Meta dispara quando `balance`/`amount_spent` muda.
-- Webhook atualiza `consultant_wallet.last_synced_at` e dispara reconciliação imediata.
+1. Criar helper `openOAuthInNewTab(mode)`:
+   ```ts
+   async function openOAuthInNewTab(mode: "connect" | "switch" | "rerequest") {
+     // abre janela SINCRONAMENTE no clique (about:blank) pra evitar popup blocker
+     const popup = window.open("about:blank", "fb_oauth", "width=600,height=750");
+     if (!popup) { toast({ title: "Pop-up bloqueado", description: "Permita pop-ups deste site e tente de novo.", variant: "destructive" }); return; }
+     setConnecting(true);
+     try {
+       const res = await startFacebookOAuth({ scope: "platform", mode });
+       popup.location.href = res.url;
+       // polling
+       const started = Date.now();
+       const prev = JSON.stringify({ a: status?.ad_account_id, p: status?.pixel_id, v: status?.last_validated_at });
+       const interval = setInterval(async () => {
+         if (popup.closed || Date.now() - started > 5 * 60_000) {
+           clearInterval(interval); setConnecting(false); await loadStatus(); return;
+         }
+         try {
+           const s = await getPlatformFacebookStatus();
+           const now = JSON.stringify({ a: s?.ad_account_id, p: s?.pixel_id, v: s?.last_validated_at });
+           if (now !== prev) { setStatus(s); if (s?.configured) loadBalance(); clearInterval(interval); setConnecting(false); try { popup.close(); } catch {} }
+         } catch {}
+       }, 3000);
+     } catch (e: any) {
+       try { popup.close(); } catch {}
+       toast({ title: "Erro ao iniciar OAuth", description: e?.message, variant: "destructive" });
+       setConnecting(false);
+     }
+   }
+   ```
+2. Trocar `handleConnect` (estado desconectado) → `openOAuthInNewTab("connect")`.
+3. Botão "Reconectar / trocar conta" (linha 194) → `openOAuthInNewTab("switch")`.
+4. Botão "Solicitar permissões faltando" (linha 267) → `openOAuthInNewTab("rerequest")`.
+5. Remover funções antigas `handleConnect` / `handleRerequest` redundantes.
 
-E **encurtar o intervalo de polling** do `facebook-sync-metrics` de N min para **5 min** (cron via `pg_cron`), com debounce.
+# Fora do escopo
 
-### 4. Reconciliação precisa do saldo
-Hoje `wallet_transactions` debita só baseado em insights. Adicionar:
-- Job diário `facebook-balance-reconcile` que compara `consultant_wallet.total_spent_cents` com `lifetime_amount_spent_cents` da Meta e cria transação `adjustment` se divergir > R$ 0,50.
-- Mostrar no card admin: **"Saldo Meta R$ X · Sistema R$ Y · Δ R$ Z (última conferência: HH:MM)"**.
-
-### 5. Sinais extras pra IA aprender (Conversions API + offline events)
-Já existe `facebook-capi`. Melhorar:
-- Enviar **todos** os eventos: `ViewContent`, `Lead`, `CompleteRegistration`, `Purchase`, `Contact` (clique no WhatsApp) com `event_id` único pra dedupe com Pixel.
-- Adicionar `customer_information_parameters` hasheados (em, ph, fn, ln, ct, st, zp, country) → +30% match quality → IA otimiza melhor.
-- Subir **eventos offline** (status `aprovado`/`ativo` no CRM) via `/offline_conversions` → Meta aprende quem virou cliente de verdade, não só lead.
-
-### 6. UI no card "Facebook da Plataforma"
-- Badge "Match Quality: X/10" (vem de `/events_received`).
-- Botão "Solicitar nova permissão" que dispara OAuth com `auth_type=rerequest`.
-- Lista das permissões concedidas vs faltantes (lê `/me/permissions`).
-
-## Detalhes técnicos
-
-**Arquivos a mudar:**
-- `supabase/functions/facebook-oauth-start/index.ts` — adicionar scopes + `auth_type=rerequest` opcional
-- `supabase/functions/facebook-sync-metrics/index.ts` — incluir IG insights + breakdown por idade/gênero
-- `supabase/functions/facebook-capi/index.ts` — hash de todos os PII, `event_id` único, suporte offline events
-- `supabase/functions/facebook-platform-balance/index.ts` — incluir comparação Meta vs Sistema + `/me/permissions`
-- `supabase/functions/facebook-balance-webhook/index.ts` *(novo)*
-- `supabase/functions/facebook-balance-reconcile/index.ts` *(novo, agendado)*
-- `src/components/admin/super/PlatformFacebookCard.tsx` — mostrar delta, permissões, botão re-request
-- Migração: tabela `facebook_permissions_audit` (consultant_id, granted jsonb, declined jsonb, checked_at)
-- Cron `pg_cron`: balance-reconcile diário 03:00 BRT
-
-**Resposta direta à sua pergunta:**
-> "já está bom?"
-
-Não. Tá funcional, mas faltam **6 scopes** que destravariam aprendizado contínuo da IA e **falta webhook de saldo** + reconciliação — por isso o saldo no painel não bate com a Meta em tempo real.
+- Não mexer no backend (`facebook-oauth-start` / `facebook-oauth-callback`) — já suporta `mode: switch | rerequest` e já redireciona pro `return_origin` no fim.
+- Não mexer em outras telas que usam `startFacebookOAuth` com `scope: "user"` (não foi o problema reportado).

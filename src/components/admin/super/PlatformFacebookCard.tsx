@@ -77,24 +77,53 @@ export function PlatformFacebookCard() {
   }
 
 
-  async function handleConnect() {
-    setConnecting(true);
-    try {
-      const res = await startFacebookOAuth({ scope: "platform" });
-      window.location.href = res.url;
-    } catch (e: any) {
-      toast({ title: "Erro ao iniciar conexão", description: e?.message, variant: "destructive" });
-      setConnecting(false);
+  async function openOAuthInNewTab(mode: "connect" | "switch" | "rerequest") {
+    const popup = window.open("about:blank", "fb_oauth", "width=600,height=750");
+    if (!popup) {
+      toast({
+        title: "Pop-up bloqueado",
+        description: "Permita pop-ups deste site no navegador e tente de novo.",
+        variant: "destructive",
+      });
+      return;
     }
-  }
-
-  async function handleRerequest() {
     setConnecting(true);
     try {
-      const res = await startFacebookOAuth({ scope: "platform", mode: "rerequest" });
-      window.location.href = res.url;
+      const res = await startFacebookOAuth({ scope: "platform", mode });
+      popup.location.href = res.url;
+
+      const started = Date.now();
+      const prev = JSON.stringify({
+        a: status?.ad_account_id,
+        p: status?.pixel_id,
+        v: status?.token_expires_at, u: status?.fb_user_name,
+      });
+      const interval = setInterval(async () => {
+        if (popup.closed || Date.now() - started > 5 * 60_000) {
+          clearInterval(interval);
+          setConnecting(false);
+          await loadStatus();
+          return;
+        }
+        try {
+          const s = await getPlatformFacebookStatus();
+          const now = JSON.stringify({
+            a: s?.ad_account_id,
+            p: s?.pixel_id,
+            v: s?.token_expires_at, u: s?.fb_user_name,
+          });
+          if (now !== prev) {
+            setStatus(s);
+            if (s?.configured) loadBalance();
+            clearInterval(interval);
+            setConnecting(false);
+            try { popup.close(); } catch { /* ignore */ }
+          }
+        } catch { /* keep polling */ }
+      }, 3000);
     } catch (e: any) {
-      toast({ title: "Erro ao re-solicitar permissões", description: e?.message, variant: "destructive" });
+      try { popup.close(); } catch { /* ignore */ }
+      toast({ title: "Erro ao iniciar OAuth", description: e?.message, variant: "destructive" });
       setConnecting(false);
     }
   }
@@ -191,7 +220,7 @@ export function PlatformFacebookCard() {
                 <Settings2 className="w-3.5 h-3.5" />
                 Definir principal
               </Button>
-              <Button size="sm" variant="outline" onClick={handleConnect} disabled={connecting} className="ml-auto gap-1.5">
+              <Button size="sm" variant="outline" onClick={() => openOAuthInNewTab("switch")} disabled={connecting} className="ml-auto gap-1.5">
                 {connecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                 Reconectar / trocar conta
               </Button>
@@ -264,7 +293,7 @@ export function PlatformFacebookCard() {
                   <span className="font-medium">Permissões Meta {balance.permissions.all_ok ? "(todas concedidas)" : `(${balance.permissions.missing.length} faltando)`}</span>
                 </div>
                 {!balance.permissions.all_ok && (
-                  <Button size="sm" variant="outline" onClick={handleRerequest} disabled={connecting} className="gap-1.5">
+                  <Button size="sm" variant="outline" onClick={() => openOAuthInNewTab("rerequest")} disabled={connecting} className="gap-1.5">
                     {connecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
                     Solicitar permissões faltando
                   </Button>
@@ -293,7 +322,7 @@ export function PlatformFacebookCard() {
               <p className="text-muted-foreground">Conecte a conta Facebook Business da plataforma para que os consultores possam criar campanhas.</p>
             </div>
           </div>
-          <Button onClick={handleConnect} disabled={connecting} className="w-full gap-2">
+          <Button onClick={() => openOAuthInNewTab("connect")} disabled={connecting} className="w-full gap-2">
             {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Facebook className="w-4 h-4" />}
             Conectar Facebook Business
           </Button>
