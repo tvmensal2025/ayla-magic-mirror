@@ -2710,7 +2710,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
         if (nextCustom) {
           console.log(`[post-confirm-conta] next=${nextCustom.step_key} type=${nextCustom.step_type} reason=customflow`);
-          const ok = await dispatchStepFromFlow(nextCustom.step_key, _vars);
+          // Para finalizar_cadastro NÃO usamos dispatch: o texto precisa ir
+          // acoplado ao botão interativo (sendOptions) — caso contrário o
+          // cliente recebe só texto e não consegue tocar para concluir.
+          const ok = nextCustom.step_type === "finalizar_cadastro"
+            ? true
+            : await dispatchStepFromFlow(nextCustom.step_key, _vars);
           if (nextCustom.step_type === "capture_documento" || nextCustom.step_type === "capture_doc") {
             if (!ok) {
               console.warn(`[post-confirm-conta] dispatch vazio — usando fallback hardcoded de doc`);
@@ -2718,8 +2723,24 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             }
             updates.conversation_step = "aguardando_doc_auto";
           } else if (nextCustom.step_type === "finalizar_cadastro") {
-            if (!ok) {
-              console.warn(`[post-confirm-conta] dispatch vazio — enviando botão de finalizar`);
+            // Sempre enviar com botão interativo "✅ Finalizar".
+            // O dispatchStepFromFlow envia o texto como plain text, sem botão,
+            // então substituímos por sendOptions usando o message_text do passo.
+            try {
+              const rawText = (nextCustom.message_text || "").trim();
+              const firstName = String(customer.name || "").trim().split(/\s+/)[0] || "";
+              const finalText = (rawText || FINAL_FALLBACK_TEXT)
+                .replaceAll("{{nome}}", firstName)
+                .replaceAll("{{representante}}", nomeRepresentante || "");
+              await sendOptions(remoteJid, finalText, [
+                { id: "btn_finalizar", title: "✅ Finalizar" },
+              ]);
+              await supabase.from("conversations").insert({
+                customer_id: customer.id, message_direction: "outbound",
+                message_text: finalText, message_type: "text", conversation_step: "ask_finalizar",
+              });
+            } catch (e) {
+              console.warn(`[post-confirm-conta] envio do botão finalizar falhou:`, (e as Error).message);
               await sendFinalizarButton();
             }
             updates.conversation_step = "ask_finalizar";
