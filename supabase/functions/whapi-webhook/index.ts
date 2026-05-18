@@ -475,6 +475,25 @@ Deno.serve(async (req) => {
       conversation_step: customer.conversation_step,
     }).select("id").maybeSingle();
 
+
+    // ─── Auto-tag lead source (Meta Ads) ─────────────────────────────────
+    // Detecta no PRIMEIRO inbound de texto se o lead veio de anúncio Meta
+    // (mensagem pré-preenchida do Click-to-WhatsApp). Não sobrescreve fonte já marcada.
+    try {
+      if (!hasAudio && !isFile && messageText && !(customer as any).lead_source) {
+        const adsRegex = /(vim do an[uú]ncio|do an[uú]ncio|pelo an[uú]ncio|vi o an[uú]ncio|facebook|instagram|\bfb ads?\b|\bmeta ads?\b|patrocinad|reels|stories|sponsored)/i;
+        if (adsRegex.test(messageText)) {
+          await supabase.from("customers")
+            .update({ lead_source: "meta_ads" })
+            .eq("id", customer.id)
+            .is("lead_source", null);
+          (customer as any).lead_source = "meta_ads";
+          console.log(`[lead-source] customer ${customer.id} marcado como meta_ads via msg: "${messageText.slice(0,80)}"`);
+        }
+      }
+    } catch (e) {
+      console.warn("[lead-source] falha ao detectar:", (e as Error).message);
+    }
     // ─── Download media ────────────────────────────────────────────────
     let fileUrl: string | null = whapiFileUrl || null;
     let fileBase64: string | null = whapiFileBase64 || null;
