@@ -254,6 +254,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         onSend={sendMessage}
         initialMessage={initialMessage}
         consultantId={consultantId}
+        customerId={customerId || undefined}
         customerJid={chat?.remoteJid}
         customerName={chat?.name}
         onSendAudio={async (base64) => {
