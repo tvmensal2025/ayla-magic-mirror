@@ -136,6 +136,7 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
     mediaUrl: string,
     caption: string,
     mediatype: "video" | "image" | "document" | "audio" | "voice" = "video",
+    durationSec?: number,
   ): Promise<boolean> {
     const to = remoteJid.includes("@") ? remoteJid : `${remoteJid}@s.whatsapp.net`;
     const isAudio = mediatype === "audio" || mediatype === "voice";
