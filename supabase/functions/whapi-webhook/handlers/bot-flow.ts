@@ -352,7 +352,7 @@ function getReentryPromptForStep(step: string, customer: any): string {
     "ask_birth_date": `${v}qual sua *data de nascimento*? (DD/MM/AAAA)`,
     "ask_phone": `${v}me confirma seu *telefone* (com DDD)?`,
     "ask_phone_confirm": `${v}me confirma seu *telefone* (com DDD)?`,
-    "ask_email": `${v}qual é o seu *e-mail*?`,
+    "ask_email": `${v}me passa seu *e-mail* 📧 (pode ser de qualquer provedor — Gmail, Outlook, iCloud, Yahoo...)`,
     "ask_cep": `${v}qual o *CEP* da sua casa? (8 dígitos)`,
     "ask_number": `${v}qual o *número* da sua casa?`,
     "ask_complement": `${v}tem *complemento*? (apto, bloco) — ou diga "não".`,
@@ -2420,12 +2420,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }
         }
         const DOC_FALLBACK = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é.`;
-        const FINAL_FALLBACK = `✅ *Todos os dados foram preenchidos!*\n\n1️⃣ Finalizar\n\n_Digite *1* ou *FINALIZAR* para concluir:_`;
+        const FINAL_FALLBACK_TEXT = `✅ *Tudo pronto!*\n\nSeus dados foram preenchidos. Vamos finalizar seu cadastro no portal iGreen?`;
         const sendFallback = async (text: string, stepStr: string) => {
           await sendText(remoteJid, text);
           await supabase.from("conversations").insert({
             customer_id: customer.id, message_direction: "outbound",
             message_text: text, message_type: "text", conversation_step: stepStr,
+          });
+        };
+        const sendFinalizarButton = async () => {
+          await sendOptions(remoteJid, FINAL_FALLBACK_TEXT, [
+            { id: "btn_finalizar", title: "✅ Finalizar cadastro" },
+          ]);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id, message_direction: "outbound",
+            message_text: FINAL_FALLBACK_TEXT, message_type: "text", conversation_step: "ask_finalizar",
           });
         };
 
@@ -2440,10 +2449,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             updates.conversation_step = "aguardando_doc_auto";
           } else if (nextCustom.step_type === "finalizar_cadastro") {
             if (!ok) {
-              console.warn(`[post-confirm-conta] dispatch vazio — usando fallback hardcoded de finalizar`);
-              await sendFallback(FINAL_FALLBACK, "finalizar_cadastro");
+              console.warn(`[post-confirm-conta] dispatch vazio — enviando botão de finalizar`);
+              await sendFinalizarButton();
             }
-            updates.conversation_step = "finalizar_cadastro";
+            updates.conversation_step = "ask_finalizar";
           } else if (nextCustom.step_type === "capture_conta") {
             updates.conversation_step = "aguardando_conta";
           } else if (nextCustom.step_type === "capture_email") {
@@ -2788,7 +2797,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           if (d.nomeMae) updates.nome_mae = d.nomeMae;
           updates.conversation_step = "confirmando_dados_doc";
           const mismatchWarn = updates.name_mismatch_flag
-            ? `\n\n⚠️ *Notei uma diferença:* o nome no documento (*${d.nome}*) parece diferente do nome na conta de luz (*${customer.bill_holder_name || updates.bill_holder_name}*).\nSem problema — pode ser titularidade de cônjuge/pai/mãe. Antes de finalizar vou te perguntar.`
+            ? `\n\n━━━━━━━━━━━━━━━\n⚠️ *Atenção: notei uma diferença de nome*\n\n📄 Conta de luz: *${customer.bill_holder_name || updates.bill_holder_name}*\n🪪 Documento: *${d.nome}*\n\nPara o cadastro no portal iGreen funcionar, o documento precisa ser do *mesmo titular da conta de luz*.\n\nSe for cônjuge, pai/mãe ou outro parente, tudo bem 💚 — eu confirmo isso com você antes de finalizar.\n━━━━━━━━━━━━━━━`
             : "";
           reply = "📋 *Confirme seus dados pessoais:*\n\n" +
             `👤 *Nome:* ${d.nome || "❌ não encontrado"}\n` +
@@ -3283,16 +3292,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       // ⚠️ Email é OBRIGATÓRIO no portal iGreen. Não aceitar PULAR — repetir até cliente fornecer email real.
       // Se cliente disser que não tem, orientar a criar um Gmail rápido.
       if (["pular", "skip", "não tenho", "nao tenho", "sem email", "sem e-mail", "n", "não", "nao"].includes(lower)) {
-        reply = "📧 Preciso de um *e-mail* para finalizar seu cadastro no portal iGreen.\n\nSe você não tem, pode criar um agora em *gmail.com* — leva 1 minuto.\n\nDepois é só enviar aqui (ex: nome.sobrenome@gmail.com):";
+        reply = "📧 Preciso de um *e-mail* para finalizar seu cadastro no portal iGreen.\n\nPode ser de *qualquer provedor* (Gmail, Outlook, iCloud, Yahoo...). Se você não tem, dá pra criar um agora em qualquer um deles — leva 1 minuto.\n\nDepois é só enviar aqui (ex: maria.silva@outlook.com):";
         break;
       }
       // ── Validação dura: formato + placeholder + email do consultor ──
       if (!isValidEmailFormat(txt)) {
-        reply = "❌ Não consegui ler esse e-mail.\n\n✅ Exemplo correto: *joao.silva@gmail.com*\n\nInforme um *e-mail pessoal real*:";
+        reply = "❌ Não consegui ler esse e-mail.\n\nPode ser de *qualquer provedor* (Gmail, Outlook, iCloud...). Exemplo: *joao.silva@hotmail.com*\n\nInforme um *e-mail pessoal real*:";
         break;
       }
       if (isPlaceholderEmail(txt)) {
-        reply = "❌ Esse e-mail não pode ser usado.\n\nInforme um *e-mail pessoal real* (ex: nome@gmail.com):";
+        reply = "❌ Esse e-mail não pode ser usado.\n\nInforme um *e-mail pessoal real* — qualquer provedor serve (ex: maria@outlook.com):";
         break;
       }
       // Bloquear email do consultor dono
@@ -3303,7 +3312,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           .eq("id", consultorId)
           .maybeSingle();
         if (cons?.igreen_portal_email && isSameContact(txt, cons.igreen_portal_email)) {
-          reply = "❌ Esse e-mail é do consultor. Por favor, informe *seu próprio e-mail pessoal* (ex: nome@gmail.com):";
+          reply = "❌ Esse e-mail é do consultor. Por favor, informe *seu próprio e-mail pessoal* — pode ser de qualquer provedor (ex: maria@outlook.com):";
           break;
         }
       } catch (_) { /* segue */ }
@@ -3450,7 +3459,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         const sent = await sendOptions(remoteJid, "📋 Todos os dados foram preenchidos!\n\nDeseja finalizar o cadastro?\n\n_(Você também pode digitar *FINALIZAR* ou *OK*)_", [
           { id: "btn_finalizar", title: "✅ Finalizar" },
         ]);
-        if (!sent) reply = "Digite *FINALIZAR* ou *1* para confirmar o cadastro:";
+        if (!sent) reply = "Toque no botão *✅ Finalizar* acima — ou responda *FINALIZAR* para concluir o cadastro.";
       }
       break;
     }
