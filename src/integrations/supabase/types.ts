@@ -3889,6 +3889,7 @@ export type Database = {
         Args: { _customer_id: string }
         Returns: undefined
       }
+      repair_bot_flow: { Args: { _flow_id: string }; Returns: Json }
       reset_all_consultant_conversations: {
         Args: { _consultant_id: string }
         Returns: Json
