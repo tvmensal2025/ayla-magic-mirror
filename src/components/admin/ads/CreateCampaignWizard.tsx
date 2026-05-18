@@ -190,7 +190,8 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
   useEffect(() => {
     if (!open) return;
     setStep(1); setIssues(null); setHits([]);
-    setFilesByFormat(EMPTY_FILES); setFormat("square"); setCopy(null); setHeadline(""); setPrimaryText(""); setDescription("");
+    setFilesByFormat(EMPTY_FILES); setPickedLibrary([]); setPhotoTab("upload");
+    setFormat("square"); setCopy(null); setHeadline(""); setPrimaryText(""); setDescription("");
     setBudget(30); setDuration(0);
     setPlacementMode("auto"); setPlacements(ALL_PLACEMENTS);
     setQuality(null); setPreflight(null); setLiveReach(null);
