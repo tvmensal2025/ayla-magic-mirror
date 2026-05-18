@@ -805,38 +805,11 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           try { await supabase.from("customers").update(patch).eq("id", customer.id); } catch (_) {}
           return { reply: text, updates: { __inline_sent: qa.mediaUrls.length > 0 || undefined } as any };
         } else {
-          console.log(`[midflow-qa] hit=false step="${(customer as any).conversation_step}" → pausando IA + handoff`);
-          // Pergunta fora da FAQ → pausa IA imediatamente e alerta o humano
-          try {
-            await supabase.from("customers").update({
-              bot_paused: true,
-              bot_paused_reason: "duvida_fora_faq",
-              bot_paused_at: new Date().toISOString(),
-            }).eq("id", customer.id);
-          } catch (_) { /* noop */ }
-          try {
-            await supabase.from("bot_handoff_alerts").insert({
-              customer_id: customer.id,
-              consultant_id: customer.consultant_id,
-              reason: "duvida_fora_faq",
-              user_message: messageText.slice(0, 300),
-              phone: (customer as any).phone_whatsapp || null,
-            } as any);
-          } catch (e) { console.warn("[midflow-qa] handoff alert falhou:", (e as Error).message); }
-          // Notifica o consultor no número de alertas (fire-and-forget)
-          notifyHandoff(
-            customer.consultant_id,
-            {
-              id: customer.id,
-              name: (customer as any).name,
-              phone_whatsapp: (customer as any).phone_whatsapp,
-              conversation_step: (customer as any).conversation_step,
-            },
-            messageText,
-            "duvida_fora_faq",
-          ).catch((e) => console.warn("[notify-handoff] falhou:", (e as Error).message));
-          // Silencioso para o lead: bot pausa e humano assume sem aviso
-          return { reply: "", updates: { __inline_sent: true } as any };
+          console.log(`[midflow-qa] hit=false step="${(customer as any).conversation_step}" → respondAndReentry (IA + reentry)`);
+          return await respondAndReentry({
+            reason: "midflow_qa_miss",
+            questionText: messageText,
+          });
         }
       }
     } else if (
