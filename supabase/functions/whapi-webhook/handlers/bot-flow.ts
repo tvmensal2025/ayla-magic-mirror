@@ -3625,7 +3625,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const lower = txt.toLowerCase();
       // ⚠️ Email é OBRIGATÓRIO no portal iGreen. Não aceitar PULAR.
       if (["pular", "skip", "não tenho", "nao tenho", "sem email", "sem e-mail", "n", "não", "nao"].includes(lower)) {
-        reply = "📧 Preciso de um *e-mail seu* — é por ele que o portal manda o código.\n\nSe não tiver, crie um rapidinho em qualquer provedor.";
+        reply = "📧 Esse aqui é *importante*! É o login do seu app *iGreen Club* 📱\n\nMe passa um e-mail seu — pode criar rapidinho em qualquer provedor (Gmail, Outlook, iCloud…).";
         break;
       }
       if (!isValidEmailFormat(txt)) {
