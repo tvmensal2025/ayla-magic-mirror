@@ -803,6 +803,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     cpf: (ctx.customer as any).cpf,
   };
   _setTurnStepQuestion(currentStep?.message_text || "", _turnVars);
+  if (!currentStep) {
     // Unknown/legacy step → restart no primeiro step ativo.
     // REGRA DE OURO: SEMPRE seguir o /admin/fluxos. NUNCA inventar texto.
     // - Se o step tem message_text → usa.
