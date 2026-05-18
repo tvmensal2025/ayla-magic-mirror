@@ -2064,6 +2064,7 @@ export type Database = {
           intent_signals: Json | null
           last_bot_interaction_at: string | null
           last_bot_reply_at: string | null
+          last_custom_prompt_at: string | null
           last_followup_at: string | null
           last_rescue_at: string | null
           last_rule_fire_at: string | null
@@ -2180,6 +2181,7 @@ export type Database = {
           intent_signals?: Json | null
           last_bot_interaction_at?: string | null
           last_bot_reply_at?: string | null
+          last_custom_prompt_at?: string | null
           last_followup_at?: string | null
           last_rescue_at?: string | null
           last_rule_fire_at?: string | null
@@ -2296,6 +2298,7 @@ export type Database = {
           intent_signals?: Json | null
           last_bot_interaction_at?: string | null
           last_bot_reply_at?: string | null
+          last_custom_prompt_at?: string | null
           last_followup_at?: string | null
           last_rescue_at?: string | null
           last_rule_fire_at?: string | null
