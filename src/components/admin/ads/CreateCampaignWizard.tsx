@@ -1279,7 +1279,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
               </Button>
               <div className="flex gap-2">
                 {step === 4 && (
-                  <Button type="button" variant="outline" onClick={handleSaveAsTemplate} disabled={submitting || savingTemplate} className="gap-1.5">
+                  <Button type="button" variant="outline" onClick={() => setSaveTplOpen(true)} disabled={submitting || savingTemplate} className="gap-1.5">
                     {savingTemplate ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                     Salvar como template
                   </Button>
