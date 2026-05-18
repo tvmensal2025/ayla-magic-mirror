@@ -759,6 +759,10 @@ Deno.serve(async (req) => {
           intent: __intent, confidence: __confidence,
         });
       }
+      // Avança o estágio do deal no Kanban conforme o lead progride na conversa.
+      if (updates.conversation_step) {
+        await syncDealStageFromStep(supabase, customer.id, updates.conversation_step);
+      }
     }
 
     // ─── Send reply ────────────────────────────────────────────────────
