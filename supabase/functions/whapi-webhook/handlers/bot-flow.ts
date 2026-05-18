@@ -1891,13 +1891,6 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         if (stepIsUuid) {
           const { data } = await supabase
             .from("bot_flow_steps")
-            .select("id, step_key, step_type, position")
-            .eq("flow_id", flow.id).eq("id", step).maybeSingle();
-          stepRow = data;
-        }
-        if (stepIsUuid) {
-          const { data } = await supabase
-            .from("bot_flow_steps")
             .select("id, step_key, step_type, position, transitions")
             .eq("flow_id", flow.id).eq("id", step).maybeSingle();
           stepRow = data;
