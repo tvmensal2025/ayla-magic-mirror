@@ -1,4 +1,4 @@
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useConsultant } from "@/hooks/useConsultant";
 import { useTrackView } from "@/hooks/useTrackView";
 import HeroSection from "@/components/HeroSection";
@@ -21,10 +21,17 @@ import { useInstancePhone } from "@/hooks/useInstancePhone";
 
 const ConsultantPage = () => {
   const { licenca } = useParams<{ licenca: string }>();
+  const [searchParams] = useSearchParams();
   const { data: consultant, isLoading } = useConsultant(licenca || "");
   useTrackView(consultant?.id, "client");
 
   const { data: instancePhone } = useInstancePhone(consultant?.id);
+
+  // Modo CTWA / Anúncio: ?src=ads (ou ?utm_source=ads / facebook / instagram)
+  // Versão enxuta da LP: Hero + Vantagens + Depoimentos + Consultor. Mensagem do WhatsApp
+  // já indica origem do anúncio para o auto-tag (lead_source = meta_ads).
+  const srcParam = (searchParams.get("src") || searchParams.get("utm_source") || "").toLowerCase();
+  const isAdsMode = ["ads", "anuncio", "anúncio", "facebook", "instagram", "fb", "ig", "meta"].includes(srcParam);
 
   if (isLoading) return <LoadingScreen />;
 
@@ -43,10 +50,15 @@ const ConsultantPage = () => {
   // Normalizar telefone do perfil com prefixo 55
   const rawPhone = consultant.phone?.replace(/\D/g, '') || "";
   const normalizedPhone = rawPhone.startsWith("55") ? rawPhone : `55${rawPhone}`;
-  
+
   // Botão de atendimento: priorizar instância
   const contactPhone = instancePhone || normalizedPhone;
-  const whatsappUrl = `https://wa.me/${contactPhone}?text=${encodeURIComponent("Olá, gostaria de mais informações sobre o desconto na conta de luz oferecido pela iGreen Energy")}`;
+
+  // Mensagem pré-preenchida — em modo ads usa texto que casa com o auto-tag do bot
+  const waMessage = isAdsMode
+    ? "Oi! Vim do anúncio do Facebook/Instagram e quero simular minha economia na conta de luz 💡"
+    : "Olá, gostaria de mais informações sobre o desconto na conta de luz oferecido pela iGreen Energy";
+  const whatsappUrl = `https://wa.me/${contactPhone}?text=${encodeURIComponent(waMessage)}`;
 
   return (
     <>
@@ -57,24 +69,44 @@ const ConsultantPage = () => {
       />
       <div className="min-h-screen">
         <HeroSection cadastroUrl={consultant.cadastro_url} whatsappUrl={whatsappUrl} consultantId={consultant.id} />
-        <AboutSection />
-        <HowItWorksSection />
-        <SolarPlantsSection />
-        <StatesSection />
-        <ReferralSection />
-        <TestimonialsSection />
-        <NewsSection />
-        <ClubSection />
-        <AdvantagesSection />
-        <ConsultantSection
-          name={consultant.name}
-          phone={consultant.phone}
-          cadastroUrl={consultant.cadastro_url}
-          whatsappUrl={whatsappUrl}
-          photoUrl={consultant.photo_url}
-          igreenId={consultant.igreen_id}
-          consultantId={consultant.id}
-        />
+
+        {isAdsMode ? (
+          // Versão CTWA enxuta — foco em conversão direta para WhatsApp
+          <>
+            <AdvantagesSection />
+            <TestimonialsSection />
+            <ConsultantSection
+              name={consultant.name}
+              phone={consultant.phone}
+              cadastroUrl={consultant.cadastro_url}
+              whatsappUrl={whatsappUrl}
+              photoUrl={consultant.photo_url}
+              igreenId={consultant.igreen_id}
+              consultantId={consultant.id}
+            />
+          </>
+        ) : (
+          <>
+            <AboutSection />
+            <HowItWorksSection />
+            <SolarPlantsSection />
+            <StatesSection />
+            <ReferralSection />
+            <TestimonialsSection />
+            <NewsSection />
+            <ClubSection />
+            <AdvantagesSection />
+            <ConsultantSection
+              name={consultant.name}
+              phone={consultant.phone}
+              cadastroUrl={consultant.cadastro_url}
+              whatsappUrl={whatsappUrl}
+              photoUrl={consultant.photo_url}
+              igreenId={consultant.igreen_id}
+              consultantId={consultant.id}
+            />
+          </>
+        )}
       </div>
       <WhatsAppFloat url={whatsappUrl} />
     </>
