@@ -62,6 +62,7 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
   const { toast } = useToast();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [flowSteps, setFlowSteps] = useState<FlowStep[]>([]);
   const [confirmReset, setConfirmReset] = useState<Row | null>(null);
   const [manualStepFor, setManualStepFor] = useState<Row | null>(null);
 
