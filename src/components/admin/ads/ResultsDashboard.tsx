@@ -230,6 +230,23 @@ export function ResultsDashboard({
         )}
       </div>
 
+      {/* Aviso quando há cliques mas nenhum lead foi atribuído ao anúncio */}
+      {totals.clicks > 0 && realLeads === 0 && (
+        <Card className="p-4 bg-warning/10 border-warning/40">
+          <div className="flex items-start gap-3">
+            <div className="text-warning text-lg">⚠️</div>
+            <div className="text-xs sm:text-sm">
+              <p className="font-semibold text-foreground mb-1">Atribuição de anúncio pendente</p>
+              <p className="text-muted-foreground">
+                Você teve <strong className="text-foreground">{totals.clicks} cliques</strong> no anúncio, mas nenhum contato no seu WhatsApp foi marcado como <code className="px-1 rounded bg-secondary text-foreground">lead_source = meta_ads</code> ainda.
+                Isso acontece quando o link do anúncio não passa o parâmetro de origem, ou os contatos entraram antes da atribuição automática.
+                Os números abaixo mostram <strong className="text-foreground">apenas leads/clientes confirmados de anúncio</strong>.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Explicação clara: Click vs Lead vs Cliente */}
       <CostExplainerCard
         spendCents={totals.spend}
@@ -237,6 +254,7 @@ export function ResultsDashboard({
         leads={realLeads}
         approved={acquired}
       />
+
 
       {/* Funil de conversão com custo por etapa */}
       <FunnelWithCosts
