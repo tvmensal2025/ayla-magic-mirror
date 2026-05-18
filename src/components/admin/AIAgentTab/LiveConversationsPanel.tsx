@@ -230,6 +230,16 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {manualStepFor && (
+        <ManualStepDialog
+          open={!!manualStepFor}
+          onOpenChange={(o) => !o && setManualStepFor(null)}
+          consultantId={userId}
+          customerId={manualStepFor.id}
+          customerName={manualStepFor.name}
+        />
+      )}
     </div>
   );
 }
