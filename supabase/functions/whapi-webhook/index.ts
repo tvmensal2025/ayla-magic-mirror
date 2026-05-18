@@ -722,11 +722,14 @@ Deno.serve(async (req) => {
     // Extrai metadados de telemetria (não persistir no customers).
     const __intent = (updates as any).__intent ?? null;
     const __confidence = (updates as any).__confidence ?? null;
-    delete (updates as any).__intent;
-    delete (updates as any).__confidence;
+    const __inline_sent_flag = (updates as any).__inline_sent === true;
+    // Strip TODAS as chaves internas "__*" antes do update — previne erros
+    // de coluna inexistente (ex: __ai_faq, __intent etc.) que quebram tudo.
+    for (const k of Object.keys(updates)) {
+      if (k.startsWith("__")) delete (updates as any)[k];
+    }
 
     if (Object.keys(updates).length > 0) {
-      delete (updates as any).__inline_sent;
       const { error: updateError } = await supabase.from("customers").update(updates).eq("id", customer.id).select();
       if (updateError) console.error(`❌ ERRO ao salvar updates:`, updateError);
       if (updates.conversation_step && stripPrefix(updates.conversation_step) !== stepBefore) {
@@ -740,8 +743,7 @@ Deno.serve(async (req) => {
 
     // ─── Send reply ────────────────────────────────────────────────────
     // Considera "inline_sent" sempre que houver QUALQUER update — inclusive só __inline_sent.
-    const handlerSentInline = reply === "" && (Object.keys(updates).length > 0 || (updates as any).__inline_sent);
-    delete (updates as any).__inline_sent;
+    const handlerSentInline = reply === "" && (Object.keys(updates).length > 0 || __inline_sent_flag);
     let finalReply = reply;
     if (!finalReply && !handlerSentInline) {
       // Sem fallback robotizado. Silêncio é melhor do que empurrar texto fantasma.
