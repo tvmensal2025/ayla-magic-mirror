@@ -1276,6 +1276,99 @@ async function aguardarOTP(customerId, timeoutMs = 120000) {
   throw new Error(`Timeout aguardando OTP (${timeoutMs / 1000}s)`);
 }
 
+async function localizarCampoOTP(page) {
+  const selectors = [
+    'input[autocomplete="one-time-code"]',
+    'input[name="token"], input[name="otp"], input[name="otpCode"], input[name="code"], input[name="verificationCode"]',
+    'input[id*="token" i], input[id*="otp" i], input[id*="codigo" i], input[id*="código" i], input[id*="code" i]',
+    'input[aria-label*="código" i], input[aria-label*="codigo" i], input[aria-label*="OTP" i], input[aria-label*="token" i]',
+    'input[placeholder*="código" i], input[placeholder*="codigo" i], input[placeholder*="OTP" i], input[placeholder*="token" i]',
+    'input[maxlength="6"], input[maxlength="4"], input[maxlength="8"]',
+    'input[type="tel"], input[inputmode="numeric"], input[inputmode="decimal"]',
+  ];
+  for (const sel of selectors) {
+    const loc = page.locator(sel).first();
+    if (await loc.count() > 0 && await loc.isVisible().catch(() => false)) return loc;
+  }
+  const index = await page.evaluate(() => {
+    const known = ['documentNumber','name','birthDate','phone','phoneConfirm','email','emailConfirm','cep','address','number','neighborhood','city','state','complement','installationNumber','energyBillPassword'];
+    const inputs = Array.from(document.querySelectorAll('input'));
+    for (let i = 0; i < inputs.length; i++) {
+      const inp = inputs[i];
+      if (inp.offsetParent === null) continue;
+      const n = inp.getAttribute('name') || '';
+      const t = inp.getAttribute('type') || '';
+      if (t === 'file' || t === 'radio' || t === 'hidden' || t === 'checkbox') continue;
+      if (known.includes(n)) continue;
+      if (!inp.value || inp.value.trim() === '') return i;
+    }
+    return -1;
+  }).catch(() => -1);
+  return index >= 0 ? page.locator('input').nth(index) : null;
+}
+
+async function preencherEConfirmarOTP(page, customerId, otpCode) {
+  const codeClean = String(otpCode || '').replace(/\D/g, '');
+  if (codeClean.length < 4 || codeClean.length > 8) throw new Error(`OTP inválido recebido: ${otpCode}`);
+  const beforeUrl = page.url();
+  const beforeText = (await page.textContent('body').catch(() => '') || '').replace(/\s+/g, ' ').slice(0, 600);
+  const otpField = await localizarCampoOTP(page);
+  if (!otpField || await otpField.count() === 0) {
+    await screenshot(page, customerId, '11-OTP-FALHOU-campo-nao-encontrado');
+    throw new Error('Campo OTP não encontrado no portal');
+  }
+  await otpField.scrollIntoViewIfNeeded().catch(() => {});
+  await otpField.click({ timeout: 5000 });
+  await otpField.evaluate((input) => { input.focus(); input.select?.(); }).catch(() => {});
+  await page.keyboard.press('Control+A').catch(() => {});
+  await page.keyboard.press('Backspace').catch(() => {});
+  await otpField.type(codeClean, { delay: 90 });
+  await otpField.evaluate((input) => {
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
+  }).catch(() => {});
+  const typed = await otpField.inputValue().catch(() => '');
+  if (typed.replace(/\D/g, '') !== codeClean) {
+    await screenshot(page, customerId, '11-OTP-FALHOU-valor-divergente');
+    throw new Error(`OTP não ficou no campo correto. Esperado=${codeClean} lido=${typed}`);
+  }
+  console.log(`   ✅ OTP digitado e validado no input: ${codeClean}`);
+
+  let clickedLabel = null;
+  for (const label of ['Confirmar', 'Verificar', 'Enviar', 'Validar', 'Continuar']) {
+    try {
+      const btn = page.locator(`button:has-text("${label}"), [role="button"]:has-text("${label}"), a:has-text("${label}")`).first();
+      if (await btn.count() > 0 && await btn.isVisible().catch(() => false) && await btn.isEnabled().catch(() => true)) {
+        await btn.scrollIntoViewIfNeeded().catch(() => {});
+        await btn.click({ timeout: 8000 });
+        clickedLabel = label;
+        console.log(`   ✅ Clique de confirmação OTP: "${label}"`);
+        break;
+      }
+    } catch (_) {}
+  }
+  if (!clickedLabel) {
+    await screenshot(page, customerId, '11-OTP-FALHOU-botao-nao-encontrado');
+    throw new Error('Botão Confirmar OTP não encontrado');
+  }
+
+  await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+  await delay(5000);
+  const afterUrl = page.url();
+  const afterText = (await page.textContent('body').catch(() => '') || '').replace(/\s+/g, ' ');
+  const stillOnOtp = /confirma[cç][aã]o de c[oó]digo|reenviar c[oó]digo|c[oó]digo\s*\*/i.test(afterText)
+    && await localizarCampoOTP(page).then(async (f) => !!f && await f.isVisible().catch(() => false)).catch(() => false);
+  const hasError = /c[oó]digo inv[aá]lido|token inv[aá]lido|erro|incorreto|expirad|obrigat[oó]rio/i.test(afterText);
+  const changed = afterUrl !== beforeUrl || afterText.slice(0, 600) !== beforeText;
+  await screenshot(page, customerId, '11-apos-otp');
+  if (hasError || stillOnOtp || !changed) {
+    throw new Error(`OTP não confirmou no portal. stillOnOtp=${stillOnOtp} hasError=${hasError} url=${afterUrl}`);
+  }
+  console.log('   ✅ OTP confirmado no portal; tela avançou após Confirmar');
+  return true;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // AUTOMAÇÃO PRINCIPAL
 // ═══════════════════════════════════════════════════════════════════════════════
