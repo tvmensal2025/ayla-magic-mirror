@@ -2420,12 +2420,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }
         }
         const DOC_FALLBACK = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é.`;
-        const FINAL_FALLBACK = `✅ *Todos os dados foram preenchidos!*\n\n1️⃣ Finalizar\n\n_Digite *1* ou *FINALIZAR* para concluir:_`;
+        const FINAL_FALLBACK_TEXT = `✅ *Tudo pronto!*\n\nSeus dados foram preenchidos. Vamos finalizar seu cadastro no portal iGreen?`;
         const sendFallback = async (text: string, stepStr: string) => {
           await sendText(remoteJid, text);
           await supabase.from("conversations").insert({
             customer_id: customer.id, message_direction: "outbound",
             message_text: text, message_type: "text", conversation_step: stepStr,
+          });
+        };
+        const sendFinalizarButton = async () => {
+          await sendOptions(remoteJid, FINAL_FALLBACK_TEXT, [
+            { id: "btn_finalizar", title: "✅ Finalizar cadastro" },
+          ]);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id, message_direction: "outbound",
+            message_text: FINAL_FALLBACK_TEXT, message_type: "text", conversation_step: "ask_finalizar",
           });
         };
 
@@ -2440,10 +2449,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             updates.conversation_step = "aguardando_doc_auto";
           } else if (nextCustom.step_type === "finalizar_cadastro") {
             if (!ok) {
-              console.warn(`[post-confirm-conta] dispatch vazio — usando fallback hardcoded de finalizar`);
-              await sendFallback(FINAL_FALLBACK, "finalizar_cadastro");
+              console.warn(`[post-confirm-conta] dispatch vazio — enviando botão de finalizar`);
+              await sendFinalizarButton();
             }
-            updates.conversation_step = "finalizar_cadastro";
+            updates.conversation_step = "ask_finalizar";
           } else if (nextCustom.step_type === "capture_conta") {
             updates.conversation_step = "aguardando_conta";
           } else if (nextCustom.step_type === "capture_email") {
@@ -3450,7 +3459,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         const sent = await sendOptions(remoteJid, "📋 Todos os dados foram preenchidos!\n\nDeseja finalizar o cadastro?\n\n_(Você também pode digitar *FINALIZAR* ou *OK*)_", [
           { id: "btn_finalizar", title: "✅ Finalizar" },
         ]);
-        if (!sent) reply = "Digite *FINALIZAR* ou *1* para confirmar o cadastro:";
+        if (!sent) reply = "Toque no botão *✅ Finalizar* acima — ou responda *FINALIZAR* para concluir o cadastro.";
       }
       break;
     }
