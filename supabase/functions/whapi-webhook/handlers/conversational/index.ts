@@ -551,13 +551,34 @@ async function sendStepMedia(
 // Regra de ouro: o bot só envia o que o consultor configurou. Se não há
 // message_text nem mídia válida, cascateia pelo fallback.goto_step_id.
 
-// Wrapper de segurança — bloqueia replies vazios sem mídia (evita mensagens fantasma).
+// Registro do passo atual por turno, populado pelo runConversationalFlow.
+// _finalize usa isso para compor uma reentrada quando o reply ficaria vazio,
+// evitando silêncio total quando o lead manda algo fora do esperado.
+let _currentTurnStepQuestion: string = "";
+function _setTurnStepQuestion(q: string) {
+  _currentTurnStepQuestion = (q || "").trim();
+}
+function _extractTail(t: string): string {
+  if (!t) return "";
+  const cleaned = String(t).replace(/^📋\s*\*?Voltando ao seu cadastro:\*?\s*/i, "").trim();
+  const qMatches = cleaned.match(/[^.!?\n]*\?+/g);
+  if (qMatches && qMatches.length > 0) return qMatches[qMatches.length - 1].trim();
+  const sents = cleaned.split(/(?<=[.!?])\s+/).filter(Boolean);
+  return (sents[sents.length - 1] || cleaned).trim();
+}
+
+// Wrapper de segurança — NUNCA silencia. Se não há reply nem mídia inline,
+// compõe uma reentrada cortês com a última pergunta do passo atual.
 function _finalize(stepKey: string, r: BotResult): BotResult {
   const reply = (r.reply || "").trim();
   const hasMedia = r.updates?.__inline_sent === true;
   if (!reply && !hasMedia) {
-    console.warn(`[conversational] ⚠️ reply vazio bloqueado em step=${stepKey}`);
-    return { reply: "", updates: { ...r.updates, __inline_sent: true } };
+    const tail = _extractTail(_currentTurnStepQuestion);
+    const reentry = tail
+      ? `Boa! Me ajuda voltando aqui: ${tail}`
+      : `Boa! Pra eu te ajudar do jeito certo, me confirma onde a gente parou? 🙏`;
+    console.warn(`[conversational] ⚠️ reply vazio → recuperando com reentry em step=${stepKey}`);
+    return { reply: reentry, updates: { ...r.updates } };
   }
   return { reply, updates: r.updates };
 }
