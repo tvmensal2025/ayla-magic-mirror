@@ -164,11 +164,11 @@ const AdminContent = () => {
     { id: "rede" as const, label: "Rede", icon: Network },
     { id: "whatsapp" as const, label: "WhatsApp", icon: MessageSquare },
     { id: "performance" as const, label: "Performance", icon: TrendingUp },
+    { id: "central-anuncios" as const, label: "Central de Anúncios", icon: Megaphone },
     { id: "historico" as const, label: "Histórico", icon: History },
     { id: "links" as const, label: "Links", icon: LinkIcon },
     { id: "dados" as const, label: "Dados", icon: Settings },
     { id: "materiais" as const, label: "Materiais", icon: FolderDown },
-    { id: "central-anuncios" as const, label: "Central de Anúncios", icon: Megaphone },
   ];
 
   if (loading) {
