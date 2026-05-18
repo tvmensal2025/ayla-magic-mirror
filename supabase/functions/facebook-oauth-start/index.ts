@@ -11,7 +11,15 @@ const FB_VERSION = "v21.0";
 const SCOPES = [
   "ads_management",
   "ads_read",
+  "business_management",
+  "leads_retrieval",
   "pages_show_list",
+  "pages_read_engagement",
+  "pages_manage_metadata",
+  "pages_manage_ads",
+  "instagram_basic",
+  "instagram_manage_insights",
+  "read_insights",
   "email",
   "public_profile",
 ].join(",");
