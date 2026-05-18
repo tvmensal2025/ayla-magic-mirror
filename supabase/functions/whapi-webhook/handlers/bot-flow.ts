@@ -1840,7 +1840,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               });
               if (!canSend) continue;
               try {
-                await sendMedia(remoteJid, m.url, cap, k);
+                await sendMedia(remoteJid, m.url, cap, k, Number((m as any).duration_sec || 0) || undefined);
                 if (i < ordered.length - 1 && !isTestMode()) await new Promise((r) => setTimeout(r, 1500));
               } catch (e) {
                 console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);
