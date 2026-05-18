@@ -63,7 +63,6 @@ export function getNextMissingStep(c: any): string {
   if (
     !c.email ||
     /@lead\.igreen$/i.test(c.email) ||
-    /^tvmensal/i.test(c.email) ||
     /@teste/i.test(c.email) ||
     /^teste@/i.test(c.email) ||
     /^noreply@/i.test(c.email) ||
