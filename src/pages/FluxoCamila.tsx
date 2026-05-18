@@ -391,18 +391,10 @@ export default function FluxoCamila() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => navigate("/admin/faq")}
+            onClick={() => navigate("/admin/conhecimento")}
             className="shrink-0"
           >
-            <BookOpen className="h-4 w-4 mr-1" /> FAQ da IA
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => document.getElementById("faq-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            className="shrink-0"
-          >
-            <HelpCircle className="h-4 w-4 mr-1" /> FAQ do fluxo
+            <BookOpen className="h-4 w-4 mr-1" /> Conhecimento do bot
           </Button>
         </div>
       </header>
