@@ -116,10 +116,12 @@ Deno.serve(async (req) => {
     url.searchParams.set("state", state);
     if (mode === "switch") {
       // Solicita ao Facebook reautenticar/permitir trocar conta.
-      // Obs.: o Facebook não garante 100% que pedirá senha — depende dos cookies do navegador.
       url.searchParams.set("auth_type", "reauthenticate");
       url.searchParams.set("prompt", "login");
       url.searchParams.set("force_authentication", "1");
+    } else if (mode === "rerequest") {
+      // Re-pede permissões que o usuário negou antes — sem isso, scopes negados não voltam a aparecer.
+      url.searchParams.set("auth_type", "rerequest");
     }
 
     // URL auxiliar de logout do Facebook (para casos em que o usuário queira garantir troca de conta)
