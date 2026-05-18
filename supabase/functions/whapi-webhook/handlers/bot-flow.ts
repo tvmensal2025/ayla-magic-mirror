@@ -3974,7 +3974,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         // ── Email: placeholder, formato, consultor, ou ausente → volta a perguntar ──
         if (err.includes("Email")) {
           updates.conversation_step = "ask_email";
-          reply = `⚠️ ${err}\n\nInforme um *e-mail pessoal real* (ex: nome@gmail.com):`;
+          reply = `⚠️ ${err}\n\nMe manda um e-mail *seu*, diferente do consultor — pode ser qualquer provedor:`;
           redirected = true; break;
         }
         // ── Telefone não confirmado / placeholder / DDD inválido / do consultor ──
