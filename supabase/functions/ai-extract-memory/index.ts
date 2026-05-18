@@ -94,24 +94,22 @@ Deno.serve(async (req) => {
       `${m.message_direction === "inbound" ? "Lead" : "IA"}: ${(m.message_text || "(mídia)").slice(0, 240)}`
     ).join("\n");
 
-    const sys = `Você extrai FATOS PERSISTENTES sobre um lead da iGreen Energy a partir da conversa. Retorne SOMENTE fatos novos ou que mudaram. Ignore small talk, saudações e info já presente em [JÁ SABEMOS]. Categorias: ${VALID_CATEGORIES.join(", ")}. Use snake_case nas chaves. Confidence baixa (<0.5) para inferências; alta (>0.8) só quando o lead afirmou explicitamente.`;
+    const sys = `Você extrai FATOS PERSISTENTES sobre um lead da iGreen Energy a partir da conversa. Retorne SOMENTE fatos novos ou que mudaram. Ignore small talk, saudações e info já presente em [JÁ SABEMOS]. Categorias: ${VALID_CATEGORIES.join(", ")}. Use snake_case nas chaves. Confidence baixa (<0.5) para inferências; alta (>0.8) só quando o lead afirmou explicitamente. Se não houver nada novo, retorne {"facts": []}.`;
 
-    const prompt = `[JÁ SABEMOS]\n${existingLine}\n\n[RESUMO ATUAL]\n${customer.conversation_summary || "(sem resumo)"}\n\n[CONVERSA RECENTE]\n${transcript}\n\nExtraia fatos novos chamando save_memory_facts. Se não houver nada novo, chame com facts: [].`;
+    const prompt = `[JÁ SABEMOS]\n${existingLine}\n\n[RESUMO ATUAL]\n${customer.conversation_summary || "(sem resumo)"}\n\n[CONVERSA RECENTE]\n${transcript}\n\nExtraia fatos novos.`;
 
-    const result = await geminiGenerate({
-      model: "gemini-2.5-flash-lite",
-      system: sys,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      tools: [extractTool],
-      toolChoice: { mode: "ANY" },
+    const result = await aiChat({
+      model: "google/gemini-3-flash-preview",
       temperature: 0.2,
-      maxOutputTokens: 800,
-      functionName: "ai-extract-memory",
-      consultantId: customer.consultant_id,
-      customerId: customer_id,
+      maxTokens: 800,
+      jsonSchema: { name: "extract_facts", schema: FACTS_SCHEMA },
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: prompt },
+      ],
     });
 
-    const facts = (result.toolCall?.args?.facts || []) as any[];
+    const facts = (result.json?.facts || []) as any[];
     let upserted = 0;
     for (const f of facts) {
       if (!f?.category || !f?.key || !f?.value) continue;
