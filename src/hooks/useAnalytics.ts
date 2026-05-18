@@ -223,10 +223,93 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
       const total = totalClient + totalLicenciada;
       const conversionRate = total > 0 ? (totalClicks / total) * 100 : 0;
 
+      // === FUNNEL ===
+      const ctaClicks = events.filter((e) =>
+        e.event_type === "click" &&
+        (e.event_target?.includes("whatsapp") || e.event_target?.includes("cadastro"))
+      ).length;
+      const periodCustomers = allCustomers.filter((c) => new Date(c.created_at) >= sinceDate);
+      const leadsCount = periodCustomers.length;
+      const approvedCount = periodCustomers.filter((c) =>
+        c.status === "approved" || c.status === "active"
+      ).length;
+      const funnel = [
+        { stage: "Visitas", count: total, pct: 100 },
+        { stage: "Cliques CTA", count: ctaClicks, pct: total ? (ctaClicks / total) * 100 : 0 },
+        { stage: "Leads", count: leadsCount, pct: total ? (leadsCount / total) * 100 : 0 },
+        { stage: "Aprovados", count: approvedCount, pct: total ? (approvedCount / total) * 100 : 0 },
+      ];
+
+      // === WEEKDAY ===
+      const weekdayNames = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+      const weekdayMap = new Map<number, { views: number; clicks: number }>();
+      for (let i = 0; i < 7; i++) weekdayMap.set(i, { views: 0, clicks: 0 });
+      for (const v of views) {
+        const d = new Date(v.created_at).getDay();
+        weekdayMap.get(d)!.views++;
+      }
+      for (const e of events) {
+        if (e.event_type === "click") {
+          const d = new Date(e.created_at).getDay();
+          weekdayMap.get(d)!.clicks++;
+        }
+      }
+      const weekday = Array.from(weekdayMap.entries()).map(([d, v]) => ({
+        day: weekdayNames[d], views: v.views, clicks: v.clicks,
+      }));
+
+      // === WEEK COMPARISON (current 7 days vs previous 7) ===
+      const now = Date.now();
+      const day = 24 * 60 * 60 * 1000;
+      const curStart = now - 7 * day;
+      const prevStart = now - 14 * day;
+      const curViews = views.filter((v) => new Date(v.created_at).getTime() >= curStart).length;
+      const prevViews = views.filter((v) => {
+        const t = new Date(v.created_at).getTime();
+        return t >= prevStart && t < curStart;
+      }).length;
+      const curClicks = events.filter((e) => e.event_type === "click" && new Date(e.created_at).getTime() >= curStart).length;
+      const prevClicks = events.filter((e) => e.event_type === "click" && new Date(e.created_at).getTime() >= prevStart && new Date(e.created_at).getTime() < curStart).length;
+      const curLeads = allCustomers.filter((c) => new Date(c.created_at).getTime() >= curStart).length;
+      const prevLeads = allCustomers.filter((c) => {
+        const t = new Date(c.created_at).getTime();
+        return t >= prevStart && t < curStart;
+      }).length;
+      const pctChange = (cur: number, prev: number) => prev === 0 ? (cur > 0 ? 100 : 0) : ((cur - prev) / prev) * 100;
+      const weekComparison = {
+        views: { current: curViews, previous: prevViews, change: pctChange(curViews, prevViews) },
+        clicks: { current: curClicks, previous: prevClicks, change: pctChange(curClicks, prevClicks) },
+        leads: { current: curLeads, previous: prevLeads, change: pctChange(curLeads, prevLeads) },
+      };
+
+      // === TOP CAMPAIGNS (utm_source breakdown with conversions) ===
+      const campaignMap = new Map<string, { views: number; clicks: number; leads: number }>();
+      for (const v of views) {
+        const key = v.utm_source || "direto";
+        if (!campaignMap.has(key)) campaignMap.set(key, { views: 0, clicks: 0, leads: 0 });
+        campaignMap.get(key)!.views++;
+      }
+      for (const e of events) {
+        if (e.event_type === "click") {
+          const key = e.utm_source || "direto";
+          if (!campaignMap.has(key)) campaignMap.set(key, { views: 0, clicks: 0, leads: 0 });
+          campaignMap.get(key)!.clicks++;
+        }
+      }
+      const topCampaigns = Array.from(campaignMap.entries())
+        .map(([source, v]) => ({
+          source,
+          ...v,
+          conversionRate: v.views > 0 ? (v.clicks / v.views) * 100 : 0,
+        }))
+        .sort((a, b) => b.views - a.views)
+        .slice(0, 8);
+
       return {
         totalClient, totalLicenciada, total, totalClicks, clicksByTarget, clicksByPage,
         daily, hourly, devices, utmSources, totalCustomers, customersByStatus,
         totalKw, avgKw, topLicenciados, weeklyNewCustomers, conversionRate, allCustomers,
+        funnel, weekday, weekComparison, topCampaigns,
       };
     },
   });

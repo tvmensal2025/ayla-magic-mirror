@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { Eye, Users, MousePointerClick, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Megaphone, ChevronDown } from "lucide-react";
+import { Eye, Users, MousePointerClick, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Megaphone, ChevronDown, Trash2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import { useAnalytics } from "@/hooks/useAnalytics";
 import { StatCard } from "./StatCard";
 import { CustomerCharts } from "./CustomerCharts";
 import { AnalyticsCharts } from "./AnalyticsCharts";
+import { PerformanceCharts } from "./PerformanceCharts";
 import { LeadSourceCard } from "./LeadSourceCard";
 import { ResultsDashboard } from "./ads/ResultsDashboard";
 import { WalletChip } from "./ads/WalletChip";
@@ -38,6 +39,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
   const [showCredPassword, setShowCredPassword] = useState(false);
   const dashboardRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState(false);
+  const [resettingPerf, setResettingPerf] = useState(false);
   const [sharedAccountCount, setSharedAccountCount] = useState(0);
 
   useEffect(() => {
@@ -170,6 +172,25 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
     finally { setExporting(false); }
   };
 
+  const handleResetPerformance = async () => {
+    if (!confirm("Apagar todo o histórico de visitas, cliques e eventos das suas landing pages? Clientes e mensagens NÃO serão apagados. Esta ação não pode ser desfeita.")) return;
+    setResettingPerf(true);
+    try {
+      const { data, error } = await supabase.rpc("reset_consultant_analytics" as any, { _consultant_id: userId });
+      if (error) throw error;
+      const d = (data as any)?.deleted ?? {};
+      toast({
+        title: "✅ Performance resetada",
+        description: `Apagados: ${d.page_views ?? 0} visitas, ${d.page_events ?? 0} cliques, ${d.crm_page_events ?? 0} eventos CRM, ${d.facebook_capi_events ?? 0} eventos Facebook.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    } catch (err: unknown) {
+      toast({ title: "Erro ao resetar", description: err instanceof Error ? err.message : "Erro desconhecido", variant: "destructive" });
+    } finally {
+      setResettingPerf(false);
+    }
+  };
+
   return (
     <div ref={dashboardRef} className="space-y-6">
       {sharedAccountCount > 0 && (
@@ -183,6 +204,16 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
       )}
       <div className="flex items-center justify-end gap-2 flex-wrap">
         <WalletChip consultantId={userId} />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleResetPerformance}
+          disabled={resettingPerf}
+          className="h-8 text-xs gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+        >
+          {resettingPerf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+          {resettingPerf ? "Resetando..." : "Resetar performance"}
+        </Button>
         <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exporting} className="h-8 text-xs gap-1.5">
           {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
           {exporting ? "Gerando..." : "Exportar PDF"}
@@ -197,6 +228,9 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
           </SelectContent>
         </Select>
       </div>
+
+      {/* NOVOS GRÁFICOS — funil, semana atual vs anterior, dia da semana, top origens */}
+      <PerformanceCharts analytics={analytics} />
 
       {/* 1. ANÚNCIOS — foco principal */}
       <div className="space-y-3">
