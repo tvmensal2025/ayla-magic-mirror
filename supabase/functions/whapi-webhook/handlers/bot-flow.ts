@@ -2829,7 +2829,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           reply = "";
           break;
         }
-        reply = "📸 Me envie a foto da *frente* do seu *RG ou CNH*.\n\nA IA reconhece automaticamente qual documento é. Formatos: JPG, PNG ou PDF.";
+        reply = "📸 Me envie a foto da *frente do seu documento*.\n\nPode ser RG ou CNH, o que estiver mais à mão. Formatos: JPG, PNG ou PDF.";
         break;
       }
       const mime = imageMessage?.mimetype || documentMessage?.mimetype || "image/jpeg";
