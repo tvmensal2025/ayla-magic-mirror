@@ -2710,7 +2710,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
         if (nextCustom) {
           console.log(`[post-confirm-conta] next=${nextCustom.step_key} type=${nextCustom.step_type} reason=customflow`);
-          const ok = await dispatchStepFromFlow(nextCustom.step_key, _vars);
+          // Para finalizar_cadastro NÃO usamos dispatch: o texto precisa ir
+          // acoplado ao botão interativo (sendOptions) — caso contrário o
+          // cliente recebe só texto e não consegue tocar para concluir.
+          const ok = nextCustom.step_type === "finalizar_cadastro"
+            ? true
+            : await dispatchStepFromFlow(nextCustom.step_key, _vars);
           if (nextCustom.step_type === "capture_documento" || nextCustom.step_type === "capture_doc") {
             if (!ok) {
               console.warn(`[post-confirm-conta] dispatch vazio — usando fallback hardcoded de doc`);
