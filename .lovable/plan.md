@@ -1,87 +1,103 @@
-## Por que os leads estão parados
+# Dashboard de Custo por Cliente (Meta Ads)
 
-A função `crm-auto-progress` só sabe avançar quem já está em **aprovado/reprovado** (30→60→90→120 dias). Não existe nada que mova um lead de `novo_lead` para algo intermediário enquanto ele conversa com a Camila. Além disso, o Kanban hoje só tem `novo_lead` → `aprovado` / `reprovado` → `30/60/90/120 dias` — **não há estágios intermediários** para o lead "andar". Resultado: 5.558 contatos travados em `novo_lead`, mesmo os 7 que estão conversando ativamente.
+## O que vamos resolver
 
-## O que vou construir
+Hoje você gasta em anúncios no Facebook/Meta mas não sabe **quanto custou cada lead que entrou no WhatsApp** nem **quanto custou cada cliente aprovado**. Vamos integrar a Meta Ads API por consultor e criar gráficos claros.
 
-### 1. Migration — novos estágios no Kanban
+## Conceitos (para ficar claro)
 
-Inserir 5 estágios em `kanban_stages` para **cada consultor** (e sempre que um consultor novo for criado, via trigger ou seed). Ordem:
+Cada contato que chega vai ser contado em **2 métricas diferentes**, lado a lado:
 
-```text
-novo_lead → qualificando → valor_conta → conta_enviada → doc_enviado → finalizando → aprovado / reprovado → 30/60/90/120
-```
+| Métrica | O que é | Como calcular |
+|---|---|---|
+| **CPL** (Custo por Lead) | Quanto custou alguém **entrar no WhatsApp** | Gasto ÷ nº de novos contatos (estágio `novo_lead`) |
+| **CPA** (Custo por Aquisição) | Quanto custou alguém **virar cliente iGreen** | Gasto ÷ nº de contatos que chegaram em `aprovado` |
 
-| stage_key       | label              | display_order |
-|-----------------|--------------------|---------------|
-| `qualificando`  | Em qualificação    | 10            |
-| `valor_conta`   | Valor da conta     | 20            |
-| `conta_enviada` | Conta enviada      | 30            |
-| `doc_enviado`   | Documento enviado  | 40            |
-| `finalizando`   | Finalizando cadastro | 50          |
+Exemplo: gastou R$ 100, entraram 7 no WhatsApp, 2 viraram aprovados → CPL = R$ 14,28 · CPA = R$ 50,00
 
-(novo_lead = 0, aprovado = 60, reprovado = 70 etc — vou recalcular `display_order` para manter consistência.)
+**Resposta direta da sua pergunta:** o contato entra primeiro como **Lead** (estágio `novo_lead`). Só vira "cliente" quando chega em `aprovado`. Os 7 que você mencionou contam para o CPL agora; quando algum for aprovado, conta também para o CPA.
 
-### 2. Helper compartilhado `_shared/crm-stage-sync.ts`
+## Como funciona a coleta de gasto
 
-Exporta `syncDealStageFromStep(supabase, customerId, conversationStep)`. Lógica:
+1. Cada consultor conecta sua **conta de anúncios Meta** (via token de acesso da Meta Ads API).
+2. Edge Function `meta-ads-sync` roda **1x por dia (07:00 BRT)** via `pg_cron` e busca o gasto de ontem por campanha.
+3. Os dados ficam guardados em `meta_ads_daily_spend`.
+4. O CRM já sabe quantos leads entraram por dia (tabela `customers` + `kanban_stages`), então calculamos CPL/CPA cruzando as duas fontes.
 
-1. Busca o deal ativo do customer (`crm_deals` por `customer_id`).
-2. Mapeia `conversation_step` → `stage_key` alvo:
+## Estrutura técnica
 
-| conversation_step (legacy ou flow:)                          | stage_key alvo  |
-|---|---|
-| `welcome`, `aguardando_nome`, `null`                         | `novo_lead` (não mexe) |
-| nome capturado / `aguardando_valor_conta`                    | `qualificando`  |
-| `aguardando_conta` / valor recebido                          | `valor_conta`   |
-| `aguardando_doc_auto` / conta OCR ok                         | `conta_enviada` |
-| `confirmando_dados_conta`, `ask_email`, `ask_phone_confirm`  | `doc_enviado`   |
-| `finalizando`, `finalizando_cadastro`, `portal_submitting`, `aguardando_otp` | `finalizando` |
+### Banco de dados
 
-Para passos custom (`flow:UUID`), consulta `bot_flow_steps.step_type` e mapeia: `capture_conta` → `valor_conta`, `capture_documento` → `conta_enviada`, `confirm_phone` → `doc_enviado`, `finalizar_cadastro` → `finalizando`.
+**Novas colunas em `consultants`:**
+- `meta_access_token` (texto, criptografado via RLS owner-only)
+- `meta_ad_account_id` (ex: `act_317035519061535`)
+- `meta_business_id` (opcional)
 
-3. **Guard-rails (não rebaixar, não tocar base fria):**
-   - Só atua se `deal.stage ∈ {novo_lead, qualificando, valor_conta, conta_enviada, doc_enviado, finalizando}`.
-   - Nunca mexe em `aprovado`, `reprovado`, `30_dias`, `60_dias`, etc.
-   - Só avança (`display_order` alvo > `display_order` atual) — nunca volta atrás.
-   - Loga `[crm-stage] customer=X step=Y from=A → to=B`.
+**Nova tabela `meta_ads_campaigns`:**
+- `id`, `consultant_id`, `campaign_id` (Meta), `campaign_name`, `status`, `created_at`
 
-### 3. Invocar o helper nos webhooks
+**Nova tabela `meta_ads_daily_spend`:**
+- `id`, `consultant_id`, `campaign_id`, `date` (DATE), `spend` (numeric), `impressions`, `clicks`, `leads_meta` (leads que a Meta reporta)
+- Unique: `(consultant_id, campaign_id, date)`
+- RLS: consultor lê só os seus; admin lê tudo.
 
-Chamar `syncDealStageFromStep(...)` **logo após cada `update({ conversation_step })`** em:
+### Edge Functions
 
-- `supabase/functions/whapi-webhook/index.ts`
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
-- Mesmos três espelhados em `evolution-webhook/`
+- `meta-ads-sync` — cron diário: para cada consultor com token, chama `/insights` da Meta Ads API e faz upsert.
+- `meta-ads-connect` — recebe o token do consultor, valida em `/me/adaccounts`, salva.
+- `meta-ads-disconnect` — limpa credenciais.
 
-Custo: 1 query extra por turno (já estamos fazendo várias). Sem cron novo.
+### Frontend
 
-### 4. Base importada permanece intacta
+**Nova página `/admin/ads-roi`** com 4 seções:
 
-Conforme decidido: **não toco nos 5.558 já em novo_lead**. O helper só age quando o customer começa a conversar (conversation_step deixa de ser NULL). Se a base fria nunca interagir, fica em `novo_lead` para sempre — comportamento desejado.
+1. **KPIs no topo** (cards): Gasto total · Leads · Aprovados · CPL médio · CPA médio · Período (date range picker).
 
-### 5. Frontend
+2. **Gráfico de linha** — CPL e CPA ao longo do tempo (recharts `LineChart`, eixo X = data, 2 linhas).
 
-`useKanbanStages` já lê dinâmico de `kanban_stages` ordenado por `display_order`, então o Kanban automaticamente mostra as 5 colunas novas sem nenhuma mudança de UI. Vou só verificar que `KanbanBoard` não tem largura fixa quebrando com mais colunas.
+3. **Funil de conversão com custos** — barras horizontais:
+   ```text
+   Novo Lead       ████████████ 100  (R$ 5,00/lead)
+   Qualificando    ████████ 70       (R$ 7,14)
+   Valor da Conta  ██████ 50         (R$ 10,00)
+   Conta Enviada   ████ 30           (R$ 16,67)
+   Doc Enviado     ███ 20            (R$ 25,00)
+   Finalizando     ██ 12             (R$ 41,67)
+   Aprovado        █ 8               (R$ 62,50 ← CPA)
+   ```
 
-### 6. Teste
+4. **Tabela: Ranking de campanhas** — colunas: Campanha · Gasto · Leads · Aprovados · CPL · CPA · CTR. Ordenável por CPA.
 
-Test Deno em `_shared/crm-stage-sync_test.ts`:
-- step `aguardando_valor_conta`, deal em `novo_lead` → vira `qualificando`.
-- step `aguardando_doc_auto`, deal em `aprovado` → **não mexe** (guard-rail).
-- step `welcome`, deal em `qualificando` → **não rebaixa**.
-- step `flow:UUID` (capture_conta) → vira `valor_conta`.
+5. **ROI por consultor** (só admin) — tabela: Consultor · Gasto · Leads · Aprovados · CPL · CPA · Taxa de conversão.
 
-### Fora de escopo
+**Página `/admin/configuracoes` (aba "Integrações")** — botão "Conectar Meta Ads" para cada consultor colar o access token + selecionar ad account.
 
-- Não reativo (não vou rodar cron pra "recuperar" os 5558 antigos).
-- Não toco em `crm-auto-progress` (continua cuidando do pós-aprovação 30/60/90/120).
-- Não mexo em fluxo do bot/Camila, só leio o `conversation_step`.
+### Atribuição (lead ↔ campanha)
 
-### Arquivos
+Para casar lead com campanha específica, vamos usar **UTM/CTWA** (Click-to-WhatsApp):
+- O link `wa.me/...` na campanha leva parâmetro `?ref=campanha_X`
+- O bot da Whapi captura `referral` do primeiro evento e salva em `customers.source_campaign`
+- Se não houver `ref`, lead é atribuído à campanha ativa do consultor (fallback proporcional).
 
-- **Migration:** inserir 5 stages em `kanban_stages` para todos os consultores existentes + criar/atualizar trigger de seed para novos consultores.
-- **Novo:** `supabase/functions/_shared/crm-stage-sync.ts` + `_test.ts`.
-- **Edit:** `whapi-webhook/{index,bot-flow,conversational/index}.ts` + 3 espelhados em `evolution-webhook/`.
-- **Memory:** atualizar `mem/crm/automation-logic` com o novo fluxo mid-funnel.
+## Implementação em fases
+
+**Fase 1 — Estrutura + conexão (1 migração + 2 edge functions)**
+- Migração: tabelas + colunas + RLS
+- Edge: `meta-ads-connect`, `meta-ads-disconnect`
+- UI: aba "Integrações" com formulário
+
+**Fase 2 — Sync de gasto**
+- Edge: `meta-ads-sync` + cron 07:00 BRT
+- Captura `source_campaign` no webhook Whapi
+
+**Fase 3 — Dashboard**
+- Página `/admin/ads-roi` com os 4 gráficos
+- Hook `useAdsRoi(dateRange, consultantId?)` que agrega gastos × leads × aprovados
+
+## O que você precisa providenciar
+
+Para conectar sua conta agora, precisarei do **Access Token da Meta Ads API** (gerado em https://developers.facebook.com → seu app → Marketing API → Get Token, com escopo `ads_read`). Eu te explico o passo a passo quando aprovar o plano.
+
+---
+
+**Aprovar o plano?** Posso começar pela Fase 1 (estrutura + tela de conexão) e depois seguimos.
