@@ -1,85 +1,82 @@
-## Bug: bot re-envia áudio de boas-vindas após o cadastro estar finalizado
+## Ligando TODOS os 11 passos em sequência (sem pular nenhum)
 
-### Causa raiz (confirmada no código)
+Você criou todos pensando que vão funcionar — então a ordem é simples: cada passo vai para o próximo, em linha reta, e o "Quebra de objeção" entra quando o cliente disser "não entendi" no passo 9.
 
-Em `supabase/functions/whapi-webhook/index.ts:253-298`:
+### Fluxo linear (todos os passos serão executados)
 
-```ts
-const statusFinalizados = [
-  "data_complete", "portal_submitting", "awaiting_otp", "validating_otp",
-  "awaiting_manual_submit", "portal_submitted", "registered_igreen",
-  "awaiting_signature", "complete",
-];
-
-// Busca customer EXCLUINDO esses status
-let { data: activeRecords } = await supabase
-  .from("customers")
-  .select("*")
-  .eq("phone_whatsapp", phone)
-  .eq("consultant_id", superAdminConsultantId)
-  .not("status", "in", `(${statusFinalizados.join(",")})`)
-  ...
-let customer = activeRecords?.[0] || null;
-...
-if (!customer) {
-  // 🚨 cria customer NOVO com conversation_step: "welcome"
-}
+```text
+[2] Nome do cliente
+      │  captura {{nome}}
+      ▼
+[3] Boas Vindas
+      │
+      ▼
+[4] Qual o valor da conta de luz
+      │  captura {{valor_conta}}
+      ▼
+[5] Valor da conta (reação)
+      │
+      ▼
+[6] Perguntando se pode explicar
+      │  "ok/pode/sim" → segue   |   "não/agora não" → segue mesmo assim (sem travar)
+      ▼
+[7] Como funciona (áudio + vídeo)
+      │
+      ▼
+[8] Quebra de objeção
+      │
+      ▼
+[9] Deu para entender?
+      │  "sim" → segue
+      │  "não/dúvida" → volta para [8] uma vez, depois segue
+      ▼
+[10] Conta de energia (capture_conta)
+      │
+      ▼
+[11] Cadastro (capture_documento)
+      │
+      ▼
+[12] Confirmação (finalizar_cadastro)
 ```
 
-Quando o `worker-callback` marca `status=registered_igreen` (ou `awaiting_signature`, `awaiting_otp`, etc.) e o lead manda qualquer mensagem depois:
+### Transições (default = sempre avança para o próximo)
 
-1. A query exclui o customer (status está na lista de "finalizados").
-2. `customer = null` → cai no `if (!customer)` e **cria um customer NOVO** com `conversation_step: "welcome"`.
-3. O welcome dispara o áudio inicial → exatamente o bug que a Fran viu.
+| De | Para | Gatilho |
+|---|---|---|
+| 2 Nome | 3 Boas Vindas | default (após capturar nome) |
+| 3 Boas Vindas | 4 Qual valor | default |
+| 4 Qual valor | 5 Valor da conta | default (após capturar valor) |
+| 5 Valor da conta | 6 Perguntando se pode explicar | default |
+| 6 Perguntando | 7 Como funciona | default (qualquer resposta segue) |
+| 7 Como funciona | 8 Quebra de objeção | default |
+| 8 Quebra de objeção | 9 Deu para entender | default |
+| 9 Deu para entender | 10 Conta energia | afirmação (sim/vamos/ok) |
+| 9 Deu para entender | 8 Quebra de objeção | negação (não/dúvida) — volta 1 vez |
+| 10 Conta energia | 11 Cadastro | default (após receber a foto) |
+| 11 Cadastro | 12 Confirmação | default (após receber documento) |
 
-Isso afeta TODOS os leads em qualquer estado pós-portal: `awaiting_otp`, `awaiting_signature`, `registered_igreen`, `portal_submitting`, `complete`, etc.
+### Tempos (text_delay_ms = pausa antes de enviar cada passo)
 
-### Correção
+| Pos | Passo | Atual | Novo | Por quê |
+|---|---|---|---|---|
+| 2 | Nome | 1500 | **1500** | OK |
+| 3 | Boas Vindas | 1500 | **2000** | Respiro após receber nome |
+| 4 | Qual valor | 2500 | **2500** | OK |
+| 5 | Valor da conta | 2000 | **2500** | Reação natural ao valor |
+| 6 | Perguntando | 1500 | **2000** | OK |
+| 7 | Como funciona | **60000** | **3000** | 60s estava errado — atrasa o envio. Áudio+vídeo já têm duração própria |
+| 8 | Quebra de objeção | 1500 | **4000** | Pausa pós-explicação |
+| 9 | Deu para entender | **30000** | **8000** | 30s exagerado — 8s dá tempo de digitar |
+| 10 | Conta energia | 1500 | **2000** | OK |
+| 11 | Cadastro | 0 | **1500** | Pausa mínima entre passos |
+| 12 | Confirmação | 2500 | **2500** | OK |
 
-#### 1. `whapi-webhook/index.ts` — nunca recriar customer com status pós-cadastro
+### Resumo do que muda
 
-Trocar a lógica de busca + criação:
+1. **Religar todos com `default`** para garantir que nenhum passo seja pulado (hoje pos 5 pula direto para 7, e pos 9/10/11 apontam para IDs inexistentes).
+2. **Ajustar os 2 delays exagerados** (60s no pos 7 e 30s no pos 9).
+3. **Quebra de objeção entra como passo 8 normal do fluxo** e também como fallback se o cliente disser "não entendi" no passo 9.
 
-- **Buscar sempre o customer mais recente desse telefone** (sem filtrar por status). Se existir, usa ele.
-- Só criar customer novo se realmente não existir nenhum registro para o telefone.
-- Se o customer encontrado estiver em estado pós-finalização (`awaiting_otp`, `validating_otp`, `awaiting_signature`, `awaiting_facial`, `portal_submitting`, `portal_submitted`, `registered_igreen`, `complete`, `data_complete`, ou step `complete`/`cadastro_em_analise`/`aguardando_otp`/`aguardando_assinatura`/`aguardando_facial`), **mantém o step atual** — não reseta para `welcome`. O bot-flow já tem handlers polidos para cada um deles (linhas 3467, 3472, 3510, 3528, 3536) que apenas respondem com status/aviso sem disparar mídia.
-- Manter o caso `automation_failed` (já existe — esse pode resetar para `welcome` porque é falha técnica que precisa recomeçar).
-- Manter `RESUMABLE_STATUSES` (`abandoned`, `stuck_finalizar`, `stuck_contact`, `email_pendente_revisao`) — esses são leads travados que devem retomar.
+Tudo isso é **uma migration `UPDATE bot_flow_steps`** no flow `66a19db4-b061-4f3f-921f-c13e9fb6f730` — zero alteração de código TS.
 
-Resultado: lead pós-portal manda mensagem → cai no handler de `aguardando_otp`/`aguardando_assinatura`/`cadastro_em_analise`/`complete`, que responde com texto educado e sem mídia.
-
-#### 2. `worker-callback/index.ts:148-159` — alinhar com o handler existente
-
-Hoje, em `registration_complete`, o worker:
-- Seta `status = "registered_igreen"`, `conversation_step = "complete"`.
-- Envia direto via WhatsApp uma mensagem "🎉 Parabéns..."
-
-Trocar `conversation_step` por `cadastro_em_analise` (que tem handler educado no bot-flow para mensagens subsequentes) — mantém a mensagem de parabéns enviada uma única vez no callback.
-
-#### 3. Remover "Obrigado pela confiança! ☀️🌱"
-
-Em `bot-flow.ts:3739`, apagar a última linha do bloco `await sendText(remoteJid, ...)`:
-
-```ts
-await sendText(remoteJid,
-  "✅ *Todos os dados coletados com sucesso!* 🎉\n\n" +
-  "⏳ Estamos processando seu cadastro no portal...\n\n" +
-  "📱 Em breve você receberá um *código de verificação no WhatsApp*. Quando receber, *digite aqui*!"
-);
-```
-
-(Apenas remoção da linha — sem mexer em mais nada.)
-
-### Verificação
-
-Após o deploy, simular o caso: setar manualmente um customer de teste com `status=registered_igreen` e `conversation_step=complete`/`cadastro_em_analise`, mandar mensagem pelo WhatsApp e confirmar nos logs do `whapi-webhook` que:
-- Nenhum customer novo é inserido.
-- A resposta vem do handler `cadastro_em_analise` (texto educado, sem áudio).
-
-### Arquivos afetados
-
-- `supabase/functions/whapi-webhook/index.ts` (linhas 253-328 — refator da lógica find-or-create)
-- `supabase/functions/worker-callback/index.ts` (linha 150 — trocar step para `cadastro_em_analise`)
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (linha 3739 — remover "Obrigado pela confiança")
-
-Deploy: `whapi-webhook` e `worker-callback`.
+Posso aplicar?
