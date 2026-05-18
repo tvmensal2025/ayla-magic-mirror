@@ -743,8 +743,7 @@ Deno.serve(async (req) => {
 
     // ─── Send reply ────────────────────────────────────────────────────
     // Considera "inline_sent" sempre que houver QUALQUER update — inclusive só __inline_sent.
-    const handlerSentInline = reply === "" && (Object.keys(updates).length > 0 || (updates as any).__inline_sent);
-    delete (updates as any).__inline_sent;
+    const handlerSentInline = reply === "" && (Object.keys(updates).length > 0 || __inline_sent_flag);
     let finalReply = reply;
     if (!finalReply && !handlerSentInline) {
       // Sem fallback robotizado. Silêncio é melhor do que empurrar texto fantasma.
