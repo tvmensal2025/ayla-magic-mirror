@@ -325,11 +325,7 @@ Deno.serve(async (req) => {
           .limit(1)
           .maybeSingle();
         if (fallback) {
-          if (stepsFinalizados.includes(stripPrefix(fallback.conversation_step || "")) || statusFinalizados.includes(fallback.status)) {
-            await supabase.from("customers").update({ conversation_step: "welcome", status: "pending" }).eq("id", fallback.id);
-            fallback.conversation_step = "welcome";
-            fallback.status = "pending";
-          }
+          // Mesma regra do bloco principal: NÃO resetar leads pós-cadastro para welcome.
           customer = fallback;
         } else {
           return new Response(JSON.stringify({ error: "Failed to create customer" }), {
