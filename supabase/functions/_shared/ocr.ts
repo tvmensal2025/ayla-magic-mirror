@@ -430,9 +430,14 @@ export async function ocrDocumentoFrenteVerso(
   const v = ocrVerso.dados;
   if (!validarNomeOCR(d.nome) && validarNomeOCR(v.nome)) d.nome = v.nome;
   if ((!d.cpf || d.cpf.length !== 11) && v.cpf && v.cpf.length === 11) d.cpf = v.cpf;
-  if (!normalizarRG(d.rg) && v.rg) {
-    const rgVerso = normalizarRG(v.rg) || (v.rg.replace(/\D/g, "").length >= 7 && v.rg.replace(/\D/g, "").length <= 12 ? v.rg.replace(/\D/g, "") : "");
-    if (rgVerso) d.rg = rgVerso;
+  // RG do verso (REGISTRO GERAL) tem prioridade sobre número de série da frente do RG antigo
+  if (v.rg) {
+    const rgVerso = normalizarRG(v.rg) || (v.rg.replace(/[^\dXx]/g, "").length >= 7 && v.rg.replace(/[^\dXx]/g, "").length <= 12 ? v.rg.replace(/[^\dXx]/g, "").toUpperCase() : "");
+    const rgFrente = normalizarRG(d.rg);
+    if (rgVerso && (!rgFrente || rgFrente !== rgVerso)) {
+      console.log(`🔁 RG: usando verso (REGISTRO GERAL=${rgVerso}) ao invés da frente (${rgFrente || "vazio"})`);
+      d.rg = rgVerso;
+    }
   }
   if (!validarDataNascimento(d.dataNascimento) && validarDataNascimento(v.dataNascimento)) d.dataNascimento = validarDataNascimento(v.dataNascimento);
   if (!d.nomePai && v.nomePai) d.nomePai = v.nomePai;
