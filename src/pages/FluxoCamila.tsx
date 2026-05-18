@@ -1156,13 +1156,31 @@ function auditFlow(steps: Step[]): Issue[] {
   return issues;
 }
 
-function FlowAuditPanel({ steps }: { steps: Step[] }) {
+function FlowAuditPanel({ steps, flowId, onRepaired }: { steps: Step[]; flowId: string | null; onRepaired?: () => void }) {
   const issues = useMemo(() => auditFlow(steps), [steps]);
+  const [repairing, setRepairing] = useState(false);
+
+  async function handleRepair() {
+    if (!flowId) return;
+    setRepairing(true);
+    try {
+      const { data, error } = await supabase.rpc("repair_bot_flow", { _flow_id: flowId });
+      if (error) throw error;
+      const patched = (data as any)?.patched ?? 0;
+      toast.success(patched > 0 ? `${patched} passo(s) reparado(s) automaticamente` : "Nada para reparar — fluxo já está consistente");
+      onRepaired?.();
+    } catch (e: any) {
+      toast.error("Erro ao reparar: " + (e?.message ?? String(e)));
+    } finally {
+      setRepairing(false);
+    }
+  }
+
   if (issues.length === 0) {
     return (
       <Card className="p-3 sm:p-4 border-emerald-500/30 bg-emerald-500/5 flex items-center gap-3">
         <div className="h-8 w-8 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center text-sm">✓</div>
-        <div className="text-sm">
+        <div className="text-sm flex-1">
           <div className="font-semibold">Fluxo pronto para teste</div>
           <div className="text-muted-foreground text-xs">Nenhum problema de configuração detectado.</div>
         </div>
@@ -1172,12 +1190,21 @@ function FlowAuditPanel({ steps }: { steps: Step[] }) {
   const high = issues.filter((i) => i.severity === "high").length;
   return (
     <Card className="p-3 sm:p-4 border-amber-500/40 bg-amber-500/5">
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
         <AlertTriangle className="h-4 w-4 text-amber-600" />
-        <span className="text-sm font-semibold">
+        <span className="text-sm font-semibold flex-1">
           {issues.length} problema(s) detectado(s){high > 0 ? ` — ${high} crítico(s)` : ""}
         </span>
+        {flowId && (
+          <Button size="sm" variant="default" onClick={handleRepair} disabled={repairing}>
+            <Sparkles className="h-3.5 w-3.5 mr-1" />
+            {repairing ? "Reparando…" : "Reparar automaticamente"}
+          </Button>
+        )}
       </div>
+      <p className="text-[11px] text-muted-foreground mb-2">
+        O botão "Reparar" preenche capturas, transições e Plano B padrão nos passos vazios (sem sobrescrever o que você já configurou).
+      </p>
       <ul className="space-y-1.5 text-xs">
         {issues.map((i, idx) => (
           <li key={idx} className="flex items-start gap-2">
