@@ -554,9 +554,15 @@ async function sendStepMedia(
 // Registro do passo atual por turno, populado pelo runConversationalFlow.
 // _finalize usa isso para compor uma reentrada quando o reply ficaria vazio,
 // evitando silêncio total quando o lead manda algo fora do esperado.
+// IMPORTANTE: guardamos também as `vars` p/ renderizar {{nome}}, {{valor_conta}},
+// etc. antes de enviar ao lead. Sem isso, o lead recebia placeholder cru.
 let _currentTurnStepQuestion: string = "";
-function _setTurnStepQuestion(q: string) {
+// deno-lint-ignore no-explicit-any
+let _currentTurnVars: any = {};
+// deno-lint-ignore no-explicit-any
+function _setTurnStepQuestion(q: string, vars?: any) {
   _currentTurnStepQuestion = (q || "").trim();
+  _currentTurnVars = vars || {};
 }
 function _extractTail(t: string): string {
   if (!t) return "";
@@ -573,7 +579,9 @@ function _finalize(stepKey: string, r: BotResult): BotResult {
   const reply = (r.reply || "").trim();
   const hasMedia = r.updates?.__inline_sent === true;
   if (!reply && !hasMedia) {
-    const tail = _extractTail(_currentTurnStepQuestion);
+    const rawTail = _extractTail(_currentTurnStepQuestion);
+    // ✅ Renderiza variáveis ({{nome}}, {{valor_conta}}, etc.) antes de enviar.
+    const tail = rawTail ? renderTemplate(rawTail, _currentTurnVars || {}) : "";
     const reentry = tail
       ? `Boa! Me ajuda voltando aqui: ${tail}`
       : `Boa! Pra eu te ajudar do jeito certo, me confirma onde a gente parou? 🙏`;
