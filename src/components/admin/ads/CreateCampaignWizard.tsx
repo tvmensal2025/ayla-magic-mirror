@@ -504,8 +504,13 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
         ...filesByFormat.vertical.map((f) => ({ file: f, format: "vertical" as const })),
         ...filesByFormat.story.map((f) => ({ file: f, format: "story" as const })),
       ].filter((x) => isFileValidAny(x.file));
-      const photoUrls = await uploadAdPhotos(consultantId, tagged.map((t) => t.file.file));
-      const photos = photoUrls.map((url, i) => ({ url, format: tagged[i].format }));
+      const photoUrls = tagged.length
+        ? await uploadAdPhotos(consultantId, tagged.map((t) => t.file.file), { formats: tagged.map((t) => t.format) })
+        : [];
+      const photos: { url: string; format: AdFormat }[] = [
+        ...photoUrls.map((url, i) => ({ url, format: tagged[i].format })),
+        ...pickedLibrary.map((it) => ({ url: it.url, format: it.format as AdFormat })),
+      ];
       const campaignName = activePresetNames.length > 1
         ? `iGreen — ${activePresetNames.length} distribuidoras`
         : distribuidoraPrimary
