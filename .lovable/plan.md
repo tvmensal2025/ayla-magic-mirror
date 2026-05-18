@@ -1,71 +1,62 @@
-# Redesign do Dashboard — visual premium e organizado
+## Objetivo
 
-## Problema atual
-- Vários blocos empilhados sem hierarquia (PerformanceCharts, Ads, LeadSource, Clientes, Tráfego colapsável) — parece "lista", não dashboard.
-- KPIs principais escondidos no meio.
-- "Cliques nos botões" mostra apenas total — não detalha o valor de cada CTA (WhatsApp, Cadastro, Telefone, Instagram…).
-- Toolbar superior com 4 botões soltos no canto, sem identidade.
+1. **Todos os consultores** usam apenas **Evolution API** (1 conexão).
+2. **Apenas `rafael.ids@icloud.com`** mantém o acesso ao **Whapi** (super admin já existente).
+3. **Apenas `rafael.ids@icloud.com`** ganha uma **segunda conexão Evolution** (instância extra), podendo conectar outro número.
 
-## Solução
+## Diagnóstico atual
 
-### 1. Hero header do dashboard
-Faixa superior com gradiente sutil (verde primário) contendo:
-- Saudação + nome do consultor + período ativo
-- 4 KPIs grandes em destaque: **Visitas**, **Cliques totais**, **Leads novos**, **Aprovados** — cada um com mini-sparkline dos últimos 7 dias e chip de variação (↑/↓ %).
-- Toolbar discreta à direita (período, exportar, resetar, sincronizar) — agrupada num único container glass.
+- `whatsapp_instances` tem `UNIQUE(consultant_id)` → hoje cada consultor só pode ter 1 instância.
+- `useWhatsAppInstanceDb.saveInstance` faz upsert com `onConflict: "consultant_id"`.
+- `useWhatsApp.ts` detecta Whapi via `admin_settings.superadmin_consultant_id`. O ID do Rafael já está nessa chave (Whapi continuará funcionando só para ele, já está restrito).
+- `ConnectionPanel` e `WhatsAppTab` já lidam com `isWhapi`.
 
-### 2. Novo card "Valor de cada clique" (substitui o atual genérico)
-Grid de **CTAs reais** com ícone, label amigável e contagem destacada:
+Ou seja: Whapi-só-Rafael já está implementado. O que falta é a **segunda instância Evolution para o Rafael**.
 
-```text
-┌───────────────────┬───────────────────┬───────────────────┐
-│ 💬 WhatsApp       │ 📋 Cadastro       │ 📞 Telefone       │
-│   142 cliques     │   58 cliques      │   12 cliques      │
-│   ↑ 23% vs sem.   │   ↓ 8% vs sem.    │   estável         │
-│   ▂▃▅▆▇ sparkline │   ▂▂▃▃▂          │   ▁▁▁▂▁          │
-├───────────────────┼───────────────────┼───────────────────┤
-│ 📸 Instagram      │ 💼 Licenciada     │ 📘 Facebook       │
-│   ...             │   ...             │   ...             │
-└───────────────────┴───────────────────┴───────────────────┘
-```
+## Mudanças
 
-Usa `clicksByTarget` que já existe + `friendlyClickLabel` + nova série diária por target para sparkline.
+### 1. Banco (migration)
 
-### 3. Reorganização em 3 abas internas (dentro do Dashboard)
-Substituir a pilha vertical por **Tabs**:
+- Adicionar coluna `slot smallint NOT NULL DEFAULT 1` em `whatsapp_instances`.
+- Substituir `UNIQUE(consultant_id)` por `UNIQUE(consultant_id, slot)`.
+- Backfill: todas as linhas existentes ficam com `slot = 1`.
+- Manter `UNIQUE(instance_name)` (cada slot vira `igreen-{slug}` e `igreen-{slug}-2`).
 
-- **Visão Geral** — Hero KPIs + Funil + Comparativo semanal + Valor de cada clique
-- **Anúncios & Origem** — ResultsDashboard (Facebook Ads) + LeadSourceCard + Top Campanhas UTM + Performance por dia da semana
-- **Clientes iGreen** — StatCards de clientes + filtro licenciado + CustomerCharts + sincronizar
+### 2. Hook `useWhatsApp` (parametrizado por slot)
 
-Tráfego da LP vira sub-bloco colapsável dentro de "Visão Geral".
+- Aceitar `slot: 1 | 2` (default 1).
+- Nome da instância: `slot===2 ? `${base}-2` : base`.
+- Toda query/upsert em `whatsapp_instances` passa a filtrar `.eq("slot", slot)`.
+- `useWhatsAppInstanceDb` recebe `slot` e usa `onConflict: "consultant_id,slot"`.
+- `isWhapi` só vale para `slot===1` (Whapi não tem slot 2).
 
-### 4. Polimento visual
-- Todos os cards: mesma `premium-card` com `border border-border/40`, `rounded-2xl`, hover sutil com glow verde.
-- Tipografia: títulos em `font-heading font-bold text-base` (subir do `text-sm` atual), descrições em `text-xs text-muted-foreground`.
-- Espaçamento padrão `gap-5` entre cards, `space-y-6` entre seções.
-- Ícones sempre num círculo `bg-primary/10 text-primary p-2 rounded-xl` (consistência).
-- Funil ganha animação de largura ao montar (CSS transition já existe — aumentar para 800ms com delay escalonado).
+### 3. UI
 
-## Arquivos
+- **WhatsAppTab** ganha props/estado de slot ativo. Para usuário normal: comportamento atual (slot 1).
+- **Para Rafael (super admin)**: exibir tabs internas **"Conexão 1"** e **"Conexão 2"** no painel de conexão. Cada uma instancia o fluxo `useWhatsApp({ slot })` independentemente, com QR code, status e número conectado próprios.
+- Gate por `is_super_admin(auth.uid())` (já existe RPC) — não hardcodar email.
+- Tab de "Conexão 2" mostra apenas Evolution (sem Whapi).
 
-**Novos**
-- `src/components/admin/dashboard/HeroKpis.tsx` — header com 4 KPIs + sparklines
-- `src/components/admin/dashboard/ClickValueGrid.tsx` — grid de CTAs com valor de cada clique
-- `src/components/admin/dashboard/DashboardToolbar.tsx` — toolbar agrupada (período/export/reset/sync)
+### 4. Edge functions / envio
 
-**Editados**
-- `src/components/admin/DashboardTab.tsx` — reestruturar com Tabs (`@/components/ui/tabs`), montar HeroKpis no topo, mover blocos para abas
-- `src/hooks/useAnalytics.ts` — adicionar série diária por click target (`clicksByTargetDaily`) para sparklines + comparação semanal por target
-- `src/components/admin/PerformanceCharts.tsx` — remover bloco "Esta Semana vs Semana Anterior" (vira parte do HeroKpis), manter funil/weekday/campaigns
+- `messageSender` / envio em massa hoje resolve a instância do consultor por `consultant_id`. Atualizar para usar **slot 1 por padrão** (comportamento atual preservado). Slot 2 fica disponível só para conectar/desconectar/visualizar — envios automáticos continuam pelo slot 1, evitando regressão.
+- (Opcional, fora de escopo deste plano salvo confirmação) seletor de slot no envio em massa do Rafael.
 
-## Detalhes técnicos
-- Sparklines: usar `recharts` `<AreaChart>` mini (sem eixos, height 32px) ou inline SVG simples para performance.
-- Tabs: shadcn `Tabs/TabsList/TabsTrigger/TabsContent` — manter URL hash `#visao`, `#anuncios`, `#clientes` opcional (não bloqueia).
-- Não toca em backend, RLS, edge functions, schema ou edge-function logic.
-- Mantém compatibilidade com `useAnalytics` existente — só estende o retorno.
+### Arquivos previstos
 
-## Fora do escopo
-- Não mexer em métricas WhatsApp (mensagens, presence) — feito na rodada anterior.
-- Não criar novos hooks de backend.
-- Não alterar `ResultsDashboard`, `LeadSourceCard`, `CustomerCharts` internamente — só repor.
+- **Migration:** nova, adiciona `slot` + índice único composto.
+- **Editados:**
+  - `src/hooks/useWhatsApp.ts` (aceitar slot)
+  - `src/hooks/whatsapp/useWhatsAppInstanceDb.ts` (slot + onConflict)
+  - `src/components/whatsapp/WhatsAppTab.tsx` (tabs Conexão 1/2 só p/ super admin)
+  - `src/components/whatsapp/ConnectionPanel.tsx` (rótulo do slot)
+  - `src/integrations/supabase/types.ts` (regenerado automaticamente após migration)
+
+### Fora de escopo
+
+- Mudar fluxo de bot, CRM, dashboard ou Whapi.
+- Roteamento de envios automáticos pelo slot 2 (pode entrar depois se desejado).
+
+## Pergunta antes de implementar
+
+Confirma que o **slot 2 serve apenas para conectar/visualizar outro número** (sem mudar para onde vão os envios automáticos do bot)? Se quiser que o Rafael escolha por qual slot enviar (manual ou em massa), eu incluo no mesmo plano.
