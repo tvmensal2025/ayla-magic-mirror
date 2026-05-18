@@ -35,8 +35,20 @@ interface DailyMetric {
 
 const TICKET_MEDIO_MENSAL = 30; // R$ estimado de comissão por cliente ativo/mês (ajustável)
 
-export function ResultsDashboard({ consultantId, onCreateClick }: { consultantId: string; onCreateClick?: () => void }) {
-  const [range, setRange] = useState<Range>(30);
+export function ResultsDashboard({
+  consultantId,
+  onCreateClick,
+  externalRange,
+  hidePeriodSelector,
+}: {
+  consultantId: string;
+  onCreateClick?: () => void;
+  externalRange?: Range;
+  hidePeriodSelector?: boolean;
+}) {
+  const [internalRange, setInternalRange] = useState<Range>(30);
+  const range = externalRange ?? internalRange;
+  const setRange = (r: Range) => setInternalRange(r);
   const [distribFilter, setDistribFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -176,13 +188,15 @@ export function ResultsDashboard({ consultantId, onCreateClick }: { consultantId
     <div className="space-y-5">
       {/* Filtros */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1 rounded-lg bg-secondary p-1">
-          {[7, 30, 90].map(r => (
-            <Button key={r} size="sm" variant={range === r ? "default" : "ghost"} onClick={() => setRange(r as Range)} className="h-7 text-xs">
-              {r === 90 ? "90 dias" : `${r} dias`}
-            </Button>
-          ))}
-        </div>
+        {!hidePeriodSelector && (
+          <div className="flex items-center gap-1 rounded-lg bg-secondary p-1">
+            {[7, 30, 90].map(r => (
+              <Button key={r} size="sm" variant={range === r ? "default" : "ghost"} onClick={() => setRange(r as Range)} className="h-7 text-xs">
+                {r === 90 ? "90 dias" : `${r} dias`}
+              </Button>
+            ))}
+          </div>
+        )}
         {distribuidoras.length > 0 && (
           <select
             value={distribFilter}
