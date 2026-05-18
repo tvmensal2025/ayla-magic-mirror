@@ -109,18 +109,22 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
 
   // Check if this contact is already a customer
   useEffect(() => {
-    if (!chat) { setIsCustomer(false); return; }
+    if (!chat) { setIsCustomer(false); setCustomerId(null); return; }
     const phone = chat.remoteJid.split("@")[0];
     supabase
       .from("customers")
       .select("id")
       .eq("phone_whatsapp", phone)
       .maybeSingle()
-      .then(({ data }) => setIsCustomer(!!data));
+      .then(({ data }) => {
+        setIsCustomer(!!data);
+        setCustomerId(data?.id || null);
+      });
   }, [chat]);
 
-  const handleCustomerAdded = useCallback(() => {
+  const handleCustomerAdded = useCallback((newCustomerId?: string) => {
     setIsCustomer(true);
+    if (newCustomerId) setCustomerId(newCustomerId);
   }, []);
 
   // Auto-scroll to bottom on new messages
