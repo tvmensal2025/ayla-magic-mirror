@@ -1949,16 +1949,11 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }
           return { reply: "", updates: { ...updates, __inline_sent: true } as any };
         }
-        // Sem QA configurada: ainda assim manda o reentry (não responde com "❌ inválido")
-        const reentry = getReentryPromptForStep(step, customer);
-        if (reentry) {
-          await sendText(remoteJid, reentry);
-          await supabase.from("conversations").insert({
-            customer_id: customer.id, message_direction: "outbound",
-            message_text: reentry, message_type: "text", conversation_step: step,
-          });
-          return { reply: "", updates: { ...updates, __inline_sent: true } as any };
-        }
+        // Sem QA configurada: IA responde + reentry (nunca silencia, nunca "❌ inválido")
+        return await respondAndReentry({
+          reason: "off_topic_collect",
+          questionText: messageText,
+        });
       }
     }
   }
