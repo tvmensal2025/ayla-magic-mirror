@@ -1,65 +1,96 @@
-# Auditoria — Conversas do Bot (últimas 24h)
 
-Analisei 3 conversas reais ativas (Oiii, Franciele, Lucas) + a estrutura do fluxo ativo (`bot_flow_steps`) + FAQ (`bot_flow_qa`). Há problemas reais que estão afundando a taxa de conversão.
+# Plano: onde vale Lovable AI vs onde fica Gemini direto
 
-## Problemas encontrados
+## Estado atual
 
-### 1. FAQ vazia — perguntas do lead caem no vazio
-A tabela `bot_flow_qa` tem intents cadastradas ("Como funciona", "Quanto custa", "Tem fidelidade?" etc.) mas **`text_response` é NULL** em quase todas. Resultado:
-- Franciele perguntou *"O que é isso imposto?"*, *"Não tem custo mesmo?"*, *"Não consigo ver vídeo"* → bot ignorou e seguiu empurrando o roteiro.
-- Só "Boas-vindas" tem resposta preenchida.
+O projeto já tem infra robusta de Gemini direto (`_shared/gemini.ts`) com pricing, retries, fallback Pro→Flash, telemetria por consultor e cliente. E já existe um **híbrido OpenAI/Gemini** em `intent-classifier.ts`. Ou seja, não estamos partindo do zero — a decisão é **onde plugar Lovable AI Gateway** sem quebrar o que funciona.
 
-### 2. FAQ duplicado por consultor
-Há **12 cópias** idênticas de cada intent (uma por flow ativo). Quando o admin edita uma, as outras ficam desatualizadas. Vira ruído operacional.
+## Princípio de escolha
 
-### 3. Fluxo avança sem capturar resposta
-Step 4 ("Qual o valor da conta") tem `capture electricity_bill_value` mas `fallback.mode = goto`. Quando Franciele respondeu *"Queria saber um pouco mais sobre essa questão"*, o bot:
-- respondeu *"Pode me responder, por favor? 🙂"* (genérico, sem entender a dúvida);
-- depois avançou mesmo assim, ignorando "100/150" e a pergunta sobre imposto.
+| Critério | Vai pra **Gemini direto** | Vai pra **Lovable AI** |
+|---|---|---|
+| Volume | Alto (>1k req/dia) | Baixo a médio |
+| Latência sensível ao usuário | Sim (bot WhatsApp em tempo real) | Não (cron, batch, dashboards) |
+| Custo crítico | Sim | Tanto faz |
+| Multi-modal pesado (imagem/áudio/PDF) | Sim (já está em produção) | Evitar |
+| Precisa de provider failover (OpenAI/Anthropic) | Não | Sim |
+| Você quer trocar de modelo sem mexer em código | Não | Sim |
 
-Devia ser `fallback: repeat` + roteamento por intenção (dúvida → FAQ; valor → capturar).
+## Mapa: o que fica onde
 
-### 4. Pergunta sem ramo de negação
-Step 6 ("posso estar explicando abaixo?") tem só `trigger_intent: afirmacao` (ok/sim/pode/claro/manda/beleza). Se o lead responde "não", "ainda não", "espera" → fica travado em `repeat` e o bot insiste.
+### Fica em Gemini direto (NÃO MEXER — alto volume / latência crítica)
 
-### 5. Steps "fantasma" sendo pulados
-Steps 5 (`80188e5f` "Valor da conta") e 6 (`bdc7ebb3`) têm `message_text` vazio/quase vazio. Lucas pulou direto de pos 4 → pos 7 sem passar pelo "posso explicar?". O resolver custom está saltando passos com texto vazio mesmo quando eles têm propósito (gate/transição).
+```text
+whapi-webhook (bot WhatsApp em tempo real)
+├── intent-classifier        ── já é híbrido OpenAI+Gemini, OK
+├── bot-flow (resolver)      ── determinístico, sem IA
+├── ai-transcribe-media      ── áudio Whapi, alto volume
+├── _shared/ocr.ts           ── RG/CNH/conta de luz (volume alto)
+├── _shared/detect-doc-type  ── classificação de docs
+├── ad-image-validator       ── batch grande de criativos
+└── extract-pdf-text         ── PDFs longos, tokens caros
+```
 
-### 6. Texto com erro no step de explicação
-Step 7 (`a71ba814` "Como funciona"): *"É simples, mas vou mandar um audio e um  para ficar mais facil de entender"* — falta a palavra ("um vídeo"/"uma imagem"), espaço duplo, sem pontuação. É a primeira impressão técnica que o lead recebe.
+Motivo: já paga pricing tabelado, tem retries, fallback Pro→Flash e a conta de tokens é grande demais pra passar por gateway intermediário.
 
-### 7. Sem debounce/agrupamento de inbound
-Franciele mandou 4 mensagens em ~80s; o bot reagiu à 1ª e ignorou as outras 3. O processamento é por mensagem individual, sem aguardar fim da rajada.
+### Migra pra Lovable AI (ganho real)
 
-### 8. Bot não detecta objeção real ("Não consigo ver vídeo", "Não tem custo mesmo?")
-Não há regras em `bot_flow_rules` cobrindo esses casos comuns nem handoff para humano configurado.
+| Função atual | Por que migrar | Modelo sugerido |
+|---|---|---|
+| `ai-summarize-conversation` | Resumo de handoff — 1 chamada por handoff, baixo volume, valoriza ter prompts editáveis e trocar modelo fácil | `google/gemini-3-flash-preview` |
+| `ai-extract-memory` | Extrai memórias do CRM — batch noturno, latência não importa | `google/gemini-3-flash-preview` |
+| `ai-daily-digest` | Resumo diário do consultor — 1x/dia, qualidade > custo | `google/gemini-3.1-pro-preview` |
+| `ai-learn-feedback` | Aprende com correções do humano — ocasional | `google/gemini-3-flash-preview` |
+| `ai-cpl-watchdog` | Análise de CPL de campanhas — observabilidade interna | `google/gemini-3-flash-preview` |
+| `ai-followup-cron` (geração de copy) | Mensagem de follow-up — ganha em poder testar variantes | `google/gemini-3-flash-preview` |
+| `support-chat` / `igreen-chat` | Chats internos pro admin — baixo volume, melhor com streaming AI SDK | `google/gemini-3-flash-preview` |
+| `ad-creative-builder` / `ad-creative-qa` | Geração de copy de anúncios — qualidade > custo, baixo volume | `google/gemini-3.1-pro-preview` |
 
----
+Ganhos concretos:
+- **Sem `GEMINI_API_KEY` pra rotacionar** nesses pontos — Lovable provisiona `LOVABLE_API_KEY`.
+- **Trocar `google/gemini-3-flash` por `openai/gpt-5-mini` numa linha** se um caso específico responder melhor.
+- **Streaming nativo via AI SDK** (`support-chat`, `igreen-chat` ficam mais fluidos).
+- **Telemetria centralizada no gateway** (sem precisar manter `ai_usage_log` à mão pra esses).
 
-## Plano de correção (priorizado)
+### Novo: o que dá pra criar com Lovable AI (alto ROI)
 
-### Fase 1 — Quick wins (impacto alto, baixo risco)
-1. **Preencher `text_response` de todas as intents de FAQ** (Como funciona, Quanto custa, Tem fidelidade, Tem multa, Como cancelar, Não consigo ver vídeo, etc.). Entregar 1 resposta canônica por intent.
-2. **Consolidar FAQ duplicado**: manter 1 conjunto global (consultant_id null) ou de-duplicar para o flow ativo principal. Reduz manutenção e divergência.
-3. **Corrigir texto do step "Como funciona"** ("É simples, vou te mandar um áudio e uma imagem rapidinha pra ficar mais fácil 👇").
-4. **Adicionar ramo de negação** no step 6 → vai para step de "quebra de objeção" em vez de repetir.
+1. **FAQ Answerer com RAG** — quando o lead pergunta algo fora do script no WhatsApp, classifier já marca `tem_duvida` mas o bot só responde se houver match em `bot_flow_qa`. Adicionar uma chamada **Lovable AI** com contexto de `ai_knowledge_sections` (RAG) pra responder objeções genéricas. **Frequência baixa por lead, qualidade alta** — perfeito pro gateway.
 
-### Fase 2 — Lógica de fluxo
-5. **Mudar fallback do step 4 (valor da conta) para `repeat`** + adicionar transição por intent (`pergunta`/`duvida` → roteia ao FAQ, mantém step).
-6. **Não pular steps com `message_text` vazio** se eles têm `transitions` por intent (servem de gate). Ajustar resolver em `bot-flow.ts` para tratar texto vazio como "não emite, mas aguarda input".
-7. **Agrupar inbound em rajada** (debounce 8–12s): juntar mensagens consecutivas do mesmo lead antes de processar — usa `whatsapp_message_buffer` que já existe.
+2. **Handoff Summary on-demand** — gerar resumo da conversa no botão "passar pro humano" do CRM (1 clique = 1 request). Lovable AI ideal.
 
-### Fase 3 — Cobertura de objeções
-8. **Criar `bot_flow_rules` globais** para intents recorrentes: "não tem custo", "não consigo ver vídeo/áudio", "vou pensar", "depois te falo", "é golpe?", "preciso instalar?". Cada uma com resposta + comportamento (`stay` ou `goto`).
-9. **Handoff automático** quando lead manda 2+ perguntas seguidas sem o bot conseguir responder → pausa bot + `notifyHandoff` ao consultor (mecanismo já existe).
+3. **Audit Dashboard com IA** — você pediu auditoria das conversas. Plugar um endpoint `audit-conversation` no Lovable AI que recebe `conversation_id` e cospe: sentimento, ponto de fricção, próxima ação sugerida. Roda 1x/conversa, qualitativo.
 
-### Fase 4 — Observabilidade
-10. **Dashboard de "perguntas não respondidas"**: agregar inbound em `aguardando_*` que não bateu em nenhuma rule/FAQ, ordenado por frequência, para alimentar Fase 3 continuamente.
+4. **Sugestão de resposta no chat do consultor** — quando o consultor digita no CRM, sugerir 3 respostas baseadas no histórico. Streaming pelo AI SDK fica natural.
 
----
+## Implementação proposta (3 fases pequenas)
 
-## O que eu preciso de você para começar
+### Fase 1 — FAQ Answerer (maior impacto no bot)
+- Nova função `bot-faq-answerer` (Lovable AI, `gemini-3-flash-preview`)
+- Chamada de `whapi-webhook` quando `intent=tem_duvida` E não houver match em `bot_flow_qa`
+- Usa `ai_knowledge_sections` como contexto (RAG simples)
+- Resposta limitada a 3 frases + handoff se confidence < 0.6
+- Resolve diretamente o problema da auditoria (Franciele travada)
 
-Posso seguir direto com **Fase 1 + 4** (correções de conteúdo + texto + ramo de negação) sem risco, ou prefere que eu mostre antes as respostas que vou escrever em cada intent de FAQ pra você validar o tom?
+### Fase 2 — Migração das funções de baixo volume
+- `ai-summarize-conversation`, `ai-extract-memory`, `ai-daily-digest`, `ai-learn-feedback`, `ai-cpl-watchdog`
+- Trocar `_shared/gemini.ts` por `_shared/ai-gateway.ts` (já existe!)
+- Manter prompts iguais, só trocar o client
+- Sem mudança de comportamento percebida
 
-Também: quer que eu **consolide o FAQ duplicado** em um único conjunto global (recomendado) ou mantenho um por consultor?
+### Fase 3 — Sugestão de resposta no CRM
+- Endpoint streaming via AI SDK
+- Frontend: input com botão "💡 Sugerir resposta"
+- 3 variantes geradas em paralelo
+
+## O que NÃO recomendo fazer
+
+- ❌ Migrar `intent-classifier` pra Lovable AI — volume alto, já tem fallback OpenAI→Gemini, latência crítica.
+- ❌ Migrar `ai-transcribe-media`, `ocr`, `extract-pdf-text` — multi-modal pesado, custo importa.
+- ❌ Migrar `bot-flow` — é determinístico, não tem IA.
+- ❌ Centralizar TUDO no Lovable AI — perde controle de custo no alto volume.
+
+## Próximo passo
+
+Aprovando este plano, sugiro começar pela **Fase 1 (FAQ Answerer)** porque resolve diretamente o problema visto na auditoria (leads fazendo pergunta fora do script e bot travando). É 1 edge function nova + 1 hook no `whapi-webhook`. Não toca em nada que já funciona.
+
+Quer que eu prossiga só com a Fase 1, ou aprova o conjunto Fase 1 + Fase 2 pra rodar em sequência?

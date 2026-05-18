@@ -13,6 +13,7 @@ import {
 import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
 import { isTestMode } from "../../../_shared/test-mode.ts";
 import { evaluateRules, logRuleFire, _consumeCustomerRateLimit } from "./rules-engine.ts";
+import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
@@ -958,6 +959,47 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   }
 
   const cls = await classifyIntent(ctx.messageText, stepKey as ConversationalStep, ctx.geminiApiKey);
+
+  // ─── AI FAQ Answerer (Lovable AI) ──────────────────────────────────
+  // Quando o lead faz pergunta (tem_duvida) que NÃO casou em bot_flow_qa
+  // E não é uma captura legítima, tenta responder via Lovable AI usando
+  // ai_knowledge_sections como base. Mantém o passo atual (não avança
+  // o funil). Se confidence < 0.6 OU shouldHandoff → pula e deixa o
+  // fluxo default seguir (que vai disparar regras/handoff conforme cfg).
+  if (cls.intent === "tem_duvida" && !hasCapture) {
+    try {
+      const ai = await answerFaqWithAI({
+        supabase: ctx.supabase,
+        question: ctx.messageText || "",
+        leadName: ctx.customer.name,
+        currentStepLabel: currentStep.step_key,
+      });
+      if (ai.source === "ai" && ai.text && ai.confidence >= 0.6 && !ai.shouldHandoff) {
+        console.log(`[ai-faq] hit step="${stepKey}" conf=${ai.confidence.toFixed(2)}`);
+        return _finalize(stepKey, {
+          reply: renderTemplate(ai.text, {
+            nome: ctx.customer.name,
+            representante: ctx.nomeRepresentante,
+            valor_conta: (ctx.customer as any).electricity_bill_value,
+            telefone: ctx.customer.phone_whatsapp,
+            cpf: (ctx.customer as any).cpf,
+          }),
+          updates: {
+            conversation_step: stepKey,
+            __intent: cls.intent,
+            __confidence: cls.confidence,
+            __ai_faq: true,
+            ...restoreDetourUpdates,
+          },
+        });
+      }
+      if (ai.shouldHandoff) {
+        console.log(`[ai-faq] handoff sugerido step="${stepKey}" — deixando fluxo default tratar`);
+      }
+    } catch (e) {
+      console.warn("[ai-faq] erro, ignorando:", (e as Error).message);
+    }
+  }
 
   // ─── Restart por saudação ──────────────────────────────────────────
   // Se o lead manda "Oi/Olá/Bom dia/..." e já está em qualquer step que
