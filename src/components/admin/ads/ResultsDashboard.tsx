@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, DollarSign, Users, FileCheck2, CheckCircle2, TrendingUp, Target, BarChart3, Eye, Hand } from "lucide-react";
+import { Loader2, DollarSign, Users, FileCheck2, CheckCircle2, TrendingUp, Target, BarChart3, Eye, Hand, MousePointerClick, MessageCircle } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { MetricTooltip } from "./MetricTooltip";
 import { HealthSummaryCard } from "./HealthSummaryCard";
@@ -140,6 +140,10 @@ export function ResultsDashboard({
   const cpa = acquired > 0 ? totals.spend / acquired / 100 : 0;
   const convRate = realLeads > 0 ? (acquired / realLeads) * 100 : 0;
   const roiMensal = (acquired * TICKET_MEDIO_MENSAL) - (totals.spend / 100);
+  // Métricas de eficiência criativa/funil de topo
+  const ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
+  const clickToLead = totals.clicks > 0 ? (realLeads / totals.clicks) * 100 : 0;
+  const cpc = totals.clicks > 0 ? totals.spend / totals.clicks / 100 : 0;
 
   const chartData = useMemo(() => {
     const map = new Map<string, { date: string; gasto: number; leads: number; cadastros: number }>();
@@ -251,10 +255,55 @@ export function ResultsDashboard({
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard icon={<DollarSign className="w-4 h-4" />} label="Quanto gastou" metric="spend" value={`R$ ${(totals.spend / 100).toFixed(2)}`} accent />
         <StatCard icon={<Eye className="w-4 h-4" />} label="Pessoas que viram" metric="impressions" value={totals.impressions.toLocaleString("pt-BR")} />
-        <StatCard icon={<Hand className="w-4 h-4" />} label="Tocaram no anúncio" metric="clicks" value={totals.clicks.toString()} />
+        <StatCard icon={<Hand className="w-4 h-4" />} label="Tocaram no anúncio" metric="clicks" value={totals.clicks.toString()} sub={cpc > 0 ? `R$ ${cpc.toFixed(2)} por clique` : "—"} />
         <StatCard icon={<Users className="w-4 h-4" />} label="Leads no WhatsApp" metric="leads" value={realLeads.toString()} sub={cpl > 0 ? `R$ ${cpl.toFixed(2)} cada` : "—"} />
         <StatCard icon={<FileCheck2 className="w-4 h-4" />} label="Viraram cliente" metric="registrations" value={acquired.toString()} sub={realLeads > 0 ? `${convRate.toFixed(1)}% dos leads` : "—"} />
         <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Lucro estimado/mês" value={`R$ ${roiMensal.toFixed(0)}`} accent={roiMensal >= 0} />
+      </div>
+
+      {/* Eficiência do funil: topo (anúncio) e meio (clique → conversa) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Card className="p-4">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <MousePointerClick className="w-4 h-4 text-primary" />
+            <span>CTR — Taxa de clique no anúncio</span>
+          </div>
+          <div className="flex items-end justify-between mt-2">
+            <div className="text-2xl font-bold text-foreground">
+              {totals.impressions > 0 ? `${ctr.toFixed(2)}%` : "—"}
+            </div>
+            <div className="text-[11px] text-muted-foreground text-right">
+              {totals.clicks.toLocaleString("pt-BR")} cliques<br/>de {totals.impressions.toLocaleString("pt-BR")} visualizações
+            </div>
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-2">
+            {ctr === 0 && "Sem dados ainda."}
+            {ctr > 0 && ctr < 1 && <span className="text-warning">⚠ Abaixo de 1% — criativo pode estar fraco.</span>}
+            {ctr >= 1 && ctr < 2 && "Dentro da média do mercado (1–2%)."}
+            {ctr >= 2 && <span className="text-primary">✅ Acima da média — criativo performando bem.</span>}
+          </div>
+        </Card>
+
+        <Card className="p-4">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <MessageCircle className="w-4 h-4 text-primary" />
+            <span>Clique → Lead no WhatsApp</span>
+          </div>
+          <div className="flex items-end justify-between mt-2">
+            <div className="text-2xl font-bold text-foreground">
+              {totals.clicks > 0 ? `${clickToLead.toFixed(1)}%` : "—"}
+            </div>
+            <div className="text-[11px] text-muted-foreground text-right">
+              {realLeads} leads reais<br/>de {totals.clicks.toLocaleString("pt-BR")} cliques
+            </div>
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-2">
+            {clickToLead === 0 && totals.clicks > 0 && <span className="text-warning">⚠ Ninguém que clicou virou lead. Verifique o link/WhatsApp.</span>}
+            {clickToLead > 0 && clickToLead < 30 && "Muitos cliques se perdem antes de abrir conversa."}
+            {clickToLead >= 30 && clickToLead < 60 && "Boa conversão de clique pra conversa."}
+            {clickToLead >= 60 && <span className="text-primary">✅ Excelente — quase todo clique vira lead.</span>}
+          </div>
+        </Card>
       </div>
 
       {/* Card-resumo de fechamento real */}
