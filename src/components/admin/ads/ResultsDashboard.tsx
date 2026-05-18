@@ -188,13 +188,15 @@ export function ResultsDashboard({
     <div className="space-y-5">
       {/* Filtros */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1 rounded-lg bg-secondary p-1">
-          {[7, 30, 90].map(r => (
-            <Button key={r} size="sm" variant={range === r ? "default" : "ghost"} onClick={() => setRange(r as Range)} className="h-7 text-xs">
-              {r === 90 ? "90 dias" : `${r} dias`}
-            </Button>
-          ))}
-        </div>
+        {!hidePeriodSelector && (
+          <div className="flex items-center gap-1 rounded-lg bg-secondary p-1">
+            {[7, 30, 90].map(r => (
+              <Button key={r} size="sm" variant={range === r ? "default" : "ghost"} onClick={() => setRange(r as Range)} className="h-7 text-xs">
+                {r === 90 ? "90 dias" : `${r} dias`}
+              </Button>
+            ))}
+          </div>
+        )}
         {distribuidoras.length > 0 && (
           <select
             value={distribFilter}
