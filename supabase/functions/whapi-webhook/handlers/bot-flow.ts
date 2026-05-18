@@ -490,7 +490,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         const qa = await matchQA(supabase, (flowRow as any).id, customer.consultant_id, questionText);
         if (qa && (qa.text || qa.mediaUrls.length)) {
           for (const m of qa.mediaUrls) {
-            try { await sendMedia(remoteJid, m.url, "", m.kind); } catch (_) { /* segue */ }
+            try { await sendMedia(remoteJid, m.url, "", m.kind, Number((m as any).duration_sec || 0) || undefined); } catch (_) { /* segue */ }
           }
           answer = (qa.text || "").trim();
           source = "faq";
