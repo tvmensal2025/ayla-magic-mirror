@@ -12,6 +12,7 @@ import { useAnalytics } from "@/hooks/useAnalytics";
 import { StatCard } from "./StatCard";
 import { CustomerCharts } from "./CustomerCharts";
 import { AnalyticsCharts } from "./AnalyticsCharts";
+import { LeadSourceCard } from "./LeadSourceCard";
 import { Eye as EyeIcon, EyeOff } from "lucide-react";
 
 interface DashboardTabProps {
@@ -224,6 +225,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
       </div>
 
       <CustomerCharts filteredMetrics={filteredMetrics} topLicenciados={analytics?.topLicenciados} />
+      <LeadSourceCard consultantId={userId} periodDays={periodDays} />
       <AnalyticsCharts chartData={chartData} periodDays={periodDays} analytics={analytics} weeklyNewCustomers={filteredMetrics?.weeklyNewCustomers} />
 
       {/* Credentials Dialog */}
