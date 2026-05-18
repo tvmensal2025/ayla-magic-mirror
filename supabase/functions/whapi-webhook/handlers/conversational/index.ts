@@ -1071,6 +1071,35 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // invés de retomar do meio do funil.
   const saudacaoRegex = /\b(oi+|ol[áa]|bom dia|boa tarde|boa noite|opa|e a[íi]|eai|hello|hi)\b/i;
   const isSaudacao = cls.intent === "saudacao" || saudacaoRegex.test(ctx.messageText || "");
+  // Saudação no PRIMEIRO passo ativo: não reseta nem cai no fallback.
+  // Responde apenas com a pergunta corrente do passo (renderizada), evitando
+  // o efeito "bot pediu pra confirmar onde paramos" logo no início.
+  if (isSaudacao && currentStep.id === firstActive.id) {
+    const greetVars = {
+      nome: captureUpdates.name || ctx.customer.name,
+      representante: ctx.nomeRepresentante,
+      valor_conta: captureUpdates.electricity_bill_value ?? (ctx.customer as any).electricity_bill_value,
+      telefone: captureUpdates.phone_whatsapp || ctx.customer.phone_whatsapp,
+      cpf: captureUpdates.cpf || (ctx.customer as any).cpf,
+    };
+    const rawQ = (currentStep.message_text || "").trim();
+    let question = rawQ ? renderTemplate(rawQ, greetVars) : "";
+    question = question.replace(/\{\{\s*[^}]+\s*\}\}/g, "").replace(/\s{2,}/g, " ").trim();
+    if (question) {
+      console.log(`[conversational] 👋 saudação no firstActive (${currentStep.step_key}) → repete pergunta do passo, sem reset`);
+      return _finalize(stepKey, {
+        reply: question,
+        updates: {
+          conversation_step: currentStep.id,
+          __intent: cls.intent,
+          __confidence: cls.confidence,
+          ...captureUpdates,
+          ...restoreDetourUpdates,
+        },
+      });
+    }
+    // sem texto no passo → segue fluxo normal (provavelmente vai cascatear mídia).
+  }
   if (isSaudacao && currentStep.id !== firstActive.id) {
     console.log(`[conversational] 🔁 saudação detectada em step=${currentStep.step_key} → restart no Passo 1 (${firstActive.step_key})`);
     const restartVars = {
