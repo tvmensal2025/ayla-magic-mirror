@@ -51,14 +51,11 @@ Deno.serve(async (req) => {
 
     const prompt = `Resuma em até 6 linhas em PT-BR a conversa abaixo entre uma vendedora (IA) e um lead da iGreen Energy. Inclua: estágio atual, dados que já sabemos do lead (nome, valor da conta, distribuidora se mencionados), objeções levantadas, mídias enviadas, e qual seria o próximo passo natural. Nada de bullets — texto corrido, conciso.\n\nResumo anterior (se houver, atualize-o): ${customer.conversation_summary || "(nenhum)"}\n\nConversa recente:\n${transcript}`;
 
-    const result = await geminiGenerate({
-      model: "gemini-2.5-flash-lite",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    const result = await aiChat({
+      model: "google/gemini-3-flash-preview",
       temperature: 0.3,
-      maxOutputTokens: 350,
-      functionName: "ai-summarize-conversation",
-      consultantId: customer.consultant_id,
-      customerId: customer_id,
+      maxTokens: 350,
+      messages: [{ role: "user", content: prompt }],
     });
 
     const summary = (result.text || "").trim().slice(0, 1500);
