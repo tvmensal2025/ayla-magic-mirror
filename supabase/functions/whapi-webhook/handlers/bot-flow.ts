@@ -985,7 +985,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         if (delayMs > 0) await new Promise((r) => setTimeout(r, Math.min(delayMs, 10_000)));
 
         try {
-          const ok = await sendMedia(remoteJid, m.url, "", kind);
+          const ok = await sendMedia(remoteJid, m.url, "", kind, Number(m.duration_sec || 0) || undefined);
           if (ok !== false) {
             sent = true;
             await supabase.from("conversations").insert({
