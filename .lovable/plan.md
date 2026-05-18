@@ -1,51 +1,59 @@
-## O que muda
+## Diagnóstico (baseado em conversas reais — Simone fd51f071 e Geralda 3fdc7244)
 
-Hoje, no painel **Agente IA → Atendimentos** (`LiveConversationsPanel`), quando o lead sai do fluxo ele aparece em "👤 Você está atendendo" com apenas um botão **Devolver para IA**. Isso devolve ele no passo onde travou — e ele cai de novo no mesmo erro.
+Olhei o que aconteceu na vida real e o bot não está "reiniciando para boas‑vindas". O que está acontecendo é pior em termos de percepção: ele responde com a frase de "socorro" repetidas vezes.
 
-A proposta é trocar o botão único por um **menu "Devolver para o passo…"** que mostra a lista de passos do fluxo ativo do consultor + passos legacy mais usados, e devolve o lead já posicionado no passo certo.
+Reproduzi 3 sintomas concretos:
 
-## Fluxo do usuário
+1. **"Boa! Pra eu te ajudar do jeito certo, me confirma onde a gente parou? 🙏"** dispara quando o lead manda "Boa noite", "Tem que pagar", "Kkkkk" — qualquer coisa que o passo atual não saiba responder. É a frase de fallback do wrapper `_finalize` em `conversational/index.ts`. Hoje ela é a 1ª coisa que o lead lê depois de cumprimentar.
 
-1. Lead trava (ex.: não entendeu uma pergunta) → bot pausa e cai na lista "Você está atendendo".
-2. Consultor abre o menu **▾ Devolver para…** no card do lead.
-3. Vê os passos do fluxo agrupados:
-   - **Pular para:** lista dos passos do `bot_flows` ativo (ícone + título, ex.: "1. Saudação", "2. Pedir valor da conta", "3. Pedir documento"…)
-   - **Passos clássicos:** Aguardando valor da conta · Aguardando conta · Aguardando documento · Confirmar dados · Finalizando
-   - **Reiniciar do zero** (mantém o reset existente)
-4. Clica num passo → `conversation_step` é atualizado, `bot_paused=false`, `assigned_human_id=null`, e o card volta para "🤖 IA atendendo".
+2. **"Boa! Me ajuda voltando aqui: {{nome}}, qual o valor médio da sua conta de luz?"** — mesma origem, mas com o template **sem renderizar variável** (`{{nome}}` aparece cru). Vi isso 2x no histórico da Simone. `_finalize` usa `_currentTurnVars` que não foi populado naquele turno.
 
-## Onde mexer (frontend, sem mudança de schema)
+3. **Loop "Vamos fazer seu cadastro?"** — a Simone perguntou "Mas eu moro em casa alugada" / "Como vai fica" e o bot respondeu 2x com "Boa! Me ajuda voltando aqui: Vamos fazer seu cadastro?" sem responder a dúvida. É o mesmo fallback, agora colado ao tail do passo. Da ótica do lead, parece "voltei pro começo".
 
-- **`LiveConversationsPanel.tsx`**
-  - Trocar o `<Button>Devolver para IA</Button>` por um `DropdownMenu` (já existe no shadcn) com as opções acima.
-  - Carregar uma vez (no mount) os passos do fluxo ativo: `bot_flows` (consultant_id=userId, is_active=true) → `bot_flow_steps` (order by position) selecionando `id, step_key, step_type, title, position, icon`.
-  - Função `returnToStep(customerId, stepValue)` faz:
-    ```
-    update customers
-      set conversation_step = stepValue,
-          bot_paused = false,
-          bot_paused_reason = null,
-          bot_paused_at = null,
-          assigned_human_id = null,
-          last_custom_prompt_at = null,        -- libera redispatch imediato
-          updated_at = now()
-      where id = customerId
-    ```
-    Para passos do fluxo custom, `stepValue` é o UUID do step (resolver já existente em `whapi-webhook/handlers/bot-flow.ts` aceita UUID). Para passos legacy, é o nome textual (`aguardando_valor_conta`, etc.).
-  - Toast: "↩️ Lead devolvido para: {título do passo}".
-  - Manter o botão **Assumir** como está.
+## Arquivos afetados
 
-- **Texto/UX**
-  - Label muda para "Devolver para…" (com seta ▾).
-  - Item destacado no topo: **"Continuar de onde parou"** (= comportamento atual, mantém `conversation_step` intacto).
-  - Item secundário no rodapé do menu: **"🔄 Reiniciar conversa"** chamando o `resetLeadConversation` já existente, com confirm.
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (somente)
+
+## Mudanças propostas
+
+### 1. `_finalize`: parar de mandar "Boa!" como muleta
+
+Hoje, qualquer turno com reply vazio gera "Boa! …". Vou:
+
+- Remover o prefixo "Boa! " das duas variantes. Trocar por reentrada neutra:
+  - com tail: `"{tail}"` (só repete a pergunta atual, sem prefixo)
+  - sem tail: `"Tô aqui 👀 — me conta um pouquinho mais pra eu te ajudar?"`
+- Garantir que `_currentTurnVars` é populado com `{nome, representante, valor_conta, telefone, cpf}` **sempre** que `_setTurnStepQuestion` é chamado (hoje em vários pontos passa-se só a string da pergunta, deixando vars vazio → `{{nome}}` cru).
+- Renderizar tail com `renderTemplate(tail, _currentTurnVars)` e fazer um **strip defensivo**: se ainda restar `{{...}}` depois do render, trocar por string vazia (não vaza placeholder pro cliente).
+
+### 2. Saudação no 1º passo não pode cair no fallback
+
+No bloco "Restart por saudação" (linha ~1042), hoje o restart só roda se `currentStep.id !== firstActive.id`. Quando o lead manda "Boa noite" e já está no 1º passo (welcome / firstActive), a saudação cai no caminho default e termina em `_finalize` vazio.
+
+Solução: tratar saudação no 1º passo **sem reset** — apenas devolver a `question` atual do passo (renderizada). Exemplo: lead manda "Boa noite" e o bot responde diretamente "Boa noite! Qual o seu nome?" (ou a pergunta corrente do step), sem o "Boa! Pra eu te ajudar…".
+
+### 3. Repetição da mesma reentrada
+
+Adicionar guarda: se a última mensagem outbound do mesmo customer foi essa reentrada (mesmo `tail`) há menos de 60s, **não envia de novo** — devolve reply vazio e marca `__suppressed_reentry: true` no update. Evita o caso "Boa! Vamos fazer seu cadastro?" 2x seguidas.
 
 ## Fora de escopo
 
-- Webhook/edge functions: nenhuma alteração — o resolver de step já avança a partir do `conversation_step` setado (memória: *Custom Flow Step Engine*).
-- Schema: nenhuma migration.
-- Outras telas (CRM, WhatsApp clients): inalteradas.
+- Não mexer em `bot-flow.ts`, fluxo de OCR, schema do banco, painel admin, ou no engine de passos custom.
+- Não mudar passos do fluxo no painel.
+- Não tocar no roteador de troca de fluxo (PJ/Licenciada) — separado.
 
-## Resultado
+## Validação
 
-O consultor vê numa lista clara todos os passos do fluxo da Camila e devolve o lead exatamente no ponto onde quer — sem o lead "errar de novo" na mesma pergunta.
+- Reler trechos do `conversations` da Simone (fd51f071) e Geralda (3fdc7244) mentalmente com a nova lógica: nenhuma frase de "Boa! …" deve aparecer; "Boa noite" inicial deve ser respondido com a pergunta de captura de nome/valor, sem o socorro.
+- Conferir que nenhum log novo de `[conversational] ⚠️ reply vazio` aparece nas próximas conversas.
+
+## Detalhes técnicos (somente Edge Function)
+
+```text
+conversational/index.ts
+├─ _setTurnStepQuestion(q, vars)   → garantir vars sempre populado nos call sites
+├─ _finalize(stepKey, r)           → remover "Boa! "; strip {{...}} residual; suppress duplicado <60s
+└─ bloco "Restart por saudação"    → branch nova: se já está em firstActive, devolve a question atual sem reset
+```
+
+Posso seguir com a implementação?

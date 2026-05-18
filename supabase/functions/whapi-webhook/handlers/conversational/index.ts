@@ -559,6 +559,7 @@ async function sendStepMedia(
 let _currentTurnStepQuestion: string = "";
 // deno-lint-ignore no-explicit-any
 let _currentTurnVars: any = {};
+let _currentTurnCustomerId: string | null = null;
 // deno-lint-ignore no-explicit-any
 function _setTurnStepQuestion(q: string, vars?: any) {
   _currentTurnStepQuestion = (q || "").trim();
@@ -573,19 +574,40 @@ function _extractTail(t: string): string {
   return (sents[sents.length - 1] || cleaned).trim();
 }
 
+// Guarda em memória da última reentrada por customer, p/ evitar repetir
+// a mesma muleta 2x em menos de 60s.
+const _lastReentryByCustomer = new Map<string, { tail: string; at: number }>();
+
 // Wrapper de segurança — NUNCA silencia. Se não há reply nem mídia inline,
-// compõe uma reentrada cortês com a última pergunta do passo atual.
+// devolve a própria pergunta do passo atual (sem prefixo "Boa!"), e suprime
+// repetição em menos de 60s pro mesmo cliente.
 function _finalize(stepKey: string, r: BotResult): BotResult {
   const reply = (r.reply || "").trim();
   const hasMedia = r.updates?.__inline_sent === true;
   if (!reply && !hasMedia) {
     const rawTail = _extractTail(_currentTurnStepQuestion);
-    // ✅ Renderiza variáveis ({{nome}}, {{valor_conta}}, etc.) antes de enviar.
-    const tail = rawTail ? renderTemplate(rawTail, _currentTurnVars || {}) : "";
+    // ✅ Renderiza variáveis ({{nome}}, {{valor_conta}}, etc.) e remove
+    // qualquer {{...}} residual pra não vazar placeholder cru pro lead.
+    let tail = rawTail ? renderTemplate(rawTail, _currentTurnVars || {}) : "";
+    tail = tail.replace(/\{\{\s*[^}]+\s*\}\}/g, "").replace(/\s{2,}/g, " ").trim();
+    tail = tail.replace(/^[,;:\-\s]+/, "").trim();
+
+    // Suprime repetição da mesma reentrada em curto intervalo.
+    const cid = _currentTurnCustomerId;
+    if (cid) {
+      const prev = _lastReentryByCustomer.get(cid);
+      const now = Date.now();
+      if (prev && prev.tail === tail && now - prev.at < 60_000) {
+        console.warn(`[conversational] 🤫 reentry suprimida (repetida <60s) step=${stepKey}`);
+        return { reply: "", updates: { ...r.updates, __suppressed_reentry: true } as any };
+      }
+      _lastReentryByCustomer.set(cid, { tail, at: now });
+    }
+
     const reentry = tail
-      ? `Boa! Me ajuda voltando aqui: ${tail}`
-      : `Boa! Pra eu te ajudar do jeito certo, me confirma onde a gente parou? 🙏`;
-    console.warn(`[conversational] ⚠️ reply vazio → recuperando com reentry em step=${stepKey}`);
+      ? tail
+      : "Tô aqui 👀 — me conta um pouquinho mais pra eu te ajudar?";
+    console.warn(`[conversational] ⚠️ reply vazio → reentry em step=${stepKey}`);
     return { reply: reentry, updates: { ...r.updates } };
   }
   return { reply, updates: r.updates };
@@ -593,6 +615,8 @@ function _finalize(stepKey: string, r: BotResult): BotResult {
 
 export async function runConversationalFlow(ctx: BotContext): Promise<BotResult> {
   let stepKey = (ctx.customer.conversation_step || "welcome") as string;
+  _currentTurnCustomerId = (ctx.customer?.id as string) || null;
+
 
   // Cadastro steps are NEVER handled here — defensive guard
   if (CADASTRO_STEPS.has(stepKey)) {
@@ -1047,6 +1071,35 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // invés de retomar do meio do funil.
   const saudacaoRegex = /\b(oi+|ol[áa]|bom dia|boa tarde|boa noite|opa|e a[íi]|eai|hello|hi)\b/i;
   const isSaudacao = cls.intent === "saudacao" || saudacaoRegex.test(ctx.messageText || "");
+  // Saudação no PRIMEIRO passo ativo: não reseta nem cai no fallback.
+  // Responde apenas com a pergunta corrente do passo (renderizada), evitando
+  // o efeito "bot pediu pra confirmar onde paramos" logo no início.
+  if (isSaudacao && currentStep.id === firstActive.id) {
+    const greetVars = {
+      nome: captureUpdates.name || ctx.customer.name,
+      representante: ctx.nomeRepresentante,
+      valor_conta: captureUpdates.electricity_bill_value ?? (ctx.customer as any).electricity_bill_value,
+      telefone: captureUpdates.phone_whatsapp || ctx.customer.phone_whatsapp,
+      cpf: captureUpdates.cpf || (ctx.customer as any).cpf,
+    };
+    const rawQ = (currentStep.message_text || "").trim();
+    let question = rawQ ? renderTemplate(rawQ, greetVars) : "";
+    question = question.replace(/\{\{\s*[^}]+\s*\}\}/g, "").replace(/\s{2,}/g, " ").trim();
+    if (question) {
+      console.log(`[conversational] 👋 saudação no firstActive (${currentStep.step_key}) → repete pergunta do passo, sem reset`);
+      return _finalize(stepKey, {
+        reply: question,
+        updates: {
+          conversation_step: currentStep.id,
+          __intent: cls.intent,
+          __confidence: cls.confidence,
+          ...captureUpdates,
+          ...restoreDetourUpdates,
+        },
+      });
+    }
+    // sem texto no passo → segue fluxo normal (provavelmente vai cascatear mídia).
+  }
   if (isSaudacao && currentStep.id !== firstActive.id) {
     console.log(`[conversational] 🔁 saudação detectada em step=${currentStep.step_key} → restart no Passo 1 (${firstActive.step_key})`);
     const restartVars = {
