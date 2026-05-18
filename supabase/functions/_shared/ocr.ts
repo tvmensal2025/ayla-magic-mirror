@@ -224,7 +224,7 @@ CAMPOS QUE COSTUMAM APARECER NO VERSO:
 REGRAS:
 - Extraia SOMENTE o que estiver ESCRITO e LEGÍVEL. NUNCA invente.
 - CPF: exatamente 11 dígitos (sem pontos/traços).
-- RG: só números; remova pontos, traços e espaços (7 a 12 dígitos).
+- RG: dígitos do "Registro Geral"; remova pontos, traços e espaços. PRESERVE o 'X' final se houver (dígito verificador). 7 a 12 caracteres.
 - Data: estritamente DD/MM/AAAA. Se não encontrar, use "".
 
 Retorne APENAS um JSON válido, sem markdown e sem texto antes ou depois:
