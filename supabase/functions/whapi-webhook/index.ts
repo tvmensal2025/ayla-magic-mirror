@@ -478,18 +478,26 @@ Deno.serve(async (req) => {
 
 
     // ─── Auto-tag lead source (Meta Ads) ─────────────────────────────────
-    // Detecta no PRIMEIRO inbound de texto se o lead veio de anúncio Meta
-    // (mensagem pré-preenchida do Click-to-WhatsApp). Não sobrescreve fonte já marcada.
+    // 1) Sinal forte: payload Whapi com referral/context (CTWA do Meta)
+    // 2) Fallback: regex no texto (frase pré-preenchida do CTWA ou menção a ad)
     try {
-      if (!hasAudio && !isFile && messageText && !(customer as any).lead_source) {
-        const adsRegex = /(vim do an[uú]ncio|do an[uú]ncio|pelo an[uú]ncio|vi o an[uú]ncio|facebook|instagram|\bfb ads?\b|\bmeta ads?\b|patrocinad|reels|stories|sponsored)/i;
-        if (adsRegex.test(messageText)) {
+      if (!(customer as any).lead_source) {
+        const rawMsg: any = body?.messages?.[0] || {};
+        const referral = rawMsg.referral || rawMsg.context?.referred_product || rawMsg.context?.referral || rawMsg.ad_reply || null;
+        const ctwaClid = rawMsg.ctwa_clid || referral?.ctwa_clid || null;
+        const hasReferral = !!(referral || ctwaClid);
+
+        const adsRegex = /(tenho interesse.*mais informa[çc][õo]es|gostaria de saber mais|quero saber mais|vi seu an[uú]ncio|vim do an[uú]ncio|do an[uú]ncio|pelo an[uú]ncio|vi o an[uú]ncio|facebook|instagram|\bfb ads?\b|\bmeta ads?\b|patrocinad|reels|stories|sponsored)/i;
+        const textMatch = !hasAudio && !isFile && messageText && adsRegex.test(messageText);
+
+        if (hasReferral || textMatch) {
           await supabase.from("customers")
             .update({ lead_source: "meta_ads" })
             .eq("id", customer.id)
             .is("lead_source", null);
           (customer as any).lead_source = "meta_ads";
-          console.log(`[lead-source] customer ${customer.id} marcado como meta_ads via msg: "${messageText.slice(0,80)}"`);
+          const reason = hasReferral ? `referral=${JSON.stringify(referral).slice(0,120)} ctwa=${ctwaClid}` : `regex msg="${(messageText||'').slice(0,80)}"`;
+          console.log(`[lead-source] customer ${customer.id} marcado como meta_ads (${reason})`);
         }
       }
     } catch (e) {
