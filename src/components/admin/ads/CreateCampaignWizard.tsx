@@ -19,6 +19,10 @@ import { useUserRole } from "@/hooks/useUserRole";
 import { useConsultantPhone, formatBrPhone } from "@/hooks/useConsultantPhone";
 import { supabase } from "@/integrations/supabase/client";
 import { upsertAdTemplate } from "@/services/adTemplates";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { AdImageLibraryPanel } from "./AdImageLibraryPanel";
+import { SaveTemplateDialog } from "./SaveTemplateDialog";
+import type { AdImageLibraryItem } from "@/services/adImageLibrary";
 
 interface Props {
   open: boolean;
@@ -145,6 +149,11 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
   const [filesByFormat, setFilesByFormat] = useState<FilesByFormat>(EMPTY_FILES);
   const adFiles = filesByFormat[format];
   const totalFiles = filesByFormat.square.length + filesByFormat.vertical.length + filesByFormat.story.length;
+  // Imagens reutilizadas da biblioteca (não passam por upload de novo).
+  const [pickedLibrary, setPickedLibrary] = useState<AdImageLibraryItem[]>([]);
+  const [photoTab, setPhotoTab] = useState<"upload" | "library">("upload");
+  // Save template dialog
+  const [saveTplOpen, setSaveTplOpen] = useState(false);
 
   // Step 3: copy
   const [copy, setCopy] = useState<CopyPackV2 | null>(null);
@@ -181,7 +190,8 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
   useEffect(() => {
     if (!open) return;
     setStep(1); setIssues(null); setHits([]);
-    setFilesByFormat(EMPTY_FILES); setFormat("square"); setCopy(null); setHeadline(""); setPrimaryText(""); setDescription("");
+    setFilesByFormat(EMPTY_FILES); setPickedLibrary([]); setPhotoTab("upload");
+    setFormat("square"); setCopy(null); setHeadline(""); setPrimaryText(""); setDescription("");
     setBudget(30); setDuration(0);
     setPlacementMode("auto"); setPlacements(ALL_PLACEMENTS);
     setQuality(null); setPreflight(null); setLiveReach(null);
@@ -435,7 +445,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
       if (cities.length === 0) return toast({ title: "Selecione pelo menos 1 cidade", variant: "destructive" });
       setStep(2);
     } else if (step === 2) {
-      if (totalFiles < 1) return toast({ title: "Adicione pelo menos 1 foto válida", variant: "destructive" });
+      if (totalFiles + pickedLibrary.length < 1) return toast({ title: "Adicione pelo menos 1 foto válida", variant: "destructive" });
       setStep(3);
       if (!copy) generateCopyForCities();
     } else if (step === 3) {
@@ -494,8 +504,13 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
         ...filesByFormat.vertical.map((f) => ({ file: f, format: "vertical" as const })),
         ...filesByFormat.story.map((f) => ({ file: f, format: "story" as const })),
       ].filter((x) => isFileValidAny(x.file));
-      const photoUrls = await uploadAdPhotos(consultantId, tagged.map((t) => t.file.file));
-      const photos = photoUrls.map((url, i) => ({ url, format: tagged[i].format }));
+      const photoUrls = tagged.length
+        ? await uploadAdPhotos(consultantId, tagged.map((t) => t.file.file), { formats: tagged.map((t) => t.format) })
+        : [];
+      const photos: { url: string; format: AdFormat }[] = [
+        ...photoUrls.map((url, i) => ({ url, format: tagged[i].format })),
+        ...pickedLibrary.map((it) => ({ url: it.url, format: it.format as AdFormat })),
+      ];
       const campaignName = activePresetNames.length > 1
         ? `iGreen — ${activePresetNames.length} distribuidoras`
         : distribuidoraPrimary
@@ -611,10 +626,12 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
     }
   }
 
-  async function handleSaveAsTemplate() {
+  async function handleSaveAsTemplate(meta: { title: string; description: string }) {
     if (!headline.trim() || !primaryText.trim())
       return toast({ title: "Preencha headline e texto antes", variant: "destructive" });
-    if (totalFiles === 0) return toast({ title: "Adicione ao menos 1 imagem", variant: "destructive" });
+    if (totalFiles === 0 && pickedLibrary.length === 0)
+      return toast({ title: "Adicione ao menos 1 imagem", variant: "destructive" });
+    if (!meta.title.trim()) return toast({ title: "Informe um nome para o template", variant: "destructive" });
     setSavingTemplate(true);
     try {
       const tagged: { file: AdFile; format: AdFormat }[] = [
@@ -622,10 +639,16 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
         ...filesByFormat.vertical.map((f) => ({ file: f, format: "vertical" as const })),
         ...filesByFormat.story.map((f) => ({ file: f, format: "story" as const })),
       ].filter((x) => isFileValidAny(x.file));
-      const photoUrls = await uploadAdPhotos(consultantId, tagged.map((t) => t.file.file));
-      const photos = photoUrls.map((url, i) => ({ url, format: tagged[i].format }));
+      const photoUrls = tagged.length
+        ? await uploadAdPhotos(consultantId, tagged.map((t) => t.file.file), { formats: tagged.map((t) => t.format) })
+        : [];
+      const photos = [
+        ...photoUrls.map((url, i) => ({ url, format: tagged[i].format })),
+        ...pickedLibrary.map((it) => ({ url: it.url, format: it.format as AdFormat })),
+      ];
       await upsertAdTemplate({
-        title: `${distribuidoraPrimary || "Multi"} — ${headline.slice(0, 40)}`,
+        title: meta.title.trim(),
+        description: meta.description.trim() || null,
         photos,
         headline,
         primary_text: primaryText,
@@ -640,6 +663,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
         title: "Template salvo ✓",
         description: isSuperAdmin ? "Publicado para todos os consultores." : "Salvo como rascunho pessoal.",
       });
+      setSaveTplOpen(false);
     } catch (e: any) {
       toast({ title: "Erro ao salvar template", description: e?.message || "Tente novamente", variant: "destructive" });
     } finally {
@@ -970,50 +994,74 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
                   </div>
                 </div>
 
-                <div className={`border-2 border-dashed rounded-xl p-6 text-center ${adFiles.length >= PER_FORMAT_LIMIT ? "opacity-50 pointer-events-none" : ""}`}>
-                  <input type="file" accept="image/jpeg,image/png,image/webp" multiple id="photos-input" className="hidden"
-                    onChange={e => { handleFiles(e.target.files); e.currentTarget.value = ""; }} />
-                  <label htmlFor="photos-input" className="cursor-pointer space-y-2 block">
-                    <Upload className="w-8 h-8 text-primary mx-auto" />
-                    <div className="text-sm font-medium">Clique para enviar fotos {FORMAT_SPEC[format].label} ({adFiles.length}/{PER_FORMAT_LIMIT})</div>
-                    <div className="text-xs text-muted-foreground">
-                      Tamanho exigido: <strong className="text-foreground">{FORMAT_SPEC[format].w}×{FORMAT_SPEC[format].h}</strong> · JPG/PNG/WebP · até 8 MB
-                    </div>
-                  </label>
-                </div>
-
-                {adFiles.length > 0 && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {adFiles.map((a, i) => {
-                      const ok = isFileValid(a);
-                      return (
-                        <div key={i} className={`relative group rounded-lg overflow-hidden border-2 ${ok ? "border-primary/50" : "border-amber-500/60"} bg-muted`}>
-                          <div className={FORMAT_SPEC[format].ratio === 0.5625 ? "aspect-[9/16]" : FORMAT_SPEC[format].ratio === 0.8 ? "aspect-[4/5]" : "aspect-square"}>
-                            <img src={a.url} alt="" className="w-full h-full object-cover" />
-                          </div>
-                          <div className="absolute bottom-0 inset-x-0 bg-black/70 text-[10px] text-white px-1.5 py-1 flex items-center justify-between">
-                            <span>{a.w}×{a.h}</span>
-                            {ok ? <span className="text-primary">✓</span> : (
-                              <div className="flex gap-1.5">
-                                <button type="button" onClick={() => handleCrop(i)} className="text-amber-300 underline">Cortar</button>
-                                <button type="button" onClick={() => handleAiResize(i)} disabled={aiResizingIdx === i}
-                                  className="text-emerald-300 underline flex items-center gap-0.5">
-                                  {aiResizingIdx === i ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Wand2 className="w-2.5 h-2.5" />}
-                                  IA
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          <button onClick={() => removeFile(i)} className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition">
-                            <X className="w-3 h-3" />
-                          </button>
+                <Tabs value={photoTab} onValueChange={(v) => setPhotoTab(v as any)}>
+                  <TabsList className="grid grid-cols-2 w-full">
+                    <TabsTrigger value="upload">🆕 Enviar novo</TabsTrigger>
+                    <TabsTrigger value="library">📁 Minhas imagens</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="upload" className="space-y-3 mt-3">
+                    <div className={`border-2 border-dashed rounded-xl p-6 text-center ${adFiles.length >= PER_FORMAT_LIMIT ? "opacity-50 pointer-events-none" : ""}`}>
+                      <input type="file" accept="image/jpeg,image/png,image/webp" multiple id="photos-input" className="hidden"
+                        onChange={e => { handleFiles(e.target.files); e.currentTarget.value = ""; }} />
+                      <label htmlFor="photos-input" className="cursor-pointer space-y-2 block">
+                        <Upload className="w-8 h-8 text-primary mx-auto" />
+                        <div className="text-sm font-medium">Clique para enviar fotos {FORMAT_SPEC[format].label} ({adFiles.length}/{PER_FORMAT_LIMIT})</div>
+                        <div className="text-xs text-muted-foreground">
+                          Tamanho exigido: <strong className="text-foreground">{FORMAT_SPEC[format].w}×{FORMAT_SPEC[format].h}</strong> · JPG/PNG/WebP · até 8 MB
                         </div>
-                      );
-                    })}
+                      </label>
+                    </div>
+                    {adFiles.length > 0 && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {adFiles.map((a, i) => {
+                          const ok = isFileValid(a);
+                          return (
+                            <div key={i} className={`relative group rounded-lg overflow-hidden border-2 ${ok ? "border-primary/50" : "border-amber-500/60"} bg-muted`}>
+                              <div className={FORMAT_SPEC[format].ratio === 0.5625 ? "aspect-[9/16]" : FORMAT_SPEC[format].ratio === 0.8 ? "aspect-[4/5]" : "aspect-square"}>
+                                <img src={a.url} alt="" className="w-full h-full object-cover" />
+                              </div>
+                              <div className="absolute bottom-0 inset-x-0 bg-black/70 text-[10px] text-white px-1.5 py-1 flex items-center justify-between">
+                                <span>{a.w}×{a.h}</span>
+                                {ok ? <span className="text-primary">✓</span> : (
+                                  <div className="flex gap-1.5">
+                                    <button type="button" onClick={() => handleCrop(i)} className="text-amber-300 underline">Cortar</button>
+                                    <button type="button" onClick={() => handleAiResize(i)} disabled={aiResizingIdx === i}
+                                      className="text-emerald-300 underline flex items-center gap-0.5">
+                                      {aiResizingIdx === i ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Wand2 className="w-2.5 h-2.5" />}
+                                      IA
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                              <button onClick={() => removeFile(i)} className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition">
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </TabsContent>
+                  <TabsContent value="library" className="mt-3">
+                    <AdImageLibraryPanel
+                      consultantId={consultantId}
+                      format={format}
+                      selectedUrls={new Set(pickedLibrary.map((it) => it.url))}
+                      onPick={(it) => setPickedLibrary((prev) =>
+                        prev.find((x) => x.url === it.url)
+                          ? prev.filter((x) => x.url !== it.url)
+                          : [...prev, it]
+                      )}
+                    />
+                  </TabsContent>
+                </Tabs>
+                {pickedLibrary.length > 0 && (
+                  <div className="text-[11px] text-emerald-400">
+                    📁 {pickedLibrary.length} imagem(ns) da biblioteca selecionada(s) — sem novo upload.
                   </div>
                 )}
                 <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-                  <Smartphone className="w-3 h-3" /> Total: <strong className="text-foreground">{totalFiles}</strong> foto(s). Você pode misturar formatos — Meta usa cada um no posicionamento ideal.
+                  <Smartphone className="w-3 h-3" /> Total: <strong className="text-foreground">{totalFiles + pickedLibrary.length}</strong> foto(s). Misture formatos — Meta usa cada um no posicionamento ideal.
                 </div>
               </div>
             )}
@@ -1255,7 +1303,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
               </Button>
               <div className="flex gap-2">
                 {step === 4 && (
-                  <Button type="button" variant="outline" onClick={handleSaveAsTemplate} disabled={submitting || savingTemplate} className="gap-1.5">
+                  <Button type="button" variant="outline" onClick={() => setSaveTplOpen(true)} disabled={submitting || savingTemplate} className="gap-1.5">
                     {savingTemplate ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                     Salvar como template
                   </Button>
@@ -1270,6 +1318,14 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
           </div>
         )}
       </DialogContent>
+      <SaveTemplateDialog
+        open={saveTplOpen}
+        onClose={() => setSaveTplOpen(false)}
+        defaultTitle={`${distribuidoraPrimary || "Multi"} — ${headline.slice(0, 40)}`}
+        saving={savingTemplate}
+        isSuperAdmin={isSuperAdmin}
+        onConfirm={(meta) => handleSaveAsTemplate(meta)}
+      />
     </Dialog>
   );
 }

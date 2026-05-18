@@ -266,6 +266,63 @@ export type Database = {
         }
         Relationships: []
       }
+      ad_image_library: {
+        Row: {
+          consultant_id: string
+          content_type: string | null
+          created_at: string
+          fb_image_hash: string | null
+          fb_image_hash_synced_at: string | null
+          file_size: number | null
+          filename: string | null
+          format: string
+          height: number | null
+          id: string
+          last_used_at: string | null
+          storage_path: string | null
+          updated_at: string
+          url: string
+          usage_count: number
+          width: number | null
+        }
+        Insert: {
+          consultant_id: string
+          content_type?: string | null
+          created_at?: string
+          fb_image_hash?: string | null
+          fb_image_hash_synced_at?: string | null
+          file_size?: number | null
+          filename?: string | null
+          format: string
+          height?: number | null
+          id?: string
+          last_used_at?: string | null
+          storage_path?: string | null
+          updated_at?: string
+          url: string
+          usage_count?: number
+          width?: number | null
+        }
+        Update: {
+          consultant_id?: string
+          content_type?: string | null
+          created_at?: string
+          fb_image_hash?: string | null
+          fb_image_hash_synced_at?: string | null
+          file_size?: number | null
+          filename?: string | null
+          format?: string
+          height?: number | null
+          id?: string
+          last_used_at?: string | null
+          storage_path?: string | null
+          updated_at?: string
+          url?: string
+          usage_count?: number
+          width?: number | null
+        }
+        Relationships: []
+      }
       ad_image_validations: {
         Row: {
           created_at: string

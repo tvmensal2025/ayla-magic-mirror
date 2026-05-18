@@ -150,36 +150,71 @@ export async function createCampaign(body: CreateCampaignBody) {
   return data as { ok: true; campaign_id: string; adset_id: string; ad_ids: string[]; ads_count: number };
 }
 
-export async function uploadAdPhotos(consultantId: string, files: File[]): Promise<string[]> {
-  const urls: string[] = [];
-  for (const f of files) {
-    const path = `${consultantId}/ads/${Date.now()}-${f.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-    try {
-      const { error } = await supabase.storage.from("consultant-photos").upload(path, f, { upsert: true, contentType: f.type });
-      if (error) throw error;
-      const { data } = supabase.storage.from("consultant-photos").getPublicUrl(path);
-      urls.push(data.publicUrl);
-    } catch (directUploadError) {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(reader.error || new Error("Falha ao ler imagem."));
-        reader.readAsDataURL(f);
-      });
-      const { data, error } = await supabase.functions.invoke("upload-ad-photo", {
-        body: {
-          consultant_id: consultantId,
-          filename: f.name,
-          content_type: f.type,
-          data_base64: dataUrl,
-        },
-      });
-      if (error) await throwFunctionError(error);
-      if ((data as any)?.error || !(data as any)?.url) {
-        throw new Error((data as any)?.error || (directUploadError as Error)?.message || "Falha ao enviar imagem.");
-      }
-      urls.push((data as any).url);
+async function uploadOne(consultantId: string, f: File): Promise<{ url: string; path: string | null }> {
+  const safe = f.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${consultantId}/ads/${Date.now()}-${safe}`;
+  try {
+    const { error } = await supabase.storage.from("consultant-photos").upload(path, f, { upsert: true, contentType: f.type });
+    if (error) throw error;
+    const { data } = supabase.storage.from("consultant-photos").getPublicUrl(path);
+    return { url: data.publicUrl, path };
+  } catch (directUploadError) {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("Falha ao ler imagem."));
+      reader.readAsDataURL(f);
+    });
+    const { data, error } = await supabase.functions.invoke("upload-ad-photo", {
+      body: { consultant_id: consultantId, filename: f.name, content_type: f.type, data_base64: dataUrl },
+    });
+    if (error) await throwFunctionError(error);
+    if ((data as any)?.error || !(data as any)?.url) {
+      throw new Error((data as any)?.error || (directUploadError as Error)?.message || "Falha ao enviar imagem.");
     }
+    return { url: (data as any).url, path: (data as any).path || null };
+  }
+}
+
+function readDim(f: File): Promise<{ w: number; h: number }> {
+  return new Promise((resolve, reject) => {
+    const u = URL.createObjectURL(f);
+    const img = new Image();
+    img.onload = () => { resolve({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(u); };
+    img.onerror = () => { reject(new Error("Imagem inválida")); URL.revokeObjectURL(u); };
+    img.src = u;
+  });
+}
+
+function detectFormat(w: number, h: number): "square" | "vertical" | "story" {
+  const r = w / h;
+  if (Math.abs(r - 1) < 0.06) return "square";
+  if (Math.abs(r - 0.5625) < 0.06) return "story";
+  return "vertical";
+}
+
+export async function uploadAdPhotos(
+  consultantId: string,
+  files: File[],
+  opts?: { formats?: ("square" | "vertical" | "story")[] }
+): Promise<string[]> {
+  const urls: string[] = [];
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    const { url, path } = await uploadOne(consultantId, f);
+    urls.push(url);
+    // Registra na biblioteca de imagens reutilizáveis (best-effort).
+    try {
+      const dim = await readDim(f).catch(() => ({ w: 0, h: 0 }));
+      const format = opts?.formats?.[i] || (dim.w && dim.h ? detectFormat(dim.w, dim.h) : "square");
+      const { addToAdImageLibrary } = await import("@/services/adImageLibrary");
+      await addToAdImageLibrary({
+        consultant_id: consultantId,
+        url, storage_path: path,
+        format, width: dim.w || null, height: dim.h || null,
+        file_size: f.size, content_type: f.type, filename: f.name,
+      });
+    } catch (e) { console.warn("[uploadAdPhotos] library save falhou:", e); }
   }
   return urls;
 }
