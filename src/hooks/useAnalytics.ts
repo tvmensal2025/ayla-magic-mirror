@@ -106,7 +106,7 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
       while (true) {
         const { data, error } = await supabase
           .from("customers")
-          .select("id, name, status, media_consumo, electricity_bill_value, created_at, registered_by_name, registered_by_igreen_id")
+          .select("id, name, status, media_consumo, electricity_bill_value, created_at, registered_by_name, registered_by_igreen_id, customer_origin")
           .eq("consultant_id", consultantId!)
           .range(page * pageSize, (page + 1) * pageSize - 1);
         if (error) throw error;
