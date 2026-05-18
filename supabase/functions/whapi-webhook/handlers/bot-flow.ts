@@ -1929,15 +1929,73 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             const emittedCurrent = await dispatchStepFromFlow(stepRow.step_key, _vars).catch(() => false);
             console.log(`[custom-step-resolver] emit-current step=${stepRow.step_key} ok=${emittedCurrent}`);
 
-            // Qualquer resposta do lead avança para o próximo passo ativo por position.
-            const nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {
-              afterPosition: Number(stepRow.position) || 0,
-            });
+            // ── Resolução do próximo passo HONRANDO transitions/goto_step_id ──
+            // Evita pular perguntas e objeções: se o passo atual tem trigger_phrases
+            // (afirmacao/negacao), só avança quando a mensagem casar com elas;
+            // se tem default com goto_step_id, segue esse goto explicitamente.
+            const _norm = (s: string) => String(s || "").toLowerCase()
+              .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+            const _loadStepById = async (id: string) => {
+              const { data } = await supabase
+                .from("bot_flow_steps")
+                .select("id, step_key, step_type, position, transitions")
+                .eq("flow_id", flow.id).eq("id", id).eq("is_active", true).maybeSingle();
+              return data ? {
+                id: String(data.id), step_key: String(data.step_key),
+                step_type: String(data.step_type), position: Number(data.position),
+                transitions: Array.isArray((data as any).transitions) ? (data as any).transitions : [],
+              } : null;
+            };
+            const _resolveNextFromTransitions = async (txns: any[], msg: string) => {
+              const arr = Array.isArray(txns) ? txns : [];
+              const msgN = _norm(msg);
+              // 1) match por trigger_phrases (intents afirmacao/negacao/etc)
+              for (const t of arr) {
+                const phrases = Array.isArray(t?.trigger_phrases) ? t.trigger_phrases : [];
+                if (!phrases.length) continue;
+                for (const p of phrases) {
+                  const pn = _norm(p);
+                  if (!pn) continue;
+                  const safe = pn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                  if (msgN === pn || new RegExp(`(^|\\W)${safe}(\\W|$)`).test(msgN)) {
+                    if (t?.goto_step_id) return { matched: true, next: await _loadStepById(String(t.goto_step_id)) };
+                  }
+                }
+              }
+              // 2) default explícito com goto_step_id
+              const def = arr.find((t: any) =>
+                String(t?.trigger_intent || "").toLowerCase() === "default"
+                && (!Array.isArray(t?.trigger_phrases) || t.trigger_phrases.length === 0)
+                && t?.goto_step_id
+              );
+              if (def?.goto_step_id) return { matched: false, next: await _loadStepById(String(def.goto_step_id)) };
+              return { matched: false, next: null as any };
+            };
+
+            const txnsNow = Array.isArray(stepRow.transitions) ? stepRow.transitions : [];
+            const hasIntentTxns = txnsNow.some((t: any) =>
+              Array.isArray(t?.trigger_phrases) && t.trigger_phrases.length > 0
+            );
+            const resolved = await _resolveNextFromTransitions(txnsNow, messageText);
+            let nextCustom: any = resolved.next;
+
+            // Se há perguntas (intent txns) e a resposta NÃO casou e não há default,
+            // aguarda nova mensagem (não pula o passo).
+            if (!nextCustom && hasIntentTxns && !txnsNow.some((t: any) => String(t?.trigger_intent||"").toLowerCase()==="default")) {
+              console.log(`[custom-step-resolver] aguardando resposta válida no step=${stepRow.step_key} (sem match)`);
+              return { reply: "", updates: { __inline_sent: emittedCurrent || undefined } as any };
+            }
+
+            // Fallback: próximo por position
+            if (!nextCustom) {
+              nextCustom = await findNextActiveFlowStep(supabase, customer.consultant_id, {
+                afterPosition: Number(stepRow.position) || 0,
+              });
+            }
 
             if (nextCustom) {
-              // Chain enquanto o próximo for type=message com transição default sem trigger_phrases.
-              // Isso garante que após emitir mídia (sem pergunta), o bot avança sozinho para o próximo passo
-              // sem esperar nova mensagem do lead.
+              // Chain: avança automaticamente passos message que tenham default sem phrases.
+              // Honra goto_step_id quando presente; caso contrário usa next-by-position.
               let current = nextCustom;
               let dispatchedAny = false;
               for (let hops = 0; hops < 8; hops++) {
@@ -1946,16 +2004,20 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 console.log(`[custom-step-resolver] chain-emit step=${current.step_key} pos=${current.position} dispatched=${ok}`);
                 const ctype = String(current.step_type || "message");
                 if (ctype !== "message") break;
-                const hasAutoAdvance = Array.isArray(current.transitions) && current.transitions.some((t: any) =>
+                const ctxns = Array.isArray(current.transitions) ? current.transitions : [];
+                const defTxn = ctxns.find((t: any) =>
                   String(t?.trigger_intent || "").toLowerCase() === "default"
                   && (!Array.isArray(t?.trigger_phrases) || t.trigger_phrases.length === 0)
                 );
-                if (!hasAutoAdvance) break;
-                const nxt = await findNextActiveFlowStep(supabase, customer.consultant_id, {
-                  afterPosition: Number(current.position) || 0,
-                });
+                if (!defTxn) break; // tem pergunta/objeção → aguarda resposta
+                let nxt: any = null;
+                if (defTxn.goto_step_id) nxt = await _loadStepById(String(defTxn.goto_step_id));
+                if (!nxt) {
+                  nxt = await findNextActiveFlowStep(supabase, customer.consultant_id, {
+                    afterPosition: Number(current.position) || 0,
+                  });
+                }
                 if (!nxt) break;
-                // pequeno delay para não atropelar as mensagens
                 await new Promise((r) => setTimeout(r, 1500));
                 current = nxt;
               }
@@ -1969,7 +2031,6 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               else if (ntype === "finalizar_cadastro") nextStepValue = "finalizando";
               console.log(`[custom-step-resolver] message→advance final=${current.step_key} type=${ntype} isCapture=${_isCapture}`);
               const _updates: any = { conversation_step: nextStepValue, __inline_sent: (emittedCurrent || dispatchedAny) || undefined };
-              // Marca timestamp para suprimir re-prompts duplicados do handler legacy.
               if (_isCapture && (emittedCurrent || dispatchedAny)) {
                 _updates.last_custom_prompt_at = new Date().toISOString();
               }
