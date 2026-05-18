@@ -3,10 +3,29 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Bot, User, Loader2, Pause, Play, RefreshCw } from "lucide-react";
+import { Loader2, Pause, Play, RefreshCw, ChevronDown, RotateCcw } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { resetLeadConversation } from "@/services/resetConversation";
 
 type Row = {
   id: string;
@@ -20,10 +39,30 @@ type Row = {
   updated_at: string;
 };
 
+type FlowStep = {
+  id: string;
+  step_key: string | null;
+  step_type: string;
+  title: string | null;
+  position: number;
+};
+
+const LEGACY_STEPS: { value: string; label: string }[] = [
+  { value: "aguardando_valor_conta", label: "Aguardando valor da conta" },
+  { value: "aguardando_conta", label: "Aguardando foto da conta" },
+  { value: "aguardando_doc_auto", label: "Aguardando documento" },
+  { value: "confirmando_dados_conta", label: "Confirmar dados da conta" },
+  { value: "ask_email", label: "Pedir e-mail" },
+  { value: "ask_phone_confirm", label: "Confirmar telefone" },
+  { value: "finalizando", label: "Finalizando cadastro" },
+];
+
 export function LiveConversationsPanel({ userId }: { userId: string }) {
   const { toast } = useToast();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [flowSteps, setFlowSteps] = useState<FlowStep[]>([]);
+  const [confirmReset, setConfirmReset] = useState<Row | null>(null);
 
   async function load() {
     setLoading(true);
@@ -36,9 +75,26 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
     setRows((data as any) || []);
     setLoading(false);
   }
-  useEffect(() => { load(); }, [userId]);
 
-  // Realtime
+  async function loadFlowSteps() {
+    const { data: flow } = await supabase
+      .from("bot_flows")
+      .select("id")
+      .eq("consultant_id", userId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (!flow?.id) { setFlowSteps([]); return; }
+    const { data: steps } = await supabase
+      .from("bot_flow_steps")
+      .select("id, step_key, step_type, title, position")
+      .eq("flow_id", flow.id)
+      .eq("is_active", true)
+      .order("position", { ascending: true });
+    setFlowSteps((steps as any) || []);
+  }
+
+  useEffect(() => { load(); loadFlowSteps(); }, [userId]);
+
   useEffect(() => {
     const ch = supabase
       .channel("ai-live-customers")
@@ -61,10 +117,80 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
     }
   }
 
+  async function returnToStep(row: Row, stepValue: string | null, label: string) {
+    const update: any = {
+      bot_paused: false,
+      bot_paused_reason: null,
+      bot_paused_at: null,
+      assigned_human_id: null,
+      last_custom_prompt_at: null,
+      updated_at: new Date().toISOString(),
+    };
+    if (stepValue !== null) update.conversation_step = stepValue;
+    const { error } = await supabase.from("customers").update(update).eq("id", row.id);
+    if (error) toast({ title: "Erro", description: error.message, variant: "destructive" });
+    else {
+      toast({ title: `↩️ Devolvido para: ${label}` });
+      load();
+    }
+  }
+
+  async function doReset(row: Row) {
+    const res = await resetLeadConversation({ consultantId: userId, customerId: row.id });
+    if (!res.ok) toast({ title: "Erro ao resetar", description: (res as any).error, variant: "destructive" });
+    else { toast({ title: "🔄 Conversa reiniciada" }); load(); }
+    setConfirmReset(null);
+  }
+
   if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
 
   const active = rows.filter((r) => !r.bot_paused);
   const human = rows.filter((r) => r.bot_paused);
+
+  const renderReturnMenu = (r: Row) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="default" className="gap-1.5">
+          <Play className="w-4 h-4" /> Devolver para… <ChevronDown className="w-3.5 h-3.5 opacity-70" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-72 max-h-[420px] overflow-y-auto">
+        <DropdownMenuItem onClick={() => returnToStep(r, null, "Continuar de onde parou")}>
+          <Play className="w-4 h-4 mr-2 text-primary" /> Continuar de onde parou
+        </DropdownMenuItem>
+        {flowSteps.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
+              Pular para passo do fluxo
+            </DropdownMenuLabel>
+            {flowSteps.map((s, i) => (
+              <DropdownMenuItem key={s.id} onClick={() => returnToStep(r, s.id, s.title || s.step_key || `Passo ${i + 1}`)}>
+                <span className="text-xs font-mono text-muted-foreground mr-2 w-6">{String(i + 1).padStart(2, "0")}</span>
+                <span className="truncate">{s.title || s.step_key || `Passo ${i + 1}`}</span>
+              </DropdownMenuItem>
+            ))}
+          </>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
+          Passos clássicos
+        </DropdownMenuLabel>
+        {LEGACY_STEPS.map((s) => (
+          <DropdownMenuItem key={s.value} onClick={() => returnToStep(r, s.value, s.label)}>
+            <span className="truncate">{s.label}</span>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => setConfirmReset(r)}
+          className="text-rose-500 focus:text-rose-500"
+        >
+          <RotateCcw className="w-4 h-4 mr-2" /> Reiniciar conversa do zero
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 
   return (
     <div className="space-y-6">
@@ -79,11 +205,24 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
         </Button>
       )} />
 
-      <Section title="👤 Você está atendendo" rows={human} action={(r) => (
-        <Button size="sm" variant="default" onClick={() => setPaused(r.id, false)} className="gap-2">
-          <Play className="w-4 h-4" /> Devolver para IA
-        </Button>
-      )} />
+      <Section title="👤 Você está atendendo" rows={human} action={renderReturnMenu} />
+
+      <AlertDialog open={!!confirmReset} onOpenChange={(o) => !o && setConfirmReset(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reiniciar conversa?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Isso apaga o histórico, memória e decisões da IA para <strong>{confirmReset?.name || confirmReset?.phone_whatsapp}</strong>. O lead volta para o início do fluxo. Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => confirmReset && doReset(confirmReset)}>
+              Reiniciar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
