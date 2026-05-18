@@ -598,6 +598,19 @@ const _lastReentryByCustomer = new Map<string, { tail: string; at: number }>();
 function _finalize(stepKey: string, r: BotResult): BotResult {
   const reply = (r.reply || "").trim();
   const hasMedia = r.updates?.__inline_sent === true;
+
+  // Saudação contextual: se o lead cumprimentou ("bom dia", "boa noite", etc.),
+  // prefixa a resposta no mesmo tom. Não altera o fluxo — só cortesia.
+  const greet = greetingPrefix(_currentTurnMessageText);
+  const applyGreet = (text: string): string => {
+    if (!greet) return text;
+    const t = (text || "").trim();
+    if (!t) return greet;
+    // Evita duplicar se a própria resposta já começa com a mesma saudação.
+    if (new RegExp(`^${greet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(t)) return t;
+    return `${greet} ${t}`;
+  };
+
   if (!reply && !hasMedia) {
     const rawTail = _extractTail(_currentTurnStepQuestion);
     // ✅ Renderiza variáveis ({{nome}}, {{valor_conta}}, etc.) e remove
@@ -622,8 +635,13 @@ function _finalize(stepKey: string, r: BotResult): BotResult {
       ? tail
       : "Tô aqui 👀 — me conta um pouquinho mais pra eu te ajudar?";
     console.warn(`[conversational] ⚠️ reply vazio → reentry em step=${stepKey}`);
-    return { reply: reentry, updates: { ...r.updates } };
+    return { reply: applyGreet(reentry), updates: { ...r.updates } };
   }
+
+  // Caso comum: prefixa saudação se aplicável.
+  if (reply) return { reply: applyGreet(reply), updates: r.updates };
+  // Sem reply mas com mídia: se houve saudação, envia ao menos o "Bom dia!".
+  if (greet) return { reply: greet, updates: r.updates };
   return { reply, updates: r.updates };
 }
 
