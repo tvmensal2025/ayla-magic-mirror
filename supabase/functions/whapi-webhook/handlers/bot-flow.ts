@@ -352,7 +352,7 @@ function getReentryPromptForStep(step: string, customer: any): string {
     "ask_birth_date": `${v}qual sua *data de nascimento*? (DD/MM/AAAA)`,
     "ask_phone": `${v}me confirma seu *telefone* (com DDD)?`,
     "ask_phone_confirm": `${v}me confirma seu *telefone* (com DDD)?`,
-    "ask_email": `${v}me passa seu *e-mail* 📧`,
+    "ask_email": `${v}me passa seu *e-mail* 📧\n_É por ele que você vai acessar o app *iGreen Club* 📱 (cashback, faturas e indicações)._`,
     "ask_cep": `${v}qual o *CEP* da sua casa? (8 dígitos)`,
     "ask_number": `${v}qual o *número* da sua casa?`,
     "ask_complement": `${v}tem *complemento* no endereço? (apto, bloco) — ou *PULAR* / *NÃO TEM*.`,
@@ -3625,7 +3625,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const lower = txt.toLowerCase();
       // ⚠️ Email é OBRIGATÓRIO no portal iGreen. Não aceitar PULAR.
       if (["pular", "skip", "não tenho", "nao tenho", "sem email", "sem e-mail", "n", "não", "nao"].includes(lower)) {
-        reply = "📧 Preciso de um *e-mail seu* — é por ele que o portal manda o código.\n\nSe não tiver, crie um rapidinho em qualquer provedor.";
+        reply = "📧 Esse aqui é *importante*! É o login do seu app *iGreen Club* 📱\n\nMe passa um e-mail seu — pode criar rapidinho em qualquer provedor (Gmail, Outlook, iCloud…).";
         break;
       }
       if (!isValidEmailFormat(txt)) {
