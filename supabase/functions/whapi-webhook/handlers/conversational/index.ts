@@ -1096,86 +1096,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     }
   }
 
-  // ─── Restart por saudação ──────────────────────────────────────────
-  // Se o lead manda "Oi/Olá/Bom dia/..." e já está em qualquer step que
-  // NÃO seja o primeiro ativo do fluxo, reinicia no Passo 1 e cascateia
-  // a partir dali. Isso garante que TODOS os passos sejam executados em
-  // ordem (áudio de Boas-vindas, pergunta do valor da conta, etc.) ao
-  // invés de retomar do meio do funil.
-  const saudacaoRegex = /\b(oi+|ol[áa]|bom dia|boa tarde|boa noite|opa|e a[íi]|eai|hello|hi)\b/i;
-  const isSaudacao = cls.intent === "saudacao" || saudacaoRegex.test(ctx.messageText || "");
-  // Saudação no PRIMEIRO passo ativo: não reseta nem cai no fallback.
-  // Responde apenas com a pergunta corrente do passo (renderizada), evitando
-  // o efeito "bot pediu pra confirmar onde paramos" logo no início.
-  if (isSaudacao && currentStep.id === firstActive.id) {
-    const greetVars = {
-      nome: captureUpdates.name || ctx.customer.name,
-      representante: ctx.nomeRepresentante,
-      valor_conta: captureUpdates.electricity_bill_value ?? (ctx.customer as any).electricity_bill_value,
-      telefone: captureUpdates.phone_whatsapp || ctx.customer.phone_whatsapp,
-      cpf: captureUpdates.cpf || (ctx.customer as any).cpf,
-    };
-    const rawQ = (currentStep.message_text || "").trim();
-    let question = rawQ ? renderTemplate(rawQ, greetVars) : "";
-    question = question.replace(/\{\{\s*[^}]+\s*\}\}/g, "").replace(/\s{2,}/g, " ").trim();
-    if (question) {
-      console.log(`[conversational] 👋 saudação no firstActive (${currentStep.step_key}) → repete pergunta do passo, sem reset`);
-      return _finalize(stepKey, {
-        reply: question,
-        updates: {
-          conversation_step: currentStep.id,
-          __intent: cls.intent,
-          __confidence: cls.confidence,
-          ...captureUpdates,
-          ...restoreDetourUpdates,
-        },
-      });
-    }
-    // sem texto no passo → segue fluxo normal (provavelmente vai cascatear mídia).
-  }
-  if (isSaudacao && currentStep.id !== firstActive.id) {
-    console.log(`[conversational] 🔁 saudação detectada em step=${currentStep.step_key} → restart no Passo 1 (${firstActive.step_key})`);
-    const restartVars = {
-      nome: captureUpdates.name || ctx.customer.name,
-      representante: ctx.nomeRepresentante,
-      valor_conta: captureUpdates.electricity_bill_value ?? (ctx.customer as any).electricity_bill_value,
-      telefone: captureUpdates.phone_whatsapp || ctx.customer.phone_whatsapp,
-      cpf: captureUpdates.cpf || (ctx.customer as any).cpf,
-    };
-    const parts: string[] = [];
-    let anyMediaSent = false;
-    let cursor: DbStep | undefined = firstActive;
-    const visited = new Set<string>();
-    let landingStepId = firstActive.id;
-    while (cursor && !visited.has(cursor.id)) {
-      visited.add(cursor.id);
-      landingStepId = cursor.id;
-      const { mediaSent } = await sendStepMedia(ctx, cursor, consultantId, true);
-      if (mediaSent === true) anyMediaSent = true;
-      const tpl = (cursor.message_text || "").trim();
-      if (tpl) parts.push(renderTemplate(tpl, restartVars));
-      const stepHasContent = !!tpl || mediaSent === true;
-      if (cursor.wait_for === "reply" || cursor.wait_for === "media") break;
-      const nextId = cursor.fallback?.mode === "goto" ? cursor.fallback?.goto_step_id : null;
-      if (!nextId) break;
-      const next = dbSteps.find((s) => s.id === nextId && s.is_active);
-      if (!next) break;
-      if (stepHasContent && cursor.wait_for !== "none") break;
-      cursor = next;
-    }
-    const reply = parts.filter((p) => p && p.trim()).join("\n\n");
-    return _finalize(stepKey, {
-      reply,
-      updates: {
-        conversation_step: landingStepId,
-        __inline_sent: anyMediaSent || undefined,
-        __intent: cls.intent,
-        __confidence: cls.confidence,
-        ...captureUpdates,
-        ...restoreDetourUpdates,
-      },
-    });
-  }
+  // ─── Saudação ──────────────────────────────────────────────────────
+  // "Bom dia/Boa tarde/Boa noite/Oi" não muda o fluxo. _finalize prefixa
+  // a resposta no mesmo tom; o lead segue exatamente no passo em que está.
+
+
 
   // Global overrides: cadastro / humano keywords win in any step
   if (cls.intent === "quer_cadastrar") {
