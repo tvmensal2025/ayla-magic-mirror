@@ -137,7 +137,7 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
 
   async function doReset(row: Row) {
     const res = await resetLeadConversation({ consultantId: userId, customerId: row.id });
-    if (!res.ok) toast({ title: "Erro ao resetar", description: res.error, variant: "destructive" });
+    if (!res.ok) toast({ title: "Erro ao resetar", description: (res as any).error, variant: "destructive" });
     else { toast({ title: "🔄 Conversa reiniciada" }); load(); }
     setConfirmReset(null);
   }
