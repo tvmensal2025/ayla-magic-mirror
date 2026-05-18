@@ -135,9 +135,10 @@ export function ResultsDashboard({
     return t;
   }, [filteredMetrics]);
 
-  const cpl = totals.leads > 0 ? totals.spend / totals.leads / 100 : 0;
-  const cpa = totals.registrations > 0 ? totals.spend / totals.registrations / 100 : 0;
-  const convRate = totals.leads > 0 ? (totals.registrations / totals.leads) * 100 : 0;
+  // CPL/CPA usam os dados REAIS do CRM (não os reportados pela Meta, que dependem do Pixel)
+  const cpl = realLeads > 0 ? totals.spend / realLeads / 100 : 0;
+  const cpa = acquired > 0 ? totals.spend / acquired / 100 : 0;
+  const convRate = realLeads > 0 ? (acquired / realLeads) * 100 : 0;
   const roiMensal = (acquired * TICKET_MEDIO_MENSAL) - (totals.spend / 100);
 
   const chartData = useMemo(() => {
