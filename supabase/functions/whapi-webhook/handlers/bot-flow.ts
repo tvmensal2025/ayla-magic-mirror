@@ -1998,12 +1998,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   });
                 } catch (e) { console.warn("[custom-step-resolver] handoff alert falhou:", (e as Error).message); }
                 try {
-                  await notifyHandoff(supabase, customer.consultant_id || consultorId, {
-                    customer_id: customer.id,
-                    phone: customer.phone_whatsapp || phone,
-                    name: customer.name || "Lead",
-                    reason: "Lead travado no fluxo (passo sem resposta válida após 2 tentativas)",
-                  } as any).catch(() => {});
+                  notifyHandoff(
+                    customer.consultant_id || consultorId,
+                    {
+                      id: customer.id,
+                      name: (customer as any).name,
+                      phone_whatsapp: (customer as any).phone_whatsapp || phone,
+                      conversation_step: stepKeyForRetry,
+                    },
+                    messageText,
+                    "custom_step_no_match_retries_exhausted",
+                  ).catch((e) => console.warn("[notify-handoff] falhou:", (e as Error).message));
                 } catch (_) { /* notify opcional */ }
                 return {
                   reply: "Vou chamar um consultor humano pra te ajudar agora, tá bom? Em instantes alguém responde por aqui. 👋",
