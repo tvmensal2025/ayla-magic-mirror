@@ -560,10 +560,24 @@ let _currentTurnStepQuestion: string = "";
 // deno-lint-ignore no-explicit-any
 let _currentTurnVars: any = {};
 let _currentTurnCustomerId: string | null = null;
+let _currentTurnMessageText: string = "";
 // deno-lint-ignore no-explicit-any
 function _setTurnStepQuestion(q: string, vars?: any) {
   _currentTurnStepQuestion = (q || "").trim();
   _currentTurnVars = vars || {};
+}
+
+// Detecta saudação no texto do lead e devolve o prefixo correspondente
+// no mesmo tom ("Bom dia!", "Boa tarde!", "Boa noite!", "Oi!"). Retorna ""
+// quando não há saudação — assim o fluxo segue sem alterações.
+function greetingPrefix(text: string): string {
+  const t = (text || "").toLowerCase();
+  if (!t) return "";
+  if (/\bbom\s*dia\b/.test(t)) return "Bom dia!";
+  if (/\bboa\s*tarde\b/.test(t)) return "Boa tarde!";
+  if (/\bboa\s*noite\b/.test(t)) return "Boa noite!";
+  if (/\b(oi+|ol[áa]|opa|e a[íi]|eai|hello|hi)\b/.test(t)) return "Oi!";
+  return "";
 }
 function _extractTail(t: string): string {
   if (!t) return "";
