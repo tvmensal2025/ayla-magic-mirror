@@ -39,6 +39,22 @@ Deno.serve(async (req) => {
       return json({ connected: true, error: (acc as any).error });
     }
 
+    // Permissões concedidas / negadas
+    const perms = await fbFetch(`/me/permissions?access_token=${platform.token}`).catch(() => ({ data: [] }));
+    const granted: string[] = [];
+    const declined: string[] = [];
+    for (const p of ((perms as any).data || [])) {
+      if (p.status === "granted") granted.push(p.permission);
+      else declined.push(p.permission);
+    }
+    const REQUIRED = [
+      "ads_management", "ads_read", "business_management", "leads_retrieval",
+      "pages_show_list", "pages_read_engagement", "pages_manage_metadata",
+      "pages_manage_ads", "instagram_basic", "instagram_manage_insights",
+      "read_insights",
+    ];
+    const missing = REQUIRED.filter((p) => !granted.includes(p));
+
     const balance_cents = toCents((acc as any).balance);
     const lifetime_amount_spent_cents = toCents((acc as any).amount_spent);
     const spend_cap_cents = toCents((acc as any).spend_cap);
@@ -63,6 +79,9 @@ Deno.serve(async (req) => {
       .sort()
       .at(-1) ?? null;
 
+    // Δ = quanto a Meta gastou que o sistema ainda não contabilizou
+    const delta_unsynced_cents = Math.max(0, lifetime_amount_spent_cents - system_spend_cents);
+
     return json({
       connected: true,
       ad_account_id: platform.ad_account_id,
@@ -74,10 +93,17 @@ Deno.serve(async (req) => {
       system_spend_cents,
       system_charged_cents,
       lifetime_amount_spent_cents,
+      delta_unsynced_cents,
       spend_cap_cents,
       available_cents,
       has_funding: !!(acc as any).funding_source_details || prepaidAccount || spend_cap_cents > 0,
       last_system_sync_at,
+      permissions: {
+        granted,
+        declined,
+        missing,
+        all_ok: missing.length === 0,
+      },
     });
   } catch (err) {
     console.error("[fb-platform-balance]", err);

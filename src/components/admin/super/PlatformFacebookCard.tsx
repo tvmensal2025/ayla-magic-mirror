@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Facebook, CheckCircle2, AlertCircle, Loader2, Wallet, RefreshCw, Settings2 } from "lucide-react";
+import { Facebook, CheckCircle2, AlertCircle, Loader2, Wallet, RefreshCw, Settings2, ShieldCheck, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { getPlatformFacebookStatus, listFacebookAssets, selectFacebookAssets, startFacebookOAuth, type FbAssets, type PlatformFacebookStatus } from "@/services/facebookAds";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -17,11 +18,18 @@ interface PlatformBalance {
   system_spend_cents?: number;
   system_charged_cents?: number;
   lifetime_amount_spent_cents?: number;
+  delta_unsynced_cents?: number;
   spend_cap_cents?: number;
   available_cents?: number;
   has_funding?: boolean;
   account_status?: number | null;
   last_system_sync_at?: string | null;
+  permissions?: {
+    granted: string[];
+    declined: string[];
+    missing: string[];
+    all_ok: boolean;
+  };
   error?: string;
 }
 
@@ -76,6 +84,17 @@ export function PlatformFacebookCard() {
       window.location.href = res.url;
     } catch (e: any) {
       toast({ title: "Erro ao iniciar conexão", description: e?.message, variant: "destructive" });
+      setConnecting(false);
+    }
+  }
+
+  async function handleRerequest() {
+    setConnecting(true);
+    try {
+      const res = await startFacebookOAuth({ scope: "platform", mode: "rerequest" });
+      window.location.href = res.url;
+    } catch (e: any) {
+      toast({ title: "Erro ao re-solicitar permissões", description: e?.message, variant: "destructive" });
       setConnecting(false);
     }
   }
@@ -220,6 +239,14 @@ export function PlatformFacebookCard() {
                   <p>Histórico total da conta Meta: <span className="text-foreground">{fmt(balance.lifetime_amount_spent_cents, balance.currency)}</span></p>
                   <p>Última sincronização do sistema: <span className="text-foreground">{balance.last_system_sync_at ? new Date(balance.last_system_sync_at).toLocaleString("pt-BR") : "—"}</span></p>
                 </div>
+                {(balance.delta_unsynced_cents ?? 0) > 50 && (
+                  <div className="rounded-lg bg-warning/10 border border-warning/30 p-2.5 text-xs space-y-0.5">
+                    <p className="font-medium text-warning flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5" /> Δ não sincronizado: {fmt(balance.delta_unsynced_cents, balance.currency)}
+                    </p>
+                    <p className="text-muted-foreground">A Meta já gastou esse valor que o sistema ainda não debitou. Próximo sync cobre.</p>
+                  </div>
+                )}
                 {!balance.has_funding && (
                   <p className="text-xs text-warning flex items-center gap-1.5">
                     <AlertCircle className="w-3.5 h-3.5" /> Sem forma de pagamento configurada na Meta.
@@ -228,6 +255,34 @@ export function PlatformFacebookCard() {
               </>
             ) : null}
           </div>}
+
+          {balance?.permissions && (
+            <div className="rounded-xl bg-card/60 border border-border/60 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-foreground">
+                  <ShieldCheck className={`w-5 h-5 ${balance.permissions.all_ok ? "text-primary" : "text-warning"}`} />
+                  <span className="font-medium">Permissões Meta {balance.permissions.all_ok ? "(todas concedidas)" : `(${balance.permissions.missing.length} faltando)`}</span>
+                </div>
+                {!balance.permissions.all_ok && (
+                  <Button size="sm" variant="outline" onClick={handleRerequest} disabled={connecting} className="gap-1.5">
+                    {connecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
+                    Solicitar permissões faltando
+                  </Button>
+                )}
+              </div>
+              {balance.permissions.missing.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {balance.permissions.missing.map((p) => (
+                    <Badge key={p} variant="outline" className="border-warning/40 text-warning text-xs">{p}</Badge>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Concedidas: {balance.permissions.granted.length} · Negadas: {balance.permissions.declined.length}
+                {!balance.permissions.all_ok && " · Algumas exigem App Review aprovado da Meta para funcionar com usuários fora da BM."}
+              </p>
+            </div>
+          )}
         </>
       ) : (
         <div className="rounded-xl bg-warning/10 border border-warning/30 p-4 space-y-3">

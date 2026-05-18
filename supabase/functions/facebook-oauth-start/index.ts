@@ -11,7 +11,15 @@ const FB_VERSION = "v21.0";
 const SCOPES = [
   "ads_management",
   "ads_read",
+  "business_management",
+  "leads_retrieval",
   "pages_show_list",
+  "pages_read_engagement",
+  "pages_manage_metadata",
+  "pages_manage_ads",
+  "instagram_basic",
+  "instagram_manage_insights",
+  "read_insights",
   "email",
   "public_profile",
 ].join(",");
@@ -65,14 +73,15 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Modo: 'connect' (padrão) ou 'switch' (forçar troca de conta)
+    // Modo: 'connect' (padrão), 'switch' (forçar troca de conta) ou 'rerequest' (re-pedir permissões negadas)
     // Escopo: 'user' (consultor) ou 'platform' (conta única da plataforma — só super admin).
-    let mode: "connect" | "switch" = "connect";
+    let mode: "connect" | "switch" | "rerequest" = "connect";
     let scope: "user" | "platform" = "user";
     let body: any = {};
     try {
       body = await req.json().catch(() => ({}));
       if (body?.mode === "switch") mode = "switch";
+      else if (body?.mode === "rerequest") mode = "rerequest";
       if (body?.scope === "platform") scope = "platform";
     } catch (_) { /* sem body */ }
 
@@ -107,10 +116,12 @@ Deno.serve(async (req) => {
     url.searchParams.set("state", state);
     if (mode === "switch") {
       // Solicita ao Facebook reautenticar/permitir trocar conta.
-      // Obs.: o Facebook não garante 100% que pedirá senha — depende dos cookies do navegador.
       url.searchParams.set("auth_type", "reauthenticate");
       url.searchParams.set("prompt", "login");
       url.searchParams.set("force_authentication", "1");
+    } else if (mode === "rerequest") {
+      // Re-pede permissões que o usuário negou antes — sem isso, scopes negados não voltam a aparecer.
+      url.searchParams.set("auth_type", "rerequest");
     }
 
     // URL auxiliar de logout do Facebook (para casos em que o usuário queira garantir troca de conta)
