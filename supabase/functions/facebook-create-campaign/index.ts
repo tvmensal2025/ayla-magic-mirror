@@ -509,7 +509,7 @@ Deno.serve(async (req) => {
       link: waLink,
       call_to_action: {
         type: "WHATSAPP_MESSAGE",
-        value: { app_destination: "WHATSAPP", page: conn.page_id, link: waLink },
+        value: { link: waLink },
       },
       image_hash,
     });
