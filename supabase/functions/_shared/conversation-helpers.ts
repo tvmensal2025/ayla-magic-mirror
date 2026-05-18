@@ -111,10 +111,10 @@ export function getReplyForStep(step: string, c: any): string {
       return `📞 Esse é o seu *telefone de contato*?\n\n*${fmt}*`;
     }
     case "ask_phone": return "Informe seu *telefone* com DDD (ex: 11999998888):";
-    case "ask_email": return "📧 Qual é o seu *e-mail*?\n\nPrecisa ser um e-mail *seu, que você usa de verdade* — qualquer provedor (Outlook, iCloud, Yahoo, Gmail, do trabalho...). É por ele que o portal manda o código de acesso.";
+    case "ask_email": return "📧 *Seu e-mail*\n_O portal envia um código por ele._";
     case "ask_cep": return "Qual o seu *CEP*? (8 dígitos)";
     case "ask_number": return `📍 Endereço: *${c.address_street || ""}*\n\nQual o *número* da residência?`;
-    case "ask_complement": return "Tem *complemento*? (ex: Apto 12)";
+    case "ask_complement": return "🏠 *Tem complemento no endereço?*\n_Apto, bloco, casa, fundos, etc._";
     case "ask_installation_number": return "Qual o *número da instalação* de energia?\n(Campo \"Seu Código\" na conta de luz)";
     case "ask_bill_value": return "Qual o *valor médio* da sua conta de luz? (ex: 350)";
     case "ask_doc_frente_manual": return "📸 Envie a *FRENTE do seu documento* (RG ou CNH)";

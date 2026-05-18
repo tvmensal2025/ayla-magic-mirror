@@ -352,10 +352,10 @@ function getReentryPromptForStep(step: string, customer: any): string {
     "ask_birth_date": `${v}qual sua *data de nascimento*? (DD/MM/AAAA)`,
     "ask_phone": `${v}me confirma seu *telefone* (com DDD)?`,
     "ask_phone_confirm": `${v}me confirma seu *telefone* (com DDD)?`,
-    "ask_email": `${v}me passa seu *e-mail* 📧 (qualquer um que você usa no dia a dia)`,
+    "ask_email": `${v}me passa seu *e-mail* 📧`,
     "ask_cep": `${v}qual o *CEP* da sua casa? (8 dígitos)`,
     "ask_number": `${v}qual o *número* da sua casa?`,
-    "ask_complement": `${v}tem *complemento*? (apto, bloco) — ou diga "não".`,
+    "ask_complement": `${v}tem *complemento* no endereço? (apto, bloco) — ou *PULAR* / *NÃO TEM*.`,
     "ask_installation_number": `${v}qual o *número da instalação* da conta?`,
     "ask_bill_value": `${v}qual a *média* da sua conta de luz? (ex: 350,50)`,
     "ask_tipo_documento": `Me manda só uma foto da *frente do seu documento* (RG ou CNH — eu identifico sozinho).`,
@@ -3623,18 +3623,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "ask_email": {
       const txt = (messageText || "").trim();
       const lower = txt.toLowerCase();
-      // ⚠️ Email é OBRIGATÓRIO no portal iGreen. Não aceitar PULAR — repetir até cliente fornecer email real.
+      // ⚠️ Email é OBRIGATÓRIO no portal iGreen. Não aceitar PULAR.
       if (["pular", "skip", "não tenho", "nao tenho", "sem email", "sem e-mail", "n", "não", "nao"].includes(lower)) {
-        reply = "📧 Preciso de um *e-mail* pra liberar seu cadastro no portal iGreen.\n\nPode ser qualquer e-mail seu — do trabalho, pessoal, antigo, novo. Se não tiver nenhum agora, crie um rapidinho (leva 1 minuto) em qualquer provedor.\n\nQuando tiver, é só mandar aqui.";
+        reply = "📧 Preciso de um *e-mail seu* — é por ele que o portal manda o código.\n\nSe não tiver, crie um rapidinho em qualquer provedor.";
         break;
       }
-      // ── Validação dura: formato + placeholder + email do consultor ──
       if (!isValidEmailFormat(txt)) {
-        reply = "❌ Não consegui ler esse e-mail. Confere se digitou certinho (precisa ter @ e o domínio, ex: *seunome@dominio.com*) e me manda de novo:";
+        reply = "❌ E-mail inválido. Confere o *@* e o domínio (ex: *seunome@gmail.com*):";
         break;
       }
       if (isPlaceholderEmail(txt)) {
-        reply = "❌ Esse e-mail parece de teste. Me manda o e-mail *que você usa de verdade* — é por ele que o portal vai mandar o código:";
+        reply = "❌ Esse e-mail parece de teste. Me manda o seu *de verdade*:";
         break;
       }
       // Bloquear email do consultor dono
@@ -3645,7 +3644,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           .eq("id", consultorId)
           .maybeSingle();
         if (cons?.igreen_portal_email && isSameContact(txt, cons.igreen_portal_email)) {
-          reply = "❌ Esse é o e-mail do consultor. Preciso de um e-mail *seu, diferente desse* — pode ser qualquer provedor:";
+          reply = "❌ Esse é o e-mail do consultor. Preciso de um e-mail *seu*:";
           break;
         }
       } catch (_) { /* segue */ }
@@ -3654,9 +3653,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const next = await autoResolveCepIfNeeded(merged, updates);
       updates.conversation_step = next;
       if (next === "ask_email") {
-        // Algum validador secundário ainda recusa esse e-mail. Em vez de
-        // repetir a pergunta padrão, explicar e pedir um e-mail diferente.
-        reply = "❌ Esse e-mail não foi aceito pelo sistema. Me manda um *outro e-mail seu* — qualquer provedor (Outlook, iCloud, Yahoo, Gmail...):";
+        reply = "❌ E-mail não aceito. Me manda *outro e-mail seu* (qualquer provedor):";
       } else {
         reply = getReplyForStep(next, merged);
       }
@@ -3694,7 +3691,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     case "ask_complement": {
       const resp = isButton ? buttonId : (messageText || "").toLowerCase().trim();
-      const skipWords = ["não", "nao", "n", "pular", "skip", "sem complemento", "sem", "nenhum", "skip_complement"];
+      const skipWords = ["não", "nao", "n", "pular", "skip", "sem complemento", "sem", "nenhum", "não tem", "nao tem", "skip_complement", "no_complement"];
 
       // Cliente pediu para adicionar complemento → repete o passo aguardando o texto
       if (resp === "add_complement") {
@@ -3703,19 +3700,24 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         break;
       }
 
-      // Pular (botão skip_complement OU palavras-chave) → salva vazio
-      if (resp === "skip_complement" || skipWords.includes(String(resp).toLowerCase())) {
+      // Pular / Não tem → salva vazio
+      if (resp === "skip_complement" || resp === "no_complement" || skipWords.includes(String(resp).toLowerCase())) {
         updates.address_complement = "";
       } else if (messageText && messageText.trim().length > 0) {
         updates.address_complement = messageText.trim();
       } else {
-        // Sem texto válido nem botão → reenvia pergunta com botões
-        const sent = await sendOptions(remoteJid, "Tem *complemento*? (ex: Apto 12)", [
-          { id: "add_complement", title: "✍️ Adicionar" },
-          { id: "skip_complement", title: "⏭️ Pular" },
-        ]);
+        // Sem texto válido nem botão → reenvia pergunta com 3 botões
+        const sent = await sendOptions(
+          remoteJid,
+          "🏠 *Tem complemento no endereço?*\n_Apto, bloco, casa, fundos, etc._",
+          [
+            { id: "add_complement", title: "✍️ Adicionar" },
+            { id: "skip_complement", title: "⏭️ Pular" },
+            { id: "no_complement", title: "🚫 Não tem" },
+          ],
+        );
         if (sent) { reply = ""; (updates as any).__inline_sent = true; }
-        else reply = "Tem complemento? Digite o complemento ou *PULAR* se não tiver.";
+        else reply = "🏠 Tem complemento? Digite o complemento, *PULAR* ou *NÃO TEM*.";
         break;
       }
 
@@ -4192,6 +4194,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const sent = await sendButtons(remoteJid, reply, [
         { id: "add_complement", title: "✍️ Adicionar" },
         { id: "skip_complement", title: "⏭️ Pular" },
+        { id: "no_complement", title: "🚫 Não tem" },
       ]);
       if (sent) { reply = ""; (updates as any).__inline_sent = true; }
     }

@@ -467,6 +467,150 @@ Retorne APENAS este JSON, sem markdown:
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Passadas focadas: RG, NOME e NASCIMENTO (mesmo padrão de ocrCpfFocado)
+// Usadas quando o OCR principal não conseguiu extrair o campo, garantindo
+// que RG antigo, RG novo/CIN, CNH antiga e CNH nova nunca falhem em silêncio.
+// ─────────────────────────────────────────────────────────────────────
+
+async function gemFocado(prompt: string, img: { mime: string; b64: string }, geminiApiKey: string, maxTokens = 256): Promise<any | null> {
+  try {
+    const res = await fetchWithTimeout(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }, { inline_data: { mime_type: img.mime, data: img.b64 } }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: maxTokens, responseMimeType: "application/json" },
+        }),
+        timeout: TIMEOUT_GEMINI,
+      },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const m = text.match(/\{[\s\S]*\}/);
+    return m ? JSON.parse(m[0]) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export async function ocrRgFocado(
+  imagemUrl: string | null, geminiApiKey: string, base64?: string, mediaMessage?: any, lado: "frente" | "verso" = "verso",
+): Promise<string> {
+  try {
+    if (!geminiApiKey) return "";
+    const img = await baixarImagem(imagemUrl, base64, mediaMessage);
+    if (!img) return "";
+    const prompt = `Sua ÚNICA tarefa é encontrar o número do *REGISTRO GERAL (RG)* nesta imagem de documento brasileiro.
+
+CONTEXTO: a imagem é do *${lado.toUpperCase()}* do documento.
+
+ONDE PROCURAR:
+- RG ANTIGO (cartão verde de papel): o número do REGISTRO GERAL fica no VERSO, geralmente impresso em VERMELHO, rotulado "REGISTRO GERAL" — formato XX.XXX.XXX-X (ex.: 60.070.001-X).
+- RG NOVO / CIN (policarbonato): o número fica na FRENTE, rotulado "RG" ou "Registro Geral".
+- CNH: campo "RG" ou "Identidade".
+
+REGRAS:
+- Tamanho típico: 7 a 12 caracteres.
+- Preserve o dígito verificador final, mesmo se for letra X (use 'X' literal).
+- Retorne APENAS dígitos + (opcionalmente) 'X' no final. Remova pontos, traços e espaços.
+- NÃO confunda com: nº de série/controle da lateral da FRENTE do RG antigo, CPF, título de eleitor, CNS (15 dígitos), PIS/NIS, CNH.
+- Se não encontrar com certeza, retorne "" (string vazia). NUNCA chute.
+
+Retorne APENAS este JSON, sem markdown:
+{"rg":""}`;
+    const obj = await gemFocado(prompt, img, geminiApiKey);
+    const rgRaw = String(obj?.rg || "").trim();
+    if (!rgRaw) return "";
+    const rgNorm = normalizarRG(rgRaw);
+    if (rgNorm) {
+      console.log(`✅ [ocrRgFocado:${lado}] RG recuperado: ${rgNorm}`);
+      return rgNorm;
+    }
+    const limpo = rgRaw.replace(/[^\dXx]/g, "").toUpperCase();
+    if (limpo.length >= 7 && limpo.length <= 12) {
+      console.log(`✅ [ocrRgFocado:${lado}] RG (raw) recuperado: ${limpo}`);
+      return limpo;
+    }
+    return "";
+  } catch (e: any) {
+    console.warn("⚠️ ocrRgFocado falhou:", e?.message || e);
+    return "";
+  }
+}
+
+export async function ocrNomeFocado(
+  imagemUrl: string | null, geminiApiKey: string, base64?: string, mediaMessage?: any,
+): Promise<string> {
+  try {
+    if (!geminiApiKey) return "";
+    const img = await baixarImagem(imagemUrl, base64, mediaMessage);
+    if (!img) return "";
+    const prompt = `Sua ÚNICA tarefa é encontrar o *NOME COMPLETO do TITULAR* nesta imagem de documento brasileiro (RG ou CNH).
+
+REGRAS:
+- Retorne o nome do TITULAR (campo "NOME" / "NOME COMPLETO" / "NOME E SOBRENOME").
+- NÃO retorne nome do pai, nome da mãe, naturalidade, ou nome da autoridade.
+- Nome completo brasileiro: 2 a 8 palavras, sem números, sem símbolos.
+- Mantenha maiúsculas/minúsculas como no documento.
+- Se não tiver certeza, retorne "" (string vazia). NUNCA chute.
+
+Retorne APENAS este JSON, sem markdown:
+{"nome":""}`;
+    const obj = await gemFocado(prompt, img, geminiApiKey);
+    const nome = validarNomeOCR(String(obj?.nome || ""));
+    if (nome) {
+      console.log(`✅ [ocrNomeFocado] nome recuperado: ${nome}`);
+      return nome;
+    }
+    return "";
+  } catch (e: any) {
+    console.warn("⚠️ ocrNomeFocado falhou:", e?.message || e);
+    return "";
+  }
+}
+
+export async function ocrNascimentoFocado(
+  imagemUrl: string | null, geminiApiKey: string, base64?: string, mediaMessage?: any,
+): Promise<string> {
+  try {
+    if (!geminiApiKey) return "";
+    const img = await baixarImagem(imagemUrl, base64, mediaMessage);
+    if (!img) return "";
+    const prompt = `Sua ÚNICA tarefa é encontrar a *DATA DE NASCIMENTO* nesta imagem de documento brasileiro (RG ou CNH).
+
+REGRAS:
+- Retorne SOMENTE a data rotulada como "DATA DE NASCIMENTO" / "NASCIMENTO" / "DATA NASC." / "DT. NASC.".
+- ❌ NÃO retorne: data de emissão, data de validade, data de expedição, primeira habilitação, qualquer outra data.
+- Formato de saída: DD/MM/AAAA.
+- O ano deve ser plausível (entre 1920 e ${new Date().getFullYear() - 17}).
+- Se não tiver certeza, retorne "" (string vazia). NUNCA chute.
+
+Retorne APENAS este JSON, sem markdown:
+{"dataNascimento":""}`;
+    const obj = await gemFocado(prompt, img, geminiApiKey);
+    const dt = validarDataNascimento(String(obj?.dataNascimento || ""));
+    if (dt) {
+      const m = dt.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (m) {
+        const ano = parseInt(m[3], 10);
+        const max = new Date().getFullYear() - 17;
+        if (ano >= 1920 && ano <= max) {
+          console.log(`✅ [ocrNascimentoFocado] data recuperada: ${dt}`);
+          return dt;
+        }
+      }
+    }
+    return "";
+  } catch (e: any) {
+    console.warn("⚠️ ocrNascimentoFocado falhou:", e?.message || e);
+    return "";
+  }
+}
+
 /**
  * OCR frente e verso do documento.
  * Parâmetros renomeados para clareza:
@@ -489,12 +633,29 @@ export async function ocrDocumentoFrenteVerso(
   const temVerso = !!(versoUrl || versoBase64);
 
   if (!temVerso) {
-    // Sem verso: se faltou CPF, tenta segunda passada focada na frente
+    // Sem verso: roda retries focados em todos os campos críticos na própria frente.
+    const rec: string[] = [];
     if (!d.cpf || d.cpf.length !== 11) {
-      console.log("🔁 OCR Doc (só frente) sem CPF — tentando segunda passada focada");
       const cpf2 = await ocrCpfFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
-      if (cpf2) d.cpf = cpf2;
+      if (cpf2) { d.cpf = cpf2; rec.push("cpf"); }
     }
+    const rgDig = (d.rg || "").replace(/[^\dXx]/g, "");
+    if (!rgDig || rgDig.length < 7) {
+      const rg2 = await ocrRgFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg, "frente");
+      if (rg2) { d.rg = rg2; rec.push("rg"); }
+    }
+    if (!validarNomeOCR(d.nome)) {
+      const n2 = await ocrNomeFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
+      if (n2) { d.nome = n2; rec.push("nome"); }
+    }
+    if (!validarDataNascimento(d.dataNascimento)) {
+      const dt2 = await ocrNascimentoFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
+      if (dt2) { d.dataNascimento = dt2; rec.push("nascimento"); }
+    }
+    const criticos = [d.nome, d.cpf, d.rg, d.dataNascimento];
+    const preenchidos = criticos.filter((v: any) => v && String(v).trim().length > 0).length;
+    d.confianca = Math.round((preenchidos / criticos.length) * 100);
+    if (rec.length > 0) console.log(`🔁 OCR Doc (só frente) recuperou: ${rec.join(", ")} (conf ${d.confianca}%)`);
     console.log("✅ OCR Doc (só frente) OK:", JSON.stringify(d).substring(0, 400));
     return { sucesso: true, dados: d };
   }
@@ -532,16 +693,46 @@ export async function ocrDocumentoFrenteVerso(
   if (d.rg) d.rg = normalizarRG(d.rg) || (d.rg.replace(/\D/g, "").length >= 7 && d.rg.replace(/\D/g, "").length <= 12 ? d.rg.replace(/\D/g, "") : "");
   if (d.dataNascimento) d.dataNascimento = validarDataNascimento(d.dataNascimento);
 
-  // 🎯 ÚLTIMA TENTATIVA: se mesmo com frente+verso o CPF não veio, faz passada focada
-  // em ambas as imagens. Resolve casos em que o CPF está em cabeçalho/áreas atípicas.
+  // 🎯 RETRIES FOCADOS: garante que nome, CPF, RG e nascimento sejam encontrados
+  // mesmo em RG antigo, RG novo/CIN, CNH antiga ou CNH nova. Alterna frente/verso.
+  const recuperados: string[] = [];
+
+  // CPF
   if (!d.cpf || d.cpf.length !== 11) {
-    console.log("🔁 OCR Doc (frente+verso) sem CPF — passada focada na FRENTE");
     let cpf2 = await ocrCpfFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
-    if (!cpf2) {
-      console.log("🔁 CPF ainda não encontrado — passada focada no VERSO");
-      cpf2 = await ocrCpfFocado(versoUrl, geminiApiKey, versoBase64, undefined);
-    }
-    if (cpf2) d.cpf = cpf2;
+    if (!cpf2) cpf2 = await ocrCpfFocado(versoUrl, geminiApiKey, versoBase64, undefined);
+    if (cpf2) { d.cpf = cpf2; recuperados.push("cpf"); }
+  }
+
+  // RG
+  const rgDigits = (d.rg || "").replace(/[^\dXx]/g, "");
+  if (!rgDigits || rgDigits.length < 7) {
+    let rg2 = await ocrRgFocado(versoUrl, geminiApiKey, versoBase64, undefined, "verso");
+    if (!rg2) rg2 = await ocrRgFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg, "frente");
+    if (rg2) { d.rg = rg2; recuperados.push("rg"); }
+  }
+
+  // NOME
+  if (!validarNomeOCR(d.nome)) {
+    let n2 = await ocrNomeFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
+    if (!n2) n2 = await ocrNomeFocado(versoUrl, geminiApiKey, versoBase64, undefined);
+    if (n2) { d.nome = n2; recuperados.push("nome"); }
+  }
+
+  // NASCIMENTO
+  if (!validarDataNascimento(d.dataNascimento)) {
+    let dt2 = await ocrNascimentoFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
+    if (!dt2) dt2 = await ocrNascimentoFocado(versoUrl, geminiApiKey, versoBase64, undefined);
+    if (dt2) { d.dataNascimento = dt2; recuperados.push("nascimento"); }
+  }
+
+  // Recalcular confiança após retries
+  const criticos = [d.nome, d.cpf, d.rg, d.dataNascimento];
+  const preenchidos = criticos.filter((v: any) => v && String(v).trim().length > 0).length;
+  d.confianca = Math.round((preenchidos / criticos.length) * 100);
+
+  if (recuperados.length > 0) {
+    console.log(`🔁 OCR Doc recuperou via passada focada: ${recuperados.join(", ")} (confiança final ${d.confianca}%)`);
   }
 
   console.log("✅ OCR Doc (frente+verso) OK:", JSON.stringify(d).substring(0, 400));

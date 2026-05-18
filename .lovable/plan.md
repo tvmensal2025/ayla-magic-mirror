@@ -1,60 +1,59 @@
-## Diagnóstico — Donizete
+## Objetivo
 
-O OTP `732320` foi salvo no banco (`otp_received_at: 14:00:38`), mas o portal iGreen ainda mostra a tela de "Confirmação de código" com o campo vazio. Significa que a VPS/Playwright NÃO digitou o código no campo certo e/ou NÃO clicou em "Confirmar" antes de finalizar o job.
+Melhorar a UX do cadastro: mensagem de e-mail mais curta e bonita, passo de complemento com 3 botões e descrição clara, e OCR do documento (RG/CNH, novo ou antigo) mais robusto — fazendo múltiplas passadas para nunca errar nome, CPF, RG e nascimento.
 
-### Por que falhou
+## 1. Pergunta de e-mail mais curta e bonita
 
-Analisando `worker-portal/playwright-automation.mjs` (linhas 1773-1837):
+Arquivo: `supabase/functions/_shared/conversation-helpers.ts` (linha 114)
+Arquivo: `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (linhas 355, 3628, 3633, 3637, 3648, 3659)
 
-1. Após clicar "Finalizar", o worker detecta a tela de OTP e chama `aguardarOTP(customerId, 300000)` (5 min de timeout).
-2. O `aguardarOTP` faz polling em `/otp/{customerId}` e no Supabase a cada 1.5s.
-3. Quando o código chega, ele tenta achar o campo OTP com esses seletores em cascata:
-   - `input[name="token|otp|otpCode|code|verificationCode]`
-   - fallback: `input[maxlength="6|4|8"]`
-   - fallback: `input[placeholder*="código"], input[type="tel"]`
-   - último fallback: qualquer input visível vazio
-4. Em seguida procura um botão `"Confirmar|Verificar|Enviar|Validar|Continuar"`.
+- Trocar o texto longo atual por uma mensagem curta, com hierarquia visual limpa. Exemplo:
+  - `📧 *Seu e-mail*\n_O portal envia um código por ele._\n\nPode ser qualquer e-mail seu (Gmail, Outlook, iCloud, do trabalho…).`
+- Manter as validações (formato, placeholder, e-mail do consultor) mas com mensagens curtas (1–2 linhas), sem repetição de explicações.
+- Centralizar o texto base no `getReplyForStep` e remover duplicações em `bot-flow.ts`.
 
-Problemas que provavelmente ocorreram:
-- O campo OTP no portal não bateu com nenhum dos seletores acima (o portal usa um Material UI input genérico, sem `name`), então o worker pode ter digitado em outro campo ou silenciosamente pulado.
-- O log do worker mostra `"⚠️ Nenhum botão de confirmar OTP encontrado (auto-submit?)"` quando isso acontece — mas o job continua mesmo assim.
-- Como o `try/catch` engole o erro e a "Estratégia 5 (fallback construtivo)" cria o link facial só com `igreen_code + igreen_id`, o worker salvou `link_facial` e encerrou o job mesmo com a etapa OTP inacabada no portal. O `aguardarOTP` pode até ter dado timeout e foi engolido — o portal ficou aberto esperando o código.
+## 2. Passo de complemento com 3 botões + descrição
 
-Outro detalhe crítico: o `link_facial` salvo é o `https://digital.igreenenergy.com.br/validacao-codigo/1463252?id=142381&sendcontract=true` — esse link é justamente a tela do segundo OTP que o cliente vê no print. Sem o primeiro OTP ter sido confirmado pela VPS, o cadastro do portal não chegou a entrar no estágio de assinatura/facial real.
+Arquivo: `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (linhas 3695–3727 e callsite em 4182–4191)
 
-## Plano de correção
+- Substituir o atual `sendOptions` de 2 botões por 3 botões padronizados, com uma descrição curta acima:
+  - Texto: `🏠 *Tem complemento no endereço?*\n_Apto, bloco, casa, fundos, etc._`
+  - Botões:
+    1. `add_complement` → "✍️ Adicionar"
+    2. `skip_complement` → "⏭️ Pular"
+    3. `no_complement` → "🚫 Não tem"
+- Tratar `no_complement` igual a `skip_complement` (salva `address_complement = ""`), mas mantendo o id próprio para telemetria.
+- Garantir que sempre que o passo ficar ativo (entrada, reentrada e callsite no fim do handler) os 3 botões sejam enviados, nunca só texto.
+- Atualizar `getReplyForStep("ask_complement")` para o mesmo texto curto + descrição (fallback quando botões não renderizam).
 
-1. Resgatar o cadastro do Donizete agora
-   - Recolocar o lead na fila do worker (`/force-submit`) com o OTP `732320` já salvo no banco para que, ao chegar na fase OTP, o worker o use imediatamente sem aguardar.
-   - Antes de reenviar, limpar `link_facial`, `link_assinatura`, `facial_link_sent_at`, `otp_code` e voltar `conversation_step` para `aguardando_otp` (mantendo todos os dados já preenchidos).
-   - Restaurar o `name` para "APARECIDO DONIZETE DE OLIVEIRA" (foi sobrescrito por engano para "Código Recebido" pelo multi-field extractor).
+## 3. OCR do documento mais robusto (RG/CNH, novo e antigo)
 
-2. Endurecer a fase OTP no Playwright (`worker-portal/playwright-automation.mjs`)
-   - Adicionar seletores específicos do Material UI usado pelo portal iGreen: `input[id*="token" i]`, `input[id*="otp" i]`, `input[id*="codigo" i]`, `input[aria-label*="código" i]`, `input[autocomplete="one-time-code"]`.
-   - Validar APÓS digitar: ler `value` do input e conferir que bate com o OTP; se não bater, tentar próximo seletor.
-   - Confirmar APÓS clicar "Confirmar": esperar 5s e verificar se a URL mudou ou se apareceu mensagem de sucesso/erro. Se NADA mudou, registrar `error_message = "otp_not_confirmed"` e NÃO seguir para a estratégia 5.
-   - Falhar o job (`throw`) quando OTP não foi confirmado em vez de continuar para fallback construtivo — assim o link facial só é gravado quando o portal realmente passou pra próxima etapa.
+Arquivo: `supabase/functions/_shared/ocr.ts`
 
-3. Proteger a Estratégia 5 (fallback construtivo)
-   - Só construir o link `validacao-codigo` se houve confirmação OTP bem-sucedida (flag `otpConfirmado === true`). Caso contrário, marcar `automation_failed` e logar `pendência: OTP não confirmado no portal`.
+Hoje só o CPF tem segunda passada focada (`ocrCpfFocado`). Vamos generalizar para garantir que todos os campos críticos sejam encontrados, mesmo em RG antigo, RG novo (CIN), CNH nova e CNH antiga.
 
-4. Notificar o cliente quando o OTP falhar
-   - Quando o worker falhar a etapa OTP, atualizar `conversation_step` para `otp_falhou` e o whapi-webhook envia uma mensagem natural pedindo para o cliente reenviar o código (ou aguardar nova tentativa).
+- Criar funções focadas adicionais (mesmo padrão de `ocrCpfFocado`, prompts cirúrgicos):
+  - `ocrRgFocado` — procura o número do Registro Geral, tratando RG antigo (verso, vermelho) vs CIN (frente).
+  - `ocrNascimentoFocado` — procura a data de nascimento, distinguindo das outras datas (emissão/validade na CNH).
+  - `ocrNomeFocado` — procura o nome completo do titular (e descarta nome do pai/mãe).
+- Em `ocrDocumentoFrenteVerso`, depois da consolidação atual, rodar um *retry loop* (até 2 passadas extras) para qualquer campo crítico ainda vazio ou de baixa confiança, alternando frente/verso quando aplicável:
+  - se faltar `cpf` → `ocrCpfFocado` (já existe) na frente e depois no verso.
+  - se faltar `rg`  → `ocrRgFocado` no verso (RG antigo) e depois na frente (CIN/CNH).
+  - se faltar `nome` ou nome inválido → `ocrNomeFocado` na frente.
+  - se faltar `dataNascimento` ou ano implausível → `ocrNascimentoFocado` na frente.
+- Atualizar `confianca` final para refletir o resultado pós-retry e logar quais campos foram recuperados em qual passada.
+- Continuar respeitando os validadores (`normalizarRG`, `validarCPFDigitos`, `validarDataNascimento`, `validarNomeOCR`) — nada entra sem validação.
 
-5. Corrigir bug secundário do nome
-   - Em `supabase/functions/_shared/multi-field-extractor.ts`, incluir `user_confirmed` e `ocr_conta` em `strongNameSources` para impedir que mensagens livres do cliente sobrescrevam nome confirmado.
+## 4. Validação
 
-6. Validar
-   - Observar logs do worker-portal e confirmar `"✅ OTP confirmado (botão Confirmar)"` + screenshot `11-apos-otp` mostrando a tela seguinte (não mais o campo OTP).
-   - Confirmar no banco que `facial_link_sent_at` foi preenchido.
-   - Confirmar com o Donizete (WhatsApp) que recebeu o link e conseguiu fazer a selfie.
+- `bot-flow`: testar fluxo no preview, conferir que:
+  - mensagem de e-mail aparece curta e legível.
+  - passo de complemento mostra os 3 botões (Adicionar / Pular / Não tem) com a descrição.
+- `ocr.ts`: rodar OCR com imagens já conhecidas (Donizete, casos anteriores de RG antigo/novo e CNH) e confirmar nos logs que os retries focados disparam quando algum campo falta e que o `confianca` final sobe.
+- Deploy: `whapi-webhook` (edge function).
 
-## Arquivos envolvidos
+## Arquivos afetados
 
-- `worker-portal/playwright-automation.mjs` — endurecer fase OTP + Estratégia 5
-- `supabase/functions/_shared/multi-field-extractor.ts` — proteger nome
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — novo step `otp_falhou`
-- Migration: resetar Donizete (limpar `link_facial`, `facial_link_sent_at`; restaurar `name`; manter `otp_code`; `conversation_step = aguardando_otp`)
-- Chamada HTTP `/force-submit` ao worker-portal logo após a migration
-
-Importante: as mudanças no `worker-portal/` rodam na VPS (Easypanel) e exigem deploy manual lá. O Lovable só consegue fazer as mudanças no repositório — o usuário precisa atualizar o serviço no Easypanel para que entrem em vigor.
+- `supabase/functions/_shared/conversation-helpers.ts`
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
+- `supabase/functions/_shared/ocr.ts`
