@@ -1713,7 +1713,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
             });
             canSend = data !== false;
           }
-          if (canSend) { try { await ctx.sender.sendMedia(ctx.remoteJid, mr.url, "", kind); } catch (_) {} }
+          if (canSend) { try { await ctx.sender.sendMedia(ctx.remoteJid, mr.url, "", kind, Number((mr as any).duration_sec || 0) || undefined); } catch (_) {} }
         }
       }
 
