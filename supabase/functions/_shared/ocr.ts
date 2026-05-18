@@ -675,16 +675,46 @@ export async function ocrDocumentoFrenteVerso(
   if (d.rg) d.rg = normalizarRG(d.rg) || (d.rg.replace(/\D/g, "").length >= 7 && d.rg.replace(/\D/g, "").length <= 12 ? d.rg.replace(/\D/g, "") : "");
   if (d.dataNascimento) d.dataNascimento = validarDataNascimento(d.dataNascimento);
 
-  // 🎯 ÚLTIMA TENTATIVA: se mesmo com frente+verso o CPF não veio, faz passada focada
-  // em ambas as imagens. Resolve casos em que o CPF está em cabeçalho/áreas atípicas.
+  // 🎯 RETRIES FOCADOS: garante que nome, CPF, RG e nascimento sejam encontrados
+  // mesmo em RG antigo, RG novo/CIN, CNH antiga ou CNH nova. Alterna frente/verso.
+  const recuperados: string[] = [];
+
+  // CPF
   if (!d.cpf || d.cpf.length !== 11) {
-    console.log("🔁 OCR Doc (frente+verso) sem CPF — passada focada na FRENTE");
     let cpf2 = await ocrCpfFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
-    if (!cpf2) {
-      console.log("🔁 CPF ainda não encontrado — passada focada no VERSO");
-      cpf2 = await ocrCpfFocado(versoUrl, geminiApiKey, versoBase64, undefined);
-    }
-    if (cpf2) d.cpf = cpf2;
+    if (!cpf2) cpf2 = await ocrCpfFocado(versoUrl, geminiApiKey, versoBase64, undefined);
+    if (cpf2) { d.cpf = cpf2; recuperados.push("cpf"); }
+  }
+
+  // RG
+  const rgDigits = (d.rg || "").replace(/[^\dXx]/g, "");
+  if (!rgDigits || rgDigits.length < 7) {
+    let rg2 = await ocrRgFocado(versoUrl, geminiApiKey, versoBase64, undefined, "verso");
+    if (!rg2) rg2 = await ocrRgFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg, "frente");
+    if (rg2) { d.rg = rg2; recuperados.push("rg"); }
+  }
+
+  // NOME
+  if (!validarNomeOCR(d.nome)) {
+    let n2 = await ocrNomeFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
+    if (!n2) n2 = await ocrNomeFocado(versoUrl, geminiApiKey, versoBase64, undefined);
+    if (n2) { d.nome = n2; recuperados.push("nome"); }
+  }
+
+  // NASCIMENTO
+  if (!validarDataNascimento(d.dataNascimento)) {
+    let dt2 = await ocrNascimentoFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
+    if (!dt2) dt2 = await ocrNascimentoFocado(versoUrl, geminiApiKey, versoBase64, undefined);
+    if (dt2) { d.dataNascimento = dt2; recuperados.push("nascimento"); }
+  }
+
+  // Recalcular confiança após retries
+  const criticos = [d.nome, d.cpf, d.rg, d.dataNascimento];
+  const preenchidos = criticos.filter((v: any) => v && String(v).trim().length > 0).length;
+  d.confianca = Math.round((preenchidos / criticos.length) * 100);
+
+  if (recuperados.length > 0) {
+    console.log(`🔁 OCR Doc recuperou via passada focada: ${recuperados.join(", ")} (confiança final ${d.confianca}%)`);
   }
 
   console.log("✅ OCR Doc (frente+verso) OK:", JSON.stringify(d).substring(0, 400));
