@@ -490,7 +490,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         const qa = await matchQA(supabase, (flowRow as any).id, customer.consultant_id, questionText);
         if (qa && (qa.text || qa.mediaUrls.length)) {
           for (const m of qa.mediaUrls) {
-            try { await sendMedia(remoteJid, m.url, "", m.kind); } catch (_) { /* segue */ }
+            try { await sendMedia(remoteJid, m.url, "", m.kind, Number((m as any).duration_sec || 0) || undefined); } catch (_) { /* segue */ }
           }
           answer = (qa.text || "").trim();
           source = "faq";
@@ -780,7 +780,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           console.log(`[midflow-qa] hit=true step="${(customer as any).conversation_step}" detour=${(customer as any).detour_count || 0}`);
           // Envia mídias da FAQ (se houver)
           for (const m of qa.mediaUrls) {
-            try { await sendMedia(remoteJid, m.url, "", m.kind); } catch (_) { /* noop */ }
+            try { await sendMedia(remoteJid, m.url, "", m.kind, Number((m as any).duration_sec || 0) || undefined); } catch (_) { /* noop */ }
           }
           const stepKey = String((customer as any).conversation_step || "");
           const reentry = getReentryPromptForStep(stepKey, customer);
@@ -985,7 +985,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         if (delayMs > 0) await new Promise((r) => setTimeout(r, Math.min(delayMs, 10_000)));
 
         try {
-          const ok = await sendMedia(remoteJid, m.url, "", kind);
+          const ok = await sendMedia(remoteJid, m.url, "", kind, Number(m.duration_sec || 0) || undefined);
           if (ok !== false) {
             sent = true;
             await supabase.from("conversations").insert({
@@ -1220,7 +1220,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         mediaId: resolvedMediaId, slotKey: m.slot_key, kind,
       });
       if (!canSend) continue;
-      await sendMedia(remoteJid, url, "", kind);
+      await sendMedia(remoteJid, url, "", kind, durationSec || undefined);
       sentSomething = true;
       await supabase.from("conversations").insert({
         customer_id: customer.id, message_direction: "outbound",
@@ -1378,7 +1378,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (!canSend) continue;
 
               try {
-                const ok = await sendMedia(remoteJid, url, "", kind);
+                const ok = await sendMedia(remoteJid, url, "", kind, durationSec || undefined);
                 if (ok !== false) {
                   sentSomething = true;
                   await supabase.from("conversations").insert({
@@ -1840,7 +1840,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               });
               if (!canSend) continue;
               try {
-                await sendMedia(remoteJid, m.url, cap, k);
+                await sendMedia(remoteJid, m.url, cap, k, Number((m as any).duration_sec || 0) || undefined);
                 if (i < ordered.length - 1 && !isTestMode()) await new Promise((r) => setTimeout(r, 1500));
               } catch (e) {
                 console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);

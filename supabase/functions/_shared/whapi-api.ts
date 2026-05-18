@@ -136,6 +136,7 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
     mediaUrl: string,
     caption: string,
     mediatype: "video" | "image" | "document" | "audio" | "voice" = "video",
+    durationSec?: number,
   ): Promise<boolean> {
     const to = remoteJid.includes("@") ? remoteJid : `${remoteJid}@s.whatsapp.net`;
     const isAudio = mediatype === "audio" || mediatype === "voice";
@@ -274,9 +275,19 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
       }
     };
 
-    sendPresence(remoteJid, isAudio ? "recording" : "typing", 3).catch(() => {});
+    // Presence realista antes do upload:
+    // - Áudio: "gravando" pelo tempo real do arquivo (+1s buffer), entre 4s e 25s.
+    // - Imagem/Vídeo: "digitando" 4-6s aleatório (humano).
+    // Aguardamos o presence subir + pequena pausa para o status aparecer ANTES da mídia.
+    const presenceSec = isAudio
+      ? Math.max(4, Math.min(25, Math.round((durationSec && durationSec > 0 ? durationSec : 6)) + 1))
+      : (4 + Math.floor(Math.random() * 3)); // 4-6s
+    try {
+      await sendPresence(remoteJid, isAudio ? "recording" : "typing", presenceSec);
+    } catch (_) { /* segue mesmo se presence falhar */ }
+    await new Promise((r) => setTimeout(r, 700 + Math.floor(Math.random() * 400))); // 0.7-1.1s
 
-    console.log(`📤 [whapi:sendMedia] -> ${to} (${mediatype} via ${endpoint}) url=…${urlPreview}`);
+    console.log(`📤 [whapi:sendMedia] -> ${to} (${mediatype} via ${endpoint}, presence=${presenceSec}s) url=…${urlPreview}`);
 
     // 1ª tentativa: JSON com URL (rápido quando funciona)
     const initialBody: Record<string, unknown> = isAudio
