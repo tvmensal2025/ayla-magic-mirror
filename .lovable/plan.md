@@ -1,96 +1,82 @@
-## Diagnóstico
+# Diagnóstico do fluxo atual (Rafael Ferreira, 18/05 00:33-00:35)
 
-Hoje o motor (`supabase/functions/whapi-webhook/handlers/bot-flow.ts`) tem **3 caminhos diferentes** para mensagem fora do esperado, e dois deles **cortam** o lead (pausam o bot e silenciam):
+Analisei os logs do `whapi-webhook` e do CRM. A IA está falhando por 4 motivos independentes, todos visíveis no caso do Rafael:
 
-
-| Caminho                                                    | Linhas    | Comportamento atual                                                                                                                             | Problema                                                                                                 |
-| ---------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **A. Midflow QA (steps `ask_*`/`editing_*` de cadastro)**  | 619‑706   | Se a pergunta NÃO casa com a FAQ → pausa o bot (`bot_paused=true`, motivo `duvida_fora_faq`) e devolve `reply:""` (silêncio total para o lead). | Lead fica sem resposta esperando humano que pode demorar. Em escala (100+ consultores) = leads perdidos. |
-| **B. Off‑topic em `ask_/editing_/aguardando_(conta|doc)**` | 1801‑1846 | Se houver QA configurada → responde + reenvia prompt. Se NÃO houver → manda só o reentry seco.                                                  | OK, mas não usa IA quando a QA está vazia — o lead recebe só o prompt repetido.                          |
-| **C. Fluxos custom (passos UUID/`flow:`)**                 | 1975‑2025 | Se a resposta não casa com nenhum `trigger_intent` e não há `default` → 2 tentativas e depois **handoff humano + pausa**.                       | Não tenta responder a pergunta nem reformular — pula direto para humano.                                 |
-
-
-Resultado: com muitos leads simultâneos, qualquer pergunta fora do roteiro (“mas e se eu morar de aluguel?”, “qual o desconto exato?”, “já tenho energia solar”) cai em handoff silencioso ou loop de prompt repetido.
-
-## Objetivo
-
-Para QUALQUER mensagem inesperada, o bot deve:
-
-1. **Responder a dúvida** (FAQ → IA com persona/knowledge base como fallback).
-2. **Reconduzir ao passo atual** com o prompt de reentrada (“Voltando ao que eu te perguntei: …”).
-3. **Nunca silenciar** o lead nem **pausar** sem antes esgotar tentativas reais.
-4. Só pausar/escalar para humano após `N` reentradas seguidas sem progresso (e sempre com mensagem de cortesia, não silêncio).
-
-## Mudanças
-
-### 1. Unificar fallback em um único helper `respondAndReentry()`
-
-Criar dentro de `bot-flow.ts` (ou em `handlers/conversational/`) uma função:
-
-```ts
-async function respondAndReentry({
-  customer, step, messageText, remoteJid,
-  reason, // 'midflow_qa_miss' | 'off_topic_collect' | 'custom_step_no_match'
-}): Promise<{ reply: string; updates: any }>
+## Bug 1 — Coluna `__ai_faq` não existe (quebra silencioso após FAQ AI)
 ```
+❌ ERRO ao salvar updates: Could not find the '__ai_faq' column of 'customers'
+```
+`handlers/conversational/index.ts:991` adiciona `__ai_faq: true` nos updates, mas `index.ts:728` só remove `__intent`, `__confidence` e `__inline_sent` antes do `update()`. Resultado: sempre que a IA responde uma dúvida via Lovable AI, o update do customer falha — `detour_count`, `conversation_step`, restore de step etc. não salvam. Lead fica preso no mesmo estado.
 
-Ela faz, em ordem:
+## Bug 2 — Classifier OpenAI quebrado (gpt-5-mini rejeita temperature=0)
+```
+[classifier] openai failed: 'temperature' does not support 0 with this model. Only the default (1) value is supported.
+```
+`intent-classifier.ts:89` e `:119` enviam `temperature: 0`. Em todo turno o OpenAI falha, cai pro Gemini (mais lento, e às vezes classifica errado). Quando volta `intent="outro"` em vez de `tem_duvida`, o lead pula o ramo AI FAQ e vai pra rota default — que dispara o Bug 3.
 
-1. Tenta `matchQA()` (FAQ do consultor) → se hit, usa.
-2. Se miss, chama a **IA de vendas** (já existe em `handlers/conversational/` — `sales-ai` / `request_handoff`) com instrução fixa:
-  > “Responda a dúvida do lead em 1‑2 frases curtas, no tom da Camila, SEM prometer nada fora do script. Depois devolva o lead ao passo atual repetindo a pergunta original.”
-3. Anexa `getReentryPromptForStep(step, customer)`.
-4. Incrementa `detour_count`. Só pausa+handoff quando `detour_count >= 5` (já existe) — e ainda assim manda uma **mensagem de cortesia** (“Vou chamar alguém do time pra te ajudar com essa, tá? Em instantes.”), nunca silêncio.
+## Bug 3 — Motor `conversational` ainda silencia (`reply vazio bloqueado`)
+```
+[conversational] fallback goto bloqueado: step=33be... exige captura antes de 6226...
+[conversational] ⚠️ reply vazio bloqueado em step=33be...
+```
+O fix anterior do `respondAndReentry` foi aplicado só em `handlers/bot-flow.ts`. Mas leads em welcome/qualificação/`flow:*` rodam por `handlers/conversational/index.ts`, que tem seu próprio caminho de "fallback goto bloqueado" e devolve `reply:""` → silêncio total. Foi exatamente o que aconteceu na mensagem das 00:33 do Rafael.
 
-### 2. Substituir os 3 caminhos pelo helper
+## Bug 4 — Spam de "NOVO LEAD CHEGOU" a cada minuto
+Cada áudio do Rafael disparou uma notificação nova. O dedup do `_shared/notify-consultant.ts:155` (`recentAlerts = new Map`, TTL 60s) **só funciona dentro do mesmo isolate**. Edge Functions reiniciam ("booted" aparece a cada poucos segundos no log), então o Map sempre nasce vazio e o `shouldSend` deixa passar.
 
-- **A (midflow‑qa miss, linhas 662‑695)**: trocar o bloco que pausa silenciosamente por `await respondAndReentry(..., reason: 'midflow_qa_miss')`.
-- **B (off‑topic collect, 1834‑1843)**: quando não há QA, chamar `respondAndReentry` antes do reentry seco.
-- **C (custom flow no‑match, 1985‑2025)**: antes de incrementar `custom_step_retries` ou escalar, chamar `respondAndReentry`. Só após 3 tentativas reais (não 2) com a IA também falhando → handoff com mensagem de cortesia.
+---
 
-### 3. Blindagem anti‑erro (não pode dar erro)
+# Plano de correção
 
-- Envolver `respondAndReentry` num `try/catch` que, em qualquer falha (IA fora do ar, FAQ quebrada), faz **fallback mínimo garantido**:
-  ```
-  "Boa pergunta! Vou te explicar melhor já já. Antes, me confirma só: <reentry>"
-  ```
-  Nunca lança exceção para o caller.
-- Mesmo tratamento em `dispatchStepFromFlow` (envia mídias do passo): se MinIO/Whapi der erro em uma mídia, logar e seguir para a próxima — não abortar o passo.
-- Adicionar timeout (8s) na chamada da IA para não travar o webhook.
+## 1. Sanitização genérica de chaves `__*` (resolve Bug 1 e previne novos)
+Em `supabase/functions/whapi-webhook/index.ts`, antes do `supabase.from("customers").update(updates)`:
+```ts
+for (const k of Object.keys(updates)) if (k.startsWith("__")) delete (updates as any)[k];
+```
+Substitui os `delete` manuais por uma varredura única. Preserva `__intent`/`__confidence` em variáveis locais antes da limpeza (como já é feito).
 
-### 4. Telemetria para acompanhar em escala
+## 2. Remover `temperature` dos classifiers (resolve Bug 2)
+- `intent-classifier.ts:89`: remover `temperature: 0` (gpt-5-mini só aceita default).
+- `intent-classifier.ts:119` (Gemini): manter `temperature: 0` (Gemini suporta) ou trocar pra `0.1`. Apenas o OpenAI é o problema.
+- Auditar `bot-flow.ts:1106` (outro `temperature: 0`) — checar qual modelo é; se for gpt-5*, remover também.
 
-Adicionar uma linha em `bot_step_transitions` (ou tabela nova `bot_recovery_events`) a cada `respondAndReentry`, com:
+## 3. Portar `respondAndReentry` para o motor conversational (resolve Bug 3)
+No `handlers/conversational/index.ts`, em todo ponto que hoje retorna `_finalize(stepKey, { reply:"", ... })` por "fallback goto bloqueado" ou por miss de QA/AI:
+- Chamar o mesmo helper `respondAndReentry` já criado em `bot-flow.ts` (extrair pra `_shared/respond-and-reentry.ts` para reuso).
+- Fluxo: tenta `matchQA` → tenta `answerFaqWithAI` (já existe aqui, ampliar para qualquer intent) → fallback genérico ("Boa pergunta! Já te explico — antes me confirma: <pergunta do step atual>") → após 5 deviations, handoff cortês + `bot_handoff_alerts` + `notifyHandoff`.
+- Garante que **nunca** retornamos `reply:""` quando não houve mídia inline.
 
-- `customer_id`, `consultant_id`, `step`, `reason`, `source` (`faq`|`ai`|`fallback`), `detour_count`.
+## 4. Dedup persistente de notificações (resolve Bug 4)
+Migration nova:
+```sql
+alter table customers add column if not exists last_new_lead_notified_at timestamptz;
+alter table customers add column if not exists last_handoff_notified_at timestamptz;
+```
+Em `_shared/notify-consultant.ts`:
+- `notifyNewLead`: antes de enviar, ler `customers.last_new_lead_notified_at`. Se < 24h, abortar. Após enviar, gravar `now()`.
+- `notifyHandoff`: mesma lógica com janela de 30 min.
+- Manter o Map em memória como cache rápido (TTL 60s) só pra evitar duas chamadas no mesmo isolate.
 
-Expor um card simples no `/admin/saude-bot` (já existe a página) mostrando:
+Isso elimina o spam mesmo com cold-boot constante.
 
-- “Recuperações automáticas hoje” / “Handoffs evitados” / Top 5 perguntas off‑script (para virarem FAQ).
+## 5. Telemetria de recuperação
+Reusar a tabela `bot_recovery_events` já planejada: registrar `source: "conversational"` quando o motor cair no `respondAndReentry`. Card `/admin/saude-bot` já vai mostrar.
 
-### 5. Limites por consultor (proteção 100+ contas)
+---
 
-- Cache em memória do edge (`Map<consultor, count/min>`) para limitar chamadas da IA de fallback a, ex., 30/min por consultor — acima disso usa só FAQ + reentry. Evita estourar `LOVABLE_API_KEY` com lead spam.
+# Arquivos afetados
 
-## Detalhes técnicos
+| Arquivo | Mudança |
+|---|---|
+| `supabase/functions/whapi-webhook/index.ts` | Loop de strip `__*` antes do update |
+| `supabase/functions/whapi-webhook/handlers/conversational/intent-classifier.ts` | Remover `temperature: 0` do OpenAI |
+| `supabase/functions/whapi-webhook/handlers/bot-flow.ts` | Auditar `temperature: 0` na linha 1106 |
+| `supabase/functions/whapi-webhook/handlers/conversational/index.ts` | Substituir `_finalize(...,reply:"")` por `respondAndReentry` |
+| `supabase/functions/_shared/respond-and-reentry.ts` | **novo** — extrair helper compartilhado |
+| `supabase/functions/_shared/notify-consultant.ts` | Dedup via colunas em `customers` |
+| Migration | `last_new_lead_notified_at`, `last_handoff_notified_at` em `customers` |
 
-- A IA de vendas já está implementada (`handlers/conversational/`) e usa Lovable AI Gateway. Reaproveitar o mesmo client, só mudando o prompt do system message para o modo “responder + reconduzir”.
-- `getReentryPromptForStep` já existe e cobre todos os steps de cadastro; para passos custom (`flow:<uuid>`), usar `stepRow.message_text` como reentry.
-- `bot_handoff_alerts` continua sendo criado quando realmente esgota — só muda o gatilho (5 detours efetivos em vez de 1 miss).
-- Sem migração de schema necessária se reusarmos `bot_step_transitions`. Se quisermos `bot_recovery_events`, é 1 migração simples (vai como passo opcional).
-
-## Arquivos afetados
-
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (criar helper + substituir 3 trechos)
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (expor função `answerAndReentry` reaproveitando o client da IA)
-- `src/pages/SaudeBot.tsx` (card de recuperações — opcional, pode ficar para depois)
-- (opcional) Migração `bot_recovery_events`
-
-## Critério de pronto
-
-- Lead manda “mas e se eu morar de aluguel?” no meio do cadastro → recebe resposta curta da Camila + reentry, **sem pausa**.
-- IA fora do ar → recebe fallback genérico + reentry, **sem erro**.
-- Lead manda 5 perguntas off‑script seguidas → recebe mensagem de cortesia e handoff é criado (não silêncio).
-- Nenhum caminho retorna `reply:""` sem antes ter enviado algo via `sendText`/`sendMedia`.  
-quando voltar ao fluxo tem que analisar se for uma pergunta vai ter que repetir apenas o final, analise para consturir
--   
+# Não-objetivos
+- Não mexer em UI/CRM (apenas backend).
+- Não alterar fluxos do `/admin/fluxos`.
+- Não trocar provider de IA (continua OpenAI + Gemini fallback).
