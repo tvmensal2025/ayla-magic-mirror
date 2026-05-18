@@ -8,6 +8,8 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { MetricTooltip } from "./MetricTooltip";
 import { HealthSummaryCard } from "./HealthSummaryCard";
 import { InsightCards } from "./InsightCards";
+import { CostExplainerCard } from "./CostExplainerCard";
+import { FunnelWithCosts } from "./FunnelWithCosts";
 
 type Range = 7 | 30 | 90;
 
