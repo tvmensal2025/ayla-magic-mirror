@@ -21,6 +21,7 @@ import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
 import { extractMultiField, buildMultiFieldPatch } from "../_shared/multi-field-extractor.ts";
 import { botRequestStore, isTestPhone, logTestOutbound } from "../_shared/test-mode.ts";
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
+import { syncDealStageFromStep } from "../_shared/crm-stage-sync.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
