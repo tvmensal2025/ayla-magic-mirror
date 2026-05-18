@@ -1,11 +1,7 @@
-import { useMemo } from "react";
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 interface Props {
-  daily?: Array<{ date: string; client: number; licenciada: number }>;
-  events?: Array<{ created_at: string; event_type: string; event_target?: string | null }>;
-  leads?: Array<{ created_at: string }>;
-  periodDays: number;
+  data?: Array<{ date: string; label: string; visitas: number; cliques: number; leads: number }>;
 }
 
 function TerminalTooltip({ active, payload, label }: any) {
@@ -26,40 +22,7 @@ function TerminalTooltip({ active, payload, label }: any) {
   );
 }
 
-export function MainChart({ daily = [], events = [], leads = [], periodDays }: Props) {
-  const data = useMemo(() => {
-    const map = new Map<string, { date: string; label: string; visitas: number; cliques: number; leads: number }>();
-    for (let i = periodDays - 1; i >= 0; i--) {
-      const d = new Date();
-      d.setHours(0, 0, 0, 0);
-      d.setDate(d.getDate() - i);
-      const key = d.toISOString().split("T")[0];
-      map.set(key, {
-        date: key,
-        label: d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
-        visitas: 0,
-        cliques: 0,
-        leads: 0,
-      });
-    }
-    for (const d of daily) {
-      const row = map.get(d.date);
-      if (row) row.visitas = (d.client || 0) + (d.licenciada || 0);
-    }
-    for (const e of events) {
-      if (e.event_type !== "click") continue;
-      if (!e.event_target?.includes("whatsapp") && !e.event_target?.includes("cadastro")) continue;
-      const key = e.created_at.split("T")[0];
-      const row = map.get(key);
-      if (row) row.cliques++;
-    }
-    for (const l of leads) {
-      const key = l.created_at.split("T")[0];
-      const row = map.get(key);
-      if (row) row.leads++;
-    }
-    return Array.from(map.values());
-  }, [daily, events, leads, periodDays]);
+export function MainChart({ data = [] }: Props) {
 
   return (
     <section className="border border-[#1a2e1a] bg-[#0a0f0a] overflow-hidden">
