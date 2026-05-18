@@ -1220,7 +1220,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         mediaId: resolvedMediaId, slotKey: m.slot_key, kind,
       });
       if (!canSend) continue;
-      await sendMedia(remoteJid, url, "", kind);
+      await sendMedia(remoteJid, url, "", kind, durationSec || undefined);
       sentSomething = true;
       await supabase.from("conversations").insert({
         customer_id: customer.id, message_direction: "outbound",
