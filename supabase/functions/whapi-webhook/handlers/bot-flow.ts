@@ -1980,10 +1980,64 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             let nextCustom: any = resolved.next;
 
             // Se há perguntas (intent txns) e a resposta NÃO casou e não há default,
-            // aguarda nova mensagem (não pula o passo).
+            // aguarda nova mensagem (não pula o passo) — mas só até 2 tentativas;
+            // depois escala para humano (anti-loop).
             if (!nextCustom && hasIntentTxns && !txnsNow.some((t: any) => String(t?.trigger_intent||"").toLowerCase()==="default")) {
-              console.log(`[custom-step-resolver] aguardando resposta válida no step=${stepRow.step_key} (sem match)`);
-              return { reply: "", updates: { __inline_sent: emittedCurrent || undefined } as any };
+              const stepKeyForRetry = String(stepRow.step_key || stepRow.id);
+              const sameStep = String((customer as any).custom_step_retries_step || "") === stepKeyForRetry;
+              const retries = sameStep ? Number((customer as any).custom_step_retries || 0) : 0;
+              const MAX_RETRIES = 2;
+              if (retries >= MAX_RETRIES) {
+                console.warn(`[custom-step-resolver] anti-loop: step=${stepKeyForRetry} retries=${retries} → handoff humano`);
+                try {
+                  await supabase.from("bot_handoff_alerts").insert({
+                    customer_id: customer.id,
+                    consultant_id: customer.consultant_id || consultorId,
+                    reason: "custom_step_no_match_retries_exhausted",
+                    metadata: { step_key: stepKeyForRetry, step_id: stepRow.id, retries, last_message: String(messageText || "").slice(0, 200) },
+                  });
+                } catch (e) { console.warn("[custom-step-resolver] handoff alert falhou:", (e as Error).message); }
+                try {
+                  await notifyHandoff(supabase, customer.consultant_id || consultorId, {
+                    customer_id: customer.id,
+                    phone: customer.phone_whatsapp || phone,
+                    name: customer.name || "Lead",
+                    reason: "Lead travado no fluxo (passo sem resposta válida após 2 tentativas)",
+                  } as any).catch(() => {});
+                } catch (_) { /* notify opcional */ }
+                return {
+                  reply: "Vou chamar um consultor humano pra te ajudar agora, tá bom? Em instantes alguém responde por aqui. 👋",
+                  updates: {
+                    bot_paused: true,
+                    bot_paused_reason: "custom_step_no_match_retries_exhausted",
+                    bot_paused_at: new Date().toISOString(),
+                    conversation_step: "aguardando_humano",
+                    custom_step_retries: 0,
+                    custom_step_retries_step: null,
+                    __inline_sent: emittedCurrent || undefined,
+                  } as any,
+                };
+              }
+              // Repete a pergunta de forma gentil e incrementa contador
+              const nextRetries = retries + 1;
+              console.log(`[custom-step-resolver] aguardando resposta válida no step=${stepKeyForRetry} retry=${nextRetries}/${MAX_RETRIES}`);
+              const gentleRetry = nextRetries === 1
+                ? "Desculpa, não entendi muito bem 🙈 Pode me responder com *sim* ou *não*?"
+                : "Pra eu te ajudar direitinho, só preciso de um *sim* ou *não* 😊";
+              return {
+                reply: gentleRetry,
+                updates: {
+                  custom_step_retries: nextRetries,
+                  custom_step_retries_step: stepKeyForRetry,
+                  __inline_sent: emittedCurrent || undefined,
+                } as any,
+              };
+            }
+
+            // Match resolvido ou avanço por default → zera contador de retry
+            if (nextCustom && (customer as any).custom_step_retries) {
+              (updates as any).custom_step_retries = 0;
+              (updates as any).custom_step_retries_step = null;
             }
 
             // Fallback: próximo por position
