@@ -1,82 +1,45 @@
-## Ligando TODOS os 11 passos em sequência (sem pular nenhum)
+## Problema
 
-Você criou todos pensando que vão funcionar — então a ordem é simples: cada passo vai para o próximo, em linha reta, e o "Quebra de objeção" entra quando o cliente disser "não entendi" no passo 9.
+O passo "Perguntando se pode explicar" (Camila pergunta "posso te explicar rapidinho?") está auto-avançando para o passo 7 sem esperar o cliente responder. O engine encadeia passos `message` que tenham uma transição `default` sem `trigger_phrases` — e esse passo tem exatamente isso, então ele dispara e avança imediatamente.
 
-### Fluxo linear (todos os passos serão executados)
+## Causa
+
+Em `whapi-webhook/handlers/bot-flow.ts` (linhas 1937–1961) o resolver de fluxo custom faz um "chain" automático enquanto o próximo passo for `type=message` e tiver uma transição `default` sem frases. Como TODOS os passos da Camila têm `default→próximo`, o fluxo desliza inteiro sem parar nas perguntas.
+
+## Passos que fazem PERGUNTA e precisam pausar
+
+Analisando os 11 passos, dois pedem resposta do cliente e estão configurados como auto-avanço:
+
+| Pos | Passo | Tipo de espera |
+|---|---|---|
+| 6 | **Perguntando se pode explicar** ("posso te explicar?") | Esperar qualquer resposta (texto/áudio) |
+| 9 | **Deu para entender?** | Esperar resposta (sim/não) |
+
+Os demais (3 Boas-vindas, 5 Reação ao valor, 7 Como funciona, 8 Quebra de objeção) são informativos e devem continuar encadeando.
+
+## Solução
+
+Migration `UPDATE bot_flow_steps` removendo a transição `default` bare dos passos 6 e 9. Mantém as transições com gatilho (afirmacao/negação) intactas. Sem alteração de código TS.
 
 ```text
-[2] Nome do cliente
-      │  captura {{nome}}
-      ▼
-[3] Boas Vindas
-      │
-      ▼
-[4] Qual o valor da conta de luz
-      │  captura {{valor_conta}}
-      ▼
-[5] Valor da conta (reação)
-      │
-      ▼
-[6] Perguntando se pode explicar
-      │  "ok/pode/sim" → segue   |   "não/agora não" → segue mesmo assim (sem travar)
-      ▼
-[7] Como funciona (áudio + vídeo)
-      │
-      ▼
-[8] Quebra de objeção
-      │
-      ▼
-[9] Deu para entender?
-      │  "sim" → segue
-      │  "não/dúvida" → volta para [8] uma vez, depois segue
-      ▼
-[10] Conta de energia (capture_conta)
-      │
-      ▼
-[11] Cadastro (capture_documento)
-      │
-      ▼
-[12] Confirmação (finalizar_cadastro)
+Posição 6 (passo_mpagqq3g — Perguntando):
+  ANTES:  [{afirmacao → 7}, {default → 7}]
+  DEPOIS: [{afirmacao → 7}]              ← chain quebra, espera o cliente
+
+Posição 9 (559b8f1b — Deu para entender):
+  ANTES:  [{afirmacao → 10}, {negacao → 8}, {default → 10}]
+  DEPOIS: [{afirmacao → 10}, {negacao → 8}]   ← chain quebra, espera o cliente
 ```
 
-### Transições (default = sempre avança para o próximo)
+### Como o engine se comporta após o fix
 
-| De | Para | Gatilho |
-|---|---|---|
-| 2 Nome | 3 Boas Vindas | default (após capturar nome) |
-| 3 Boas Vindas | 4 Qual valor | default |
-| 4 Qual valor | 5 Valor da conta | default (após capturar valor) |
-| 5 Valor da conta | 6 Perguntando se pode explicar | default |
-| 6 Perguntando | 7 Como funciona | default (qualquer resposta segue) |
-| 7 Como funciona | 8 Quebra de objeção | default |
-| 8 Quebra de objeção | 9 Deu para entender | default |
-| 9 Deu para entender | 10 Conta energia | afirmação (sim/vamos/ok) |
-| 9 Deu para entender | 8 Quebra de objeção | negação (não/dúvida) — volta 1 vez |
-| 10 Conta energia | 11 Cadastro | default (após receber a foto) |
-| 11 Cadastro | 12 Confirmação | default (após receber documento) |
+1. Chain dispara passo 5 (Reação ao valor) → passo 6 (Perguntando) emite → como **não tem mais `default` bare**, `hasAutoAdvance=false` → chain quebra. `conversation_step` fica em passo 6.
+2. Cliente responde (texto ou áudio transcrito). Resolver re-entra em passo 6 → `dispatchStepFromFlow` (anti-rep 10min bloqueia duplicata) → `findNextActiveFlowStep` por position → passo 7 → chain segue até passo 9.
+3. Passo 9 emite → chain quebra novamente. Espera resposta.
+4. Cliente responde → resolver avança por position até passo 10 (capture_conta).
 
-### Tempos (text_delay_ms = pausa antes de enviar cada passo)
+## Arquivos afetados
 
-| Pos | Passo | Atual | Novo | Por quê |
-|---|---|---|---|---|
-| 2 | Nome | 1500 | **1500** | OK |
-| 3 | Boas Vindas | 1500 | **2000** | Respiro após receber nome |
-| 4 | Qual valor | 2500 | **2500** | OK |
-| 5 | Valor da conta | 2000 | **2500** | Reação natural ao valor |
-| 6 | Perguntando | 1500 | **2000** | OK |
-| 7 | Como funciona | **60000** | **3000** | 60s estava errado — atrasa o envio. Áudio+vídeo já têm duração própria |
-| 8 | Quebra de objeção | 1500 | **4000** | Pausa pós-explicação |
-| 9 | Deu para entender | **30000** | **8000** | 30s exagerado — 8s dá tempo de digitar |
-| 10 | Conta energia | 1500 | **2000** | OK |
-| 11 | Cadastro | 0 | **1500** | Pausa mínima entre passos |
-| 12 | Confirmação | 2500 | **2500** | OK |
+- `supabase/migrations/<nova>.sql` — UPDATE de 2 linhas em `bot_flow_steps` para o flow `66a19db4-b061-4f3f-921f-c13e9fb6f730`.
 
-### Resumo do que muda
-
-1. **Religar todos com `default`** para garantir que nenhum passo seja pulado (hoje pos 5 pula direto para 7, e pos 9/10/11 apontam para IDs inexistentes).
-2. **Ajustar os 2 delays exagerados** (60s no pos 7 e 30s no pos 9).
-3. **Quebra de objeção entra como passo 8 normal do fluxo** e também como fallback se o cliente disser "não entendi" no passo 9.
-
-Tudo isso é **uma migration `UPDATE bot_flow_steps`** no flow `66a19db4-b061-4f3f-921f-c13e9fb6f730` — zero alteração de código TS.
-
-Posso aplicar?
+Sem alteração em código TypeScript. Posso aplicar?
