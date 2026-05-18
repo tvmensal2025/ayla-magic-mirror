@@ -213,6 +213,21 @@ export function ResultsDashboard({
         )}
       </div>
 
+      {/* Explicação clara: Click vs Lead vs Cliente */}
+      <CostExplainerCard
+        spendCents={totals.spend}
+        clicks={totals.clicks}
+        leads={totals.leads}
+        approved={acquired}
+      />
+
+      {/* Funil de conversão com custo por etapa */}
+      <FunnelWithCosts
+        consultantId={consultantId}
+        spendCents={totals.spend}
+        periodDays={range}
+      />
+
       {/* Saúde geral + insights da IA */}
       <HealthSummaryCard
         spend_cents={totals.spend}
