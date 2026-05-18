@@ -1882,9 +1882,17 @@ export async function executarAutomacao(customerId, options = {}) {
       if (/código|OTP|verificação|whatsapp|token/i.test(pageText)) {
         console.log('   📱 OTP detectado - aguardando código...');
         await atualizarStatus(customerId, 'awaiting_otp');
-        
-        // Enviar mensagem pedindo o OTP ao cliente via WhatsApp
-        await notificarClienteOTP(customerId);
+        const { data: otpAtual } = await getSupabase()
+          .from('customers')
+          .select('otp_code, otp_received_at')
+          .eq('id', customerId)
+          .maybeSingle()
+          .catch(() => ({ data: null }));
+        const otpRecente = otpAtual?.otp_code && otpAtual?.otp_received_at && Date.now() - Date.parse(otpAtual.otp_received_at) <= 10 * 60 * 1000;
+
+        // Enviar mensagem pedindo OTP só se ainda não existe código recente salvo.
+        if (otpRecente) console.log('   🔐 OTP recente já salvo — vou digitar direto no portal, sem pedir novamente ao cliente');
+        else await notificarClienteOTP(customerId);
         
         try {
           // Timeout 5 min — cliente leva tempo até olhar o WhatsApp.
