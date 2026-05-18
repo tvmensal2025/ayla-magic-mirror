@@ -1,59 +1,72 @@
-## Diagnóstico (baseado em conversas reais — Simone fd51f071 e Geralda 3fdc7244)
+## Objetivo
 
-Olhei o que aconteceu na vida real e o bot não está "reiniciando para boas‑vindas". O que está acontecendo é pior em termos de percepção: ele responde com a frase de "socorro" repetidas vezes.
+Quando o lead mandar uma saudação ("bom dia", "boa tarde", "boa noite", "oi", "olá"), o bot **responde a saudação no mesmo tom** ("Bom dia! …", "Boa tarde! …", "Boa noite! …") e **continua o fluxo exatamente onde estava** — sem resetar, sem repetir o passo, sem cair em fallback. Para qualquer outra mensagem, nada muda.
 
-Reproduzi 3 sintomas concretos:
+## Diagnóstico do que existe hoje
 
-1. **"Boa! Pra eu te ajudar do jeito certo, me confirma onde a gente parou? 🙏"** dispara quando o lead manda "Boa noite", "Tem que pagar", "Kkkkk" — qualquer coisa que o passo atual não saiba responder. É a frase de fallback do wrapper `_finalize` em `conversational/index.ts`. Hoje ela é a 1ª coisa que o lead lê depois de cumprimentar.
+Em `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (linhas 1066–1145) há dois blocos de saudação:
 
-2. **"Boa! Me ajuda voltando aqui: {{nome}}, qual o valor médio da sua conta de luz?"** — mesma origem, mas com o template **sem renderizar variável** (`{{nome}}` aparece cru). Vi isso 2x no histórico da Simone. `_finalize` usa `_currentTurnVars` que não foi populado naquele turno.
+1. **`isSaudacao && currentStep.id === firstActive.id`** — repete a pergunta do 1º passo.
+2. **`isSaudacao && currentStep.id !== firstActive.id`** — **reseta para o Passo 1** e cascateia mídias de novo. É isso que está causando o "voltei pro começo" toda vez que o lead manda "Boa noite" no meio da conversa.
 
-3. **Loop "Vamos fazer seu cadastro?"** — a Simone perguntou "Mas eu moro em casa alugada" / "Como vai fica" e o bot respondeu 2x com "Boa! Me ajuda voltando aqui: Vamos fazer seu cadastro?" sem responder a dúvida. É o mesmo fallback, agora colado ao tail do passo. Da ótica do lead, parece "voltei pro começo".
+Ambos os blocos tratam saudação como evento que muda o fluxo. O usuário quer o oposto: saudação é apenas cortesia.
 
-## Arquivos afetados
+## Mudanças (somente `conversational/index.ts`)
 
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (somente)
+### 1. Helper de saudação contextual
 
-## Mudanças propostas
+Adicionar função local `greetingPrefix(text: string): string` que detecta:
 
-### 1. `_finalize`: parar de mandar "Boa!" como muleta
+- `/bom dia/i` → `"Bom dia!"`
+- `/boa tarde/i` → `"Boa tarde!"`
+- `/boa noite/i` → `"Boa noite!"`
+- `/\b(oi+|ol[áa]|opa|e a[íi]|eai|hello|hi)\b/i` → `"Oi!"`
+- nenhum match → `""`
 
-Hoje, qualquer turno com reply vazio gera "Boa! …". Vou:
+### 2. Remover o bloco de restart por saudação
 
-- Remover o prefixo "Boa! " das duas variantes. Trocar por reentrada neutra:
-  - com tail: `"{tail}"` (só repete a pergunta atual, sem prefixo)
-  - sem tail: `"Tô aqui 👀 — me conta um pouquinho mais pra eu te ajudar?"`
-- Garantir que `_currentTurnVars` é populado com `{nome, representante, valor_conta, telefone, cpf}` **sempre** que `_setTurnStepQuestion` é chamado (hoje em vários pontos passa-se só a string da pergunta, deixando vars vazio → `{{nome}}` cru).
-- Renderizar tail com `renderTemplate(tail, _currentTurnVars)` e fazer um **strip defensivo**: se ainda restar `{{...}}` depois do render, trocar por string vazia (não vaza placeholder pro cliente).
+Apagar as linhas 1103–1145 (o `if (isSaudacao && currentStep.id !== firstActive.id) { … restart … }`). Saudação no meio do fluxo **não reseta mais nada**.
 
-### 2. Saudação no 1º passo não pode cair no fallback
+### 3. Simplificar o bloco do firstActive
 
-No bloco "Restart por saudação" (linha ~1042), hoje o restart só roda se `currentStep.id !== firstActive.id`. Quando o lead manda "Boa noite" e já está no 1º passo (welcome / firstActive), a saudação cai no caminho default e termina em `_finalize` vazio.
+Substituir as linhas 1066–1102 por: **não tratar saudação de forma especial aqui**. Deixar o fluxo seguir o caminho normal (classificar intenção, executar passo, etc.). O prefixo será aplicado na saída.
 
-Solução: tratar saudação no 1º passo **sem reset** — apenas devolver a `question` atual do passo (renderizada). Exemplo: lead manda "Boa noite" e o bot responde diretamente "Boa noite! Qual o seu nome?" (ou a pergunta corrente do step), sem o "Boa! Pra eu te ajudar…".
+### 4. Prefixar a saudação na resposta final
 
-### 3. Repetição da mesma reentrada
+Em `_finalize`, antes de retornar o `reply`:
 
-Adicionar guarda: se a última mensagem outbound do mesmo customer foi essa reentrada (mesmo `tail`) há menos de 60s, **não envia de novo** — devolve reply vazio e marca `__suppressed_reentry: true` no update. Evita o caso "Boa! Vamos fazer seu cadastro?" 2x seguidas.
+- Calcular `prefix = greetingPrefix(ctx.messageText || "")`.
+- Se `prefix` e `r.reply` existem **e** `r.reply` ainda não começa com o mesmo prefixo, prepender: `r.reply = \`${prefix} ${r.reply}\``.
+- Se `prefix` existe mas `r.reply` está vazio (turno sem texto, ex.: só mídia), enviar `prefix` sozinho como reply curto ("Boa noite! 👋") — assim o lead recebe resposta à saudação, e a mídia continua sendo enviada inline.
+
+Isso cobre todos os caminhos (cadastro, valor conta, OCR, dúvidas, pitch club, etc.) sem precisar editar cada handler.
+
+### 5. Limpeza
+
+- Remover `saudacaoRegex` e `isSaudacao` (não usados mais).
+- A intent `"saudacao"` continua classificada normalmente; só não dispara mais lógica de restart.
 
 ## Fora de escopo
 
-- Não mexer em `bot-flow.ts`, fluxo de OCR, schema do banco, painel admin, ou no engine de passos custom.
-- Não mudar passos do fluxo no painel.
-- Não tocar no roteador de troca de fluxo (PJ/Licenciada) — separado.
+- Não mexer em `state-machine.ts`, OCR, cadastro, painel admin, schema, ou `bot-flow.ts`.
+- Não mudar comportamento de nenhum outro intent (`quer_cadastrar`, `quer_humano`, FAQ, etc.).
+- Não mudar tom/conteúdo dos passos no painel.
 
-## Validação
+## Validação mental
 
-- Reler trechos do `conversations` da Simone (fd51f071) e Geralda (3fdc7244) mentalmente com a nova lógica: nenhuma frase de "Boa! …" deve aparecer; "Boa noite" inicial deve ser respondido com a pergunta de captura de nome/valor, sem o socorro.
-- Conferir que nenhum log novo de `[conversational] ⚠️ reply vazio` aparece nas próximas conversas.
+- Lead em `aguardando_valor_conta` manda "Boa noite, quanto eu economizo?" → bot responde "Boa noite! [resposta normal do FAQ ou pergunta do passo]" e **continua em `aguardando_valor_conta`**.
+- Lead manda só "Bom dia" no firstActive → bot responde "Bom dia! [pergunta do passo 1]".
+- Lead manda "Tem que pagar?" (sem saudação) → comportamento idêntico ao de hoje, sem prefixo.
+- Lead manda "Boa tarde" durante OCR → bot responde "Boa tarde!" e a etapa de OCR segue intacta.
 
-## Detalhes técnicos (somente Edge Function)
+## Arquivos
 
 ```text
-conversational/index.ts
-├─ _setTurnStepQuestion(q, vars)   → garantir vars sempre populado nos call sites
-├─ _finalize(stepKey, r)           → remover "Boa! "; strip {{...}} residual; suppress duplicado <60s
-└─ bloco "Restart por saudação"    → branch nova: se já está em firstActive, devolve a question atual sem reset
+supabase/functions/whapi-webhook/handlers/conversational/index.ts
+├─ + greetingPrefix(text)           helper local
+├─ ~ _finalize                      prefixa reply com saudação contextual
+├─ − bloco isSaudacao firstActive   removido (deixa seguir fluxo)
+└─ − bloco isSaudacao restart       removido (sem reset)
 ```
 
-Posso seguir com a implementação?
+Posso seguir?
