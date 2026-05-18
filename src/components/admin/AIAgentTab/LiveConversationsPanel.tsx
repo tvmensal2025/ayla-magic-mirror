@@ -150,48 +150,53 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
   const human = rows.filter((r) => r.bot_paused);
 
   const renderReturnMenu = (r: Row) => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="default" className="gap-1.5">
-          <Play className="w-4 h-4" /> Devolver para… <ChevronDown className="w-3.5 h-3.5 opacity-70" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72 max-h-[420px] overflow-y-auto">
-        <DropdownMenuItem onClick={() => returnToStep(r, null, "Continuar de onde parou")}>
-          <Play className="w-4 h-4 mr-2 text-primary" /> Continuar de onde parou
-        </DropdownMenuItem>
-        {flowSteps.length > 0 && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
-              Pular para passo do fluxo
-            </DropdownMenuLabel>
-            {flowSteps.map((s, i) => (
-              <DropdownMenuItem key={s.id} onClick={() => returnToStep(r, s.id, s.title || s.step_key || `Passo ${i + 1}`)}>
-                <span className="text-xs font-mono text-muted-foreground mr-2 w-6">{String(i + 1).padStart(2, "0")}</span>
-                <span className="truncate">{s.title || s.step_key || `Passo ${i + 1}`}</span>
-              </DropdownMenuItem>
-            ))}
-          </>
-        )}
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
-          Passos clássicos
-        </DropdownMenuLabel>
-        {LEGACY_STEPS.map((s) => (
-          <DropdownMenuItem key={s.value} onClick={() => returnToStep(r, s.value, s.label)}>
-            <span className="truncate">{s.label}</span>
+    <div className="flex gap-2">
+      <Button size="sm" variant="secondary" onClick={() => setManualStepFor(r)} className="gap-1.5">
+        <Send className="w-4 h-4" /> Enviar passo
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="default" className="gap-1.5">
+            <Play className="w-4 h-4" /> Devolver para… <ChevronDown className="w-3.5 h-3.5 opacity-70" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-72 max-h-[420px] overflow-y-auto">
+          <DropdownMenuItem onClick={() => returnToStep(r, null, "Continuar de onde parou")}>
+            <Play className="w-4 h-4 mr-2 text-primary" /> Continuar de onde parou
           </DropdownMenuItem>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() => setConfirmReset(r)}
-          className="text-rose-500 focus:text-rose-500"
-        >
-          <RotateCcw className="w-4 h-4 mr-2" /> Reiniciar conversa do zero
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          {flowSteps.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
+                Pular para passo do fluxo
+              </DropdownMenuLabel>
+              {flowSteps.map((s, i) => (
+                <DropdownMenuItem key={s.id} onClick={() => returnToStep(r, s.id, s.title || s.step_key || `Passo ${i + 1}`)}>
+                  <span className="text-xs font-mono text-muted-foreground mr-2 w-6">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="truncate">{s.title || s.step_key || `Passo ${i + 1}`}</span>
+                </DropdownMenuItem>
+              ))}
+            </>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
+            Passos clássicos
+          </DropdownMenuLabel>
+          {LEGACY_STEPS.map((s) => (
+            <DropdownMenuItem key={s.value} onClick={() => returnToStep(r, s.value, s.label)}>
+              <span className="truncate">{s.label}</span>
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => setConfirmReset(r)}
+            className="text-rose-500 focus:text-rose-500"
+          >
+            <RotateCcw className="w-4 h-4 mr-2" /> Reiniciar conversa do zero
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 
   return (
