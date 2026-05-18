@@ -505,7 +505,7 @@ async function sendStepMedia(
     // B1: retry media up to 2x with 1500ms gap to ride out Whapi/network blips
     let ok: any = false;
     for (let attempt = 0; attempt < 2; attempt++) {
-      ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind);
+      ok = await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", kind, Number((m as any).duration_sec || 0) || undefined);
       if (ok !== false) break;
       if (attempt === 0) {
         console.warn(`[conversational] mídia ${kind} falhou (media_id=${m.id}) — retry em 1500ms`);
