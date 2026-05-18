@@ -181,7 +181,8 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
           </div>
         </div>
       )}
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex items-center justify-end gap-2 flex-wrap">
+        <WalletChip consultantId={userId} />
         <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exporting} className="h-8 text-xs gap-1.5">
           {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
           {exporting ? "Gerando..." : "Exportar PDF"}
@@ -197,13 +198,22 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
         </Select>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <StatCard icon={<Eye className="w-5 h-5" />} label="Total de Visualizações" value={analytics?.total ?? 0} color="primary" />
-        <StatCard icon={<Users className="w-5 h-5" />} label="Página Cliente" value={analytics?.totalClient ?? 0} color="accent" />
-        <StatCard icon={<Users className="w-5 h-5" />} label="Página Licenciado" value={analytics?.totalLicenciada ?? 0} color="primary" />
-        <StatCard icon={<MousePointerClick className="w-5 h-5" />} label="Cliques nos Botões" value={analytics?.totalClicks ?? 0} color="accent" />
+      {/* 1. ANÚNCIOS — foco principal */}
+      <div className="space-y-3">
+        <h3 className="font-heading font-bold text-foreground text-sm flex items-center gap-2">
+          <Megaphone className="w-4 h-4 text-primary" /> Performance dos seus anúncios
+        </h3>
+        <ResultsDashboard
+          consultantId={userId}
+          externalRange={periodDays <= 7 ? 7 : periodDays >= 90 ? 90 : 30}
+          hidePeriodSelector
+        />
       </div>
 
+      {/* 2. ORIGEM DOS LEADS */}
+      <LeadSourceCard consultantId={userId} periodDays={periodDays} />
+
+      {/* 3. CLIENTES iGREEN */}
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <h3 className="font-heading font-bold text-foreground text-sm flex items-center gap-2"><Users className="w-4 h-4 text-primary" /> Clientes iGreen</h3>
         <div className="flex items-center gap-2 flex-wrap">
@@ -228,8 +238,28 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
       </div>
 
       <CustomerCharts filteredMetrics={filteredMetrics} topLicenciados={analytics?.topLicenciados} />
-      <LeadSourceCard consultantId={userId} periodDays={periodDays} />
-      <AnalyticsCharts chartData={chartData} periodDays={periodDays} analytics={analytics} weeklyNewCustomers={filteredMetrics?.weeklyNewCustomers} />
+
+      {/* 4. TRÁFEGO DA LANDING PAGE — colapsável, recolhido */}
+      <Collapsible>
+        <CollapsibleTrigger asChild>
+          <Button variant="outline" size="sm" className="w-full justify-between h-9 text-xs">
+            <span className="flex items-center gap-2">
+              <Eye className="w-3.5 h-3.5" />
+              Tráfego da landing page (opcional)
+            </span>
+            <ChevronDown className="w-3.5 h-3.5 transition-transform data-[state=open]:rotate-180" />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-4 pt-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            <StatCard icon={<Eye className="w-5 h-5" />} label="Total de Visualizações" value={analytics?.total ?? 0} color="primary" />
+            <StatCard icon={<Users className="w-5 h-5" />} label="Página Cliente" value={analytics?.totalClient ?? 0} color="accent" />
+            <StatCard icon={<Users className="w-5 h-5" />} label="Página Licenciado" value={analytics?.totalLicenciada ?? 0} color="primary" />
+            <StatCard icon={<MousePointerClick className="w-5 h-5" />} label="Cliques nos Botões" value={analytics?.totalClicks ?? 0} color="accent" />
+          </div>
+          <AnalyticsCharts chartData={chartData} periodDays={periodDays} analytics={analytics} weeklyNewCustomers={filteredMetrics?.weeklyNewCustomers} />
+        </CollapsibleContent>
+      </Collapsible>
 
       {/* Credentials Dialog */}
       <Dialog open={showCredentialsDialog} onOpenChange={setShowCredentialsDialog}>
