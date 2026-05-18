@@ -571,6 +571,10 @@ Deno.serve(async (req) => {
           to_step: stripPrefix(updates.conversation_step),
         });
       }
+      // Avança o estágio do deal no Kanban conforme o lead progride na conversa.
+      if (updates.conversation_step) {
+        await syncDealStageFromStep(supabase, customer.id, updates.conversation_step);
+      }
     }
 
     // ─── 10) Send reply ────────────────────────────────────────────────
