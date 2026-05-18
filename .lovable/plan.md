@@ -1,64 +1,108 @@
-## Diagnóstico (o que está realmente quebrado)
 
-Rodei a varredura nos 13 fluxos ativos. **Todos** clonam o mesmo seed e carregam os mesmos defeitos. A numeração que você vê (7, 9, 12) bate com posições críticas do template:
+# Resposta honesta: ainda NÃO está pronto pra escalar pra 100+
 
-```text
-1  boas_vindas         audio_slot      mídia pública OK
-2  qualificação        question        ⚠ 0 capturas / 0 transições
-3  como_funciona       audio_slot      mídia pública OK
-4  fazenda_solar       audio_slot      mídia pública OK
-5  prova_social        audio_slot      mídia pública OK
-6  pedir conta luz     media_request   ⚠ 0 capturas / 0 transições
-7  confirma_recebim.   audio_slot      ⚠ depende de pedido anterior funcionar
-8  pedir doc/selfie    media_request   ⚠ 0 capturas / 0 transições
-9  chamada_cadastro    audio_slot      ⚠ só avança se 8 capturou
-10 cadastro            cadastro        ⚠ 0 capturas configuradas
-```
+## O que o banco mostra agora (últimos 30 dias)
 
-Não existe posição 12 no fluxo padrão — o "12" que você vê é provavelmente um card de **atalho/objeção** sendo numerado junto com os passos na UI (preciso confirmar isso ao abrir o componente). Os erros reais de "trava" estão nos passos **2, 6, 8 e 10**, e o reflexo é a Camila parar nos passos **7 e 9** porque o passo anterior não capturou nada para avançar.
+| Métrica | Valor | Leitura |
+|---|---|---|
+| Fluxos ativos | 13 | OK |
+| Steps sem `captures` / `transitions` / `fallback` | 0 / 0 / 0 | OK (depois do `repair_bot_flow` de hoje) |
+| Leads novos | 785 | OK |
+| Conversões (`status=active`) | **0** | 🚨 nenhum lead virou cliente |
+| Handoffs registrados | **1** | 🚨 bot nunca escala — ou está mudo, ou está fingindo que entende |
+| Leads em loop detectados pelo lint | 1 (12 msgs no mesmo step) | 🚨 prova que o lint funciona, mas ninguém vê |
+| Bot pausado | 1 | OK |
 
-### Causas-raiz
+**Diagnóstico:** o motor não trava mais (isso a gente já consertou), mas ele também não **se vigia sozinho**. Em escala, ninguém vai abrir 100 fluxos pra ver se cada consultor está com lead travado. Hoje, depende de você ou da Camila olharem caso a caso — exatamente o que você quer evitar.
 
-1. **Passos `question`, `media_request` e `cadastro` com `transitions=[]` e `captures=[]`** — o motor (`bot-flow` edge) cai no `fallback: repeat` e a conversa fica em loop, dando a sensação de "trava no 7" ou "trava no 9".
-2. **`audio_slot` sem mídia do consultor** — 12 dos 13 consultores não têm áudio próprio nos slots `confirma_recebimento` e `chamada_cadastro`; só funciona pelo fallback público (frágil).
-3. **Numeração da UI mistura passos + atalhos** sem deixar claro qual é qual — daí o "12" fantasma.
-4. **Sem validação visual antes de salvar** — o card não te avisa quando falta captura, transição ou mídia obrigatória.
+---
 
-## Plano de correção
+## O que vou entregar (5 itens, em ordem)
 
-### 1. Migração de "saneamento" dos 13 fluxos
-- Atualizar `seed_default_camila_flow` (template novo) para já criar **captures e transitions corretas** em cada passo crítico:
-  - **pos 2 (qualificação)**: capture `valor_conta` (regex de R$ + número) → transition para pos 3.
-  - **pos 6 (pedir conta)**: capture `imagem_conta` (wait_for=`image|document`) → transition para pos 7. Retry com mensagem amigável se vier texto.
-  - **pos 8 (pedir doc)**: capture `documento_cliente` (wait_for=`image|document`) → transition para pos 9.
-  - **pos 10 (cadastro)**: deixar explícito que dispara o pipeline `cadastro_portal`.
-- Migração de back-fill: aplicar essas mesmas `captures`/`transitions` aos 13 fluxos existentes via `UPDATE bot_flow_steps` (idempotente, só preenche onde está vazio).
-- Acrescentar **mensagens de retry humanizadas** quando o lead manda texto onde se espera mídia ("Me manda a foto da conta de luz mesmo, por aqui pelo WhatsApp 😊").
+### 1. Auto-handoff por loop em produção (cron)
 
-### 2. Blindagem do motor `bot-flow` (edge function)
-- Antes de cair em `fallback: repeat`, checar se o passo tem captures configuradas. Se não tiver e o tipo for `media_request`/`question`/`cadastro`, **forçar handoff** com alerta em `bot_handoff_alerts` em vez de loopar.
-- Logar em `bot_flow_rule_fires` a razão (`step_misconfigured`) para o admin enxergar.
+A função `lint_bot_flow_consistency()` já detecta lead com 5+ mensagens no mesmo step em 24h. Mas só roda quando alguém pergunta.
 
-### 3. UI de validação no `/admin/fluxos`
-- Para cada card, mostrar 3 badges de saúde:
-  - 🎙 mídia (vermelho se 0 áudio/vídeo no slot e o passo for `audio_slot`/`video_slot`)
-  - 🎯 captura (vermelho se `media_request`/`question`/`cadastro` sem captures)
-  - 🔀 transição (vermelho se sem transition e o passo não for o último)
-- Banner topo: "X passos com problema — a Camila pode travar nesses pontos".
-- Separar visualmente **Passos do fluxo** (numerados 1–10) de **Atalhos rápidos** (lista própria, não numerada como passo) para acabar com a confusão do "12".
-- Botão "Reparar fluxo automaticamente" que chama um RPC `repair_flow(_flow_id)` aplicando os defaults do template novo nos passos vazios.
+**O que muda:** novo cron a cada 15 min (`bot-loop-watchdog`) que:
+- Roda o lint
+- Para cada `possible_loop`: pausa o bot daquele cliente, cria `bot_handoff_alerts` com `reason=auto_loop_detected`, e dispara `notifyHandoff` pro consultor.
 
-### 4. Cobertura de mídia por consultor
-- Tela de "Mídia da Camila" já existe, mas vou adicionar um indicador: para cada `slot_key` mostrar quantos consultores ainda dependem só do fallback público, com botão "duplicar fallback para meu acervo" (usa `fork_public_ai_media`).
+Resultado: nenhum lead fica 24h batendo cabeça sem o consultor saber.
 
-### 5. Teste automatizado de fim-a-fim
-- Estender `bot_test_runs` para um cenário `full_happy_path` que percorre os 10 passos com payloads sintéticos (texto + imagem mock) e marca cada passo como OK/falha. Roda nos 13 fluxos com 1 clique.
+### 2. Painel "Saúde do meu bot" pra cada consultor
 
-## Sequência de entrega
-1. Migração SQL (seed novo + back-fill nos 13 fluxos + RPC `repair_flow`).
-2. Patch no edge function `bot-flow` (handoff em vez de loop).
-3. UI de badges + separação Passos/Atalhos no `FluxoCamila.tsx`.
-4. Botão "Reparar" + "Forkar mídia pública".
-5. Cenário `full_happy_path` no testador.
+Página nova `/whatsapp/saude-bot` (ou bloco na home) que mostra, por consultor logado:
+- ⚠️ Alertas abertos (handoffs últimos 7d) com nome, telefone, motivo, botão "Assumir conversa"
+- 📊 Leads parados há +24h no mesmo step (com link pra abrir)
+- 🩹 Status do fluxo: usa `FlowAuditPanel` que já existe + botão "Reparar"
+- 📈 Taxa de avanço por passo (quantos leads passaram de cada step) — pra ver onde o bot perde gente
 
-Quer que eu siga nessa ordem? Posso começar pela migração + UI de badges (itens 1 e 3) que já elimina 90% da percepção de "trava".
+Tudo lido de tabelas que já existem (`bot_handoff_alerts`, `customers`, `bot_step_transitions`).
+
+### 3. Validação no editor de fluxo (`/admin/fluxos`)
+
+Hoje o consultor pode salvar um passo `question` sem nenhuma `transition`. Aí trava. O reparo conserta depois, mas o ideal é não deixar entrar lixo.
+
+**O que muda no editor:**
+- Botão "Salvar" desabilitado se algum passo `question`/`media_request`/`capture_*` estiver sem `captures` ou `transitions`.
+- Badge vermelho no card do passo com tooltip explicando o que falta.
+- Botão "Reparar agora" inline (mesma RPC `repair_bot_flow`) pra resolver com 1 clique.
+
+### 4. Métricas globais (admin)
+
+Em `/admin` (visível só pra super_admin) um cartão "Saúde da plataforma":
+- Total de fluxos ativos / quebrados (calculado igual ao FlowAuditPanel)
+- Loops detectados nas últimas 24h
+- Handoffs sem resposta há +1h
+- Top 5 passos onde leads mais param (em todos os 13 consultores)
+
+Permite ver, sem ler código, qual passo da Camila é gargalo e ajustar o template global.
+
+### 5. Documentar contrato `bot_flow_steps` no DOCUMENTATION.md
+
+Hoje a estrutura de `captures`, `transitions`, `fallback`, `step_type` está espalhada em 3978 linhas de `bot-flow.ts`. Pra quem chegar depois (ou IA futura), é caixa-preta.
+
+Vou adicionar seção curta no `DOCUMENTATION.md`:
+- Tipos de step válidos e quando usar cada
+- Schema esperado de `captures` / `transitions` / `fallback`
+- Como o `repair_bot_flow` aplica defaults
+- Anti-loop: como o engine decide retry vs handoff
+
+Sem isso, qualquer mudança futura vira tentativa e erro.
+
+---
+
+## O que NÃO faz parte deste plano
+
+- **Conversão zero (0 de 785).** É problema de copy / oferta / Camila, não de engine. Auditar isso é outro escopo (qualidade da IA).
+- **Refatorar `bot-flow.ts` (3978 linhas).** Grande demais pra fazer agora sem regressão. Marco como dívida técnica e atacamos quando rolar o sprint de simplificação.
+- **Teste automatizado E2E dos 13 fluxos.** Útil, mas eu sugiro deixar pra depois do item 1 e 2 — eles já dão visibilidade suficiente pra detectar regressão em produção.
+
+---
+
+## Detalhes técnicos
+
+**Item 1 — `bot-loop-watchdog`:**
+- Nova edge function `supabase/functions/bot-loop-watchdog/index.ts`
+- Cron `*/15 * * * *` via `pg_cron` + `net.http_post`
+- Lógica: `SELECT * FROM lint_bot_flow_consistency() WHERE category IN ('possible_loop','orphan_flow_step')` → para cada row, `UPDATE customers SET bot_paused=true, bot_paused_reason='auto_loop_detected'` + `INSERT bot_handoff_alerts` + chamar `notify-consultant`.
+
+**Item 2 — painel:**
+- Nova rota `/whatsapp/saude-bot` em `src/pages/`
+- Componente reutiliza `FlowAuditPanel` já existente em `FluxoCamila.tsx`
+- Queries: `bot_handoff_alerts` filtrado por `consultant_id=auth.uid()`, `customers` agrupado por `conversation_step`
+- Card de "Assumir conversa" reusa o mesmo modal de conversa já existente no CRM
+
+**Item 3 — validação no editor:**
+- `/admin/fluxos` (arquivo atual `src/pages/admin/Fluxos.tsx` ou similar) → adicionar `validateStep(step)` que retorna lista de problemas
+- Mostrar badge usando `<Badge variant="destructive">` com tooltip
+- Botão "Reparar" chama mesma RPC `repair_bot_flow`
+
+**Item 4 — admin global:**
+- `/admin` (Dashboard.tsx ou Home admin) → novo card `<SystemHealthCard />`
+- Queries SQL agregadas (uso de `bot_step_transitions` para top steps com mais retries)
+
+**Item 5 — docs:**
+- Append em `DOCUMENTATION.md`, seção nova `## Bot Flow Engine — Contrato`
+
+Sem nova tabela. Sem mudança destrutiva. Tudo aditivo.
