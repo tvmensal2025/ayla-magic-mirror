@@ -204,6 +204,16 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
       )}
       <div className="flex items-center justify-end gap-2 flex-wrap">
         <WalletChip consultantId={userId} />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleResetPerformance}
+          disabled={resettingPerf}
+          className="h-8 text-xs gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+        >
+          {resettingPerf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+          {resettingPerf ? "Resetando..." : "Resetar performance"}
+        </Button>
         <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exporting} className="h-8 text-xs gap-1.5">
           {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
           {exporting ? "Gerando..." : "Exportar PDF"}
@@ -218,6 +228,9 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
           </SelectContent>
         </Select>
       </div>
+
+      {/* NOVOS GRÁFICOS — funil, semana atual vs anterior, dia da semana, top origens */}
+      <PerformanceCharts analytics={analytics} />
 
       {/* 1. ANÚNCIOS — foco principal */}
       <div className="space-y-3">
