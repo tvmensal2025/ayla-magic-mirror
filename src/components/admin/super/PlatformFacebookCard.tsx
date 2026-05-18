@@ -163,7 +163,14 @@ export function PlatformFacebookCard() {
               <Field label="Pixel" value={status.pixel_id || "—"} />
               <Field label="Usuário FB" value={status.fb_user_name || "—"} />
             </dl>
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Button size="sm" variant="secondary" onClick={ensurePixel} disabled={ensuringPixel} className="gap-1.5">
+                {ensuringPixel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Settings2 className="w-3.5 h-3.5" />}
+                Garantir pixel igreen-tag-site
+              </Button>
+            </div>
           </div>
+
 
           {status.configured && <div className="rounded-xl bg-card/60 border border-border/60 p-4 space-y-3">
             <div className="flex items-center justify-between">
