@@ -554,9 +554,15 @@ async function sendStepMedia(
 // Registro do passo atual por turno, populado pelo runConversationalFlow.
 // _finalize usa isso para compor uma reentrada quando o reply ficaria vazio,
 // evitando silêncio total quando o lead manda algo fora do esperado.
+// IMPORTANTE: guardamos também as `vars` p/ renderizar {{nome}}, {{valor_conta}},
+// etc. antes de enviar ao lead. Sem isso, o lead recebia placeholder cru.
 let _currentTurnStepQuestion: string = "";
-function _setTurnStepQuestion(q: string) {
+// deno-lint-ignore no-explicit-any
+let _currentTurnVars: any = {};
+// deno-lint-ignore no-explicit-any
+function _setTurnStepQuestion(q: string, vars?: any) {
   _currentTurnStepQuestion = (q || "").trim();
+  _currentTurnVars = vars || {};
 }
 function _extractTail(t: string): string {
   if (!t) return "";
@@ -573,7 +579,9 @@ function _finalize(stepKey: string, r: BotResult): BotResult {
   const reply = (r.reply || "").trim();
   const hasMedia = r.updates?.__inline_sent === true;
   if (!reply && !hasMedia) {
-    const tail = _extractTail(_currentTurnStepQuestion);
+    const rawTail = _extractTail(_currentTurnStepQuestion);
+    // ✅ Renderiza variáveis ({{nome}}, {{valor_conta}}, etc.) antes de enviar.
+    const tail = rawTail ? renderTemplate(rawTail, _currentTurnVars || {}) : "";
     const reentry = tail
       ? `Boa! Me ajuda voltando aqui: ${tail}`
       : `Boa! Pra eu te ajudar do jeito certo, me confirma onde a gente parou? 🙏`;
@@ -786,8 +794,15 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   if (currentStep && currentStepRaw && currentStep.id !== currentStepRaw.id) {
     stepKey = currentStep.id;
   }
-  // Registra a pergunta do passo atual para o fallback de _finalize.
-  _setTurnStepQuestion(currentStep?.message_text || "");
+  // Registra a pergunta do passo atual + vars para o fallback de _finalize.
+  const _turnVars = {
+    nome: ctx.customer.name,
+    representante: ctx.nomeRepresentante,
+    valor_conta: (ctx.customer as any).electricity_bill_value,
+    telefone: ctx.customer.phone_whatsapp,
+    cpf: (ctx.customer as any).cpf,
+  };
+  _setTurnStepQuestion(currentStep?.message_text || "", _turnVars);
   if (!currentStep) {
     // Unknown/legacy step → restart no primeiro step ativo.
     // REGRA DE OURO: SEMPRE seguir o /admin/fluxos. NUNCA inventar texto.
