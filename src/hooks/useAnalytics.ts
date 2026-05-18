@@ -305,12 +305,82 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
         .sort((a, b) => b.views - a.views)
         .slice(0, 8);
 
+      // === PER-CTA TIME SERIES (sparklines + week comparison) ===
+      // For each click target, build a 7-day series + current/previous week totals.
+      const allTargets = Array.from(new Set(
+        events.filter((e) => e.event_type === "click" && e.event_target).map((e) => e.event_target as string)
+      ));
+      const clicksByTargetDetailed: Record<string, {
+        total: number;
+        spark: number[];
+        current: number;
+        previous: number;
+        change: number;
+      }> = {};
+      for (const t of allTargets) {
+        const targetEvents = events.filter((e) => e.event_type === "click" && e.event_target === t);
+        // 7-day sparkline (oldest -> newest)
+        const spark: number[] = [];
+        for (let i = 6; i >= 0; i--) {
+          const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0); dayStart.setDate(dayStart.getDate() - i);
+          const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
+          spark.push(targetEvents.filter((e) => {
+            const ts = new Date(e.created_at).getTime();
+            return ts >= dayStart.getTime() && ts < dayEnd.getTime();
+          }).length);
+        }
+        const cur = targetEvents.filter((e) => new Date(e.created_at).getTime() >= curStart).length;
+        const prv = targetEvents.filter((e) => {
+          const ts = new Date(e.created_at).getTime();
+          return ts >= prevStart && ts < curStart;
+        }).length;
+        clicksByTargetDetailed[t] = {
+          total: targetEvents.length,
+          spark,
+          current: cur,
+          previous: prv,
+          change: pctChange(cur, prv),
+        };
+      }
+
+      // Daily views sparkline (last 7 days) for hero KPI
+      const buildDailySpark = (rows: Array<{ created_at: string }>) => {
+        const out: number[] = [];
+        for (let i = 6; i >= 0; i--) {
+          const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0); dayStart.setDate(dayStart.getDate() - i);
+          const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
+          out.push(rows.filter((r) => {
+            const ts = new Date(r.created_at).getTime();
+            return ts >= dayStart.getTime() && ts < dayEnd.getTime();
+          }).length);
+        }
+        return out;
+      };
+      const sparkViews = buildDailySpark(views);
+      const sparkClicks = buildDailySpark(events.filter((e) => e.event_type === "click"));
+      const sparkLeads = buildDailySpark(allCustomers as Array<{ created_at: string }>);
+      const approvedRows = allCustomers.filter((c: any) => c.status === "approved" || c.status === "active");
+      const sparkApproved = buildDailySpark(approvedRows as Array<{ created_at: string }>);
+      const curApproved = approvedRows.filter((c: any) => new Date(c.created_at).getTime() >= curStart).length;
+      const prevApproved = approvedRows.filter((c: any) => {
+        const t = new Date(c.created_at).getTime();
+        return t >= prevStart && t < curStart;
+      }).length;
+      const heroKpis = {
+        views: { ...weekComparison.views, spark: sparkViews },
+        clicks: { ...weekComparison.clicks, spark: sparkClicks },
+        leads: { ...weekComparison.leads, spark: sparkLeads },
+        approved: { current: curApproved, previous: prevApproved, change: pctChange(curApproved, prevApproved), spark: sparkApproved },
+      };
+
       return {
         totalClient, totalLicenciada, total, totalClicks, clicksByTarget, clicksByPage,
         daily, hourly, devices, utmSources, totalCustomers, customersByStatus,
         totalKw, avgKw, topLicenciados, weeklyNewCustomers, conversionRate, allCustomers,
         funnel, weekday, weekComparison, topCampaigns,
+        clicksByTargetDetailed, heroKpis,
       };
+
     },
   });
 }

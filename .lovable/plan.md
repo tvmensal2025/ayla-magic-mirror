@@ -1,83 +1,71 @@
-# Plano: Reset de Performance + Dashboard Ampliado
+# Redesign do Dashboard — visual premium e organizado
 
-## Situação atual
+## Problema atual
+- Vários blocos empilhados sem hierarquia (PerformanceCharts, Ads, LeadSource, Clientes, Tráfego colapsável) — parece "lista", não dashboard.
+- KPIs principais escondidos no meio.
+- "Cliques nos botões" mostra apenas total — não detalha o valor de cada CTA (WhatsApp, Cadastro, Telefone, Instagram…).
+- Toolbar superior com 4 botões soltos no canto, sem identidade.
 
-Banco tem dados acumulados desde **26/mar/2026**:
-- `page_views`: 375 registros (visitas às LPs)
-- `page_events`: 32 registros (cliques nos botões)
-- `crm_page_events`: 91 registros (eventos do CRM)
-- `facebook_capi_events`: 24 registros (eventos enviados ao Facebook)
-- `facebook_metrics_daily`: 7 dias (gastos/resultados de anúncios)
+## Solução
 
-Dashboard hoje mostra: Visitas totais, Cliques, Horários de pico, Dispositivos, UTM, Cliques por botão, Novos clientes/semana, Comparativo diário.
+### 1. Hero header do dashboard
+Faixa superior com gradiente sutil (verde primário) contendo:
+- Saudação + nome do consultor + período ativo
+- 4 KPIs grandes em destaque: **Visitas**, **Cliques totais**, **Leads novos**, **Aprovados** — cada um com mini-sparkline dos últimos 7 dias e chip de variação (↑/↓ %).
+- Toolbar discreta à direita (período, exportar, resetar, sincronizar) — agrupada num único container glass.
 
----
+### 2. Novo card "Valor de cada clique" (substitui o atual genérico)
+Grid de **CTAs reais** com ícone, label amigável e contagem destacada:
 
-## Parte 1 — Limpar histórico (começar do zero a partir de hoje)
+```text
+┌───────────────────┬───────────────────┬───────────────────┐
+│ 💬 WhatsApp       │ 📋 Cadastro       │ 📞 Telefone       │
+│   142 cliques     │   58 cliques      │   12 cliques      │
+│   ↑ 23% vs sem.   │   ↓ 8% vs sem.    │   estável         │
+│   ▂▃▅▆▇ sparkline │   ▂▂▃▃▂          │   ▁▁▁▂▁          │
+├───────────────────┼───────────────────┼───────────────────┤
+│ 📸 Instagram      │ 💼 Licenciada     │ 📘 Facebook       │
+│   ...             │   ...             │   ...             │
+└───────────────────┴───────────────────┴───────────────────┘
+```
 
-Apagar **apenas para o seu consultor logado** (não mexer nos outros licenciados que usam a plataforma), das tabelas:
-- `page_views`
-- `page_events`
-- `crm_page_events`
-- `facebook_capi_events`
+Usa `clicksByTarget` que já existe + `friendlyClickLabel` + nova série diária por target para sparkline.
 
-**Não apagar:**
-- `customers` / `crm_deals` (são clientes reais cadastrados, não métricas)
-- `facebook_metrics_daily` (vem sincronizado da API do Facebook Ads — se apagar, volta no próximo sync)
-- Mensagens WhatsApp (não é "performance", é histórico de conversa)
+### 3. Reorganização em 3 abas internas (dentro do Dashboard)
+Substituir a pilha vertical por **Tabs**:
 
-Confirmar com você antes de rodar o DELETE.
+- **Visão Geral** — Hero KPIs + Funil + Comparativo semanal + Valor de cada clique
+- **Anúncios & Origem** — ResultsDashboard (Facebook Ads) + LeadSourceCard + Top Campanhas UTM + Performance por dia da semana
+- **Clientes iGreen** — StatCards de clientes + filtro licenciado + CustomerCharts + sincronizar
 
----
+Tráfego da LP vira sub-bloco colapsável dentro de "Visão Geral".
 
-## Parte 2 — Novos gráficos no Dashboard
+### 4. Polimento visual
+- Todos os cards: mesma `premium-card` com `border border-border/40`, `rounded-2xl`, hover sutil com glow verde.
+- Tipografia: títulos em `font-heading font-bold text-base` (subir do `text-sm` atual), descrições em `text-xs text-muted-foreground`.
+- Espaçamento padrão `gap-5` entre cards, `space-y-6` entre seções.
+- Ícones sempre num círculo `bg-primary/10 text-primary p-2 rounded-xl` (consistência).
+- Funil ganha animação de largura ao montar (CSS transition já existe — aumentar para 800ms com delay escalonado).
 
-Adicionar 6 novos blocos puxando dados completos:
+## Arquivos
 
-### 1. **Funil de Conversão** (gráfico de funil horizontal)
-Visitas → Cliques no WhatsApp/Cadastro → Leads → Cadastros completos → Aprovados iGreen
-Mostra % de conversão entre cada etapa. Identifica onde está perdendo cliente.
+**Novos**
+- `src/components/admin/dashboard/HeroKpis.tsx` — header com 4 KPIs + sparklines
+- `src/components/admin/dashboard/ClickValueGrid.tsx` — grid de CTAs com valor de cada clique
+- `src/components/admin/dashboard/DashboardToolbar.tsx` — toolbar agrupada (período/export/reset/sync)
 
-### 2. **Performance por Dia da Semana** (BarChart)
-Visitas + cliques agrupados por seg/ter/qua… Descobre qual dia rende mais para concentrar anúncios.
-
-### 3. **Tempo médio Lead → Cliente Aprovado** (StatCard + linha do tempo)
-Calcula `customers.approved_at - customers.created_at`. Mostra ciclo de venda médio em dias.
-
-### 4. **Top Campanhas UTM** (tabela ranqueada)
-Não só `utm_source`, mas combinação `source + medium + campaign` com:
-- Visitas
-- Cliques
-- Cadastros gerados
-- Taxa de conversão
-- CPL estimado (se vier do Facebook)
-
-### 5. **Mensagens WhatsApp por dia** (AreaChart)
-Volume de mensagens enviadas + recebidas do `bot_messages`/`conversations`. Mostra atividade do bot.
-
-### 6. **ROI dos Anúncios Facebook** (cards + gráfico)
-Cruza `facebook_metrics_daily` (gasto, impressões, cliques) com `customers` cadastrados no mesmo período:
-- Custo por Lead (CPL real)
-- Custo por Cliente Aprovado (CAC)
-- ROAS estimado
-
-### 7. **Comparativo semana atual vs semana anterior** (StatCards com setas ↑↓)
-Visitas, Cliques, Leads, Aprovados — com % de variação.
-
----
+**Editados**
+- `src/components/admin/DashboardTab.tsx` — reestruturar com Tabs (`@/components/ui/tabs`), montar HeroKpis no topo, mover blocos para abas
+- `src/hooks/useAnalytics.ts` — adicionar série diária por click target (`clicksByTargetDaily`) para sparklines + comparação semanal por target
+- `src/components/admin/PerformanceCharts.tsx` — remover bloco "Esta Semana vs Semana Anterior" (vira parte do HeroKpis), manter funil/weekday/campaigns
 
 ## Detalhes técnicos
+- Sparklines: usar `recharts` `<AreaChart>` mini (sem eixos, height 32px) ou inline SVG simples para performance.
+- Tabs: shadcn `Tabs/TabsList/TabsTrigger/TabsContent` — manter URL hash `#visao`, `#anuncios`, `#clientes` opcional (não bloqueia).
+- Não toca em backend, RLS, edge functions, schema ou edge-function logic.
+- Mantém compatibilidade com `useAnalytics` existente — só estende o retorno.
 
-- **Reset**: `DELETE FROM page_views WHERE consultant_id = ?` (e demais tabelas). Via migration ou query direta após confirmação.
-- **Hook `useAnalytics`** ganha campos novos: `funnel`, `weekday`, `cycleTime`, `topCampaigns`, `weekComparison`.
-- **WhatsApp daily**: novo hook `useWhatsAppActivity` consultando `bot_messages` agregado por dia.
-- **Facebook ROI**: novo hook que combina `facebook_metrics_daily` + count de `customers` por dia.
-- **Componente novo**: `src/components/admin/FunnelChart.tsx`, `WeekdayChart.tsx`, `CampaignsTable.tsx`, `WeekComparisonCards.tsx`.
-- **DashboardTab.tsx**: importa os novos blocos abaixo dos atuais.
-
----
-
-## Pergunta antes de executar
-
-1. **Reset confirmado?** Apagar 375 visitas + 32 cliques + 91 eventos CRM + 24 eventos Facebook do **seu consultor** (outros licenciados não são afetados)?
-2. **Quais novos gráficos priorizar?** Posso fazer todos os 7, ou você prefere começar pelos 3 mais críticos (Funil, ROI Facebook, Comparativo semanal)?
+## Fora do escopo
+- Não mexer em métricas WhatsApp (mensagens, presence) — feito na rodada anterior.
+- Não criar novos hooks de backend.
+- Não alterar `ResultsDashboard`, `LeadSourceCard`, `CustomerCharts` internamente — só repor.

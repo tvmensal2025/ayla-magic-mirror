@@ -1,5 +1,6 @@
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from "recharts";
-import { TrendingUp, TrendingDown, Calendar, Target, Layers } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { Calendar, Target, Layers } from "lucide-react";
+
 import { useTheme } from "@/contexts/ThemeContext";
 
 interface Props {
@@ -24,46 +25,13 @@ export function PerformanceCharts({ analytics }: Props) {
 
   if (!analytics) return null;
 
-  const { funnel, weekday, weekComparison, topCampaigns } = analytics;
-
-  const ChangeChip = ({ value }: { value: number }) => {
-    const up = value >= 0;
-    const Icon = up ? TrendingUp : TrendingDown;
-    return (
-      <span className={`inline-flex items-center gap-1 text-xs font-semibold ${up ? "text-primary" : "text-destructive"}`}>
-        <Icon className="w-3 h-3" />
-        {Math.abs(value).toFixed(0)}%
-      </span>
-    );
-  };
+  const { funnel, weekday, topCampaigns } = analytics;
 
   const funnelColors = ["hsl(130, 100%, 36%)", "hsl(160, 80%, 45%)", "hsl(200, 100%, 50%)", "hsl(30, 100%, 50%)"];
 
   return (
     <div className="space-y-6">
-      {/* WEEK COMPARISON */}
-      <div className="premium-card">
-        <h3 className="font-heading font-bold text-foreground mb-1 flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-primary" /> Esta Semana vs Semana Anterior
-        </h3>
-        <p className="text-xs text-muted-foreground mb-4">Últimos 7 dias comparados aos 7 dias anteriores</p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {[
-            { label: "Visitas", data: weekComparison?.views },
-            { label: "Cliques", data: weekComparison?.clicks },
-            { label: "Novos Leads", data: weekComparison?.leads },
-          ].map(({ label, data }) => (
-            <div key={label} className="bg-secondary/40 dark:bg-secondary/60 rounded-xl p-4 border border-border/50">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-muted-foreground">{label}</span>
-                {data && <ChangeChip value={data.change} />}
-              </div>
-              <p className="text-3xl font-bold font-heading text-foreground">{data?.current ?? 0}</p>
-              <p className="text-xs text-muted-foreground mt-1">Anterior: {data?.previous ?? 0}</p>
-            </div>
-          ))}
-        </div>
-      </div>
+
 
       {/* FUNNEL */}
       {funnel && (

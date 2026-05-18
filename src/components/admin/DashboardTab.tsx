@@ -1,11 +1,12 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { Eye, Users, MousePointerClick, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Megaphone, ChevronDown, Trash2 } from "lucide-react";
+import { Eye, Users, MousePointerClick, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Megaphone, ChevronDown, Trash2, LayoutDashboard, Target } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,6 +18,8 @@ import { PerformanceCharts } from "./PerformanceCharts";
 import { LeadSourceCard } from "./LeadSourceCard";
 import { ResultsDashboard } from "./ads/ResultsDashboard";
 import { WalletChip } from "./ads/WalletChip";
+import { HeroKpis } from "./dashboard/HeroKpis";
+import { ClickValueGrid } from "./dashboard/ClickValueGrid";
 import { Eye as EyeIcon, EyeOff } from "lucide-react";
 
 interface DashboardTabProps {
@@ -47,10 +50,6 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
     if (stored) { const remaining = Math.ceil((parseInt(stored) - Date.now()) / 1000); if (remaining > 0) setSyncCooldown(remaining); }
   }, []);
 
-  // Detecta se outro consultor usa a mesma credencial do portal iGreen.
-  // RLS dos `consultants` só deixa SELECT no próprio registro, então
-  // perguntamos ao Postgres via head/count com o mesmo email — nenhum
-  // dado sensível trafega.
   useEffect(() => {
     const email = form.igreen_portal_email?.trim().toLowerCase();
     if (!email) { setSharedAccountCount(0); return; }
@@ -62,9 +61,8 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
           .select("id", { count: "exact", head: true })
           .eq("igreen_portal_email", email);
         if (cancelled) return;
-        // count inclui o próprio consultor — só sinalizamos se houver outros.
         setSharedAccountCount(Math.max(0, (count ?? 1) - 1));
-      } catch { /* RLS pode bloquear; ignora silenciosamente */ }
+      } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
   }, [form.igreen_portal_email]);
@@ -202,98 +200,135 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
           </div>
         </div>
       )}
-      <div className="flex items-center justify-end gap-2 flex-wrap">
-        <WalletChip consultantId={userId} />
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleResetPerformance}
-          disabled={resettingPerf}
-          className="h-8 text-xs gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-        >
-          {resettingPerf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-          {resettingPerf ? "Resetando..." : "Resetar performance"}
-        </Button>
-        <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exporting} className="h-8 text-xs gap-1.5">
-          {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
-          {exporting ? "Gerando..." : "Exportar PDF"}
-        </Button>
-        <Select value={String(periodDays)} onValueChange={(v) => onPeriodChange(Number(v))}>
-          <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="7">Últimos 7 dias</SelectItem>
-            <SelectItem value="15">Últimos 15 dias</SelectItem>
-            <SelectItem value="30">Últimos 30 dias</SelectItem>
-            <SelectItem value="90">Últimos 90 dias</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
 
-      {/* NOVOS GRÁFICOS — funil, semana atual vs anterior, dia da semana, top origens */}
-      <PerformanceCharts analytics={analytics} />
-
-      {/* 1. ANÚNCIOS — foco principal */}
-      <div className="space-y-3">
-        <h3 className="font-heading font-bold text-foreground text-sm flex items-center gap-2">
-          <Megaphone className="w-4 h-4 text-primary" /> Performance dos seus anúncios
-        </h3>
-        <ResultsDashboard
-          consultantId={userId}
-          externalRange={periodDays <= 7 ? 7 : periodDays >= 90 ? 90 : 30}
-          hidePeriodSelector
-        />
-      </div>
-
-      {/* 2. ORIGEM DOS LEADS */}
-      <LeadSourceCard consultantId={userId} periodDays={periodDays} />
-
-      {/* 3. CLIENTES iGREEN */}
-      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-        <h3 className="font-heading font-bold text-foreground text-sm flex items-center gap-2"><Users className="w-4 h-4 text-primary" /> Clientes iGreen</h3>
+      {/* TOOLBAR — agrupada num container glass */}
+      <div className="flex items-center justify-between gap-2 flex-wrap p-2 rounded-xl bg-card/40 border border-border/40 backdrop-blur">
+        <div className="flex items-center gap-2">
+          <WalletChip consultantId={userId} />
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Select value={selectedLicenciado} onValueChange={setSelectedLicenciado}>
-            <SelectTrigger className="h-8 w-[200px] text-xs"><Filter className="w-3.5 h-3.5 mr-1.5" /><SelectValue placeholder="Filtrar licenciado" /></SelectTrigger>
+          <Select value={String(periodDays)} onValueChange={(v) => onPeriodChange(Number(v))}>
+            <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Todos os Licenciados</SelectItem>
-              {licenciadoOptions.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+              <SelectItem value="7">Últimos 7 dias</SelectItem>
+              <SelectItem value="15">Últimos 15 dias</SelectItem>
+              <SelectItem value="30">Últimos 30 dias</SelectItem>
+              <SelectItem value="90">Últimos 90 dias</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={handleDashboardSync} disabled={syncingDashboard || syncCooldown > 0} className="h-8 text-xs gap-1.5">
-            {syncingDashboard ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            {syncingDashboard ? "Sincronizando..." : syncCooldown > 0 ? `Aguarde ${syncCooldown}s` : "Sincronizar iGreen"}
+          <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exporting} className="h-8 text-xs gap-1.5">
+            {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
+            {exporting ? "Gerando..." : "PDF"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleResetPerformance}
+            disabled={resettingPerf}
+            className="h-8 text-xs gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          >
+            {resettingPerf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+            {resettingPerf ? "Resetando..." : "Resetar"}
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-        <StatCard icon={<Users className="w-5 h-5" />} label="Total de Clientes" value={filteredMetrics?.totalCustomers ?? 0} color="primary" />
-        <StatCard icon={<Zap className="w-5 h-5" />} label="Total kW (Consumo)" value={`${(filteredMetrics?.totalKw ?? 0).toLocaleString("pt-BR")} kW`} color="accent" subtitle={`Média: ${(filteredMetrics?.avgKw ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} kW`} />
-        <StatCard icon={<TrendingUp className="w-5 h-5" />} label="Taxa de Conversão" value={`${(analytics?.conversionRate ?? 0).toFixed(1)}%`} color="primary" subtitle="Cliques / Visualizações" />
-      </div>
+      {/* HERO KPIs */}
+      <HeroKpis kpis={(analytics as any)?.heroKpis} />
 
-      <CustomerCharts filteredMetrics={filteredMetrics} topLicenciados={analytics?.topLicenciados} />
+      {/* TABS */}
+      <Tabs defaultValue="visao" className="w-full">
+        <TabsList className="grid grid-cols-3 w-full max-w-xl">
+          <TabsTrigger value="visao" className="gap-1.5 text-xs sm:text-sm">
+            <LayoutDashboard className="w-3.5 h-3.5" /> Visão Geral
+          </TabsTrigger>
+          <TabsTrigger value="anuncios" className="gap-1.5 text-xs sm:text-sm">
+            <Target className="w-3.5 h-3.5" /> Anúncios & Origem
+          </TabsTrigger>
+          <TabsTrigger value="clientes" className="gap-1.5 text-xs sm:text-sm">
+            <Users className="w-3.5 h-3.5" /> Clientes iGreen
+          </TabsTrigger>
+        </TabsList>
 
-      {/* 4. TRÁFEGO DA LANDING PAGE — colapsável, recolhido */}
-      <Collapsible>
-        <CollapsibleTrigger asChild>
-          <Button variant="outline" size="sm" className="w-full justify-between h-9 text-xs">
-            <span className="flex items-center gap-2">
-              <Eye className="w-3.5 h-3.5" />
-              Tráfego da landing page (opcional)
-            </span>
-            <ChevronDown className="w-3.5 h-3.5 transition-transform data-[state=open]:rotate-180" />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-4 pt-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-            <StatCard icon={<Eye className="w-5 h-5" />} label="Total de Visualizações" value={analytics?.total ?? 0} color="primary" />
-            <StatCard icon={<Users className="w-5 h-5" />} label="Página Cliente" value={analytics?.totalClient ?? 0} color="accent" />
-            <StatCard icon={<Users className="w-5 h-5" />} label="Página Licenciado" value={analytics?.totalLicenciada ?? 0} color="primary" />
-            <StatCard icon={<MousePointerClick className="w-5 h-5" />} label="Cliques nos Botões" value={analytics?.totalClicks ?? 0} color="accent" />
+        {/* === VISÃO GERAL === */}
+        <TabsContent value="visao" className="space-y-6 mt-6">
+          <ClickValueGrid data={(analytics as any)?.clicksByTargetDetailed} />
+          <PerformanceCharts analytics={analytics} />
+
+          {/* Tráfego LP — colapsável */}
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button variant="outline" size="sm" className="w-full justify-between h-9 text-xs">
+                <span className="flex items-center gap-2">
+                  <Eye className="w-3.5 h-3.5" />
+                  Tráfego detalhado da landing page (opcional)
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 transition-transform data-[state=open]:rotate-180" />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-4 pt-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+                <StatCard icon={<Eye className="w-5 h-5" />} label="Total de Visualizações" value={analytics?.total ?? 0} color="primary" />
+                <StatCard icon={<Users className="w-5 h-5" />} label="Página Cliente" value={analytics?.totalClient ?? 0} color="accent" />
+                <StatCard icon={<Users className="w-5 h-5" />} label="Página Licenciado" value={analytics?.totalLicenciada ?? 0} color="primary" />
+                <StatCard icon={<MousePointerClick className="w-5 h-5" />} label="Cliques nos Botões" value={analytics?.totalClicks ?? 0} color="accent" />
+              </div>
+              <AnalyticsCharts chartData={chartData} periodDays={periodDays} analytics={analytics} weeklyNewCustomers={filteredMetrics?.weeklyNewCustomers} />
+            </CollapsibleContent>
+          </Collapsible>
+        </TabsContent>
+
+        {/* === ANÚNCIOS & ORIGEM === */}
+        <TabsContent value="anuncios" className="space-y-6 mt-6">
+          <div className="space-y-3">
+            <h3 className="font-heading font-bold text-foreground text-base flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
+                <Megaphone className="w-4 h-4" />
+              </div>
+              Performance dos seus anúncios
+            </h3>
+            <ResultsDashboard
+              consultantId={userId}
+              externalRange={periodDays <= 7 ? 7 : periodDays >= 90 ? 90 : 30}
+              hidePeriodSelector
+            />
           </div>
-          <AnalyticsCharts chartData={chartData} periodDays={periodDays} analytics={analytics} weeklyNewCustomers={filteredMetrics?.weeklyNewCustomers} />
-        </CollapsibleContent>
-      </Collapsible>
+          <LeadSourceCard consultantId={userId} periodDays={periodDays} />
+        </TabsContent>
+
+        {/* === CLIENTES iGREEN === */}
+        <TabsContent value="clientes" className="space-y-6 mt-6">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="font-heading font-bold text-foreground text-base flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
+                <Users className="w-4 h-4" />
+              </div>
+              Clientes iGreen
+            </h3>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Select value={selectedLicenciado} onValueChange={setSelectedLicenciado}>
+                <SelectTrigger className="h-8 w-[200px] text-xs"><Filter className="w-3.5 h-3.5 mr-1.5" /><SelectValue placeholder="Filtrar licenciado" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os Licenciados</SelectItem>
+                  {licenciadoOptions.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" onClick={handleDashboardSync} disabled={syncingDashboard || syncCooldown > 0} className="h-8 text-xs gap-1.5">
+                {syncingDashboard ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                {syncingDashboard ? "Sincronizando..." : syncCooldown > 0 ? `Aguarde ${syncCooldown}s` : "Sincronizar iGreen"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+            <StatCard icon={<Users className="w-5 h-5" />} label="Total de Clientes" value={filteredMetrics?.totalCustomers ?? 0} color="primary" />
+            <StatCard icon={<Zap className="w-5 h-5" />} label="Total kW (Consumo)" value={`${(filteredMetrics?.totalKw ?? 0).toLocaleString("pt-BR")} kW`} color="accent" subtitle={`Média: ${(filteredMetrics?.avgKw ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} kW`} />
+            <StatCard icon={<TrendingUp className="w-5 h-5" />} label="Taxa de Conversão" value={`${(analytics?.conversionRate ?? 0).toFixed(1)}%`} color="primary" subtitle="Cliques / Visualizações" />
+          </div>
+
+          <CustomerCharts filteredMetrics={filteredMetrics} topLicenciados={analytics?.topLicenciados} />
+        </TabsContent>
+      </Tabs>
 
       {/* Credentials Dialog */}
       <Dialog open={showCredentialsDialog} onOpenChange={setShowCredentialsDialog}>
