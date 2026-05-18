@@ -310,30 +310,49 @@ export default function AdminFaq({ embedded = false }: { embedded?: boolean } = 
     setKeywordInput("");
   }
 
-  return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/admin")}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <BookOpen className="h-6 w-6 text-primary" />
-          <div className="flex-1 min-w-0">
-            <h1 className="text-lg sm:text-xl font-bold truncate">FAQ da IA</h1>
-            <p className="text-xs text-muted-foreground">
-              {sections.length} seções · {totalChars.toLocaleString("pt-BR")} caracteres · base que a Camila usa pra responder dúvidas
-            </p>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => setOrganizeOpen(true)}>
-            <Sparkles className="h-4 w-4 mr-1" /> Organizar com IA
-          </Button>
-          <Button size="sm" onClick={startNew}>
-            <Plus className="h-4 w-4 mr-1" /> Nova
-          </Button>
+  const headerEl = embedded ? null : (
+    <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
+      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+        <Button variant="ghost" size="icon" onClick={() => navigate("/admin")}>
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+        <BookOpen className="h-6 w-6 text-primary" />
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg sm:text-xl font-bold truncate">FAQ da IA</h1>
+          <p className="text-xs text-muted-foreground">
+            {sections.length} seções · {totalChars.toLocaleString("pt-BR")} caracteres · base que a Camila usa pra responder dúvidas
+          </p>
         </div>
-      </header>
+        <Button variant="outline" size="sm" onClick={() => setOrganizeOpen(true)}>
+          <Sparkles className="h-4 w-4 mr-1" /> Organizar com IA
+        </Button>
+        <Button size="sm" onClick={startNew}>
+          <Plus className="h-4 w-4 mr-1" /> Nova
+        </Button>
+      </div>
+    </header>
+  );
 
-      <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+  return (
+    <div className={embedded ? "" : "min-h-screen bg-background"}>
+      {headerEl}
+
+      <main className={embedded ? "space-y-6" : "max-w-6xl mx-auto px-4 py-6 space-y-6"}>
+        {embedded && (
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-xs text-muted-foreground">
+              {sections.length} seções · {totalChars.toLocaleString("pt-BR")} caracteres
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setOrganizeOpen(true)}>
+                <Sparkles className="h-4 w-4 mr-1" /> Organizar com IA
+              </Button>
+              <Button size="sm" onClick={startNew}>
+                <Plus className="h-4 w-4 mr-1" /> Nova
+              </Button>
+            </div>
+          </div>
+        )}
         {/* Banner: como funciona no fluxo */}
         <Card className="p-4 border-primary/30 bg-primary/5">
           <div className="flex items-start gap-3">
