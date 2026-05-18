@@ -88,6 +88,17 @@ export function PlatformFacebookCard() {
     }
   }
 
+  async function handleRerequest() {
+    setConnecting(true);
+    try {
+      const res = await startFacebookOAuth({ scope: "platform", mode: "rerequest" });
+      window.location.href = res.url;
+    } catch (e: any) {
+      toast({ title: "Erro ao re-solicitar permissões", description: e?.message, variant: "destructive" });
+      setConnecting(false);
+    }
+  }
+
   async function loadBalance() {
     setLoadingBalance(true);
     try {
