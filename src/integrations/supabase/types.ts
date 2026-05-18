@@ -3905,6 +3905,15 @@ export type Database = {
         Args: { _consultant_id: string }
         Returns: string
       }
+      seed_objection_shortcut: {
+        Args: {
+          _flow_id: string
+          _intent_name: string
+          _text_response: string
+          _triggers: string[]
+        }
+        Returns: string
+      }
       try_lock_customer_processing: {
         Args: { _customer_id: string; _seconds?: number }
         Returns: boolean

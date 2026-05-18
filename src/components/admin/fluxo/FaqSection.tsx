@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,8 +7,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { HelpCircle, Plus, Trash2, X, ChevronUp, ChevronDown } from "lucide-react";
+import {
+  HelpCircle, Plus, Trash2, X, ChevronUp, ChevronDown,
+  Search, Sparkles, AlertTriangle, CheckCircle2, Mic, Loader2,
+} from "lucide-react";
 import { toast } from "sonner";
+import { AudioRecorderInline } from "@/components/admin/AIAgentTab/AudioRecorderInline";
+import {
+  OBJECTION_SHORTCUTS, OBJECTION_CATEGORIES, CATEGORY_EMOJI,
+  formatIntentName, parseIntentName, RESERVED_FLOW_KEYWORDS,
+  type ObjectionCategory,
+} from "@/lib/objectionShortcuts";
 
 type Trigger = { id?: string; qa_id?: string; phrase: string };
 type Media = {
@@ -32,29 +41,35 @@ type QA = {
 };
 type Slot = { slot_key: string; label: string; video_url: string | null };
 type LibraryVideo = { id: string; label: string; url: string | null };
+type LibraryAudio = { id: string; label: string; url: string | null };
 
 export default function FaqSection({ flowId }: { flowId: string }) {
   const [qas, setQas] = useState<QA[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [availableVideos, setAvailableVideos] = useState<LibraryVideo[]>([]);
+  const [availableAudios, setAvailableAudios] = useState<LibraryAudio[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterCat, setFilterCat] = useState<ObjectionCategory | "all">("all");
+  const [search, setSearch] = useState("");
+  const [seeding, setSeeding] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: slotsRow }, { data: videoRows }, { data: qaRows }] = await Promise.all([
+    const [{ data: slotsRow }, { data: videoRows }, { data: audioRows }, { data: qaRows }] = await Promise.all([
       supabase.from("ai_agent_slots").select("slot_key, label, video_url").eq("active", true).order("position"),
       supabase
-        .from("ai_media_library")
-        .select("id, label, url")
-        .eq("kind", "video")
-        .eq("active", true)
-        .not("url", "is", null)
-        .order("priority", { ascending: false })
+        .from("ai_media_library").select("id, label, url")
+        .eq("kind", "video").eq("active", true).not("url", "is", null)
+        .order("priority", { ascending: false }).order("created_at", { ascending: false }),
+      supabase
+        .from("ai_media_library").select("id, label, url")
+        .eq("kind", "audio").eq("active", true).not("url", "is", null)
         .order("created_at", { ascending: false }),
       supabase.from("bot_flow_qa").select("*").eq("flow_id", flowId).order("position"),
     ]);
     setSlots((slotsRow as Slot[]) || []);
     setAvailableVideos(((videoRows as LibraryVideo[]) || []).filter((v) => !!v.url));
+    setAvailableAudios(((audioRows as LibraryAudio[]) || []).filter((a) => !!a.url));
 
     const qaList = (qaRows as any[]) || [];
     const ids = qaList.map((q) => q.id);
@@ -64,7 +79,7 @@ export default function FaqSection({ flowId }: { flowId: string }) {
     ]);
     setQas(
       qaList
-        .filter((q) => !q.is_opening && !q.is_closing) // só FAQ do meio
+        .filter((q) => !q.is_opening && !q.is_closing)
         .map((q) => ({
           ...q,
           triggers: ((trigs as Trigger[]) || []).filter((t) => t.qa_id === q.id),
@@ -76,6 +91,40 @@ export default function FaqSection({ flowId }: { flowId: string }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Conjunto global de gatilhos (lowercase) → qa_id, pra detectar duplicados
+  const triggerIndex = useMemo(() => {
+    const m = new Map<string, string[]>(); // phrase -> qa_ids
+    qas.forEach((q) => q.triggers.forEach((t) => {
+      const key = t.phrase.toLowerCase().trim();
+      m.set(key, [...(m.get(key) || []), q.id]);
+    }));
+    return m;
+  }, [qas]);
+
+  const filtered = useMemo(() => {
+    const term = search.toLowerCase().trim();
+    return qas.filter((q) => {
+      const { category } = parseIntentName(q.intent_name);
+      if (filterCat !== "all" && category !== filterCat) return false;
+      if (term) {
+        const hay = [q.intent_name, q.text_response || "", ...q.triggers.map((t) => t.phrase)]
+          .join(" ").toLowerCase();
+        if (!hay.includes(term)) return false;
+      }
+      return true;
+    });
+  }, [qas, filterCat, search]);
+
+  const countByCategory = useMemo(() => {
+    const out: Record<string, number> = { all: qas.length };
+    OBJECTION_CATEGORIES.forEach((c) => (out[c] = 0));
+    qas.forEach((q) => {
+      const { category } = parseIntentName(q.intent_name);
+      if (category) out[category] = (out[category] || 0) + 1;
+    });
+    return out;
+  }, [qas]);
+
   const addQA = async () => {
     const nextPos = (qas[qas.length - 1]?.position ?? -1) + 1;
     const { data, error } = await supabase
@@ -84,6 +133,31 @@ export default function FaqSection({ flowId }: { flowId: string }) {
       .select().single();
     if (error) return toast.error("Erro ao adicionar");
     setQas([...qas, { ...(data as any), triggers: [], medias: [] }]);
+  };
+
+  const seedDefaults = async () => {
+    if (!confirm(`Adicionar os ${OBJECTION_SHORTCUTS.length} atalhos padrão de objeção?\n\nAtalhos já existentes (mesmo nome) serão pulados.`)) return;
+    setSeeding(true);
+    let added = 0, skipped = 0;
+    try {
+      for (const s of OBJECTION_SHORTCUTS) {
+        const intentName = formatIntentName(s);
+        const exists = qas.some((q) => q.intent_name === intentName);
+        if (exists) { skipped++; continue; }
+        const { error } = await supabase.rpc("seed_objection_shortcut", {
+          _flow_id: flowId,
+          _intent_name: intentName,
+          _text_response: s.text,
+          _triggers: s.triggers,
+        });
+        if (error) { console.error(error); continue; }
+        added++;
+      }
+      toast.success(`${added} atalhos adicionados${skipped ? `, ${skipped} já existiam` : ""}`);
+      await load();
+    } finally {
+      setSeeding(false);
+    }
   };
 
   const updateQA = async (id: string, patch: Partial<QA>) => {
@@ -119,6 +193,11 @@ export default function FaqSection({ flowId }: { flowId: string }) {
   const addTrigger = async (qa: QA, phrase: string) => {
     const p = phrase.trim();
     if (!p) return;
+    // duplicado dentro do mesmo atalho
+    if (qa.triggers.some((t) => t.phrase.toLowerCase() === p.toLowerCase())) {
+      toast.error("Esse gatilho já está aqui");
+      return;
+    }
     const { data, error } = await supabase
       .from("bot_flow_qa_triggers").insert({ qa_id: qa.id, phrase: p }).select().single();
     if (error) return toast.error("Erro");
@@ -149,16 +228,102 @@ export default function FaqSection({ flowId }: { flowId: string }) {
     setQas((cur) => cur.map((q) => (q.id === qa.id ? { ...q, medias: q.medias.filter((x) => x.id !== m.id) } : q)));
   };
 
+  // Sobe áudio gravado: upload-media → ai_media_library → assign no QA
+  const onAudioRecorded = async (qa: QA, blob: Blob) => {
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const uid = u.user?.id ?? null;
+      const file = new File([blob], `atalho-${Date.now()}.ogg`, { type: "audio/ogg" });
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("kind", "audio");
+      fd.append("scope", "admin");
+      if (uid) fd.append("consultant_id", uid);
+      fd.append("slug", qa.intent_name.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 40));
+
+      const { data: upRes, error: upErr } = await supabase.functions.invoke("upload-media", { body: fd });
+      if (upErr || !upRes?.url) throw upErr || new Error("Upload falhou");
+
+      // Cria registro em ai_media_library
+      const { data: lib, error: libErr } = await supabase
+        .from("ai_media_library")
+        .insert({
+          consultant_id: uid,
+          kind: "audio",
+          label: `Atalho: ${qa.intent_name}`,
+          url: upRes.url,
+          storage_path: upRes.key,
+          active: true,
+          is_public: false,
+        })
+        .select("id, label, url").single();
+      if (libErr || !lib) throw libErr || new Error("Falha ao salvar na biblioteca");
+
+      // Adiciona como mídia do atalho
+      const pos = qa.medias.length;
+      const { data: med, error: medErr } = await supabase
+        .from("bot_flow_qa_media")
+        .insert({ qa_id: qa.id, position: pos, media_kind: "audio", media_id: null, slot_key: null })
+        .select().single();
+      if (medErr) throw medErr;
+      // associa media_id
+      await supabase.from("bot_flow_qa_media").update({ media_id: lib.id }).eq("id", (med as any).id);
+
+      setAvailableAudios((cur) => [{ id: lib.id, label: lib.label, url: lib.url }, ...cur]);
+      setQas((cur) => cur.map((q) => q.id === qa.id
+        ? { ...q, medias: [...q.medias, { ...(med as Media), media_id: lib.id }] }
+        : q));
+      toast.success("Áudio gravado e vinculado!");
+    } catch (e: any) {
+      console.error(e);
+      toast.error(`Erro: ${e?.message || "falha ao gravar"}`);
+    }
+  };
+
   return (
     <Card className="p-4 sm:p-5 border-primary/20 bg-card/40">
-      <div className="flex items-start gap-2 mb-3">
+      <div className="flex items-start gap-2 mb-4">
         <HelpCircle className="h-5 w-5 text-primary mt-0.5" />
         <div className="flex-1">
           <h2 className="text-base font-semibold">Atalhos rápidos</h2>
           <p className="text-xs text-muted-foreground">
-            Tentado <strong>antes</strong> da base da IA. Use pra respostas com áudio/vídeo, ou texto que precisa ser literal.
-            A Camila responde isto e <strong>volta para o passo atual</strong> automaticamente.
+            A Camila escolhe automaticamente o atalho que casar com a fala do lead, responde, e <strong>volta ao passo atual</strong> do fluxo.
+            Tem áudio? Ela manda áudio. Não achou aqui? Tenta a Base da IA.
           </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={seedDefaults} disabled={seeding}>
+          {seeding ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Sparkles className="w-3 h-3 mr-1" />}
+          40 atalhos padrão
+        </Button>
+      </div>
+
+      {/* Filtros */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <Badge
+          variant={filterCat === "all" ? "default" : "outline"}
+          className="cursor-pointer"
+          onClick={() => setFilterCat("all")}
+        >
+          Todos <span className="ml-1 opacity-70">({countByCategory.all})</span>
+        </Badge>
+        {OBJECTION_CATEGORIES.map((c) => (
+          <Badge
+            key={c}
+            variant={filterCat === c ? "default" : "outline"}
+            className="cursor-pointer"
+            onClick={() => setFilterCat(c)}
+          >
+            {CATEGORY_EMOJI[c]} {c} <span className="ml-1 opacity-70">({countByCategory[c] || 0})</span>
+          </Badge>
+        ))}
+        <div className="relative ml-auto w-full sm:w-auto sm:flex-1 max-w-xs">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar título, gatilho, resposta…"
+            className="pl-7 h-8 text-xs"
+          />
         </div>
       </div>
 
@@ -166,28 +331,38 @@ export default function FaqSection({ flowId }: { flowId: string }) {
         <p className="text-sm text-muted-foreground">Carregando…</p>
       ) : (
         <div className="space-y-3">
-          {qas.map((qa, i) => (
-            <QACard
-              key={qa.id}
-              qa={qa}
-              slots={slots}
-              availableVideos={availableVideos}
-              onMoveUp={i > 0 ? () => moveQA(qa.id, -1) : undefined}
-              onMoveDown={i < qas.length - 1 ? () => moveQA(qa.id, 1) : undefined}
-              onUpdate={(p) => updateQA(qa.id, p)}
-              onDelete={() => deleteQA(qa.id)}
-              onAddTrigger={(p) => addTrigger(qa, p)}
-              onRemoveTrigger={(t) => removeTrigger(qa, t)}
-              onAddMedia={(k) => addMedia(qa, k)}
-              onUpdateMedia={(m, p) => updateMedia(qa, m, p)}
-              onRemoveMedia={(m) => removeMedia(qa, m)}
-            />
-          ))}
-          {qas.length === 0 && (
-            <p className="text-sm text-muted-foreground italic">Nenhuma dúvida cadastrada ainda.</p>
+          {filtered.map((qa) => {
+            const realIdx = qas.findIndex((q) => q.id === qa.id);
+            return (
+              <QACard
+                key={qa.id}
+                qa={qa}
+                slots={slots}
+                availableVideos={availableVideos}
+                availableAudios={availableAudios}
+                triggerIndex={triggerIndex}
+                onMoveUp={realIdx > 0 ? () => moveQA(qa.id, -1) : undefined}
+                onMoveDown={realIdx < qas.length - 1 ? () => moveQA(qa.id, 1) : undefined}
+                onUpdate={(p) => updateQA(qa.id, p)}
+                onDelete={() => deleteQA(qa.id)}
+                onAddTrigger={(p) => addTrigger(qa, p)}
+                onRemoveTrigger={(t) => removeTrigger(qa, t)}
+                onAddMedia={(k) => addMedia(qa, k)}
+                onUpdateMedia={(m, p) => updateMedia(qa, m, p)}
+                onRemoveMedia={(m) => removeMedia(qa, m)}
+                onAudioRecorded={(blob) => onAudioRecorded(qa, blob)}
+              />
+            );
+          })}
+          {filtered.length === 0 && (
+            <p className="text-sm text-muted-foreground italic py-6 text-center">
+              {qas.length === 0
+                ? 'Nenhum atalho ainda. Clique em "40 atalhos padrão" pra começar.'
+                : "Nenhum atalho com esse filtro."}
+            </p>
           )}
           <Button variant="outline" onClick={addQA} className="w-full">
-            <Plus className="w-4 h-4 mr-1" /> Nova dúvida
+            <Plus className="w-4 h-4 mr-1" /> Novo atalho em branco
           </Button>
         </div>
       )}
@@ -195,10 +370,33 @@ export default function FaqSection({ flowId }: { flowId: string }) {
   );
 }
 
+// ────────────────────────────────────────────────────────────────────
+function getStatus(qa: QA, triggerIndex: Map<string, string[]>) {
+  const issues: string[] = [];
+  if (qa.triggers.length === 0) issues.push("Sem gatilhos");
+  const noText = !qa.text_response || !qa.text_response.trim();
+  const noMedia = qa.medias.length === 0 || qa.medias.every((m) => !m.media_id && !m.slot_key);
+  if (noText && noMedia) issues.push("Sem texto nem mídia");
+  // duplicado entre atalhos
+  const dup = qa.triggers.filter((t) => (triggerIndex.get(t.phrase.toLowerCase().trim()) || []).length > 1);
+  if (dup.length) issues.push(`${dup.length} gatilho(s) duplicado(s) com outro atalho`);
+  // reservada
+  const reserved = qa.triggers.filter((t) => RESERVED_FLOW_KEYWORDS.includes(t.phrase.toLowerCase().trim()));
+  if (reserved.length) issues.push(`Conflita com palavras do fluxo: ${reserved.map((r) => r.phrase).join(", ")}`);
+  // variável inválida
+  if (qa.text_response) {
+    const badVars = (qa.text_response.match(/\{[a-z_]+\}(?!\})/gi) || []);
+    if (badVars.length) issues.push(`Use {{nome}} em vez de ${badVars[0]}`);
+  }
+  return issues;
+}
+
 function QACard(props: {
   qa: QA;
   slots: Slot[];
   availableVideos: LibraryVideo[];
+  availableAudios: LibraryAudio[];
+  triggerIndex: Map<string, string[]>;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
   onUpdate: (p: Partial<QA>) => void;
@@ -208,45 +406,88 @@ function QACard(props: {
   onAddMedia: (kind: "audio" | "video") => void;
   onUpdateMedia: (m: Media, p: Partial<Media>) => void;
   onRemoveMedia: (m: Media) => void;
+  onAudioRecorded: (blob: Blob) => Promise<void>;
 }) {
-  const { qa, slots, availableVideos } = props;
+  const { qa, slots, availableVideos, availableAudios, triggerIndex } = props;
   const [phraseInput, setPhraseInput] = useState("");
   const [name, setName] = useState(qa.intent_name);
   const [text, setText] = useState(qa.text_response ?? "");
+  const [recording, setRecording] = useState(false);
 
   useEffect(() => setName(qa.intent_name), [qa.intent_name]);
   useEffect(() => setText(qa.text_response ?? ""), [qa.text_response]);
 
+  const { category, name: shortName } = parseIntentName(qa.intent_name);
+  const issues = getStatus(qa, triggerIndex);
+  const isOk = issues.length === 0;
+
   return (
     <Card className="p-4 space-y-3 bg-background/60">
       <div className="flex items-start gap-2">
-        <div className="flex-1">
+        {category && (
+          <Badge variant="secondary" className="mt-2 shrink-0">
+            {CATEGORY_EMOJI[category]} {category}
+          </Badge>
+        )}
+        <div className="flex-1 min-w-0">
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             onBlur={() => name !== qa.intent_name && props.onUpdate({ intent_name: name })}
-            placeholder="Nome curto (ex.: Preço)"
+            placeholder={category ? `${category} · Nome do atalho` : "Nome do atalho"}
             className="font-semibold"
           />
+          {shortName !== qa.intent_name && (
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Use o formato <code>"Categoria · Nome"</code> pra organizar.
+            </p>
+          )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
+          {isOk ? (
+            <CheckCircle2 className="w-4 h-4 text-green-500" aria-label="Pronto" />
+          ) : (
+            <span title={issues.join(" • ")}>
+              <AlertTriangle className="w-4 h-4 text-amber-500" />
+            </span>
+          )}
           {props.onMoveUp && <Button size="icon" variant="ghost" onClick={props.onMoveUp}><ChevronUp className="w-4 h-4" /></Button>}
           {props.onMoveDown && <Button size="icon" variant="ghost" onClick={props.onMoveDown}><ChevronDown className="w-4 h-4" /></Button>}
           <Button size="icon" variant="ghost" onClick={props.onDelete}><Trash2 className="w-4 h-4 text-destructive" /></Button>
         </div>
       </div>
 
+      {/* Avisos */}
+      {issues.length > 0 && (
+        <div className="rounded border border-amber-500/30 bg-amber-500/5 p-2 text-xs space-y-0.5">
+          {issues.map((i, idx) => (
+            <p key={idx} className="text-amber-600 dark:text-amber-400 flex items-start gap-1">
+              <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> {i}
+            </p>
+          ))}
+        </div>
+      )}
+
       <div>
         <Label className="text-xs uppercase tracking-wide text-muted-foreground">❓ Quando o cliente disser…</Label>
         <div className="flex flex-wrap gap-2 mt-2">
-          {qa.triggers.map((t) => (
-            <Badge key={t.id} variant="outline" className="gap-1 py-1">
-              {t.phrase}
-              <button onClick={() => props.onRemoveTrigger(t)} className="hover:text-destructive ml-1">
-                <X className="w-3 h-3" />
-              </button>
-            </Badge>
-          ))}
+          {qa.triggers.map((t) => {
+            const dup = (triggerIndex.get(t.phrase.toLowerCase().trim()) || []).length > 1;
+            const reserved = RESERVED_FLOW_KEYWORDS.includes(t.phrase.toLowerCase().trim());
+            return (
+              <Badge
+                key={t.id}
+                variant={dup || reserved ? "destructive" : "outline"}
+                className="gap-1 py-1"
+                title={dup ? "Duplicado em outro atalho" : reserved ? "Palavra usada pelo fluxo principal" : undefined}
+              >
+                {t.phrase}
+                <button onClick={() => props.onRemoveTrigger(t)} className="hover:text-destructive ml-1">
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
+            );
+          })}
           <Input
             value={phraseInput}
             onChange={(e) => setPhraseInput(e.target.value)}
@@ -264,12 +505,12 @@ function QACard(props: {
       </div>
 
       <div>
-        <Label className="text-xs uppercase tracking-wide text-muted-foreground">💬 Resposta</Label>
+        <Label className="text-xs uppercase tracking-wide text-muted-foreground">💬 Resposta em texto</Label>
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           onBlur={() => text !== (qa.text_response ?? "") && props.onUpdate({ text_response: text || null })}
-          placeholder="Ex.: 'É super seguro! A iGreen é uma empresa autorizada…' — use {{nome}}"
+          placeholder="Ex.: 'Relaxa {{nome}}, a iGreen é regulamentada pela ANEEL…' — variáveis disponíveis: {{nome}}, {{telefone}}, {{valor_conta}}"
           className="mt-2"
           rows={3}
         />
@@ -278,38 +519,83 @@ function QACard(props: {
       <div>
         <Label className="text-xs uppercase tracking-wide text-muted-foreground">🎙️ Mídias opcionais</Label>
         <div className="space-y-2 mt-2">
-          {qa.medias.map((m, i) => (
-            <div key={m.id} className="flex items-center gap-2 p-2 rounded border bg-muted/30">
-              <Badge>{i + 1}</Badge>
-              <Badge variant="secondary">{m.media_kind === "audio" ? "🎙️ Áudio" : "🎬 Vídeo"}</Badge>
-              {m.media_kind === "video" ? (
-                <Select value={m.media_id ?? ""} onValueChange={(v) => props.onUpdateMedia(m, { media_id: v, slot_key: null })}>
-                  <SelectTrigger className="flex-1"><SelectValue placeholder="Escolha o vídeo…" /></SelectTrigger>
-                  <SelectContent>
-                    {availableVideos.map((v) => (<SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Select value={m.slot_key ?? ""} onValueChange={(v) => props.onUpdateMedia(m, { slot_key: v, media_id: null })}>
-                  <SelectTrigger className="flex-1"><SelectValue placeholder="Escolha o áudio…" /></SelectTrigger>
-                  <SelectContent>
-                    {slots.map((s) => (<SelectItem key={s.slot_key} value={s.slot_key}>{s.label}</SelectItem>))}
-                  </SelectContent>
-                </Select>
-              )}
-              <Button size="icon" variant="ghost" onClick={() => props.onRemoveMedia(m)}>
-                <Trash2 className="w-4 h-4 text-destructive" />
+          {qa.medias.map((m, i) => {
+            const isAudioLib = m.media_kind === "audio" && m.media_id;
+            const audioObj = isAudioLib ? availableAudios.find((a) => a.id === m.media_id) : null;
+            return (
+              <div key={m.id} className="flex items-center gap-2 p-2 rounded border bg-muted/30">
+                <Badge>{i + 1}</Badge>
+                <Badge variant="secondary">{m.media_kind === "audio" ? "🎙️ Áudio" : "🎬 Vídeo"}</Badge>
+                {m.media_kind === "video" ? (
+                  <Select value={m.media_id ?? ""} onValueChange={(v) => props.onUpdateMedia(m, { media_id: v, slot_key: null })}>
+                    <SelectTrigger className="flex-1"><SelectValue placeholder="Escolha o vídeo…" /></SelectTrigger>
+                    <SelectContent>
+                      {availableVideos.map((v) => (<SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
+                ) : audioObj ? (
+                  <div className="flex-1 flex items-center gap-2 min-w-0">
+                    <span className="text-xs truncate flex-1">{audioObj.label}</span>
+                    {audioObj.url && <audio controls src={audioObj.url} className="h-7" />}
+                  </div>
+                ) : (
+                  <Select
+                    value={m.slot_key ?? (m.media_id ?? "")}
+                    onValueChange={(v) => {
+                      if (v.startsWith("lib:")) props.onUpdateMedia(m, { media_id: v.slice(4), slot_key: null });
+                      else props.onUpdateMedia(m, { slot_key: v, media_id: null });
+                    }}
+                  >
+                    <SelectTrigger className="flex-1"><SelectValue placeholder="Escolha o áudio…" /></SelectTrigger>
+                    <SelectContent>
+                      {availableAudios.length > 0 && (
+                        <>
+                          <div className="px-2 py-1 text-[10px] uppercase text-muted-foreground">Biblioteca</div>
+                          {availableAudios.map((a) => (
+                            <SelectItem key={`lib-${a.id}`} value={`lib:${a.id}`}>{a.label}</SelectItem>
+                          ))}
+                        </>
+                      )}
+                      {slots.length > 0 && (
+                        <>
+                          <div className="px-2 py-1 text-[10px] uppercase text-muted-foreground">Slots de IA</div>
+                          {slots.map((s) => (<SelectItem key={s.slot_key} value={s.slot_key}>{s.label}</SelectItem>))}
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Button size="icon" variant="ghost" onClick={() => props.onRemoveMedia(m)}>
+                  <Trash2 className="w-4 h-4 text-destructive" />
+                </Button>
+              </div>
+            );
+          })}
+
+          {recording ? (
+            <div className="rounded border border-primary/30 bg-primary/5 p-3 space-y-2">
+              <p className="text-xs text-muted-foreground">Grave o áudio e clique em ✓ para salvar:</p>
+              <AudioRecorderInline
+                onRecorded={async (blob) => {
+                  await props.onAudioRecorded(blob);
+                  setRecording(false);
+                }}
+              />
+              <Button size="sm" variant="ghost" onClick={() => setRecording(false)}>Cancelar</Button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="default" onClick={() => setRecording(true)}>
+                <Mic className="w-3 h-3 mr-1" /> Gravar áudio agora
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => props.onAddMedia("audio")}>
+                <Plus className="w-3 h-3 mr-1" /> Áudio da biblioteca
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => props.onAddMedia("video")}>
+                <Plus className="w-3 h-3 mr-1" /> Vídeo
               </Button>
             </div>
-          ))}
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => props.onAddMedia("audio")}>
-              <Plus className="w-3 h-3 mr-1" /> Áudio
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => props.onAddMedia("video")}>
-              <Plus className="w-3 h-3 mr-1" /> Vídeo
-            </Button>
-          </div>
+          )}
         </div>
       </div>
     </Card>
