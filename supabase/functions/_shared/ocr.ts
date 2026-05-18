@@ -609,6 +609,7 @@ Retorne APENAS este JSON, sem markdown:
     console.warn("⚠️ ocrNascimentoFocado falhou:", e?.message || e);
     return "";
   }
+}
 
 /**
  * OCR frente e verso do documento.
