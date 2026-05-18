@@ -1,5 +1,6 @@
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from "recharts";
-import { TrendingUp, TrendingDown, Calendar, Target, Layers } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { Calendar, Target, Layers } from "lucide-react";
+
 import { useTheme } from "@/contexts/ThemeContext";
 
 interface Props {
