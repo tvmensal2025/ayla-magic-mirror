@@ -308,7 +308,13 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
           ].map((o) => (
             <button
               key={o.key}
-              onClick={() => setOriginFilter(o.key as any)}
+              onClick={() => {
+                setOriginFilter(o.key as any);
+                setStatusFilter("all");
+                setDevolutivaFilter("all");
+                setLicenciadoFilter(new Set());
+                setSelectedIds(new Set());
+              }}
               disabled={isSending}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
                 originFilter === o.key
@@ -321,17 +327,25 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
           ))}
         </div>
 
-        {/* Status filters */}
+        {/* Status filters — específicos por público (NUNCA misturar) */}
         <div className="flex flex-wrap gap-2 mb-3">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground mr-1">
             <Filter className="w-3.5 h-3.5" /> Filtrar:
           </div>
-          {[
-            { key: "all", label: "Todos" },
-            { key: "approved", label: "Aprovado" },
-            { key: "rejected", label: "Reprovado" },
-            { key: "pending", label: "Pendente" },
-          ].map(f => (
+          {(originFilter === "igreen_sync"
+            ? [
+                { key: "all", label: "Todos" },
+                { key: "approved", label: "Aprovado" },
+                { key: "rejected", label: "Reprovado / Devolutiva" },
+                { key: "pending", label: "Em análise" },
+              ]
+            : [
+                { key: "all", label: "Todos" },
+                { key: "pending", label: "Em conversa" },
+                { key: "approved", label: "Convertido" },
+                { key: "rejected", label: "Falha" },
+              ]
+          ).map(f => (
             <button
               key={f.key}
               onClick={() => handleStatusFilter(f.key)}
@@ -347,8 +361,8 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
           ))}
         </div>
 
-        {/* Devolutiva filter - visible when status = rejected */}
-        {statusFilter === "rejected" && (
+        {/* Devolutiva filter — só para carteira iGreen reprovada */}
+        {originFilter === "igreen_sync" && statusFilter === "rejected" && (
           <div className="mb-3">
             <Select value={devolutivaFilter} onValueChange={setDevolutivaFilter} disabled={isSending}>
               <SelectTrigger className="rounded-xl bg-secondary/50 border-border/50">
@@ -365,8 +379,8 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
           </div>
         )}
 
-        {/* Licenciado multi-select filter */}
-        {licenciadoOptions.length > 0 && (
+        {/* Licenciado multi-select filter — só faz sentido para carteira iGreen */}
+        {originFilter === "igreen_sync" && licenciadoOptions.length > 0 && (
           <div className="mb-3">
             <Popover>
               <PopoverTrigger asChild>

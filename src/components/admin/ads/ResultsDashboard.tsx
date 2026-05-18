@@ -76,13 +76,15 @@ export function ResultsDashboard({
           .order("date", { ascending: true });
         setMetrics((ms || []) as DailyMetric[]);
 
-        // clientes ativos atribuíveis a anúncios via lead_source
+        // clientes atribuíveis a anúncios: SÓ leads WhatsApp (customer_origin) com lead_source de origem ads.
+        // Nunca contar clientes sincronizados do portal iGreen aqui.
         const { count } = await supabase
           .from("customers")
           .select("id", { count: "exact", head: true })
           .eq("consultant_id", consultantId)
           .eq("status", "active")
-          .not("lead_source", "is", null)
+          .in("customer_origin", ["whatsapp_lead", "manual"])
+          .in("lead_source", ["meta_ads", "google_ads", "facebook_ads", "instagram_ads"])
           .gte("created_at", since);
         setAcquired(count || 0);
       } else {

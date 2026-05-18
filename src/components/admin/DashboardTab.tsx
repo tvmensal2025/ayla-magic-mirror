@@ -78,13 +78,18 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
   const licenciadoOptions = useMemo(() => {
     if (!analytics?.allCustomers) return [];
     const names = new Set<string>();
-    for (const c of analytics.allCustomers) { if (c.registered_by_name) names.add(c.registered_by_name); }
+    for (const c of analytics.allCustomers) {
+      if (c.customer_origin !== "igreen_sync") continue;
+      if (c.registered_by_name) names.add(c.registered_by_name);
+    }
     return Array.from(names).sort();
   }, [analytics?.allCustomers]);
 
   const filteredMetrics = useMemo(() => {
     if (!analytics) return null;
-    const filtered = selectedLicenciado === "all" ? analytics.allCustomers : analytics.allCustomers.filter((c: any) => c.registered_by_name === selectedLicenciado);
+    // Dashboard "Total de Clientes" / consumo / status → CARTEIRA iGreen sincronizada (não leads WhatsApp)
+    const walletOnly = analytics.allCustomers.filter((c: any) => c.customer_origin === "igreen_sync");
+    const filtered = selectedLicenciado === "all" ? walletOnly : walletOnly.filter((c: any) => c.registered_by_name === selectedLicenciado);
     const totalCustomers = filtered.length;
     const totalKw = filtered.reduce((sum: number, c: any) => sum + (Number(c.media_consumo) || 0), 0);
     const withConsumption = filtered.filter((c: any) => Number(c.media_consumo) > 0);

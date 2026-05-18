@@ -106,7 +106,7 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
       while (true) {
         const { data, error } = await supabase
           .from("customers")
-          .select("id, name, status, media_consumo, electricity_bill_value, created_at, registered_by_name, registered_by_igreen_id")
+          .select("id, name, status, media_consumo, electricity_bill_value, created_at, registered_by_name, registered_by_igreen_id, customer_origin")
           .eq("consultant_id", consultantId!)
           .range(page * pageSize, (page + 1) * pageSize - 1);
         if (error) throw error;
@@ -168,9 +168,16 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
       }
       const utmSources: UtmData[] = Array.from(utmMap.entries()).map(([source, count]) => ({ source, count })).sort((a, b) => b.count - a.count);
 
-      const totalCustomers = allCustomers.length;
+      // === SPLIT por origem — NUNCA misturar leads de WhatsApp com carteira iGreen ===
+      const leadCustomers = allCustomers.filter((c: any) => {
+        const o = c.customer_origin || "whatsapp_lead";
+        return o === "whatsapp_lead" || o === "manual";
+      });
+      const walletCustomers = allCustomers.filter((c: any) => c.customer_origin === "igreen_sync");
+
+      const totalCustomers = walletCustomers.length;
       const statusMap = new Map<string, number>();
-      for (const c of allCustomers) {
+      for (const c of walletCustomers) {
         const s = c.status || "pending";
         statusMap.set(s, (statusMap.get(s) || 0) + 1);
       }
@@ -182,12 +189,12 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
         .map(([status, count]) => ({ status, count, label: statusLabels[status] || status.charAt(0).toUpperCase() + status.slice(1) }))
         .sort((a, b) => b.count - a.count);
 
-      const totalKw = allCustomers.reduce((sum, c) => sum + (Number(c.media_consumo) || 0), 0);
-      const customersWithConsumption = allCustomers.filter((c) => Number(c.media_consumo) > 0);
+      const totalKw = walletCustomers.reduce((sum, c) => sum + (Number(c.media_consumo) || 0), 0);
+      const customersWithConsumption = walletCustomers.filter((c) => Number(c.media_consumo) > 0);
       const avgKw = customersWithConsumption.length > 0 ? totalKw / customersWithConsumption.length : 0;
 
       const licMap = new Map<string, number>();
-      for (const c of allCustomers) {
+      for (const c of walletCustomers) {
         const lic = c.registered_by_name;
         if (lic) licMap.set(lic, (licMap.get(lic) || 0) + 1);
       }
@@ -208,7 +215,7 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
         const label = `${start.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} - ${end.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}`;
         weekMap.set(label, 0);
       }
-      for (const c of allCustomers) {
+      for (const c of walletCustomers) {
         const created = new Date(c.created_at);
         if (created >= sinceDate) {
           const daysAgo = Math.floor((Date.now() - created.getTime()) / (1000 * 60 * 60 * 24));
@@ -228,10 +235,11 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
         e.event_type === "click" &&
         (e.event_target?.includes("whatsapp") || e.event_target?.includes("cadastro"))
       ).length;
-      const periodCustomers = allCustomers.filter((c) => new Date(c.created_at) >= sinceDate);
-      const leadsCount = periodCustomers.length;
-      const approvedCount = periodCustomers.filter((c) =>
-        c.status === "approved" || c.status === "active"
+      const periodLeads = leadCustomers.filter((c) => new Date(c.created_at) >= sinceDate);
+      const leadsCount = periodLeads.length;
+      // "Aprovados" no funil = leads que avançaram (não mistura com carteira iGreen sincronizada)
+      const approvedCount = periodLeads.filter((c: any) =>
+        c.status === "approved" || c.status === "active" || c.status === "registered_igreen" || c.status === "complete"
       ).length;
       const funnel = [
         { stage: "Visitas", count: total, pct: 100 },
@@ -270,8 +278,8 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
       }).length;
       const curClicks = events.filter((e) => e.event_type === "click" && new Date(e.created_at).getTime() >= curStart).length;
       const prevClicks = events.filter((e) => e.event_type === "click" && new Date(e.created_at).getTime() >= prevStart && new Date(e.created_at).getTime() < curStart).length;
-      const curLeads = allCustomers.filter((c) => new Date(c.created_at).getTime() >= curStart).length;
-      const prevLeads = allCustomers.filter((c) => {
+      const curLeads = leadCustomers.filter((c) => new Date(c.created_at).getTime() >= curStart).length;
+      const prevLeads = leadCustomers.filter((c) => {
         const t = new Date(c.created_at).getTime();
         return t >= prevStart && t < curStart;
       }).length;
@@ -358,8 +366,9 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
       };
       const sparkViews = buildDailySpark(views);
       const sparkClicks = buildDailySpark(events.filter((e) => e.event_type === "click"));
-      const sparkLeads = buildDailySpark(allCustomers as Array<{ created_at: string }>);
-      const approvedRows = allCustomers.filter((c: any) => c.status === "approved" || c.status === "active");
+      const sparkLeads = buildDailySpark(leadCustomers as Array<{ created_at: string }>);
+      // "Aprovados" KPI = carteira iGreen sincronizada com status ativo/aprovado (não leads)
+      const approvedRows = walletCustomers.filter((c: any) => c.status === "approved" || c.status === "active");
       const sparkApproved = buildDailySpark(approvedRows as Array<{ created_at: string }>);
       const curApproved = approvedRows.filter((c: any) => new Date(c.created_at).getTime() >= curStart).length;
       const prevApproved = approvedRows.filter((c: any) => {
