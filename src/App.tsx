@@ -17,6 +17,7 @@ const Auth = lazy(() => import("./pages/Auth"));
 const Admin = lazy(() => import("./pages/Admin"));
 
 const FluxoCamila = lazy(() => import("./pages/FluxoCamila"));
+const AdminFaq = lazy(() => import("./pages/AdminFaq"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
