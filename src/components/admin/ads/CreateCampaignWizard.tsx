@@ -149,6 +149,11 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
   const [filesByFormat, setFilesByFormat] = useState<FilesByFormat>(EMPTY_FILES);
   const adFiles = filesByFormat[format];
   const totalFiles = filesByFormat.square.length + filesByFormat.vertical.length + filesByFormat.story.length;
+  // Imagens reutilizadas da biblioteca (não passam por upload de novo).
+  const [pickedLibrary, setPickedLibrary] = useState<AdImageLibraryItem[]>([]);
+  const [photoTab, setPhotoTab] = useState<"upload" | "library">("upload");
+  // Save template dialog
+  const [saveTplOpen, setSaveTplOpen] = useState(false);
 
   // Step 3: copy
   const [copy, setCopy] = useState<CopyPackV2 | null>(null);
