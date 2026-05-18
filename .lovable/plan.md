@@ -1,96 +1,73 @@
+# Página dedicada de FAQ (`/admin/faq`)
 
-# Plano: onde vale Lovable AI vs onde fica Gemini direto
+Hoje a base de conhecimento que a IA usa pra responder dúvidas (`ai_knowledge_sections`) só aparece dentro do **Super Admin → aba "IA"**, escondida. Vou criar uma página própria, completa, fácil de editar.
 
-## Estado atual
+## O que muda
 
-O projeto já tem infra robusta de Gemini direto (`_shared/gemini.ts`) com pricing, retries, fallback Pro→Flash, telemetria por consultor e cliente. E já existe um **híbrido OpenAI/Gemini** em `intent-classifier.ts`. Ou seja, não estamos partindo do zero — a decisão é **onde plugar Lovable AI Gateway** sem quebrar o que funciona.
+### 1. Nova rota `/admin/faq`
+- Link no menu lateral do admin (ícone livro/help).
+- Acesso restrito a admin/super_admin (mesma proteção das outras rotas /admin).
 
-## Princípio de escolha
+### 2. Tela completa de gestão
+Lista todas as seções de `ai_knowledge_sections` com:
+- Busca por título/conteúdo/palavra-chave
+- Filtros: persona (lead / cliente / ambos), crítico (sim/não), ativo/inativo
+- Drag-and-drop pra reordenar (atualiza `position`)
+- Cards expansíveis mostrando preview do conteúdo
+- Botões: **Editar**, **Duplicar**, **Ativar/Desativar**, **Excluir**, **Marcar como crítico**
 
-| Critério | Vai pra **Gemini direto** | Vai pra **Lovable AI** |
-|---|---|---|
-| Volume | Alto (>1k req/dia) | Baixo a médio |
-| Latência sensível ao usuário | Sim (bot WhatsApp em tempo real) | Não (cron, batch, dashboards) |
-| Custo crítico | Sim | Tanto faz |
-| Multi-modal pesado (imagem/áudio/PDF) | Sim (já está em produção) | Evitar |
-| Precisa de provider failover (OpenAI/Anthropic) | Não | Sim |
-| Você quer trocar de modelo sem mexer em código | Não | Sim |
+### 3. Editor de seção (modal/drawer)
+Campos:
+- Título
+- Conteúdo (textarea grande com markdown leve)
+- Persona alvo (lead / cliente / ambos)
+- Crítico (resposta exata, não pode ser parafraseada pela IA)
+- Palavras-chave (chips)
+- Ativo (toggle)
 
-## Mapa: o que fica onde
+### 4. Adicionar conteúdo de 3 formas
+- **Manual** — formulário direto
+- **Upload de PDF/TXT/DOCX** — extrai texto (já existe a função de PDF no `AIKnowledgePanel`)
+- **Cola um texto bruto** — IA quebra automaticamente em seções
 
-### Fica em Gemini direto (NÃO MEXER — alto volume / latência crítica)
+### 5. "Auto-organizar com IA" (botão no topo)
+Edge function `faq-organizer` que:
+- Lê todas as seções ativas
+- Pede pra IA: deduplicar, consolidar temas parecidos, sugerir títulos melhores, gerar palavras-chave, marcar críticas, ordenar por relevância pro funil
+- Retorna um **diff preview** (antes/depois) — admin aprova antes de salvar
+- Nada é sobrescrito sem confirmação
 
-```text
-whapi-webhook (bot WhatsApp em tempo real)
-├── intent-classifier        ── já é híbrido OpenAI+Gemini, OK
-├── bot-flow (resolver)      ── determinístico, sem IA
-├── ai-transcribe-media      ── áudio Whapi, alto volume
-├── _shared/ocr.ts           ── RG/CNH/conta de luz (volume alto)
-├── _shared/detect-doc-type  ── classificação de docs
-├── ad-image-validator       ── batch grande de criativos
-└── extract-pdf-text         ── PDFs longos, tokens caros
-```
+### 6. Preview "Como a IA responderia"
+Caixinha onde admin digita uma pergunta de cliente e vê:
+- Qual(is) seção(ões) a IA usaria
+- Resposta que sairia no WhatsApp
+- Confiança e se faria handoff
+Usa a mesma função `ai-faq-answerer` que já roda em produção.
 
-Motivo: já paga pricing tabelado, tem retries, fallback Pro→Flash e a conta de tokens é grande demais pra passar por gateway intermediário.
+---
 
-### Migra pra Lovable AI (ganho real)
+## Sobre "não bagunçar o fluxo com perguntas do cliente"
 
-| Função atual | Por que migrar | Modelo sugerido |
-|---|---|---|
-| `ai-summarize-conversation` | Resumo de handoff — 1 chamada por handoff, baixo volume, valoriza ter prompts editáveis e trocar modelo fácil | `google/gemini-3-flash-preview` |
-| `ai-extract-memory` | Extrai memórias do CRM — batch noturno, latência não importa | `google/gemini-3-flash-preview` |
-| `ai-daily-digest` | Resumo diário do consultor — 1x/dia, qualidade > custo | `google/gemini-3.1-pro-preview` |
-| `ai-learn-feedback` | Aprende com correções do humano — ocasional | `google/gemini-3-flash-preview` |
-| `ai-cpl-watchdog` | Análise de CPL de campanhas — observabilidade interna | `google/gemini-3-flash-preview` |
-| `ai-followup-cron` (geração de copy) | Mensagem de follow-up — ganha em poder testar variantes | `google/gemini-3-flash-preview` |
-| `support-chat` / `igreen-chat` | Chats internos pro admin — baixo volume, melhor com streaming AI SDK | `google/gemini-3-flash-preview` |
-| `ad-creative-builder` / `ad-creative-qa` | Geração de copy de anúncios — qualidade > custo, baixo volume | `google/gemini-3.1-pro-preview` |
+**Sim, já é seguro.** A arquitetura atual já protege isso:
 
-Ganhos concretos:
-- **Sem `GEMINI_API_KEY` pra rotacionar** nesses pontos — Lovable provisiona `LOVABLE_API_KEY`.
-- **Trocar `google/gemini-3-flash` por `openai/gpt-5-mini` numa linha** se um caso específico responder melhor.
-- **Streaming nativo via AI SDK** (`support-chat`, `igreen-chat` ficam mais fluidos).
-- **Telemetria centralizada no gateway** (sem precisar manter `ai_usage_log` à mão pra esses).
+1. Durante o fluxo, se o cliente pergunta algo, o webhook tenta primeiro `bot_flow_qa` (perguntas cadastradas no fluxo).
+2. Se não bater, chama `ai-faq-answerer` usando a base de conhecimento (essa nova página).
+3. A IA **responde a dúvida mas mantém o passo atual** — não avança nem volta o funil. Termina convidando: *"Quer que eu siga com seu cadastro?"*
+4. Se a confiança for baixa ou for pergunta sensível (cancelamento, reclamação, pedido de humano), o bot **pausa e notifica o consultor** (handoff), sem responder besteira.
 
-### Novo: o que dá pra criar com Lovable AI (alto ROI)
+Vou adicionar na nova página um banner curto explicando esse comportamento, pra ficar claro que mexer no FAQ **não quebra o fluxo** — só melhora as respostas paralelas.
 
-1. **FAQ Answerer com RAG** — quando o lead pergunta algo fora do script no WhatsApp, classifier já marca `tem_duvida` mas o bot só responde se houver match em `bot_flow_qa`. Adicionar uma chamada **Lovable AI** com contexto de `ai_knowledge_sections` (RAG) pra responder objeções genéricas. **Frequência baixa por lead, qualidade alta** — perfeito pro gateway.
+---
 
-2. **Handoff Summary on-demand** — gerar resumo da conversa no botão "passar pro humano" do CRM (1 clique = 1 request). Lovable AI ideal.
+## Detalhes técnicos
 
-3. **Audit Dashboard com IA** — você pediu auditoria das conversas. Plugar um endpoint `audit-conversation` no Lovable AI que recebe `conversation_id` e cospe: sentimento, ponto de fricção, próxima ação sugerida. Roda 1x/conversa, qualitativo.
+- Página: `src/pages/AdminFaq.tsx`
+- Componentes: `src/components/admin/faq/{FaqList,FaqEditor,FaqAutoOrganize,FaqPreview,FaqUpload}.tsx`
+- Reaproveita extração de PDF do `AIKnowledgePanel` (move pra util compartilhado `src/lib/extract-text.ts`)
+- Nova edge function `faq-organizer` (chama Lovable AI Gateway, retorna proposta JSON)
+- Tabela `ai_knowledge_sections` já tem todos os campos necessários (`title`, `content`, `position`, `is_active`, `persona`, `is_critical`, `keywords`) — **sem migration**
+- RLS já permite admin gerenciar (`Admins manage knowledge`)
+- Adiciona item "FAQ da IA" no `AdminLayout` sidebar
+- Mantém o painel atual no Super Admin (compatibilidade)
 
-4. **Sugestão de resposta no chat do consultor** — quando o consultor digita no CRM, sugerir 3 respostas baseadas no histórico. Streaming pelo AI SDK fica natural.
-
-## Implementação proposta (3 fases pequenas)
-
-### Fase 1 — FAQ Answerer (maior impacto no bot)
-- Nova função `bot-faq-answerer` (Lovable AI, `gemini-3-flash-preview`)
-- Chamada de `whapi-webhook` quando `intent=tem_duvida` E não houver match em `bot_flow_qa`
-- Usa `ai_knowledge_sections` como contexto (RAG simples)
-- Resposta limitada a 3 frases + handoff se confidence < 0.6
-- Resolve diretamente o problema da auditoria (Franciele travada)
-
-### Fase 2 — Migração das funções de baixo volume
-- `ai-summarize-conversation`, `ai-extract-memory`, `ai-daily-digest`, `ai-learn-feedback`, `ai-cpl-watchdog`
-- Trocar `_shared/gemini.ts` por `_shared/ai-gateway.ts` (já existe!)
-- Manter prompts iguais, só trocar o client
-- Sem mudança de comportamento percebida
-
-### Fase 3 — Sugestão de resposta no CRM
-- Endpoint streaming via AI SDK
-- Frontend: input com botão "💡 Sugerir resposta"
-- 3 variantes geradas em paralelo
-
-## O que NÃO recomendo fazer
-
-- ❌ Migrar `intent-classifier` pra Lovable AI — volume alto, já tem fallback OpenAI→Gemini, latência crítica.
-- ❌ Migrar `ai-transcribe-media`, `ocr`, `extract-pdf-text` — multi-modal pesado, custo importa.
-- ❌ Migrar `bot-flow` — é determinístico, não tem IA.
-- ❌ Centralizar TUDO no Lovable AI — perde controle de custo no alto volume.
-
-## Próximo passo
-
-Aprovando este plano, sugiro começar pela **Fase 1 (FAQ Answerer)** porque resolve diretamente o problema visto na auditoria (leads fazendo pergunta fora do script e bot travando). É 1 edge function nova + 1 hook no `whapi-webhook`. Não toca em nada que já funciona.
-
-Quer que eu prossiga só com a Fase 1, ou aprova o conjunto Fase 1 + Fase 2 pra rodar em sequência?
+Quer que eu siga com essa estrutura?
