@@ -728,6 +728,9 @@ export type Database = {
           created_at: string
           id: string
           is_active: boolean
+          is_critical: boolean
+          keywords: string[]
+          persona: string
           position: number
           title: string
           updated_at: string
@@ -737,6 +740,9 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          is_critical?: boolean
+          keywords?: string[]
+          persona?: string
           position?: number
           title: string
           updated_at?: string
@@ -746,6 +752,9 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          is_critical?: boolean
+          keywords?: string[]
+          persona?: string
           position?: number
           title?: string
           updated_at?: string
