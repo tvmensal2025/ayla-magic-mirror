@@ -1,85 +1,59 @@
-## Diagnóstico — Evolution NÃO está 100%
+## Análise do erro com a Simone
 
-Auditei a parte de WhatsApp ponta a ponta (webhook, bot, frontend) comparando com o caminho Whapi (super-admin). Encontrei lacunas críticas. Como está hoje, **um consultor novo conecta a instância e o QR aparece, mas o bot vai engasgar em produção** porque o webhook do Evolution é uma versão antiga/reduzida do bot, e o painel de conversas só lê do Whapi.
+Linha do tempo real (cliente `fd51f071-...`, telefone 5519995904388):
 
-### O que está duplicado e funcionando
+| Hora | Direção | Texto | Step |
+|---|---|---|---|
+| 16:36:59 | in | "Olá! Tenho interesse…" | welcome |
+| 16:37:33 | in | "Simone" | flow:33be68c1 |
+| 16:37:36 | in | "Tudo bem" | flow:33be68c1 |
+| 16:37:47 | **out** | "Simone, qual o valor médio da sua conta de luz?" | `3e7fb4cd` (sem prefixo `flow:`) |
+| 16:37:55 | **out** | "Boa! Me ajuda voltando aqui: **{{nome}}**, qual o valor médio da sua conta de luz?" | `flow:3e7fb4cd` |
+| 16:38:38 | in | "Depende esse mês veio 170" | flow:3e7fb4cd |
+| 16:39:23 | out | "Simone, posso estar explicando abaixo como funciona?" | flow:bdc7ebb3 |
 
-- Edge functions `evolution-proxy` e `evolution-webhook` existem.
-- `src/services/evolutionApi.ts` cria instância já com webhook apontando para `/functions/v1/evolution-webhook` e eventos `MESSAGES_UPSERT` + `CONNECTION_UPDATE`.
-- `messageSender.ts` envia por Evolution por padrão; só usa Whapi se `isWhapi=true` (super admin).
-- `handlers/connection.ts`, `handlers/otp-intercept.ts` e o esqueleto do bot existem.
-- `notifyNewLead` está plugado no fluxo de criação de cliente.
+### Bugs identificados
 
-### O que está faltando / divergente (bloqueia uso real)
+**Bug 1 — `{{nome}}` enviado cru ao lead (crítico).**
+Em `supabase/functions/whapi-webhook/handlers/conversational/index.ts`:
 
-1. **Motor de fluxo customizado (`bot_flow_steps`) não existe no Evolution.**
-   - `whapi-webhook/handlers/bot-flow.ts` = 4217 linhas, com resolver de `bot_flow_steps` (UUID/`flow:<id>`/`passo_<ts>`), `dispatchStepFromFlow`, transitions por `trigger_phrases`, anti-duplicação via `last_custom_prompt_at`, FAQ (`matchQA`), `notifyHandoff`, módulo `conversational/` (intent-classifier, rules-engine, state-machine, templates), `step-namespace`.
-   - `evolution-webhook/handlers/bot-flow.ts` = 1582 linhas. Sem `bot_flow_steps`, sem `matchQA`, sem `notifyHandoff`, sem `dispatchStepFromFlow`, sem `conversational/`, sem `step-namespace`, sem `last_custom_prompt_at`. → **O FluxoCamila configurado no /admin/fluxos NÃO roda no Evolution.** Vai usar só os steps legacy hardcoded.
+```ts
+// linha 790
+_setTurnStepQuestion(currentStep?.message_text || "");
+```
 
-2. **Tests e arquivos auxiliares ausentes** no Evolution: `bot-flow_test.ts`, `step-namespace.ts`, pasta `handlers/conversational/` inteira.
+Guarda o `message_text` **bruto** do step. Depois, `_finalize` (linhas 572-584) usa esse texto direto na reentrada `"Boa! Me ajuda voltando aqui: ${tail}"` sem passar por `renderTemplate(...)`. Resultado: o lead recebeu literalmente `{{nome}}`. O mesmo arquivo espelhado em `evolution-webhook/handlers/conversational/index.ts` tem o bug idêntico.
 
-3. **Painel de conversas do consultor (frontend) é Whapi-only para listar/ler.**
-   - `useChats.ts` e `useMessages.ts` chamam `whapiListChats/whapiListMessages/whapiGetProfilePicture` quando NÃO é super-admin — mas o Whapi token é único do super-admin. Consultor comum vai ver lista vazia ou erro 401.
-   - Já existe `findChats/findContacts/getProfilePicture` em `evolutionApi.ts` importados mas só usados no branch super-admin invertido. A lógica de roteamento está espelhada.
+**Bug 2 — duas perguntas iguais em 8 s (dispatch duplicado).**
+A primeira resposta (16:37:47) saiu pelo caminho legado (step salvo sem prefixo `flow:`), e logo em seguida (16:37:55) o caminho conversacional disparou o `_finalize` reentry para o mesmo step `3e7fb4cd`. Sinaliza que dois engines (`sys` legacy e `flow` conversational) processaram o mesmo inbound `"Tudo bem"`, provavelmente porque `routeEngine` não respeitou o `flow:` prefixo após a transição welcome → flow.
 
-4. **`evolution-webhook` não tem o reentry/notify-handoff** quando o cliente volta após >24h sem inbound, nem pausa por pergunta fora do FAQ (regras hoje vivas no Whapi — ver `mem/features/lead-notifications-and-handoff` e `mem/features/custom-flow-step-engine`).
+### Plano de correção
 
-5. **Pitch Conexão Club + dúvidas pós-club** dependem de `dispatchStepFromFlow` (ordem text→audio→video→image) — não vão disparar via Evolution.
+1. **Renderizar variáveis na reentrada (`_finalize`)**
+   - Trocar a string global `_currentTurnStepQuestion` por um objeto `{ raw, vars }` populado em `runConversationalFlow` com as `vars` que já são montadas (nome, representante, valor_conta, telefone, cpf).
+   - Em `_finalize`, antes de compor a reentrada, rodar `renderTemplate(tail, vars)` (import já existe em `./templates.ts`).
+   - Replicar a mudança em `whapi-webhook` e `evolution-webhook` (arquivos espelhados).
 
-6. **Variáveis `EVOLUTION_API_URL` / `EVOLUTION_API_KEY`** precisam estar configuradas como secrets das edge functions (o arquivo `URGENTE_CONFIGURAR_AGORA.md` confirma que historicamente faltavam). Vale revalidar.
+2. **Evitar dispatch duplicado welcome → flow**
+   - Em `index.ts` do webhook, garantir que após `runConversationalFlow` retornar com `updates.conversation_step = "flow:..."`, o caminho `sys` (`runBotFlow` legacy) seja curto-circuitado no mesmo turno.
+   - Checar `routeEngine`: se `customer.conversation_step` começa com `flow:` OU `currentStep` resolvido é custom, **não** chamar o engine `sys` no mesmo webhook. Hoje há uma janela onde o step salvo é `3e7fb4cd` (sem prefixo) e o roteador chama os dois.
+   - Adicionar log `[route] engine=flow|sys reason=...` para auditar.
 
-7. **Connection update / `connected_phone`**: precisa garantir que ao conectar a instância o webhook `CONNECTION_UPDATE` grava `connected_phone` em `whatsapp_instances` (`useInstancePhone` depende disso para o BulkSend e filtros).
+3. **Sanity test**
+   - Test Deno em `conversational/index_test.ts`: dado `currentStep.message_text = "Olá {{nome}}, tudo bem?"` e `reply` vazio, `_finalize` retorna `"Boa! Me ajuda voltando aqui: Olá Simone, tudo bem?"` — nunca contém `{{`.
+   - Test em `routeEngine`: dado `conversation_step = "flow:xxx"`, retorna `engine=flow` e não invoca `runBotFlow` sys.
 
-8. **Trigger de mensagem outbound**: ao consultor mandar manualmente pelo painel, `sendWhatsAppMessage` usa `instanceName` — precisa confirmar que `useChats/useMessages/BulkSendPanel` passam `instanceName` correto (o do consultor logado, padrão `igreen-{slug}`).
-
-### Plano de execução (ordem obrigatória)
-
-**Fase 1 — Paridade do webhook (crítico)**
-1. Copiar para `evolution-webhook/handlers/`:
-   - `conversational/` (intent-classifier, rules-engine, state-machine, templates + tests)
-   - `step-namespace.ts` (+ test)
-2. Reescrever `evolution-webhook/handlers/bot-flow.ts` espelhando 100% o do Whapi, trocando apenas a camada de envio (usar `ctx.sender` que já é o `createEvolutionSender`) e o download de mídia (já é `sender.downloadMedia`). O resto (resolver de `bot_flow_steps`, `dispatchStepFromFlow`, `matchQA`, `notifyHandoff`, anti-rep `last_custom_prompt_at`, intent transitions, chain) é idêntico.
-3. Em `evolution-webhook/index.ts` adicionar: notifyNewLead em reentrada (sem inbound 24h) e roteamento `runConversationalFlow` antes do legacy switch — igual ao Whapi.
-
-**Fase 2 — Frontend multi-provider**
-4. `useChats.ts` / `useMessages.ts`: quando o consultor NÃO é super-admin (a maioria), buscar a instância do consultor e usar `findChats`/`findContacts`/`getProfilePicture`/`findMessages` do `evolutionApi.ts`. Manter Whapi só no branch super-admin.
-5. Garantir que `messageSender` recebe `instanceName` correto em todos os pontos (`useChats`, `useMessages`, `BulkSendPanel`, templates, CRM auto-reply).
-
-**Fase 3 — Connection lifecycle**
-6. Confirmar/ajustar `handlers/connection.ts` para gravar `connected_phone`, `status='connected'`, limpar QR ao parear, e marcar `disconnected` em logout. Testar com instância nova (`igreen-{slug}`).
-
-**Fase 4 — Validação E2E por consultor novo**
-7. Criar consultor de teste → seed automático do FluxoCamila já existe (`seed_camila_flow_on_consultant_insert`). Verificar:
-   - Conectar QR via /admin/whatsapp.
-   - Receber mensagem real → cai no `welcome` do `bot_flow_steps` (não no hardcoded).
-   - Avançar até `capture_conta` → OCR → confirmação → cadastro_portal → OTP.
-   - `notifyNewLead` chega no `notification_phone`.
-   - Pergunta fora do FAQ pausa bot e dispara `notifyHandoff`.
-   - Painel /admin/whatsapp lista o chat e o histórico via Evolution (não Whapi).
-   - BulkSend para esse consultor usa a instância dele.
-
-**Fase 5 — Limpeza**
-8. Documentar em `mem/whatsapp/evolution-parity.md` que `whapi-webhook` continua só para super-admin e `evolution-webhook` é o caminho default; remover/depreciar arquivos `.md` confusos (`URGENTE_CONFIGURAR_AGORA.md`, duplicatas de RESUMO/STATUS) num passo opcional.
-
-### Detalhes técnicos
-
-- O resolver de `bot_flow_steps` no Whapi (`bot-flow.ts` linha ~1845) precisa ser portado **textualmente** — qualquer divergência quebra transitions custom.
-- `conversational/index.ts` usa `customer.consultant_id` para buscar `bot_flow_steps` — funciona igual no Evolution.
-- `notifyHandoff` e `notifyNewLead` já existem em `_shared/notify-consultant.ts` (compartilhado).
-- Não há mudança de schema necessária — todas as colunas (`last_custom_prompt_at`, `bot_paused`, `pending_inbound_message_id`, `notification_phone`) já existem.
-- Risco: o `bot-flow.ts` do Whapi tem 4217 linhas; portar para Evolution é cópia + adaptação da camada `sender`. Vou validar com `bot-flow_test.ts`.
+4. **Validação manual pós-deploy**
+   - Reabrir conversa de teste no Camila, mandar "Tudo bem" no step que tem `{{nome}}` no `message_text` e confirmar:
+     - apenas **um** outbound por turno;
+     - nenhum `{{...}}` literal no texto enviado.
 
 ### Fora de escopo
+- Refatorar a unificação dos engines `sys`/`flow` (já planejado em `mem/whatsapp/evolution-parity.md`).
+- Tocar UI/CRM/LP/Anúncios.
 
-- Mudanças na LP, CRM Kanban, Anúncios, MinIO.
-- Migração definitiva super-admin Whapi → Evolution (fica para depois; por ora coexistem).
-
-### Resposta direta à pergunta
-
-**Hoje, NÃO está 100%.** Um consultor novo conecta o QR mas:
-- o bot ignora o FluxoCamila customizado (usa só legacy hardcoded),
-- o painel de chats fica vazio (lê Whapi do super-admin),
-- não há handoff/FAQ/anti-dup,
-- pitch Conexão Club / dúvidas não disparam.
-
-Aplicando as Fases 1–4 acima, fica 100%.
+### Arquivos a editar
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
+- `supabase/functions/evolution-webhook/handlers/conversational/index.ts`
+- `supabase/functions/whapi-webhook/index.ts` e `evolution-webhook/index.ts` (curto-circuito do engine)
+- Novos: `*_test.ts` para `_finalize` e `routeEngine`
