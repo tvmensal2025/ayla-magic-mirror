@@ -84,7 +84,9 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
 
   const filteredMetrics = useMemo(() => {
     if (!analytics) return null;
-    const filtered = selectedLicenciado === "all" ? analytics.allCustomers : analytics.allCustomers.filter((c: any) => c.registered_by_name === selectedLicenciado);
+    // Dashboard "Total de Clientes" / consumo / status → CARTEIRA iGreen sincronizada (não leads WhatsApp)
+    const walletOnly = analytics.allCustomers.filter((c: any) => c.customer_origin === "igreen_sync");
+    const filtered = selectedLicenciado === "all" ? walletOnly : walletOnly.filter((c: any) => c.registered_by_name === selectedLicenciado);
     const totalCustomers = filtered.length;
     const totalKw = filtered.reduce((sum: number, c: any) => sum + (Number(c.media_consumo) || 0), 0);
     const withConsumption = filtered.filter((c: any) => Number(c.media_consumo) > 0);
