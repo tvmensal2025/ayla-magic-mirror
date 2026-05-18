@@ -154,9 +154,10 @@ export default function FaqSection({ flowId }: { flowId: string }) {
       <div className="flex items-start gap-2 mb-3">
         <HelpCircle className="h-5 w-5 text-primary mt-0.5" />
         <div className="flex-1">
-          <h2 className="text-base font-semibold">Perguntas & Respostas</h2>
+          <h2 className="text-base font-semibold">Atalhos rápidos</h2>
           <p className="text-xs text-muted-foreground">
-            Quando o lead perguntar algo no meio do cadastro, a Camila responde isto e <strong>volta para o passo atual</strong> automaticamente.
+            Tentado <strong>antes</strong> da base da IA. Use pra respostas com áudio/vídeo, ou texto que precisa ser literal.
+            A Camila responde isto e <strong>volta para o passo atual</strong> automaticamente.
           </p>
         </div>
       </div>

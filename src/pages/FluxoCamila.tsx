@@ -21,7 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
-import FaqSection from "@/components/admin/fluxo/FaqSection";
+
 import { simulateMatch, detectRuleConflicts } from "@/lib/flowSimulator";
 
 // ---------------------------------------------------------------------------
@@ -391,18 +391,10 @@ export default function FluxoCamila() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => navigate("/admin/faq")}
+            onClick={() => navigate("/admin/conhecimento")}
             className="shrink-0"
           >
-            <BookOpen className="h-4 w-4 mr-1" /> FAQ da IA
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => document.getElementById("faq-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            className="shrink-0"
-          >
-            <HelpCircle className="h-4 w-4 mr-1" /> FAQ do fluxo
+            <BookOpen className="h-4 w-4 mr-1" /> Conhecimento do bot
           </Button>
         </div>
       </header>
@@ -535,7 +527,6 @@ export default function FluxoCamila() {
           <Plus className="h-4 w-4 mr-2" /> Adicionar passo
         </Button>
 
-        {flowId && <div id="faq-section" className="scroll-mt-20"><FaqSection flowId={flowId} /></div>}
       </main>
 
       <Dialog open={testOpen} onOpenChange={setTestOpen}>
