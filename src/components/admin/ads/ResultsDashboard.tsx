@@ -227,7 +227,7 @@ export function ResultsDashboard({
       <CostExplainerCard
         spendCents={totals.spend}
         clicks={totals.clicks}
-        leads={totals.leads}
+        leads={realLeads}
         approved={acquired}
       />
 
@@ -241,9 +241,9 @@ export function ResultsDashboard({
       {/* Saúde geral + insights da IA */}
       <HealthSummaryCard
         spend_cents={totals.spend}
-        leads={totals.leads}
+        leads={realLeads}
         impressions={totals.impressions}
-        registrations={totals.registrations}
+        registrations={acquired}
       />
       <InsightCards consultantId={consultantId} />
 
@@ -252,8 +252,8 @@ export function ResultsDashboard({
         <StatCard icon={<DollarSign className="w-4 h-4" />} label="Quanto gastou" metric="spend" value={`R$ ${(totals.spend / 100).toFixed(2)}`} accent />
         <StatCard icon={<Eye className="w-4 h-4" />} label="Pessoas que viram" metric="impressions" value={totals.impressions.toLocaleString("pt-BR")} />
         <StatCard icon={<Hand className="w-4 h-4" />} label="Tocaram no anúncio" metric="clicks" value={totals.clicks.toString()} />
-        <StatCard icon={<Users className="w-4 h-4" />} label="Conversas no zap" metric="leads" value={totals.leads.toString()} sub={`R$ ${cpl.toFixed(2)} cada`} />
-        <StatCard icon={<FileCheck2 className="w-4 h-4" />} label="Viraram cliente" metric="registrations" value={totals.registrations.toString()} sub={`${convRate.toFixed(1)}% das conversas`} />
+        <StatCard icon={<Users className="w-4 h-4" />} label="Leads no WhatsApp" metric="leads" value={realLeads.toString()} sub={cpl > 0 ? `R$ ${cpl.toFixed(2)} cada` : "—"} />
+        <StatCard icon={<FileCheck2 className="w-4 h-4" />} label="Viraram cliente" metric="registrations" value={acquired.toString()} sub={realLeads > 0 ? `${convRate.toFixed(1)}% dos leads` : "—"} />
         <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Lucro estimado/mês" value={`R$ ${roiMensal.toFixed(0)}`} accent={roiMensal >= 0} />
       </div>
 
