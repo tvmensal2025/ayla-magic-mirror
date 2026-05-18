@@ -1,110 +1,81 @@
+# Permissões Meta extras + Saldo real preciso
+
 ## Diagnóstico
 
-**1. Erro "Falha ao criar campanha — The requested file could not be read..."**
+**Permissões atuais** (`facebook-oauth-start`):
+`ads_management, ads_read, pages_show_list, email, public_profile`
 
-É o `error_user_msg` literal do endpoint `/adimages` do Meta. Hoje em `facebook-create-campaign/index.ts` (linhas 411–449) tentamos:
-- (a) mandar `url` pública do Supabase → Meta tenta baixar do nosso bucket. Em algumas contas/regiões a Meta cacheia o erro e nunca retenta.
-- (b) fallback `bytes` em base64 dentro de `application/x-www-form-urlencoded` → URL-encoded com 2–5 MB de payload às vezes é rejeitado com a mesma mensagem genérica.
+Está OK para criar/ler campanhas, **mas falta** o que dá mais sinal pra IA aprender e pra controlar mídia:
 
-Quando todos os hashes falham, o `throw "Nenhuma imagem pôde ser carregada..."` sobe e quebra a publicação inteira. O mesmo upload é usado no "Salvar como template" (linha 625) → mesmo erro.
+| Falta | Pra quê |
+|---|---|
+| `business_management` | Ler/gerenciar a BM (assets, usuários, contas) — necessário pra IA enxergar tudo da sua BM única |
+| `leads_retrieval` | Puxar leads do Lead Ads em tempo real (hoje só conta lead, não lê o conteúdo) |
+| `pages_read_engagement` + `pages_manage_metadata` | Ler comentários/reactions dos posts patrocinados (sinal forte de criativo bom/ruim) |
+| `pages_manage_ads` | Promover posts da página dentro da BM |
+| `instagram_basic` + `instagram_manage_insights` | Métricas IG (hoje só FB) |
+| `read_insights` | Insights da página (alcance orgânico) |
+| `catalog_management` (opcional) | Só se for usar Advantage+ Catalog |
 
-**2. Templates sem nome**
+**Saldo real** (`facebook-platform-balance` + `facebook-sync-metrics`):
+- Hoje lê `balance` e `amount_spent` da conta — **mas só roda quando alguém abre o card** ou quando o cron de sync passa.
+- Não há **webhook** da Meta avisando débito → saldo no dashboard fica defasado.
+- `wallet_transactions` debita pelo `spend` das insights (delta), o que tem latência de ~15min–3h da Meta.
+- Sem `Conversions API` configurada com `actions_data_processing_options` → algumas compras/leads não chegam → CPL fica errado → IA otimiza com dado ruim.
 
-`handleSaveAsTemplate` (linha 614) gera título automático `${distribuidora} — ${headline.slice(0,40)}`. Não há campo para o consultor nomear.
+## Plano
 
-**3. Re-upload toda vez**
-
-Cada publicação/save chama `uploadAdPhotos()` que faz `storage.upload()` com `Date.now()-filename` → mesma foto vira N cópias no bucket, e a Meta recebe `url` nova → sempre tem que baixar e gerar `image_hash` de novo (lento + sujeito ao erro acima).
-
-## O que vai mudar
-
-### A) Fix do upload para a Meta (multipart binário)
-
-Em `facebook-create-campaign/index.ts`, trocar o POST `/adimages` para **`multipart/form-data` com `source=<binary>`** (formato oficial e mais confiável da Marketing API):
-
-```text
-1) Baixa a imagem da URL pública (já está na nossa Storage, baixa rápido)
-2) POST /act_X/adimages com FormData:
-   - source: Blob(imagem) com filename
-   - access_token: ...
-3) Lê image_hash do response e cacheia em ad_image_library
+### 1. Ampliar scopes OAuth
+Editar `supabase/functions/facebook-oauth-start/index.ts` adicionando ao `SCOPES`:
 ```
-
-Mantém fallback: se multipart falhar, tenta `url` (estratégia atual) → último recurso `bytes` base64. Mensagem de erro real do Meta sempre propaga.
-
-### B) Biblioteca de imagens reutilizáveis
-
-Nova tabela `ad_image_library` (RLS por consultor + admin lê tudo):
-
-```text
-ad_image_library
-- id, consultant_id, url, storage_path
-- format: 'square'|'vertical'|'story'
-- width, height, file_size, content_type, filename
-- fb_image_hash (cache do hash da Meta — pula /adimages nas próximas publicações)
-- fb_image_hash_synced_at
-- usage_count, last_used_at, created_at
+business_management, leads_retrieval, pages_read_engagement,
+pages_manage_metadata, pages_manage_ads,
+instagram_basic, instagram_manage_insights, read_insights
 ```
+Você precisa **reconectar a BM uma vez** depois (botão "Reconectar Facebook" no card admin) pra aceitar as novas permissões.
 
-Mudanças:
-- `uploadAdPhotos` no front passa a **gravar uma linha** em `ad_image_library` após o upload no bucket (com dimensões/formato).
-- Edge function `facebook-create-campaign`: antes de chamar `/adimages`, lê `fb_image_hash` pela URL. Se existir, **pula o upload** e usa direto. Se subir hash novo, salva no DB. Incrementa `usage_count` + `last_used_at`.
-- `upload-ad-photo` (fallback edge) também grava na library.
+### 2. App Review da Meta (manual, fora do código)
+Permissions avançadas exigem revisão:
+- `leads_retrieval`, `pages_read_engagement`, `pages_manage_ads`, `instagram_manage_insights` → submeter no **App Dashboard → App Review → Permissions and Features** com vídeo mostrando uso.
+- Enquanto não aprovar, funcionam só pra admins/devs do app (você já é, então funciona no seu BM imediatamente).
 
-### C) UI da biblioteca dentro do wizard (Step 2)
+### 3. Saldo real em tempo (quase) real
+Criar `facebook-balance-webhook` (edge function) + assinar webhook da Meta:
+- Inscrever campos `account` no objeto `ad_account` → Meta dispara quando `balance`/`amount_spent` muda.
+- Webhook atualiza `consultant_wallet.last_synced_at` e dispara reconciliação imediata.
 
-Em `CreateCampaignWizard` (Step 2 — fotos), adicionar duas tabs:
+E **encurtar o intervalo de polling** do `facebook-sync-metrics` de N min para **5 min** (cron via `pg_cron`), com debounce.
 
-```text
-[ 🆕 Enviar novo ]   [ 📁 Minhas imagens (N) ]
-```
+### 4. Reconciliação precisa do saldo
+Hoje `wallet_transactions` debita só baseado em insights. Adicionar:
+- Job diário `facebook-balance-reconcile` que compara `consultant_wallet.total_spent_cents` com `lifetime_amount_spent_cents` da Meta e cria transação `adjustment` se divergir > R$ 0,50.
+- Mostrar no card admin: **"Saldo Meta R$ X · Sistema R$ Y · Δ R$ Z (última conferência: HH:MM)"**.
 
-Aba "Minhas imagens":
-- Lista do `ad_image_library` do consultor, agrupada por formato (Quadrado / Vertical / Story).
-- Filtro rápido "Mais usadas" / "Recentes".
-- Cada thumb mostra: dimensão (1080×1350), badge "✓ pronta na Meta" se já tem `fb_image_hash`.
-- Clicar adiciona à seleção da campanha **sem re-upload**.
-- Botão "Excluir" remove do bucket + DB.
+### 5. Sinais extras pra IA aprender (Conversions API + offline events)
+Já existe `facebook-capi`. Melhorar:
+- Enviar **todos** os eventos: `ViewContent`, `Lead`, `CompleteRegistration`, `Purchase`, `Contact` (clique no WhatsApp) com `event_id` único pra dedupe com Pixel.
+- Adicionar `customer_information_parameters` hasheados (em, ph, fn, ln, ct, st, zp, country) → +30% match quality → IA otimiza melhor.
+- Subir **eventos offline** (status `aprovado`/`ativo` no CRM) via `/offline_conversions` → Meta aprende quem virou cliente de verdade, não só lead.
 
-Mesma aba aparece no "Salvar como template" e no `UseTemplateDialog`.
+### 6. UI no card "Facebook da Plataforma"
+- Badge "Match Quality: X/10" (vem de `/events_received`).
+- Botão "Solicitar nova permissão" que dispara OAuth com `auth_type=rerequest`.
+- Lista das permissões concedidas vs faltantes (lê `/me/permissions`).
 
-### D) Dar nome ao template
+## Detalhes técnicos
 
-Quando clicar em "Salvar como template", abrir mini-dialog (`SaveTemplateDialog`):
+**Arquivos a mudar:**
+- `supabase/functions/facebook-oauth-start/index.ts` — adicionar scopes + `auth_type=rerequest` opcional
+- `supabase/functions/facebook-sync-metrics/index.ts` — incluir IG insights + breakdown por idade/gênero
+- `supabase/functions/facebook-capi/index.ts` — hash de todos os PII, `event_id` único, suporte offline events
+- `supabase/functions/facebook-platform-balance/index.ts` — incluir comparação Meta vs Sistema + `/me/permissions`
+- `supabase/functions/facebook-balance-webhook/index.ts` *(novo)*
+- `supabase/functions/facebook-balance-reconcile/index.ts` *(novo, agendado)*
+- `src/components/admin/super/PlatformFacebookCard.tsx` — mostrar delta, permissões, botão re-request
+- Migração: tabela `facebook_permissions_audit` (consultant_id, granted jsonb, declined jsonb, checked_at)
+- Cron `pg_cron`: balance-reconcile diário 03:00 BRT
 
-```text
-Nome do template:    [_________________________________]
-Descrição (opcional): [_________________________________]
-                                       ( Cancelar ) ( Salvar )
-```
+**Resposta direta à sua pergunta:**
+> "já está bom?"
 
-- Pré-preenche com sugestão (`{distribuidora} — {headline}`), editável.
-- Persiste `title` e `description` no `ad_templates`.
-- Mostra status: rascunho pessoal ou publicado (super admin).
-
-### E) Validação de tamanho centralizada
-
-`ad_image_library` só aceita itens com `width/height` válidos por formato (mesmas regras já existentes em `isFileValidFor`). Itens inválidos não entram na library — evita "lixo" e garante que só o que aparece já está no tamanho certo.
-
-## Arquivos a tocar
-
-**DB (migration nova):**
-- `ad_image_library` + índices + RLS + trigger `updated_at`.
-
-**Backend:**
-- `supabase/functions/facebook-create-campaign/index.ts` — multipart upload + leitura/escrita de `fb_image_hash`.
-- `supabase/functions/upload-ad-photo/index.ts` — após upload, insert na library.
-
-**Frontend:**
-- `src/services/adImageLibrary.ts` (novo) — `listLibrary`, `addToLibrary`, `removeFromLibrary`, `touchUsage`.
-- `src/services/facebookAds.ts` — `uploadAdPhotos` grava na library e devolve `{ url, libraryId }`.
-- `src/components/admin/ads/AdImageLibraryPanel.tsx` (novo) — grid agrupado por formato, com seleção.
-- `src/components/admin/ads/SaveTemplateDialog.tsx` (novo) — nome + descrição.
-- `src/components/admin/ads/CreateCampaignWizard.tsx` — Step 2 com Tabs "Enviar / Minhas imagens"; `handleSaveAsTemplate` usa `SaveTemplateDialog`.
-- `src/components/admin/ads/UseTemplateDialog.tsx` — mesma library disponível ao personalizar.
-
-## Fora do escopo
-
-- Não vou mexer no upload do `/adimages` pra contas que ainda usam `url` com sucesso — fica como fallback.
-- Não vou migrar imagens antigas do bucket pra `ad_image_library` automaticamente (entram conforme forem usadas).
-- Não vou tocar em audiências/CAPI/wallet — só fluxo de imagem + template.
+Não. Tá funcional, mas faltam **6 scopes** que destravariam aprendizado contínuo da IA e **falta webhook de saldo** + reconciliação — por isso o saldo no painel não bate com a Meta em tempo real.
