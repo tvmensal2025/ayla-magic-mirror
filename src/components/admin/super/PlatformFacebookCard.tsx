@@ -322,7 +322,7 @@ export function PlatformFacebookCard() {
               <p className="text-muted-foreground">Conecte a conta Facebook Business da plataforma para que os consultores possam criar campanhas.</p>
             </div>
           </div>
-          <Button onClick={() => openOAuthInNewTab("switch")} disabled={connecting} className="w-full gap-2">
+          <Button onClick={() => openOAuthInNewTab("connect")} disabled={connecting} className="w-full gap-2">
             {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Facebook className="w-4 h-4" />}
             Conectar Facebook Business
           </Button>
