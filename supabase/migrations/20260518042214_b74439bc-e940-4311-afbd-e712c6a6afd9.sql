@@ -1,0 +1,1 @@
+UPDATE public.bot_flow_steps SET position = position - 1 WHERE id IN ('559b8f1b-0630-45b5-aeae-b96cb4d20e9a','5b318e95-863b-43b8-96b2-d4f55bb9619c','bd0fd2f0-a1f1-4b02-bf35-f129d323f4b1','4735aef1-72f0-4a27-8862-61fb9647dae2');
