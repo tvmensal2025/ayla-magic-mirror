@@ -21,6 +21,7 @@ import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
 import { extractMultiField, buildMultiFieldPatch } from "../_shared/multi-field-extractor.ts";
 import { botRequestStore, isTestPhone, logTestOutbound } from "../_shared/test-mode.ts";
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
+import { syncDealStageFromStep } from "../_shared/crm-stage-sync.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -757,6 +758,10 @@ Deno.serve(async (req) => {
           phone, from_step: stepBefore, to_step: stripPrefix(updates.conversation_step),
           intent: __intent, confidence: __confidence,
         });
+      }
+      // Avança o estágio do deal no Kanban conforme o lead progride na conversa.
+      if (updates.conversation_step) {
+        await syncDealStageFromStep(supabase, customer.id, updates.conversation_step);
       }
     }
 

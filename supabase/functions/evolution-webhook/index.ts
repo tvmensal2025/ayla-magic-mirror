@@ -25,6 +25,7 @@ import { runConversationalFlow, CADASTRO_STEPS } from "./handlers/conversational
 import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
+import { syncDealStageFromStep } from "../_shared/crm-stage-sync.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -569,6 +570,10 @@ Deno.serve(async (req) => {
           from_step: stepBefore,
           to_step: stripPrefix(updates.conversation_step),
         });
+      }
+      // Avança o estágio do deal no Kanban conforme o lead progride na conversa.
+      if (updates.conversation_step) {
+        await syncDealStageFromStep(supabase, customer.id, updates.conversation_step);
       }
     }
 
