@@ -410,27 +410,47 @@ Deno.serve(async (req) => {
 
     console.log("[fb-create] step=images_start count=", validated.length);
     const uploaded: { hash: string; format: "square" | "vertical" | "story" }[] = [];
+    const uploadErrors: string[] = [];
     // Limita a 5 imagens por publicação pra ficar dentro do CPU budget.
     for (const item of validated.slice(0, 5)) {
       const url = item.url;
+      const filename = url.split("/").pop()?.split("?")[0] || `img_${Date.now()}.jpg`;
+      let hash: string | null = null;
+      // Estratégia 1: usar URL pública (Meta baixa direto, sem CPU/payload na Edge).
       try {
-        const imgResp = await fetch(url);
-        if (!imgResp.ok) throw new Error(`download ${imgResp.status}`);
-        const buf = new Uint8Array(await imgResp.arrayBuffer());
-        const b64 = bytesToBase64(buf);
-        const filename = url.split("/").pop()?.split("?")[0] || `img_${Date.now()}.jpg`;
         const r = await fbFetch(`/${accId}/adimages`, {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ bytes: b64, name: filename, access_token: conn.token }),
+          body: new URLSearchParams({ url, name: filename, access_token: conn.token }),
         });
-        const hash = r?.images && Object.values(r.images)[0] ? (Object.values(r.images)[0] as any).hash : null;
-        if (hash) uploaded.push({ hash, format: item.format });
+        hash = r?.images && Object.values(r.images)[0] ? (Object.values(r.images)[0] as any).hash : null;
       } catch (e) {
-        console.warn("[fb-create] upload imagem falhou:", url, (e as Error).message);
+        const msg = (e as Error).message;
+        console.warn("[fb-create] upload via url falhou, fallback bytes:", url, msg);
+        // Estratégia 2 (fallback): baixar + enviar em base64.
+        try {
+          const imgResp = await fetch(url);
+          if (!imgResp.ok) throw new Error(`download ${imgResp.status}`);
+          const buf = new Uint8Array(await imgResp.arrayBuffer());
+          const b64 = bytesToBase64(buf);
+          const r2 = await fbFetch(`/${accId}/adimages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({ bytes: b64, name: filename, access_token: conn.token }),
+          });
+          hash = r2?.images && Object.values(r2.images)[0] ? (Object.values(r2.images)[0] as any).hash : null;
+        } catch (e2) {
+          const msg2 = (e2 as Error).message;
+          console.error("[fb-create] upload imagem falhou nas 2 tentativas:", url, msg2);
+          uploadErrors.push(`${filename}: ${msg2}`);
+        }
       }
+      if (hash) uploaded.push({ hash, format: item.format });
     }
-    if (!uploaded.length) throw new Error("Nenhuma imagem pôde ser carregada no Facebook.");
+    if (!uploaded.length) {
+      const detail = uploadErrors.length ? ` Detalhe Meta: ${uploadErrors.join(" | ")}` : "";
+      throw new Error(`Nenhuma imagem pôde ser carregada no Facebook.${detail}`);
+    }
     const squareHashes = uploaded.filter((u) => u.format === "square").map((u) => u.hash);
     const verticalHashes = uploaded.filter((u) => u.format === "vertical").map((u) => u.hash);
     const storyHashes = uploaded.filter((u) => u.format === "story").map((u) => u.hash);

@@ -48,6 +48,26 @@ export function PlatformFacebookCard() {
   const [manualAdAccount, setManualAdAccount] = useState("");
   const [manualPage, setManualPage] = useState("");
   const [manualPixel, setManualPixel] = useState("");
+  const [ensuringPixel, setEnsuringPixel] = useState(false);
+
+  async function ensurePixel() {
+    setEnsuringPixel(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("facebook-ensure-pixel", { body: {} });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      toast({
+        title: (data as any)?.created ? "Pixel igreen-tag-site criado" : "Pixel igreen-tag-site já existia",
+        description: `ID: ${(data as any)?.pixel_id}`,
+      });
+      await loadStatus();
+    } catch (e: any) {
+      toast({ title: "Falha ao garantir pixel", description: e?.message, variant: "destructive" });
+    } finally {
+      setEnsuringPixel(false);
+    }
+  }
+
 
   async function handleConnect() {
     setConnecting(true);
@@ -163,7 +183,14 @@ export function PlatformFacebookCard() {
               <Field label="Pixel" value={status.pixel_id || "—"} />
               <Field label="Usuário FB" value={status.fb_user_name || "—"} />
             </dl>
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Button size="sm" variant="secondary" onClick={ensurePixel} disabled={ensuringPixel} className="gap-1.5">
+                {ensuringPixel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Settings2 className="w-3.5 h-3.5" />}
+                Garantir pixel igreen-tag-site
+              </Button>
+            </div>
           </div>
+
 
           {status.configured && <div className="rounded-xl bg-card/60 border border-border/60 p-4 space-y-3">
             <div className="flex items-center justify-between">
