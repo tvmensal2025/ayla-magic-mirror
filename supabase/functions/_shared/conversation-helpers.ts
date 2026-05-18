@@ -1,8 +1,11 @@
 // ─── Normalização e validação pós-OCR documento ─────────────────────────
 export function normalizarRG(rg: string | undefined): string {
   if (!rg || typeof rg !== "string") return "";
-  const limpo = rg.replace(/\s/g, "").replace(/[.\-/]/g, "").replace(/[^\d]/g, "");
-  return limpo.length >= 7 && limpo.length <= 12 ? limpo : "";
+  // Preserva dígito verificador 'X' do RG antigo; remove demais letras e pontuação
+  const limpo = rg.replace(/\s/g, "").replace(/[.\-/]/g, "").replace(/[^\dXx]/g, "").toUpperCase();
+  // Garante que só haja 'X' no final, se houver
+  const sanitizado = limpo.replace(/X(?=.)/g, "");
+  return sanitizado.length >= 7 && sanitizado.length <= 12 ? sanitizado : "";
 }
 
 export function validarDataNascimento(data: string | undefined): string {

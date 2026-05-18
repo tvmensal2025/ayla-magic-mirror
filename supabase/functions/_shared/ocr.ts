@@ -207,11 +207,13 @@ export function buildPromptDocumento(tipo: string, isVerso = false): string {
 ESTA IMAGEM É DO VERSO (COSTAS) DO RG (RG antigo OU CIN/RG novo).
 
 CAMPOS QUE COSTUMAM APARECER NO VERSO:
-- NÚMERO DO RG (Registro Geral): campo "RG", "Número", "Identidade" ou "Registro Geral" — apenas dígitos (7 a 12). No RG novo/CIN pode aparecer no verso como "Documento de Identidade".
-- CPF: 11 dígitos. PROCURE com MUITA atenção — pode estar rotulado como "CPF", "Cadastro de Pessoa Física", "CPF/MF", ou aparecer perto da filiação, do título de eleitor, ou junto com outros documentos do cidadão.
+- NÚMERO DO RG (Registro Geral): no RG antigo aparece no VERSO rotulado como "REGISTRO GERAL" (frequentemente em VERMELHO), no formato XX.XXX.XXX-X (ex.: 60.070.001-X). Retorne APENAS os dígitos, INCLUINDO o dígito verificador final mesmo quando for letra X (use 'X' literal no fim se aparecer, ex.: "60070001X"). Tamanho típico 7 a 12 caracteres.
+- CPF: 11 dígitos, rotulado "CPF" (geralmente no topo do verso do RG antigo, formato 123.456.789-00). NUNCA confunda com Registro Civil, NIS/PIS/PASEP, Título de Eleitor, CNS, CNH, CTPS.
 - NOME COMPLETO: se estiver legível.
 - DATA DE NASCIMENTO: DD/MM/AAAA.
 - FILIAÇÃO: Nome do Pai e Nome da Mãe (podem estar abreviados).
+
+⚠️ NÃO confunda o "REGISTRO GERAL" do verso com o número de série/controle que aparece na lateral da FRENTE (esse é apenas um número de controle do documento, NÃO é o RG).
 
 ⚠️ ATENÇÃO CRÍTICA — CPF:
 - O CPF é o campo MAIS IMPORTANTE deste documento. Examine TODA a imagem (cabeçalho, rodapé, laterais, áreas próximas a filiação).
@@ -222,7 +224,7 @@ CAMPOS QUE COSTUMAM APARECER NO VERSO:
 REGRAS:
 - Extraia SOMENTE o que estiver ESCRITO e LEGÍVEL. NUNCA invente.
 - CPF: exatamente 11 dígitos (sem pontos/traços).
-- RG: só números; remova pontos, traços e espaços (7 a 12 dígitos).
+- RG: dígitos do "Registro Geral"; remova pontos, traços e espaços. PRESERVE o 'X' final se houver (dígito verificador). 7 a 12 caracteres.
 - Data: estritamente DD/MM/AAAA. Se não encontrar, use "".
 
 Retorne APENAS um JSON válido, sem markdown e sem texto antes ou depois:
@@ -266,7 +268,10 @@ ANALISE ESTA IMAGEM DA FRENTE do RG (pode ser RG antigo OU CIN/RG novo em polica
 
 Na frente do RG brasileiro:
 - NOME COMPLETO: nome do titular (campo "Nome", "Nome do Titular" ou no topo).
-- RG (Registro Geral): número do documento no formato XX.XXX.XXX-X ou só dígitos (campo "RG", "Número", "Número do Documento" ou "Registro Geral"). Retorne APENAS os dígitos (7 a 12).
+- RG (Registro Geral):
+  • RG NOVO/CIN (policarbonato): número rotulado claramente como "RG" ou "Registro Geral", formato XX.XXX.XXX-X. Retorne os dígitos.
+  • RG ANTIGO (cartão verde papel): na FRENTE geralmente NÃO aparece o número do Registro Geral — o número da lateral (próximo a "VÁLIDO" ou abaixo da foto, ex.: 59684750, 8284-2) é apenas um nº de SÉRIE/CONTROLE, NÃO É o RG. NESSE CASO, retorne "" no campo rg e o sistema buscará o RG no verso.
+  • Preserve o 'X' final (dígito verificador) se houver. 7 a 12 caracteres.
 - CPF: 11 dígitos. No RG novo/CIN o CPF QUASE SEMPRE aparece impresso na FRENTE, rotulado como "CPF". No RG antigo, geralmente fica no VERSO — se não estiver claramente visível na frente, use "".
 - DATA DE NASCIMENTO: DD/MM/AAAA (campo "Nascimento", "Data de Nasc." ou "Nascimento").
 - NOME DO PAI e NOME DA MÃE: se aparecerem na frente.
@@ -425,9 +430,14 @@ export async function ocrDocumentoFrenteVerso(
   const v = ocrVerso.dados;
   if (!validarNomeOCR(d.nome) && validarNomeOCR(v.nome)) d.nome = v.nome;
   if ((!d.cpf || d.cpf.length !== 11) && v.cpf && v.cpf.length === 11) d.cpf = v.cpf;
-  if (!normalizarRG(d.rg) && v.rg) {
-    const rgVerso = normalizarRG(v.rg) || (v.rg.replace(/\D/g, "").length >= 7 && v.rg.replace(/\D/g, "").length <= 12 ? v.rg.replace(/\D/g, "") : "");
-    if (rgVerso) d.rg = rgVerso;
+  // RG do verso (REGISTRO GERAL) tem prioridade sobre número de série da frente do RG antigo
+  if (v.rg) {
+    const rgVerso = normalizarRG(v.rg) || (v.rg.replace(/[^\dXx]/g, "").length >= 7 && v.rg.replace(/[^\dXx]/g, "").length <= 12 ? v.rg.replace(/[^\dXx]/g, "").toUpperCase() : "");
+    const rgFrente = normalizarRG(d.rg);
+    if (rgVerso && (!rgFrente || rgFrente !== rgVerso)) {
+      console.log(`🔁 RG: usando verso (REGISTRO GERAL=${rgVerso}) ao invés da frente (${rgFrente || "vazio"})`);
+      d.rg = rgVerso;
+    }
   }
   if (!validarDataNascimento(d.dataNascimento) && validarDataNascimento(v.dataNascimento)) d.dataNascimento = validarDataNascimento(v.dataNascimento);
   if (!d.nomePai && v.nomePai) d.nomePai = v.nomePai;
