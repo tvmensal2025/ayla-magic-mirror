@@ -1999,6 +1999,20 @@ export async function executarAutomacao(customerId, options = {}) {
       if (validationErrors.length > 0) {
         console.error(`   🚨 ERROS DE VALIDAÇÃO: ${validationErrors.filter(e => e.trim()).join(' | ')}`);
       }
+      const combinedPortalError = [erroPortal, ...validationErrors].filter(Boolean).join(' | ');
+      const duplicateDifferentCpf = /n[úu]mero de instala[cç][aã]o, telefone ou email existente para outro cpf|existente para outro cpf/i.test(combinedPortalError);
+      if (duplicateDifferentCpf) {
+        const existingResult = await assumirCadastroExistente(customerId, cliente, data, consultorId, combinedPortalError);
+        if (existingResult.link) {
+          activeBrowser = null;
+          const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+          console.log(`\n${'='.repeat(70)}`);
+          console.log(`✅ CADASTRO EXISTENTE ASSUMIDO. Link facial enviado. Tempo: ${duration}s`);
+          console.log('='.repeat(70));
+          return { success: true, duration: parseFloat(duration), existingRegistration: true, pageUrl: existingResult.link };
+        }
+        throw new Error(existingResult.message || 'Cadastro existente no portal sem link facial localizado');
+      }
       
       let otpConfirmadoNoPortal = false;
 
