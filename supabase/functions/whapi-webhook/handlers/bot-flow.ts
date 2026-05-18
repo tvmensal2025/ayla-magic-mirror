@@ -1961,13 +1961,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               }
               const ntype = String(current.step_type || "message");
               let nextStepValue: string = current.id;
-              if (ntype === "capture_conta") nextStepValue = "aguardando_conta";
-              else if (ntype === "capture_documento" || ntype === "capture_doc") nextStepValue = "aguardando_doc_auto";
-              else if (ntype === "capture_email") nextStepValue = "ask_email";
-              else if (ntype === "confirm_phone") nextStepValue = "ask_phone_confirm";
+              let _isCapture = false;
+              if (ntype === "capture_conta") { nextStepValue = "aguardando_conta"; _isCapture = true; }
+              else if (ntype === "capture_documento" || ntype === "capture_doc") { nextStepValue = "aguardando_doc_auto"; _isCapture = true; }
+              else if (ntype === "capture_email") { nextStepValue = "ask_email"; _isCapture = true; }
+              else if (ntype === "confirm_phone") { nextStepValue = "ask_phone_confirm"; _isCapture = true; }
               else if (ntype === "finalizar_cadastro") nextStepValue = "finalizando";
-              console.log(`[custom-step-resolver] message→advance final=${current.step_key} type=${ntype}`);
-              return { reply: "", updates: { conversation_step: nextStepValue, __inline_sent: (emittedCurrent || dispatchedAny) || undefined } as any };
+              console.log(`[custom-step-resolver] message→advance final=${current.step_key} type=${ntype} isCapture=${_isCapture}`);
+              const _updates: any = { conversation_step: nextStepValue, __inline_sent: (emittedCurrent || dispatchedAny) || undefined };
+              // Marca timestamp para suprimir re-prompts duplicados do handler legacy.
+              if (_isCapture && (emittedCurrent || dispatchedAny)) {
+                _updates.last_custom_prompt_at = new Date().toISOString();
+              }
+              return { reply: "", updates: _updates };
             }
             // Sem próximo passo configurado → finaliza
             console.log(`[custom-step-resolver] sem próximo passo após pos=${stepRow.position} → finalizando`);
@@ -2150,6 +2156,15 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             reply = `Boa, ${first || "anotado"}! Anotei R$ ${billValue.toFixed(0)} 💚\n\nSe puder mandar a *foto* (ou PDF) da sua conta também, eu trava o cálculo exato. Mas se preferir, dá pra seguir só com a média mesmo.`;
             break;
           }
+        }
+
+        // ANTI-DUP: se o passo custom acabou de perguntar, NÃO duplica o prompt legacy.
+        // Apenas espera o cliente mandar a foto/PDF (ou valor).
+        const _lastCustom = (customer as any).last_custom_prompt_at;
+        if (_lastCustom && (Date.now() - new Date(_lastCustom).getTime()) < 10 * 60 * 1000) {
+          console.log(`[anti-dup] aguardando_conta: passo custom já perguntou (${_lastCustom}) — silenciando re-prompt`);
+          reply = "";
+          break;
         }
 
         reply = `${v}me manda uma *foto* (ou PDF) da sua conta de luz, por favor 📸\n\nSe estiver sem a conta agora, é só me dizer o valor médio que você paga que eu já te calculo a economia.`;
@@ -2531,6 +2546,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     // sem perguntar. Se não vier foto ainda, pede a foto.
     case "aguardando_doc_auto": {
       if (!isFile) {
+        // ANTI-DUP: se o passo custom acabou de perguntar, NÃO duplica o prompt legacy.
+        const _lastCustom = (customer as any).last_custom_prompt_at;
+        if (_lastCustom && (Date.now() - new Date(_lastCustom).getTime()) < 10 * 60 * 1000) {
+          console.log(`[anti-dup] aguardando_doc_auto: passo custom já perguntou (${_lastCustom}) — silenciando re-prompt`);
+          reply = "";
+          break;
+        }
         reply = "📸 Me envie a foto da *frente* do seu *RG ou CNH*.\n\nA IA reconhece automaticamente qual documento é. Formatos: JPG, PNG ou PDF.";
         break;
       }
