@@ -1,82 +1,77 @@
-## Diagnóstico
+## Verificação em staging
 
-Olhando as `bot_step_transitions` do lead 92433086 (consultor 0c2711ad), o bot registrou:
+Conferi os logs do `whapi-webhook` no caso mais recente (customer `75f6bd78`, consultor `0c2711ad`, 03:50 UTC):
 
-- pos 2 → pos 4 (pulou 3)
-- pos 4 → pos 7 (pulou 5 e 6)
+- Transição gravada: `from_step=3e7fb4cd` (pos 4 — "qual o valor médio…") → `to_step=a71ba814` (alvo do "afirmacao" do pos 6).
+- Logs mostram `[conversational] auto-advance por captura` direto pra pos 5, e dali em diante a cascade levou ao pos 7.
+- **Nenhum log `[chain-stop]` / `[chain-emit]` aparece**, porque o fluxo na prática NÃO passa pelo resolver custom de `bot-flow.ts` (que recebeu a heurística do "?"). Ele passa por `runConversationalFlow` em `supabase/functions/whapi-webhook/handlers/conversational/index.ts`.
+- Resultado: **o passo 5 continua sendo pulado**. A correção anterior só protegeu um caminho do código.
 
-### Por que o passo 5 foi pulado
+### Por que pula
 
-O passo 5 ("Valor da conta") está configurado assim no fluxo:
+`goToStep()` (linhas 1297–1430) tem uma "cascade engine" controlada por `wait_for === "none"` em cada passo. A função `cursorCascades(st)` só olha:
 
-- `step_type: message`
-- `message_text: ""` (vazio — só envia mídia/áudio anexado)
-- `transitions: [{ trigger_intent: "default", trigger_phrases: [] }]` apontando direto para o passo 6
+```ts
+return !caps && st.wait_for === "none";
+```
 
-O resolver custom em `bot-flow.ts` (linhas 2171-2198) tem um loop de **chain automático** que diz: "se o próximo passo é `message` e tem uma transição `default` sem `trigger_phrases`, dispara ele e avança de novo, até 8 hops, com 1.5s de delay entre cada".
+Ou seja: passo `message` sem captura e marcado `wait_for=none` cascateia automaticamente, **independente do texto ser uma pergunta**. O passo 5 do consultor (`message_text=""`, sem mídia visível) cascateia silenciosamente para o passo 6; e o passo 6 (`"posso estar explicando abaixo como funciona?"`) também cascateia se estiver com `wait_for=none`, terminando direto no passo 7.
 
-Resultado: quando o cliente responde no passo 4, o bot:
-1. Dispara o passo 5 (que não tem texto, só áudio/mídia anexada — e se o slot estiver vazio, o cliente nem percebe que algo foi enviado)
-2. Como o passo 5 é `message` + default-only, **chain continua** sem esperar resposta
-3. Dispara o passo 6 ("posso estar explicando?")
-4. O passo 6 tem transição `afirmacao` (com phrases), não `default` → chain para aqui
-
-A transição gravada (4→7) sugere que em algum caso o passo 6 também avança via fallback `findNextActiveFlowStep`. Mas o problema central é: **o chain trata todo passo `message` com default-only como "auto-avança"**, mesmo quando ele é uma pergunta esperando resposta humana.
-
-### Por que isso vai acontecer com muitos leads
-
-Hoje o motor só "para e espera resposta" quando o passo tem:
-- `trigger_phrases` não-vazias (ex.: `afirmacao` com `["sim","ok","pode"]`), OU
-- `step_type` ≠ `message` (question / capture_*)
-
-Qualquer passo `message` que o usuário criou com transição `default` simples é considerado mensagem informativa de chain. Isso quebra fluxos onde o consultor quer só uma confirmação livre ("manda a conta de luz", "qual seu valor?", etc.) sem listar todas as variações possíveis.
+Além disso, `auto-advance por captura` (linhas 1610–1639) chama `goToStep(nextByConfig, …)` no passo 5 sem checar se o próximo passo é pergunta antes de cascatear.
 
 ## Plano
 
-### 1. Mudar a heurística do chain em `bot-flow.ts` (linhas 2171-2198)
+Aplicar a mesma heurística do `?` no `runConversationalFlow`, em três pontos:
 
-O loop só deve fazer auto-advance quando o passo for **claramente informativo**. Critérios para parar o chain (passar a esperar resposta):
-
-- `message_text` (depois de trim) termina com `?` → é uma pergunta
-- `message_text` é vazio mas o passo tem **mídia anexada** com kind=`audio` e o áudio é uma pergunta (heurística: `transcript` termina com `?`) — opcional, fase 2
-- O passo tem `wait_for_reply: true` (nova flag, fase 2)
-- **Default seguro**: `message` com `message_text` vazio E sem mídia que pareça pergunta → continua o chain (caso da mídia decorativa)
-
-Implementação mínima (fase 1): no loop de chain, antes do `break` por falta de default, adicionar:
+### 1. `cursorCascades` (linha ~1360) — parar cascade em perguntas
 
 ```ts
-const txt = String(current.message_text || "").trim();
-if (txt.endsWith("?")) break;  // espera resposta
+const _looksLikeQuestion = (st: DbStep) =>
+  String(st?.message_text || "")
+    .trim().replace(/[\s\u200B-\u200D\uFEFF]+$/g, "")
+    .endsWith("?");
+
+const cursorCascades = (st: DbStep): boolean => {
+  const caps = Array.isArray(st.captures) && st.captures.some(c => c?.enabled !== false && c?.field);
+  if (caps) return false;
+  if (st.wait_for !== "none") return false;
+  if (_looksLikeQuestion(st)) return false;
+  return true;
+};
 ```
 
-E também aplicar a mesma checagem no **passo recém-resolvido** antes de entrar no loop: se o `nextCustom` já termina em `?`, dispara e para (não chain).
+E também checar a heurística no **próximo step** logo após `findCascadeNext` (linhas 1365–1377): se `_looksLikeQuestion(nextStep)`, ainda emite uma vez e para o loop.
 
-### 2. Tratar passo `message` com `message_text` vazio + sem mídia
+### 2. `auto-advance por captura` (linhas 1610–1639) — pré-check
 
-Hoje pos 5 dispara "nada visível" e ainda assim avança. Mudar `dispatchStepFromFlow`:
-- se o passo não tem texto E não tem nenhuma mídia válida vinculada → loga warn e **não conta como dispatch**, mas chain continua (não regride). Isso evita silêncio percebido pelo lead.
+Antes de `goToStep(nextByConfig, …)`, se `_looksLikeQuestion(nextByConfig)`, emite o passo (sem cascade) e para. Garante que se o consultor pôs uma pergunta logo após a captura, ela seja feita e o bot espere resposta.
 
-### 3. Sanity-check na UI `/admin/fluxos`
+### 3. Skip silencioso de step vazio sem mídia
 
-Quando o consultor salva um passo `message` cujo texto termina em `?` e a única transição é `default` sem phrases, mostrar aviso:
+Se um step `message` tem `message_text` vazio E `emitStep` retorna `inlineSent=false` (não tem áudio/imagem/vídeo associado), logar `[skip-empty-step]` e marcar o passo como "consumido" sem cascatear adiante — para o lead nunca ficar sem percepção de mensagem.
 
-> "Este passo parece ser uma pergunta. Sem `trigger_phrases`, o bot vai continuar sozinho. Adicione frases-gatilho (sim/não/etc.) ou marque 'Aguardar resposta'."
+Implementação: em `goToStep`, se `first.inlineSent === false && !replyText && !cadastroStep`, fixar `cursor=null` para não entrar na cascade — o lead já foi persistido no passo, e a próxima mensagem dele dispara `repeatCurrent`, que vai emitir o conteúdo do passo (incluindo mídia anexada nos slots).
 
 ### 4. Telemetria
 
-Adicionar log estruturado em `bot-flow.ts` quando o chain pula um passo:
-```ts
-console.log("[chain-skip]", { from: prev.position, to: current.position, reason: "default-no-phrases" });
-```
-Para conseguir auditar em prod via `edge_function_logs`.
+- `console.log("[cascade-stop] pos=… motivo=pergunta")` quando bloqueado por "?"
+- `console.log("[cascade-stop] pos=… motivo=step-vazio")` quando o step não tem nada visível
+- Manter o `bot_step_transitions` insert com `intent="cascade-stop"` para auditoria.
+
+### 5. Verificação pós-deploy
+
+1. Deploy do `whapi-webhook`.
+2. Resetar lead de teste (customer `75f6bd78` ou criar novo) para o passo 4.
+3. Enviar resposta com valor.
+4. Conferir em `bot_step_transitions` que aparecem 4→5 e 5→6 separados, e o lead para no passo 6 aguardando resposta.
+5. Conferir log `[cascade-stop] pos=6 motivo=pergunta`.
+6. Enviar "sim" e confirmar que avança para o passo 7.
 
 ### Arquivos afetados
 
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (chain loop + pre-loop check ~linhas 2165-2198)
-- `supabase/functions/whapi-webhook/handlers/_shared/dispatch-step-from-flow.ts` (skip vazio sem mídia)
-- `src/pages/admin/fluxos/...` componente do editor de passo (aviso na UI)
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (cascade + auto-advance por captura + skip vazio)
 
-### Fora de escopo desta correção
+### Fora de escopo
 
-- Mudar manualmente o passo 5 do consultor no banco (decisão dele via UI).
-- Re-classificação por IA do que é "pergunta vs mensagem" — heurística do `?` resolve 95%.
+- Mudar manualmente `wait_for` do passo 5/6 no banco (decisão do consultor via UI).
+- A heurística do bot-flow.ts já está aplicada e não precisa ser revertida.
