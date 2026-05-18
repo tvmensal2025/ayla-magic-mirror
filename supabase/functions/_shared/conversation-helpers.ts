@@ -63,7 +63,6 @@ export function getNextMissingStep(c: any): string {
   if (
     !c.email ||
     /@lead\.igreen$/i.test(c.email) ||
-    /^tvmensal/i.test(c.email) ||
     /@teste/i.test(c.email) ||
     /^teste@/i.test(c.email) ||
     /^noreply@/i.test(c.email) ||
@@ -109,7 +108,7 @@ export function getReplyForStep(step: string, c: any): string {
       return `📞 Esse é o seu *telefone de contato*?\n\n*${fmt}*`;
     }
     case "ask_phone": return "Informe seu *telefone* com DDD (ex: 11999998888):";
-    case "ask_email": return "📧 Informe seu *e-mail* para finalizarmos seu cadastro no portal iGreen (ex: joao.silva@gmail.com)\n\n_Se não tiver e-mail, crie um agora em *gmail.com* — leva 1 minuto._";
+    case "ask_email": return "📧 Qual é o seu *e-mail*?\n\nPrecisa ser um e-mail *seu, que você usa de verdade* — qualquer provedor (Outlook, iCloud, Yahoo, Gmail, do trabalho...). É por ele que o portal manda o código de acesso.";
     case "ask_cep": return "Qual o seu *CEP*? (8 dígitos)";
     case "ask_number": return `📍 Endereço: *${c.address_street || ""}*\n\nQual o *número* da residência?`;
     case "ask_complement": return "Tem *complemento*? (ex: Apto 12)";
