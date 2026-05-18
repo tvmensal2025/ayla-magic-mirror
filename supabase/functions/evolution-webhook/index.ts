@@ -241,6 +241,27 @@ Deno.serve(async (req) => {
           phone_whatsapp: newCustomer.phone_whatsapp,
         }).catch((e) => console.warn("[notify-new-lead] falhou:", (e as Error).message));
       }
+    } else {
+      // Reentrada: cliente já existe mas voltou após >24h sem inbound → notifica novamente.
+      // O helper tem dedup interno de 60s.
+      try {
+        const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+        const { count } = await supabase
+          .from("conversations")
+          .select("id", { count: "exact", head: true })
+          .eq("customer_id", customer.id)
+          .eq("message_direction", "inbound")
+          .gte("created_at", since);
+        if ((count ?? 0) === 0) {
+          notifyNewLead(instanceData.consultant_id, {
+            id: customer.id,
+            name: (customer as any).name,
+            phone_whatsapp: (customer as any).phone_whatsapp,
+          }).catch((e) => console.warn("[notify-new-lead reentry] falhou:", (e as Error).message));
+        }
+      } catch (e) {
+        console.warn("[notify-new-lead reentry] check falhou:", (e as Error).message);
+      }
     }
 
     // ─── 6) Log inbound ────────────────────────────────────────────────
