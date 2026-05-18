@@ -3723,8 +3723,15 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
       const merged = { ...customer, ...updates };
       const next = await autoResolveCepIfNeeded(merged, updates);
-      updates.conversation_step = next;
-      reply = getReplyForStep(next, merged);
+      // 🚀 Atalho: se o complemento foi o último campo, pula ask_finalizar
+      // e dispara a finalização automática (bloco abaixo cuida do envio ao portal).
+      if (next === "ask_finalizar") {
+        updates.conversation_step = "finalizando";
+        reply = "✅ Tudo certo! Processando seu cadastro...";
+      } else {
+        updates.conversation_step = next;
+        reply = getReplyForStep(next, merged);
+      }
       break;
     }
 
