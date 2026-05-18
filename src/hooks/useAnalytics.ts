@@ -168,9 +168,16 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
       }
       const utmSources: UtmData[] = Array.from(utmMap.entries()).map(([source, count]) => ({ source, count })).sort((a, b) => b.count - a.count);
 
-      const totalCustomers = allCustomers.length;
+      // === SPLIT por origem — NUNCA misturar leads de WhatsApp com carteira iGreen ===
+      const leadCustomers = allCustomers.filter((c: any) => {
+        const o = c.customer_origin || "whatsapp_lead";
+        return o === "whatsapp_lead" || o === "manual";
+      });
+      const walletCustomers = allCustomers.filter((c: any) => c.customer_origin === "igreen_sync");
+
+      const totalCustomers = walletCustomers.length;
       const statusMap = new Map<string, number>();
-      for (const c of allCustomers) {
+      for (const c of walletCustomers) {
         const s = c.status || "pending";
         statusMap.set(s, (statusMap.get(s) || 0) + 1);
       }
@@ -182,12 +189,12 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
         .map(([status, count]) => ({ status, count, label: statusLabels[status] || status.charAt(0).toUpperCase() + status.slice(1) }))
         .sort((a, b) => b.count - a.count);
 
-      const totalKw = allCustomers.reduce((sum, c) => sum + (Number(c.media_consumo) || 0), 0);
-      const customersWithConsumption = allCustomers.filter((c) => Number(c.media_consumo) > 0);
+      const totalKw = walletCustomers.reduce((sum, c) => sum + (Number(c.media_consumo) || 0), 0);
+      const customersWithConsumption = walletCustomers.filter((c) => Number(c.media_consumo) > 0);
       const avgKw = customersWithConsumption.length > 0 ? totalKw / customersWithConsumption.length : 0;
 
       const licMap = new Map<string, number>();
-      for (const c of allCustomers) {
+      for (const c of walletCustomers) {
         const lic = c.registered_by_name;
         if (lic) licMap.set(lic, (licMap.get(lic) || 0) + 1);
       }
@@ -208,7 +215,7 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
         const label = `${start.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} - ${end.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}`;
         weekMap.set(label, 0);
       }
-      for (const c of allCustomers) {
+      for (const c of walletCustomers) {
         const created = new Date(c.created_at);
         if (created >= sinceDate) {
           const daysAgo = Math.floor((Date.now() - created.getTime()) / (1000 * 60 * 60 * 24));
