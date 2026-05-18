@@ -1435,6 +1435,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       } catch (_) { /* noop */ }
 
       if (cascadeCadastroStep) break;
+      if (nextIsQuestion) {
+        console.log(`[cascade-stop] pos=${nextStep.position} step=${nextStep.step_key} motivo=pergunta(text ends with ?)`);
+        cursor = nextStep;
+        break;
+      }
       cursor = nextStep;
     }
 
