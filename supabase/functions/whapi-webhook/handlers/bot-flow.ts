@@ -1378,7 +1378,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (!canSend) continue;
 
               try {
-                const ok = await sendMedia(remoteJid, url, "", kind);
+                const ok = await sendMedia(remoteJid, url, "", kind, durationSec || undefined);
                 if (ok !== false) {
                   sentSomething = true;
                   await supabase.from("conversations").insert({
