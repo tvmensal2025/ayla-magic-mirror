@@ -264,7 +264,7 @@ async function findNextActiveFlowStep(
   supabase: any,
   consultantId: string | null | undefined,
   opts: { afterPosition?: number; stepType?: string; stepTypeIn?: string[] } = {},
-): Promise<{ id: string; step_key: string; step_type: string; position: number; transitions: any[] } | null> {
+): Promise<{ id: string; step_key: string; step_type: string; position: number; transitions: any[]; message_text: string } | null> {
   if (!consultantId) return null;
   try {
     const { data: flow } = await supabase
@@ -272,7 +272,7 @@ async function findNextActiveFlowStep(
       .eq("consultant_id", consultantId).eq("is_active", true).maybeSingle();
     if (!flow?.id) return null;
     let q = supabase.from("bot_flow_steps")
-      .select("id, step_key, step_type, position, transitions")
+      .select("id, step_key, step_type, position, transitions, message_text")
       .eq("flow_id", (flow as any).id).eq("is_active", true)
       .order("position", { ascending: true });
     if (typeof opts.afterPosition === "number") q = q.gt("position", opts.afterPosition);
@@ -280,7 +280,7 @@ async function findNextActiveFlowStep(
     if (opts.stepTypeIn && opts.stepTypeIn.length) q = q.in("step_type", opts.stepTypeIn);
     const { data } = await q.limit(1);
     const row = Array.isArray(data) ? data[0] : null;
-    return row ? { id: String(row.id), step_key: String(row.step_key), step_type: String(row.step_type), position: Number(row.position), transitions: Array.isArray((row as any).transitions) ? (row as any).transitions : [] } : null;
+    return row ? { id: String(row.id), step_key: String(row.step_key), step_type: String(row.step_type), position: Number(row.position), transitions: Array.isArray((row as any).transitions) ? (row as any).transitions : [], message_text: String((row as any).message_text || "") } : null;
   } catch (e) {
     console.warn("[findNextActiveFlowStep] erro:", (e as any)?.message || e);
     return null;
@@ -2051,12 +2051,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             const _loadStepById = async (id: string) => {
               const { data } = await supabase
                 .from("bot_flow_steps")
-                .select("id, step_key, step_type, position, transitions")
+                .select("id, step_key, step_type, position, transitions, message_text")
                 .eq("flow_id", flow.id).eq("id", id).eq("is_active", true).maybeSingle();
               return data ? {
                 id: String(data.id), step_key: String(data.step_key),
                 step_type: String(data.step_type), position: Number(data.position),
                 transitions: Array.isArray((data as any).transitions) ? (data as any).transitions : [],
+                message_text: String((data as any).message_text || ""),
               } : null;
             };
             const _resolveNextFromTransitions = async (txns: any[], msg: string) => {
@@ -2169,8 +2170,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             }
 
             if (nextCustom) {
-              // Chain: avança automaticamente passos message que tenham default sem phrases.
-              // Honra goto_step_id quando presente; caso contrário usa next-by-position.
+              // Heurística: passo cujo texto termina em "?" é uma pergunta — aguarda resposta.
+              const _looksLikeQuestion = (s: any) =>
+                String(s?.message_text || "").trim().replace(/[\s\u200B-\u200D\uFEFF]+$/g, "").endsWith("?");
+
+              // Chain: avança automaticamente passos message que tenham default sem phrases
+              // E que NÃO sejam perguntas (texto não termina em "?").
               let current = nextCustom;
               let dispatchedAny = false;
               for (let hops = 0; hops < 8; hops++) {
@@ -2179,6 +2184,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 console.log(`[custom-step-resolver] chain-emit step=${current.step_key} pos=${current.position} dispatched=${ok}`);
                 const ctype = String(current.step_type || "message");
                 if (ctype !== "message") break;
+                if (_looksLikeQuestion(current)) {
+                  console.log(`[chain-stop] pos=${current.position} step=${current.step_key} motivo=pergunta(text ends with ?)`);
+                  break;
+                }
                 const ctxns = Array.isArray(current.transitions) ? current.transitions : [];
                 const defTxn = ctxns.find((t: any) =>
                   String(t?.trigger_intent || "").toLowerCase() === "default"
@@ -2193,6 +2202,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   });
                 }
                 if (!nxt) break;
+                // Pre-check do próximo: se já parece pergunta, dispara e para
+                if (_looksLikeQuestion(nxt)) {
+                  await new Promise((r) => setTimeout(r, 1500));
+                  const okQ = await dispatchStepFromFlow(nxt.step_key, _vars);
+                  dispatchedAny = dispatchedAny || !!okQ;
+                  console.log(`[chain-stop] pos=${nxt.position} step=${nxt.step_key} motivo=proxima-eh-pergunta dispatched=${okQ}`);
+                  current = nxt;
+                  break;
+                }
+                console.log(`[chain-skip] from=${current.position} to=${nxt.position} motivo=default-no-phrases`);
                 await new Promise((r) => setTimeout(r, 1500));
                 current = nxt;
               }
