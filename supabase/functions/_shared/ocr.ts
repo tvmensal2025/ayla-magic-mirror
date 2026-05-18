@@ -272,18 +272,23 @@ Retorne APENAS este JSON, sem markdown e sem texto antes ou depois:
   return `Você é um especialista em extrair dados da FRENTE do REGISTRO GERAL (RG) brasileiro.
 ANALISE ESTA IMAGEM DA FRENTE do RG (pode ser RG antigo OU CIN/RG novo em policarbonato).
 
+🎯 PRIORIDADE MÁXIMA — PROCURE O CPF PRIMEIRO:
+No RG NOVO/CIN o CPF QUASE SEMPRE aparece na FRENTE, frequentemente no TOPO/CABEÇALHO
+(faixa superior) ou logo abaixo do nome, rotulado "CPF". Procure também laterais e rodapé.
+São 11 dígitos (formato 123.456.789-00). Devolva sempre APENAS os 11 dígitos.
+
 Na frente do RG brasileiro:
 - NOME COMPLETO: nome do titular (campo "Nome", "Nome do Titular" ou no topo).
 - RG (Registro Geral):
   • RG NOVO/CIN (policarbonato): número rotulado claramente como "RG" ou "Registro Geral", formato XX.XXX.XXX-X. Retorne os dígitos.
   • RG ANTIGO (cartão verde papel): na FRENTE geralmente NÃO aparece o número do Registro Geral — o número da lateral (próximo a "VÁLIDO" ou abaixo da foto, ex.: 59684750, 8284-2) é apenas um nº de SÉRIE/CONTROLE, NÃO É o RG. NESSE CASO, retorne "" no campo rg e o sistema buscará o RG no verso.
   • Preserve o 'X' final (dígito verificador) se houver. 7 a 12 caracteres.
-- CPF: 11 dígitos. No RG novo/CIN o CPF QUASE SEMPRE aparece impresso na FRENTE, rotulado como "CPF". No RG antigo, geralmente fica no VERSO — se não estiver claramente visível na frente, use "".
+- CPF: 11 dígitos. No RG novo/CIN o CPF QUASE SEMPRE aparece impresso na FRENTE (geralmente no TOPO), rotulado como "CPF". No RG antigo, geralmente fica no VERSO — mas SE estiver visível na frente (cabeçalho/rodapé), capture.
 - DATA DE NASCIMENTO: DD/MM/AAAA (campo "Nascimento", "Data de Nasc." ou "Nascimento").
 - NOME DO PAI e NOME DA MÃE: se aparecerem na frente.
 
 ⚠️ ATENÇÃO CRÍTICA — CPF:
-- Examine TODA a imagem (cabeçalho, rodapé, laterais).
+- Examine TODA a imagem, COMEÇANDO PELO TOPO/CABEÇALHO, depois laterais, depois rodapé.
 - Aceite formato pontuado (123.456.789-00) ou sem pontuação (12345678900); devolva sempre APENAS os 11 dígitos.
 - NÃO confunda CPF com: nº do RG, título de eleitor, PIS/NIS, cartão SUS (CNS, 15 dígitos), CNH, nº de inscrição.
 - Se o CPF estiver borrado, cortado, ilegível ou ausente, retorne "". NUNCA chute.
