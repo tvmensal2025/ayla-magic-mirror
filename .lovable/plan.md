@@ -1,45 +1,46 @@
-## Problema
+## Problema — duplicação de mensagem e botão
 
-O passo "Perguntando se pode explicar" (Camila pergunta "posso te explicar rapidinho?") está auto-avançando para o passo 7 sem esperar o cliente responder. O engine encadeia passos `message` que tenham uma transição `default` sem `trigger_phrases` — e esse passo tem exatamente isso, então ele dispara e avança imediatamente.
+Quando a Camila (fluxo custom) avança para um passo de **captura** (`capture_conta`, `capture_documento`, `confirm_phone`) ou de **confirmação**, dois prompts são enviados ao cliente: o texto que VOCÊ escreveu no editor, seguido do prompt hardcoded antigo. Visível nos prints:
+
+- IMG-WA0198: "me manda foto da conta de luz" (custom) + "me manda uma foto (ou PDF) da sua conta..." (legacy)
+- IMG-WA0203: "me manda foto da frente do documento" (custom) + "Me envie a foto da frente do seu RG ou CNH..." (legacy)
+- IMG-WA0200: "Está tudo correto?" + "Os dados estão corretos?" (duas confirmações consecutivas)
 
 ## Causa
 
-Em `whapi-webhook/handlers/bot-flow.ts` (linhas 1937–1961) o resolver de fluxo custom faz um "chain" automático enquanto o próximo passo for `type=message` e tiver uma transição `default` sem frases. Como TODOS os passos da Camila têm `default→próximo`, o fluxo desliza inteiro sem parar nas perguntas.
-
-## Passos que fazem PERGUNTA e precisam pausar
-
-Analisando os 11 passos, dois pedem resposta do cliente e estão configurados como auto-avanço:
-
-| Pos | Passo | Tipo de espera |
-|---|---|---|
-| 6 | **Perguntando se pode explicar** ("posso te explicar?") | Esperar qualquer resposta (texto/áudio) |
-| 9 | **Deu para entender?** | Esperar resposta (sim/não) |
-
-Os demais (3 Boas-vindas, 5 Reação ao valor, 7 Como funciona, 8 Quebra de objeção) são informativos e devem continuar encadeando.
+No `bot-flow.ts`, o resolver custom (linhas 1937-1970) dispara o conteúdo do passo `capture_*` via `dispatchStepFromFlow` e seta `conversation_step` para o legacy correspondente (`aguardando_conta`, `aguardando_doc_auto`, `ask_phone_confirm`). Quando o cliente responde com texto, o `switch` legacy entra no case e dispara o prompt padrão hardcoded (linhas 2155, 365, 378-379).
 
 ## Solução
 
-Migration `UPDATE bot_flow_steps` removendo a transição `default` bare dos passos 6 e 9. Mantém as transições com gatilho (afirmacao/negação) intactas. Sem alteração de código TS.
+Adicionar uma flag transitória `custom_prompt_emitted_at` (timestamp em memória de execução / passada via `updates`) que sinaliza ao switch legacy: "o passo custom já mandou a pergunta, não re-pergunte; apenas trate a resposta".
 
-```text
-Posição 6 (passo_mpagqq3g — Perguntando):
-  ANTES:  [{afirmacao → 7}, {default → 7}]
-  DEPOIS: [{afirmacao → 7}]              ← chain quebra, espera o cliente
+### Implementação concreta
 
-Posição 9 (559b8f1b — Deu para entender):
-  ANTES:  [{afirmacao → 10}, {negacao → 8}, {default → 10}]
-  DEPOIS: [{afirmacao → 10}, {negacao → 8}]   ← chain quebra, espera o cliente
-```
+1. **No resolver custom (linha ~1970)** — ao retornar com `nextStepValue` apontando para um legacy de captura/confirmação, marcar no `updates` um campo:
+   ```ts
+   updates: { conversation_step: nextStepValue, __custom_prompted: true, __inline_sent: true }
+   ```
 
-### Como o engine se comporta após o fix
+2. **No handler chamador (whapi-webhook/index.ts)** — quando `__custom_prompted=true`, salvar `last_custom_prompt_at = now()` no customer.
 
-1. Chain dispara passo 5 (Reação ao valor) → passo 6 (Perguntando) emite → como **não tem mais `default` bare**, `hasAutoAdvance=false` → chain quebra. `conversation_step` fica em passo 6.
-2. Cliente responde (texto ou áudio transcrito). Resolver re-entra em passo 6 → `dispatchStepFromFlow` (anti-rep 10min bloqueia duplicata) → `findNextActiveFlowStep` por position → passo 7 → chain segue até passo 9.
-3. Passo 9 emite → chain quebra novamente. Espera resposta.
-4. Cliente responde → resolver avança por position até passo 10 (capture_conta).
+3. **Nos cases legacy** `aguardando_conta` (linha 2124), `aguardando_doc_auto`, `ask_phone_confirm`, `confirmando_dados_conta`, `confirmando_dados_doc`:
+   - Se `customer.last_custom_prompt_at` foi nos últimos 5 minutos AND o cliente NÃO enviou arquivo/resposta válida, **não re-prompt** — apenas retorne `reply: ""` (silêncio, espera).
+   - Se enviou arquivo válido / "sim" / "não" → processa normalmente (OCR, avança, etc).
 
-## Arquivos afetados
+4. **Confirmação dupla** ("Está tudo correto?" + "Os dados estão corretos?") — investigar onde o segundo confirm dispara. Provavelmente em `post-confirm-conta` (linha 2395) que avança para próximo passo e esse próximo passo é outro confirm. Remover o confirm hardcoded quando há fluxo custom ativo.
 
-- `supabase/migrations/<nova>.sql` — UPDATE de 2 linhas em `bot_flow_steps` para o flow `66a19db4-b061-4f3f-921f-c13e9fb6f730`.
+### Migration de schema
 
-Sem alteração em código TypeScript. Posso aplicar?
+Adicionar coluna `last_custom_prompt_at TIMESTAMPTZ` na tabela `customers`.
+
+## Arquivos a editar
+
+- `supabase/migrations/<nova>.sql` — ADD COLUMN `last_custom_prompt_at`
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — marcar flag + guards nos 5 cases legacy
+- `supabase/functions/whapi-webhook/index.ts` — persistir `last_custom_prompt_at` quando flag presente
+
+## Risco
+
+Baixo. O guard só silencia o prompt legacy quando o passo custom acabou de perguntar. Lead que não responder em 5 min volta a receber prompts normais (fallback de stuck-recovery).
+
+Posso aplicar?
