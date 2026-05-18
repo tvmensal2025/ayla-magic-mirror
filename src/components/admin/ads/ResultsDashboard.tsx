@@ -35,8 +35,20 @@ interface DailyMetric {
 
 const TICKET_MEDIO_MENSAL = 30; // R$ estimado de comissão por cliente ativo/mês (ajustável)
 
-export function ResultsDashboard({ consultantId, onCreateClick }: { consultantId: string; onCreateClick?: () => void }) {
-  const [range, setRange] = useState<Range>(30);
+export function ResultsDashboard({
+  consultantId,
+  onCreateClick,
+  externalRange,
+  hidePeriodSelector,
+}: {
+  consultantId: string;
+  onCreateClick?: () => void;
+  externalRange?: Range;
+  hidePeriodSelector?: boolean;
+}) {
+  const [internalRange, setInternalRange] = useState<Range>(30);
+  const range = externalRange ?? internalRange;
+  const setRange = (r: Range) => setInternalRange(r);
   const [distribFilter, setDistribFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
