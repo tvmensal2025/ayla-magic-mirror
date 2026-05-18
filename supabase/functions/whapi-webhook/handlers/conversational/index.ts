@@ -648,6 +648,7 @@ function _finalize(stepKey: string, r: BotResult): BotResult {
 export async function runConversationalFlow(ctx: BotContext): Promise<BotResult> {
   let stepKey = (ctx.customer.conversation_step || "welcome") as string;
   _currentTurnCustomerId = (ctx.customer?.id as string) || null;
+  _currentTurnMessageText = (ctx.messageText as string) || "";
 
 
   // Cadastro steps are NEVER handled here — defensive guard
