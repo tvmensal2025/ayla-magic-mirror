@@ -25,6 +25,7 @@ import { runConversationalFlow, CADASTRO_STEPS } from "./handlers/conversational
 import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
+import { syncDealStageFromStep } from "../_shared/crm-stage-sync.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
