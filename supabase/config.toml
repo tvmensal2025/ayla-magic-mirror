@@ -36,6 +36,9 @@ verify_jwt = false
 [functions.facebook-capi]
 verify_jwt = false
 
+[functions.facebook-balance-reconcile]
+verify_jwt = false
+
 [functions.ad-creative-builder]
 verify_jwt = true
 
