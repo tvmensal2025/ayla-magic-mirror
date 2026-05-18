@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Facebook, CheckCircle2, AlertCircle, Loader2, Wallet, RefreshCw, Settings2 } from "lucide-react";
+import { Facebook, CheckCircle2, AlertCircle, Loader2, Wallet, RefreshCw, Settings2, ShieldCheck, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { getPlatformFacebookStatus, listFacebookAssets, selectFacebookAssets, startFacebookOAuth, type FbAssets, type PlatformFacebookStatus } from "@/services/facebookAds";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -17,11 +18,18 @@ interface PlatformBalance {
   system_spend_cents?: number;
   system_charged_cents?: number;
   lifetime_amount_spent_cents?: number;
+  delta_unsynced_cents?: number;
   spend_cap_cents?: number;
   available_cents?: number;
   has_funding?: boolean;
   account_status?: number | null;
   last_system_sync_at?: string | null;
+  permissions?: {
+    granted: string[];
+    declined: string[];
+    missing: string[];
+    all_ok: boolean;
+  };
   error?: string;
 }
 
