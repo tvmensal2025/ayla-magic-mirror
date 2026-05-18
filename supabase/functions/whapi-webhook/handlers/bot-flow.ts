@@ -4194,6 +4194,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const sent = await sendButtons(remoteJid, reply, [
         { id: "add_complement", title: "✍️ Adicionar" },
         { id: "skip_complement", title: "⏭️ Pular" },
+        { id: "no_complement", title: "🚫 Não tem" },
       ]);
       if (sent) { reply = ""; (updates as any).__inline_sent = true; }
     }
