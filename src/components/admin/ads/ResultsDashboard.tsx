@@ -56,10 +56,14 @@ export function ResultsDashboard({
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [metrics, setMetrics] = useState<DailyMetric[]>([]);
   const [acquired, setAcquired] = useState<number>(0);
+  const [realLeads, setRealLeads] = useState<number>(0);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
+      const since = new Date(Date.now() - range * 86400_000).toISOString();
+      const sinceDate = since.slice(0, 10);
+
       const { data: camps } = await supabase
         .from("facebook_campaigns")
         .select("id,name,status,cities,distribuidora,daily_budget_cents,created_at")
@@ -69,30 +73,35 @@ export function ResultsDashboard({
       setCampaigns(list);
 
       if (list.length > 0) {
-        const since = new Date(Date.now() - range * 86400_000).toISOString().slice(0, 10);
         const { data: ms } = await supabase
           .from("facebook_metrics_daily")
           .select("campaign_id,date,spend_cents,impressions,clicks,leads,messaging_conversations_started,complete_registrations,customers_acquired")
           .in("campaign_id", list.map(c => c.id))
-          .gte("date", since)
+          .gte("date", sinceDate)
           .order("date", { ascending: true });
         setMetrics((ms || []) as DailyMetric[]);
-
-        // clientes atribuíveis a anúncios: SÓ leads WhatsApp (customer_origin) com lead_source de origem ads.
-        // Nunca contar clientes sincronizados do portal iGreen aqui.
-        const { count } = await supabase
-          .from("customers")
-          .select("id", { count: "exact", head: true })
-          .eq("consultant_id", consultantId)
-          .eq("status", "active")
-          .in("customer_origin", ["whatsapp_lead", "manual"])
-          .in("lead_source", ["meta_ads", "google_ads", "facebook_ads", "instagram_ads"])
-          .gte("created_at", since);
-        setAcquired(count || 0);
       } else {
         setMetrics([]);
-        setAcquired(0);
       }
+
+      // REAL leads: contatos que entraram no WhatsApp no período (independente do lead_source)
+      const { count: leadsCount } = await supabase
+        .from("customers")
+        .select("id", { count: "exact", head: true })
+        .eq("consultant_id", consultantId)
+        .eq("customer_origin", "whatsapp_lead")
+        .gte("created_at", since);
+      setRealLeads(leadsCount || 0);
+
+      // REAL aprovados: deals em stage 'aprovado' no período
+      const { count: approvedCount } = await supabase
+        .from("crm_deals")
+        .select("id", { count: "exact", head: true })
+        .eq("consultant_id", consultantId)
+        .eq("stage", "aprovado")
+        .gte("created_at", since);
+      setAcquired(approvedCount || 0);
+
       setLoading(false);
     })();
   }, [consultantId, range]);
