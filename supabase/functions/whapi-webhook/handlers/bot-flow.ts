@@ -780,7 +780,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           console.log(`[midflow-qa] hit=true step="${(customer as any).conversation_step}" detour=${(customer as any).detour_count || 0}`);
           // Envia mídias da FAQ (se houver)
           for (const m of qa.mediaUrls) {
-            try { await sendMedia(remoteJid, m.url, "", m.kind); } catch (_) { /* noop */ }
+            try { await sendMedia(remoteJid, m.url, "", m.kind, Number((m as any).duration_sec || 0) || undefined); } catch (_) { /* noop */ }
           }
           const stepKey = String((customer as any).conversation_step || "");
           const reentry = getReentryPromptForStep(stepKey, customer);
