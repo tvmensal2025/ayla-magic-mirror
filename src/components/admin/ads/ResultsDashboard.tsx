@@ -84,27 +84,30 @@ export function ResultsDashboard({
         setMetrics([]);
       }
 
-      // REAL leads: contatos que entraram no WhatsApp no período (independente do lead_source)
+      // Leads de ANÚNCIO no período (lead_source = "meta_ads")
       const { count: leadsCount } = await supabase
         .from("customers")
         .select("id", { count: "exact", head: true })
         .eq("consultant_id", consultantId)
-        .eq("customer_origin", "whatsapp_lead")
+        .eq("lead_source", "meta_ads")
         .gte("created_at", since);
       setRealLeads(leadsCount || 0);
 
-      // REAL aprovados: deals em stage 'aprovado' no período
+      // Aprovados que vieram de anúncio: deals 'aprovado' cujo customer tem lead_source='meta_ads'
       const { count: approvedCount } = await supabase
         .from("crm_deals")
-        .select("id", { count: "exact", head: true })
+        .select("id, customers!inner(lead_source)", { count: "exact", head: true })
         .eq("consultant_id", consultantId)
         .eq("stage", "aprovado")
+        .eq("customers.lead_source", "meta_ads")
         .gte("created_at", since);
       setAcquired(approvedCount || 0);
 
       setLoading(false);
     })();
   }, [consultantId, range]);
+
+
 
   const distribuidoras = useMemo(() => {
     const set = new Set<string>();
