@@ -16,6 +16,7 @@ export default {
       fontFamily: {
         heading: ['Montserrat', 'sans-serif'],
         body: ['Open Sans', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
       colors: {
         border: "hsl(var(--border))",
