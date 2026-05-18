@@ -172,6 +172,25 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
     finally { setExporting(false); }
   };
 
+  const handleResetPerformance = async () => {
+    if (!confirm("Apagar todo o histórico de visitas, cliques e eventos das suas landing pages? Clientes e mensagens NÃO serão apagados. Esta ação não pode ser desfeita.")) return;
+    setResettingPerf(true);
+    try {
+      const { data, error } = await supabase.rpc("reset_consultant_analytics" as any, { _consultant_id: userId });
+      if (error) throw error;
+      const d = (data as any)?.deleted ?? {};
+      toast({
+        title: "✅ Performance resetada",
+        description: `Apagados: ${d.page_views ?? 0} visitas, ${d.page_events ?? 0} cliques, ${d.crm_page_events ?? 0} eventos CRM, ${d.facebook_capi_events ?? 0} eventos Facebook.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    } catch (err: unknown) {
+      toast({ title: "Erro ao resetar", description: err instanceof Error ? err.message : "Erro desconhecido", variant: "destructive" });
+    } finally {
+      setResettingPerf(false);
+    }
+  };
+
   return (
     <div ref={dashboardRef} className="space-y-6">
       {sharedAccountCount > 0 && (
