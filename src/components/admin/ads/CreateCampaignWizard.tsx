@@ -19,6 +19,10 @@ import { useUserRole } from "@/hooks/useUserRole";
 import { useConsultantPhone, formatBrPhone } from "@/hooks/useConsultantPhone";
 import { supabase } from "@/integrations/supabase/client";
 import { upsertAdTemplate } from "@/services/adTemplates";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { AdImageLibraryPanel } from "./AdImageLibraryPanel";
+import { SaveTemplateDialog } from "./SaveTemplateDialog";
+import type { AdImageLibraryItem } from "@/services/adImageLibrary";
 
 interface Props {
   open: boolean;
