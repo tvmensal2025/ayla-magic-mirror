@@ -1,4 +1,4 @@
-// Conversions API: envia eventos server-side ao Pixel.
+// Conversions API: envia eventos server-side ao Pixel ou como Offline Conversion.
 // Pode ser chamado por outras edge functions (lead, contact) ou diretamente.
 import { adminClient, fbFetch, FB_GRAPH, sha256Hex } from "../_shared/fb-graph.ts";
 import { decryptToken } from "../_shared/fb-crypto.ts";
@@ -7,11 +7,20 @@ const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-
 
 interface CapiBody {
   consultant_id: string;
-  event_name: "Lead" | "Contact" | "SubmitApplication" | "Purchase" | "PageView";
+  event_name: "Lead" | "Contact" | "SubmitApplication" | "Purchase" | "PageView" | "ViewContent" | "InitiateCheckout" | "CompleteRegistration";
   event_id?: string;
   customer_id?: string | null;
+  // PII (será hasheado)
   email?: string | null;
   phone?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  country?: string | null; // ISO-2 (BR)
+  external_id?: string | null;
+  // Contexto
   value?: number | null;
   currency?: string;
   source_url?: string | null;
@@ -19,7 +28,13 @@ interface CapiBody {
   fbc?: string | null;
   client_user_agent?: string | null;
   client_ip?: string | null;
+  // Offline conversion (status virou cliente): se true, envia para /offline_conversions em vez de /events
+  offline?: boolean;
+  offline_event_set_id?: string | null;
 }
+
+function norm(v: string) { return v.trim().toLowerCase(); }
+function digitsOnly(v: string) { return v.replace(/\D/g, ""); }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -31,15 +46,25 @@ Deno.serve(async (req) => {
 
     const admin = adminClient();
     const { data: conn } = await admin.from("facebook_connections").select("pixel_id,access_token_encrypted").eq("consultant_id", body.consultant_id).maybeSingle();
-    if (!conn?.pixel_id) {
+    if (!conn?.pixel_id && !body.offline) {
       return new Response(JSON.stringify({ skipped: true, reason: "no_pixel" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    if (!conn?.access_token_encrypted) {
+      return new Response(JSON.stringify({ skipped: true, reason: "no_token" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     const token = await decryptToken(conn.access_token_encrypted);
-    const eventId = body.event_id || crypto.randomUUID();
+    const eventId = body.event_id || (body.customer_id ? `${body.event_name}:${body.customer_id}` : crypto.randomUUID());
 
     const userData: Record<string, unknown> = {};
-    if (body.email) userData.em = [await sha256Hex(body.email)];
-    if (body.phone) userData.ph = [await sha256Hex(body.phone.replace(/\D/g, ""))];
+    if (body.email) userData.em = [await sha256Hex(norm(body.email))];
+    if (body.phone) userData.ph = [await sha256Hex(digitsOnly(body.phone))];
+    if (body.first_name) userData.fn = [await sha256Hex(norm(body.first_name))];
+    if (body.last_name) userData.ln = [await sha256Hex(norm(body.last_name))];
+    if (body.city) userData.ct = [await sha256Hex(norm(body.city).replace(/\s+/g, ""))];
+    if (body.state) userData.st = [await sha256Hex(norm(body.state))];
+    if (body.zip) userData.zp = [await sha256Hex(digitsOnly(body.zip))];
+    if (body.country) userData.country = [await sha256Hex(norm(body.country))];
+    if (body.external_id || body.customer_id) userData.external_id = [await sha256Hex(String(body.external_id || body.customer_id))];
     if (body.fbp) userData.fbp = body.fbp;
     if (body.fbc) userData.fbc = body.fbc;
     if (body.client_user_agent) userData.client_user_agent = body.client_user_agent;
@@ -49,13 +74,18 @@ Deno.serve(async (req) => {
       event_name: body.event_name,
       event_time: Math.floor(Date.now() / 1000),
       event_id: eventId,
-      action_source: "website",
+      action_source: body.offline ? "physical_store" : "website",
       event_source_url: body.source_url || "https://igreen.institutodossonhos.com.br",
       user_data: userData,
       ...(body.value ? { custom_data: { value: body.value, currency: body.currency || "BRL" } } : {}),
     };
 
-    const fbRes = await fbFetch(`${FB_GRAPH}/${conn.pixel_id}/events?access_token=${token}`, {
+    // Offline conversion vai pro Offline Event Set (precisa do ID); fallback pro pixel se não tiver set.
+    const targetId = body.offline && body.offline_event_set_id
+      ? body.offline_event_set_id
+      : conn.pixel_id;
+
+    const fbRes = await fbFetch(`${FB_GRAPH}/${targetId}/events?access_token=${token}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ data: [event] }),
