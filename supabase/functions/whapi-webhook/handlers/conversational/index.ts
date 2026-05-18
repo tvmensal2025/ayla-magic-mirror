@@ -1357,9 +1357,19 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     };
     // C1: guard reduzido (6→3) e cada hop com timeout — se a Edge Function
     // estourar 20s, perdíamos passos no meio da cascata sem deixar rastro.
+    // Heurística: passo cujo texto termina em "?" é uma pergunta — aguarda resposta
+    // mesmo se o consultor marcou wait_for=none por descuido.
+    const _looksLikeQuestion = (st: DbStep): boolean =>
+      String(st?.message_text || "")
+        .trim()
+        .replace(/[\s\u200B-\u200D\uFEFF]+$/g, "")
+        .endsWith("?");
     const cursorCascades = (st: DbStep): boolean => {
       const caps = Array.isArray(st.captures) && st.captures.some((c: any) => c?.enabled !== false && c?.field);
-      return !caps && st.wait_for === "none";
+      if (caps) return false;
+      if (st.wait_for !== "none") return false;
+      if (_looksLikeQuestion(st)) return false;
+      return true;
     };
     for (let guard = 0; cursor && cursorCascades(cursor) && guard < 3; guard++) {
       const nextStep = findCascadeNext(cursor);
@@ -1373,7 +1383,10 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       }
 
       const cascadeCadastroStep = stepTypeToCadastro(nextStep.step_type);
-      const nextWillCascade = !cascadeCadastroStep && nextStep.wait_for === "none"
+      // Se o próximo passo parece pergunta, emite uma vez e para — não cascateia além.
+      const nextIsQuestion = !cascadeCadastroStep && _looksLikeQuestion(nextStep);
+      const nextWillCascade = !cascadeCadastroStep && !nextIsQuestion
+        && nextStep.wait_for === "none"
         && !!findCascadeNext(nextStep);
 
       // PERSIST FIRST: marca o lead já no nextStep ANTES de enviar mídia pesada.
