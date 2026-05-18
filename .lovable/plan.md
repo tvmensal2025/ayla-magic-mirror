@@ -1,61 +1,47 @@
-# Problema
+## Diagnóstico
 
-No `/admin` o botão **"Reconectar / trocar conta"** não faz nada quando clicado. Investigação:
+O caso do Donizete não travou por erro de imagem ou por tipo de RG. O OCR leu corretamente:
 
-1. O handler atual (`handleConnect` em `PlatformFacebookCard.tsx`) chama `startFacebookOAuth({ scope: "platform" })` **sem `mode: "switch"`** — ou seja, mesmo se funcionasse, o Facebook reutilizaria a sessão atual e voltaria pra mesma conta sem permitir trocar.
-2. Ele faz `window.location.href = res.url`. Como o preview do Lovable roda dentro de **iframe**, o Facebook (`facebook.com/dialog/oauth`) bloqueia carregamento em iframe via `X-Frame-Options` → a navegação é silenciosamente bloqueada e nada acontece visualmente. Por isso "clico e não faz nada".
-3. O mesmo bug afeta o botão "Solicitar permissões faltando" e o "Conectar Facebook Business" inicial — todos usam `window.location.href`.
+- Nome: `APARECIDO DONIZETE DE OLIVEIRA`
+- RG: `59684750`
+- Data de nascimento: `26/01/1973`
+- CPF: não encontrado
 
-# Solução
+Depois o cliente clicou “NÃO” e o fluxo foi para coleta manual de CPF. O problema real é que o sistema ainda mostra confirmação mesmo quando falta CPF, e isso confunde o cliente. Como CPF é obrigatório e precisa estar correto, o fluxo deve continuar automaticamente pedindo CPF em vez de perguntar se “está tudo correto” com CPF vazio.
 
-Fazer o OAuth abrir em **nova aba** (com `window.open` disparado direto no clique, preservando o gesto do usuário pra não cair em popup blocker) e usar o **modo correto** em cada botão:
+## Plano de correção
 
-- "Reconectar / trocar conta" → `mode: "switch"` (Facebook força re-login e mostra seletor de conta)
-- "Solicitar permissões faltando" → `mode: "rerequest"` (já correto)
-- "Conectar Facebook Business" (estado desconectado) → `mode: "connect"`
+1. Reforçar extração de CPF em RG novo e RG antigo
+   - Ajustar o prompt do OCR para tratar RG antigo, RG novo/CIN e verso com mais precisão.
+   - Instruir a IA a procurar CPF em áreas comuns do RG novo/CIN, QR/textos e campos “CPF”, “Cadastro de Pessoa Física”, “Registro Civil”, sem inventar número.
+   - Manter validação matemática do CPF; CPF inválido continua sendo descartado.
 
-Depois que a nova aba completar o OAuth (`facebook-oauth-callback` já redireciona pro `return_origin`), a aba do admin precisa recarregar o status. Solução simples: ao abrir a nova aba, iniciar um **polling de 3s** chamando `loadStatus()` enquanto a aba popup estiver aberta (`popup.closed === false`) ou por até 5 min, e parar quando detectar mudança em `last_validated_at` / `pixel_id` / `ad_account_id`.
+2. Fazer o fluxo continuar quando OCR parcial for suficiente
+   - Se OCR encontrar nome/RG/data, mas não CPF, salvar esses dados e ir direto para `ask_cpf`.
+   - Não enviar tela de confirmação com `CPF: não encontrado`.
+   - Mensagem sugerida: “Consegui ler nome, RG e nascimento. Só falta o CPF para continuar.”
 
-# Arquivos alterados
+3. Evitar erro/loop em RG novo e RG antigo
+   - Se for RG/CIN e não encontrar CPF na frente, pedir verso quando aplicável.
+   - Se mesmo com verso o CPF não vier, seguir para coleta manual de CPF sem reiniciar documento.
+   - O cadastro não deve voltar para pedir a foto inteira quando o único campo ausente for CPF.
 
-**`src/components/admin/super/PlatformFacebookCard.tsx`** (única alteração de UI/lógica):
+4. Melhorar confirmação de documento
+   - Só mostrar “Confirme seus dados pessoais” quando o CPF estiver presente e válido.
+   - Se algum campo obrigatório faltar, usar `getNextMissingStep` para perguntar apenas o que falta.
+   - Preservar os dados já lidos do OCR para não perder nome, RG e nascimento.
 
-1. Criar helper `openOAuthInNewTab(mode)`:
-   ```ts
-   async function openOAuthInNewTab(mode: "connect" | "switch" | "rerequest") {
-     // abre janela SINCRONAMENTE no clique (about:blank) pra evitar popup blocker
-     const popup = window.open("about:blank", "fb_oauth", "width=600,height=750");
-     if (!popup) { toast({ title: "Pop-up bloqueado", description: "Permita pop-ups deste site e tente de novo.", variant: "destructive" }); return; }
-     setConnecting(true);
-     try {
-       const res = await startFacebookOAuth({ scope: "platform", mode });
-       popup.location.href = res.url;
-       // polling
-       const started = Date.now();
-       const prev = JSON.stringify({ a: status?.ad_account_id, p: status?.pixel_id, v: status?.last_validated_at });
-       const interval = setInterval(async () => {
-         if (popup.closed || Date.now() - started > 5 * 60_000) {
-           clearInterval(interval); setConnecting(false); await loadStatus(); return;
-         }
-         try {
-           const s = await getPlatformFacebookStatus();
-           const now = JSON.stringify({ a: s?.ad_account_id, p: s?.pixel_id, v: s?.last_validated_at });
-           if (now !== prev) { setStatus(s); if (s?.configured) loadBalance(); clearInterval(interval); setConnecting(false); try { popup.close(); } catch {} }
-         } catch {}
-       }, 3000);
-     } catch (e: any) {
-       try { popup.close(); } catch {}
-       toast({ title: "Erro ao iniciar OAuth", description: e?.message, variant: "destructive" });
-       setConnecting(false);
-     }
-   }
-   ```
-2. Trocar `handleConnect` (estado desconectado) → `openOAuthInNewTab("connect")`.
-3. Botão "Reconectar / trocar conta" (linha 194) → `openOAuthInNewTab("switch")`.
-4. Botão "Solicitar permissões faltando" (linha 267) → `openOAuthInNewTab("rerequest")`.
-5. Remover funções antigas `handleConnect` / `handleRerequest` redundantes.
+5. Aplicar nos dois webhooks
+   - Corrigir o fluxo ativo `whapi-webhook`.
+   - Replicar o mesmo comportamento no espelho `evolution-webhook`, para manter os dois consistentes.
 
-# Fora do escopo
+6. Validar com teste direcionado
+   - Criar/rodar teste do helper de decisão para o cenário: OCR retorna nome + RG + nascimento, CPF vazio.
+   - Resultado esperado: salva os campos encontrados e o próximo passo é `ask_cpf`, sem confirmação inválida.
 
-- Não mexer no backend (`facebook-oauth-start` / `facebook-oauth-callback`) — já suporta `mode: switch | rerequest` e já redireciona pro `return_origin` no fim.
-- Não mexer em outras telas que usam `startFacebookOAuth` com `scope: "user"` (não foi o problema reportado).
+## Arquivos envolvidos
+
+- `supabase/functions/_shared/ocr.ts`
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
+- `supabase/functions/evolution-webhook/handlers/bot-flow.ts`
+- Possível teste novo/ajustado em `supabase/functions/...`

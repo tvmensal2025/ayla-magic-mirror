@@ -204,14 +204,20 @@ export function buildPromptDocumento(tipo: string, isVerso = false): string {
   const isCNH = /cnh/i.test(tipo);
   if (isVerso && !isCNH) {
     return `Você é um especialista em extrair dados do VERSO do REGISTRO GERAL (RG) brasileiro.
-ESTA IMAGEM É DO VERSO (COSTAS) DO RG.
+ESTA IMAGEM É DO VERSO (COSTAS) DO RG (RG antigo OU CIN/RG novo).
 
-No verso do RG costumam aparecer:
-- NÚMERO DO RG (Registro Geral): campo "RG", "Número" ou "Identidade" — apenas dígitos (7 a 12).
-- CPF: 11 dígitos (campo "CPF" ou "Cadastro de Pessoa Física").
+CAMPOS QUE COSTUMAM APARECER NO VERSO:
+- NÚMERO DO RG (Registro Geral): campo "RG", "Número", "Identidade" ou "Registro Geral" — apenas dígitos (7 a 12). No RG novo/CIN pode aparecer no verso como "Documento de Identidade".
+- CPF: 11 dígitos. PROCURE com MUITA atenção — pode estar rotulado como "CPF", "Cadastro de Pessoa Física", "CPF/MF", ou aparecer perto da filiação, do título de eleitor, ou junto com outros documentos do cidadão.
 - NOME COMPLETO: se estiver legível.
 - DATA DE NASCIMENTO: DD/MM/AAAA.
 - FILIAÇÃO: Nome do Pai e Nome da Mãe (podem estar abreviados).
+
+⚠️ ATENÇÃO CRÍTICA — CPF:
+- O CPF é o campo MAIS IMPORTANTE deste documento. Examine TODA a imagem (cabeçalho, rodapé, laterais, áreas próximas a filiação).
+- Aceite formatos com pontuação (123.456.789-00) ou sem (12345678900). Sempre devolva APENAS os 11 dígitos.
+- NÃO confunda com: nº do RG, título eleitoral, PIS/NIS, CNS (cartão SUS, 15 dígitos), CNH, naturalização, certidão de nascimento.
+- Se o CPF estiver borrado, cortado, ilegível ou parcialmente visível, retorne "". NUNCA chute.
 
 REGRAS:
 - Extraia SOMENTE o que estiver ESCRITO e LEGÍVEL. NUNCA invente.
@@ -256,14 +262,20 @@ Retorne APENAS este JSON, sem markdown e sem texto antes ou depois:
   }
   // RG FRENTE (novo ou antigo)
   return `Você é um especialista em extrair dados da FRENTE do REGISTRO GERAL (RG) brasileiro.
-ANALISE ESTA IMAGEM DA FRENTE do RG (pode ser RG novo ou RG antigo).
+ANALISE ESTA IMAGEM DA FRENTE do RG (pode ser RG antigo OU CIN/RG novo em policarbonato).
 
 Na frente do RG brasileiro:
 - NOME COMPLETO: nome do titular (campo "Nome", "Nome do Titular" ou no topo).
-- RG (Registro Geral): número do documento no formato XX.XXX.XXX-X ou só dígitos (campo "RG", "Número" ou "Número do Documento"). Retorne APENAS os dígitos (7 a 12).
-- CPF: 11 dígitos (pode estar na frente ou só no verso; se não estiver visível use "").
+- RG (Registro Geral): número do documento no formato XX.XXX.XXX-X ou só dígitos (campo "RG", "Número", "Número do Documento" ou "Registro Geral"). Retorne APENAS os dígitos (7 a 12).
+- CPF: 11 dígitos. No RG novo/CIN o CPF QUASE SEMPRE aparece impresso na FRENTE, rotulado como "CPF". No RG antigo, geralmente fica no VERSO — se não estiver claramente visível na frente, use "".
 - DATA DE NASCIMENTO: DD/MM/AAAA (campo "Nascimento", "Data de Nasc." ou "Nascimento").
 - NOME DO PAI e NOME DA MÃE: se aparecerem na frente.
+
+⚠️ ATENÇÃO CRÍTICA — CPF:
+- Examine TODA a imagem (cabeçalho, rodapé, laterais).
+- Aceite formato pontuado (123.456.789-00) ou sem pontuação (12345678900); devolva sempre APENAS os 11 dígitos.
+- NÃO confunda CPF com: nº do RG, título de eleitor, PIS/NIS, cartão SUS (CNS, 15 dígitos), CNH, nº de inscrição.
+- Se o CPF estiver borrado, cortado, ilegível ou ausente, retorne "". NUNCA chute.
 
 REGRAS OBRIGATÓRIAS:
 - Extraia SOMENTE o que está ESCRITO e LEGÍVEL. NUNCA invente.
