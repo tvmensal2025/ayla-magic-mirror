@@ -235,10 +235,11 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
         e.event_type === "click" &&
         (e.event_target?.includes("whatsapp") || e.event_target?.includes("cadastro"))
       ).length;
-      const periodCustomers = allCustomers.filter((c) => new Date(c.created_at) >= sinceDate);
-      const leadsCount = periodCustomers.length;
-      const approvedCount = periodCustomers.filter((c) =>
-        c.status === "approved" || c.status === "active"
+      const periodLeads = leadCustomers.filter((c) => new Date(c.created_at) >= sinceDate);
+      const leadsCount = periodLeads.length;
+      // "Aprovados" no funil = leads que avançaram (não mistura com carteira iGreen sincronizada)
+      const approvedCount = periodLeads.filter((c: any) =>
+        c.status === "approved" || c.status === "active" || c.status === "registered_igreen" || c.status === "complete"
       ).length;
       const funnel = [
         { stage: "Visitas", count: total, pct: 100 },
