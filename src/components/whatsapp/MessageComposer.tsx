@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Send, Paperclip, Mic, MicOff, MessageSquareText, Loader2, Image, File, Video, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { QuickReplyMenu } from "./QuickReplyMenu";
+import { AiSuggestReplies } from "./AiSuggestReplies";
 import { Progress } from "@/components/ui/progress";
 import type { MessageTemplate } from "@/types/whatsapp";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
@@ -18,11 +19,12 @@ interface MessageComposerProps {
   disabled?: boolean;
   initialMessage?: string | null;
   consultantId?: string;
+  customerId?: string;
   customerJid?: string;
   customerName?: string;
 }
 
-export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMedia, templates, disabled, initialMessage, consultantId, customerJid, customerName }: MessageComposerProps) {
+export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMedia, templates, disabled, initialMessage, consultantId, customerId, customerJid, customerName }: MessageComposerProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [showQuickReply, setShowQuickReply] = useState(false);
