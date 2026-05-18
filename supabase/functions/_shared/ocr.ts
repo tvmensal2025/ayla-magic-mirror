@@ -206,9 +206,15 @@ export function buildPromptDocumento(tipo: string, isVerso = false): string {
     return `Você é um especialista em extrair dados do VERSO do REGISTRO GERAL (RG) brasileiro.
 ESTA IMAGEM É DO VERSO (COSTAS) DO RG (RG antigo OU CIN/RG novo).
 
+🎯 PRIORIDADE MÁXIMA — PROCURE O CPF PRIMEIRO:
+O CPF normalmente aparece no TOPO do verso do RG antigo, em uma faixa/cabeçalho à direita,
+muitas vezes ACIMA ou ao LADO de "DATA DE NASCIMENTO". Procure também próximo às palavras
+"CPF" ou "Cadastro de Pessoa Física" em QUALQUER região (topo, meio, rodapé, laterais).
+São 11 dígitos no formato 123.456.789-00. Devolva sempre APENAS os 11 dígitos.
+
 CAMPOS QUE COSTUMAM APARECER NO VERSO:
 - NÚMERO DO RG (Registro Geral): no RG antigo aparece no VERSO rotulado como "REGISTRO GERAL" (frequentemente em VERMELHO), no formato XX.XXX.XXX-X (ex.: 60.070.001-X). Retorne APENAS os dígitos, INCLUINDO o dígito verificador final mesmo quando for letra X (use 'X' literal no fim se aparecer, ex.: "60070001X"). Tamanho típico 7 a 12 caracteres.
-- CPF: 11 dígitos, rotulado "CPF" (geralmente no topo do verso do RG antigo, formato 123.456.789-00). NUNCA confunda com Registro Civil, NIS/PIS/PASEP, Título de Eleitor, CNS, CNH, CTPS.
+- CPF: 11 dígitos, rotulado "CPF" (FREQUENTEMENTE NO TOPO/CABEÇALHO do verso do RG antigo, formato 123.456.789-00). NUNCA confunda com Registro Civil, NIS/PIS/PASEP, Título de Eleitor, CNS, CNH, CTPS.
 - NOME COMPLETO: se estiver legível.
 - DATA DE NASCIMENTO: DD/MM/AAAA.
 - FILIAÇÃO: Nome do Pai e Nome da Mãe (podem estar abreviados).
@@ -216,7 +222,7 @@ CAMPOS QUE COSTUMAM APARECER NO VERSO:
 ⚠️ NÃO confunda o "REGISTRO GERAL" do verso com o número de série/controle que aparece na lateral da FRENTE (esse é apenas um número de controle do documento, NÃO é o RG).
 
 ⚠️ ATENÇÃO CRÍTICA — CPF:
-- O CPF é o campo MAIS IMPORTANTE deste documento. Examine TODA a imagem (cabeçalho, rodapé, laterais, áreas próximas a filiação).
+- O CPF é o campo MAIS IMPORTANTE deste documento. Examine TODA a imagem, COMEÇANDO PELO TOPO (cabeçalho), depois laterais, depois rodapé e áreas próximas a filiação.
 - Aceite formatos com pontuação (123.456.789-00) ou sem (12345678900). Sempre devolva APENAS os 11 dígitos.
 - NÃO confunda com: nº do RG, título eleitoral, PIS/NIS, CNS (cartão SUS, 15 dígitos), CNH, naturalização, certidão de nascimento.
 - Se o CPF estiver borrado, cortado, ilegível ou parcialmente visível, retorne "". NUNCA chute.
@@ -266,18 +272,23 @@ Retorne APENAS este JSON, sem markdown e sem texto antes ou depois:
   return `Você é um especialista em extrair dados da FRENTE do REGISTRO GERAL (RG) brasileiro.
 ANALISE ESTA IMAGEM DA FRENTE do RG (pode ser RG antigo OU CIN/RG novo em policarbonato).
 
+🎯 PRIORIDADE MÁXIMA — PROCURE O CPF PRIMEIRO:
+No RG NOVO/CIN o CPF QUASE SEMPRE aparece na FRENTE, frequentemente no TOPO/CABEÇALHO
+(faixa superior) ou logo abaixo do nome, rotulado "CPF". Procure também laterais e rodapé.
+São 11 dígitos (formato 123.456.789-00). Devolva sempre APENAS os 11 dígitos.
+
 Na frente do RG brasileiro:
 - NOME COMPLETO: nome do titular (campo "Nome", "Nome do Titular" ou no topo).
 - RG (Registro Geral):
   • RG NOVO/CIN (policarbonato): número rotulado claramente como "RG" ou "Registro Geral", formato XX.XXX.XXX-X. Retorne os dígitos.
   • RG ANTIGO (cartão verde papel): na FRENTE geralmente NÃO aparece o número do Registro Geral — o número da lateral (próximo a "VÁLIDO" ou abaixo da foto, ex.: 59684750, 8284-2) é apenas um nº de SÉRIE/CONTROLE, NÃO É o RG. NESSE CASO, retorne "" no campo rg e o sistema buscará o RG no verso.
   • Preserve o 'X' final (dígito verificador) se houver. 7 a 12 caracteres.
-- CPF: 11 dígitos. No RG novo/CIN o CPF QUASE SEMPRE aparece impresso na FRENTE, rotulado como "CPF". No RG antigo, geralmente fica no VERSO — se não estiver claramente visível na frente, use "".
+- CPF: 11 dígitos. No RG novo/CIN o CPF QUASE SEMPRE aparece impresso na FRENTE (geralmente no TOPO), rotulado como "CPF". No RG antigo, geralmente fica no VERSO — mas SE estiver visível na frente (cabeçalho/rodapé), capture.
 - DATA DE NASCIMENTO: DD/MM/AAAA (campo "Nascimento", "Data de Nasc." ou "Nascimento").
 - NOME DO PAI e NOME DA MÃE: se aparecerem na frente.
 
 ⚠️ ATENÇÃO CRÍTICA — CPF:
-- Examine TODA a imagem (cabeçalho, rodapé, laterais).
+- Examine TODA a imagem, COMEÇANDO PELO TOPO/CABEÇALHO, depois laterais, depois rodapé.
 - Aceite formato pontuado (123.456.789-00) ou sem pontuação (12345678900); devolva sempre APENAS os 11 dígitos.
 - NÃO confunda CPF com: nº do RG, título de eleitor, PIS/NIS, cartão SUS (CNS, 15 dígitos), CNH, nº de inscrição.
 - Se o CPF estiver borrado, cortado, ilegível ou ausente, retorne "". NUNCA chute.
@@ -394,6 +405,69 @@ export async function ocrDocumento(imagemUrl: string | null, geminiApiKey: strin
 }
 
 /**
+ * OCR focado APENAS em CPF — usado como segunda passada quando o OCR principal
+ * extraiu nome/RG/nascimento mas não conseguiu o CPF. Procura agressivamente
+ * em todas as áreas (topo, laterais, rodapé) e valida dígitos verificadores.
+ */
+export async function ocrCpfFocado(
+  imagemUrl: string | null,
+  geminiApiKey: string,
+  base64?: string,
+  mediaMessage?: any,
+): Promise<string> {
+  try {
+    if (!geminiApiKey) return "";
+    const img = await baixarImagem(imagemUrl, base64, mediaMessage);
+    if (!img) return "";
+
+    const prompt = `Sua ÚNICA tarefa é encontrar o CPF brasileiro nesta imagem de documento de identidade.
+
+ONDE PROCURAR (nesta ordem):
+1) TOPO/CABEÇALHO do documento — RG antigo costuma trazer o CPF na faixa superior do verso, e RG novo/CIN costuma trazer na faixa superior da frente.
+2) Próximo às palavras "CPF", "C.P.F.", "Cadastro de Pessoa Física".
+3) Laterais (direita e esquerda) e áreas próximas à foto.
+4) Rodapé do documento.
+5) Áreas próximas a "DATA DE NASCIMENTO", "NATURALIDADE" ou "FILIAÇÃO".
+
+REGRAS:
+- CPF tem EXATAMENTE 11 dígitos, podendo aparecer como "123.456.789-00" ou "12345678900".
+- NÃO retorne: nº do RG, Título de Eleitor, PIS/NIS/PASEP, CNS (cartão SUS, 15 dígitos), CNH, nº de inscrição, naturalização.
+- Se o CPF estiver borrado, cortado, ilegível ou ausente, retorne "" (string vazia). NUNCA chute.
+
+Retorne APENAS este JSON, sem markdown:
+{"cpf":""}`;
+
+    const gemRes = await fetchWithTimeout(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }, { inline_data: { mime_type: img.mime, data: img.b64 } }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 256, responseMimeType: "application/json" },
+        }),
+        timeout: TIMEOUT_GEMINI,
+      },
+    );
+    if (!gemRes.ok) return "";
+    const gemData = await gemRes.json();
+    const text = gemData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return "";
+    const obj = JSON.parse(m[0]);
+    const cpfLimpo = String(obj?.cpf || "").replace(/\D/g, "");
+    if (cpfLimpo.length === 11 && validarCPFDigitos(cpfLimpo)) {
+      console.log(`✅ [ocrCpfFocado] CPF recuperado na segunda passada: ${cpfLimpo.substring(0,3)}***`);
+      return cpfLimpo;
+    }
+    return "";
+  } catch (e: any) {
+    console.warn("⚠️ ocrCpfFocado falhou:", e?.message || e);
+    return "";
+  }
+}
+
+/**
  * OCR frente e verso do documento.
  * Parâmetros renomeados para clareza:
  *   frenteBase64 = base64 da frente (obtido via Evolution downloadMedia)
@@ -415,6 +489,12 @@ export async function ocrDocumentoFrenteVerso(
   const temVerso = !!(versoUrl || versoBase64);
 
   if (!temVerso) {
+    // Sem verso: se faltou CPF, tenta segunda passada focada na frente
+    if (!d.cpf || d.cpf.length !== 11) {
+      console.log("🔁 OCR Doc (só frente) sem CPF — tentando segunda passada focada");
+      const cpf2 = await ocrCpfFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
+      if (cpf2) d.cpf = cpf2;
+    }
     console.log("✅ OCR Doc (só frente) OK:", JSON.stringify(d).substring(0, 400));
     return { sucesso: true, dados: d };
   }
@@ -424,6 +504,11 @@ export async function ocrDocumentoFrenteVerso(
   const ocrVerso = await ocrDocumento(versoUrl, geminiApiKey, tipo, versoBase64, undefined, true);
   if (!ocrVerso.sucesso || !ocrVerso.dados) {
     console.log("⚠️ OCR verso falhou ou sem dados, usando só frente");
+    // Mesmo sem verso, tenta resgatar CPF na frente
+    if (!d.cpf || d.cpf.length !== 11) {
+      const cpf2 = await ocrCpfFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
+      if (cpf2) d.cpf = cpf2;
+    }
     return { sucesso: true, dados: d };
   }
 
@@ -446,6 +531,18 @@ export async function ocrDocumentoFrenteVerso(
   d.nome = validarNomeOCR(d.nome) || d.nome;
   if (d.rg) d.rg = normalizarRG(d.rg) || (d.rg.replace(/\D/g, "").length >= 7 && d.rg.replace(/\D/g, "").length <= 12 ? d.rg.replace(/\D/g, "") : "");
   if (d.dataNascimento) d.dataNascimento = validarDataNascimento(d.dataNascimento);
+
+  // 🎯 ÚLTIMA TENTATIVA: se mesmo com frente+verso o CPF não veio, faz passada focada
+  // em ambas as imagens. Resolve casos em que o CPF está em cabeçalho/áreas atípicas.
+  if (!d.cpf || d.cpf.length !== 11) {
+    console.log("🔁 OCR Doc (frente+verso) sem CPF — passada focada na FRENTE");
+    let cpf2 = await ocrCpfFocado(frenteUrl, geminiApiKey, frenteBase64, frenteMediaMsg);
+    if (!cpf2) {
+      console.log("🔁 CPF ainda não encontrado — passada focada no VERSO");
+      cpf2 = await ocrCpfFocado(versoUrl, geminiApiKey, versoBase64, undefined);
+    }
+    if (cpf2) d.cpf = cpf2;
+  }
 
   console.log("✅ OCR Doc (frente+verso) OK:", JSON.stringify(d).substring(0, 400));
   return { sucesso: true, dados: d };

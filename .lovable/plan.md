@@ -1,47 +1,35 @@
 ## Diagnóstico
 
-O caso do Donizete não travou por erro de imagem ou por tipo de RG. O OCR leu corretamente:
+O caso do Donizete falhou no ponto certo identificado pelos logs: o OCR leu nome, RG e nascimento, mas retornou `cpf: ""`, mesmo com CPF visível no topo do documento. Por isso o bot caiu em `ask_cpf` e pediu o CPF manualmente.
 
-- Nome: `APARECIDO DONIZETE DE OLIVEIRA`
-- RG: `59684750`
-- Data de nascimento: `26/01/1973`
-- CPF: não encontrado
-
-Depois o cliente clicou “NÃO” e o fluxo foi para coleta manual de CPF. O problema real é que o sistema ainda mostra confirmação mesmo quando falta CPF, e isso confunde o cliente. Como CPF é obrigatório e precisa estar correto, o fluxo deve continuar automaticamente pedindo CPF em vez de perguntar se “está tudo correto” com CPF vazio.
+Também encontrei textos no fluxo ativo dizendo ao cliente que “a IA reconhece automaticamente”, o que quebra a experiência de atendimento real. Isso deve virar uma mensagem natural, mantendo os botões e o fluxo visual como estão.
 
 ## Plano de correção
 
-1. Reforçar extração de CPF em RG novo e RG antigo
-   - Ajustar o prompt do OCR para tratar RG antigo, RG novo/CIN e verso com mais precisão.
-   - Instruir a IA a procurar CPF em áreas comuns do RG novo/CIN, QR/textos e campos “CPF”, “Cadastro de Pessoa Física”, “Registro Civil”, sem inventar número.
-   - Manter validação matemática do CPF; CPF inválido continua sendo descartado.
+1. Reforçar o OCR para CPF no topo do documento
+   - Ajustar o prompt de RG frente e verso para priorizar cabeçalho/topo/faixa superior antes de qualquer outro campo.
+   - Instruir explicitamente que CPF no topo do RG antigo/novo deve ser extraído mesmo se o RG estiver em outra área.
+   - Manter a regra de não inventar e validar matematicamente o CPF antes de salvar.
 
-2. Fazer o fluxo continuar quando OCR parcial for suficiente
-   - Se OCR encontrar nome/RG/data, mas não CPF, salvar esses dados e ir direto para `ask_cpf`.
-   - Não enviar tela de confirmação com `CPF: não encontrado`.
-   - Mensagem sugerida: “Consegui ler nome, RG e nascimento. Só falta o CPF para continuar.”
+2. Criar segunda leitura automática quando faltar CPF
+   - Se o OCR normal encontrar nome/RG/nascimento, mas não CPF, executar uma leitura focada apenas em CPF na mesma frente/verso.
+   - Usar prompt menor e objetivo: “procure somente CPF no topo, laterais, campos CPF/Cadastro de Pessoa Física”.
+   - Só aceitar CPF com 11 dígitos e dígitos verificadores válidos.
 
-3. Evitar erro/loop em RG novo e RG antigo
-   - Se for RG/CIN e não encontrar CPF na frente, pedir verso quando aplicável.
-   - Se mesmo com verso o CPF não vier, seguir para coleta manual de CPF sem reiniciar documento.
-   - O cadastro não deve voltar para pedir a foto inteira quando o único campo ausente for CPF.
+3. Evitar pedir CPF cedo demais
+   - Em RG, antes de ir para `ask_cpf`, tentar a segunda leitura focada usando as imagens já enviadas.
+   - Se ainda assim não encontrar, aí sim pedir CPF manualmente, sem perder nome/RG/nascimento.
 
-4. Melhorar confirmação de documento
-   - Só mostrar “Confirme seus dados pessoais” quando o CPF estiver presente e válido.
-   - Se algum campo obrigatório faltar, usar `getNextMissingStep` para perguntar apenas o que falta.
-   - Preservar os dados já lidos do OCR para não perder nome, RG e nascimento.
+4. Remover linguagem de “IA/reconhece automaticamente” para o cliente
+   - Trocar mensagens como “eu reconheço automaticamente” e “A IA reconhece” por textos naturais de atendimento humano.
+   - Manter botões e estrutura atual: o cliente continua enviando RG ou CNH sem escolher tipo técnico.
+   - Não expor “RG novo/RG antigo” ao cliente no fluxo ativo.
 
-5. Aplicar nos dois webhooks
-   - Corrigir o fluxo ativo `whapi-webhook`.
-   - Replicar o mesmo comportamento no espelho `evolution-webhook`, para manter os dois consistentes.
+5. Aplicar no webhook ativo e no espelho
+   - Corrigir `whapi-webhook`, que é o webhook ativo.
+   - Replicar a proteção essencial no `evolution-webhook` para manter consistência futura.
 
-6. Validar com teste direcionado
-   - Criar/rodar teste do helper de decisão para o cenário: OCR retorna nome + RG + nascimento, CPF vazio.
-   - Resultado esperado: salva os campos encontrados e o próximo passo é `ask_cpf`, sem confirmação inválida.
-
-## Arquivos envolvidos
-
-- `supabase/functions/_shared/ocr.ts`
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
-- `supabase/functions/evolution-webhook/handlers/bot-flow.ts`
-- Possível teste novo/ajustado em `supabase/functions/...`
+6. Validar com logs e caso Donizete
+   - Verificar nos logs que, quando o CPF faltar na primeira leitura, aparece a segunda tentativa focada.
+   - Resetar Donizete para reenviar documento se necessário, sem apagar os dados já corretos além do CPF/step.
+   - Resultado esperado: para os próximos leads, o sistema só pede CPF manual se realmente não conseguir extrair/validar após duas leituras.

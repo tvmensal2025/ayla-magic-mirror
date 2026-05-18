@@ -1702,7 +1702,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     const txt = messageText.trim().toLowerCase();
     const segueAgora = isClubProgressIntent(txt);
     if (segueAgora) {
-      const ctaMsg = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — o que for mais fácil pra você. Eu reconheço automaticamente.`;
+      const ctaMsg = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH, o que estiver mais à mão.`;
       await sendText(remoteJid, ctaMsg);
       await supabase.from("conversations").insert({
         customer_id: customer.id, message_direction: "outbound",
@@ -2689,7 +2689,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             nextCustom = forwardCapture;
           }
         }
-        const DOC_FALLBACK = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é.`;
+        const DOC_FALLBACK = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH, o que estiver mais à mão.`;
         const FINAL_FALLBACK_TEXT = `✅ *Tudo pronto!*\n\nSeus dados foram preenchidos. Vamos finalizar seu cadastro no portal iGreen?`;
         const sendFallback = async (text: string, stepStr: string) => {
           await sendText(remoteJid, text);
@@ -2799,7 +2799,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         /^(sim|s|ok|pode|pode seguir|bora|vamos|partiu|segue|seguir|tudo certo|sem d[uú]vida|nenhuma|nao tenho|n[ãa]o tenho|n[ãa]o|t[ãa]|fechou|beleza|blz)\b/.test(txt) ||
         /(quero|vamos|bora).*(cadastr|seguir|finaliz)/i.test(messageText || "");
       if (segueAgora) {
-        const ctaMsg = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente qual é.`;
+        const ctaMsg = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH, o que estiver mais à mão.`;
         await sendText(remoteJid, ctaMsg);
         await supabase.from("conversations").insert({
           customer_id: customer.id, message_direction: "outbound",
@@ -2829,7 +2829,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           reply = "";
           break;
         }
-        reply = "📸 Me envie a foto da *frente* do seu *RG ou CNH*.\n\nA IA reconhece automaticamente qual documento é. Formatos: JPG, PNG ou PDF.";
+        reply = "📸 Me envie a foto da *frente do seu documento*.\n\nPode ser RG ou CNH, o que estiver mais à mão. Formatos: JPG, PNG ou PDF.";
         break;
       }
       const mime = imageMessage?.mimetype || documentMessage?.mimetype || "image/jpeg";
@@ -2863,7 +2863,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           updates.document_front_url = fileUrl.startsWith("http") ? fileUrl : "evolution-media:pending";
         }
         updates.conversation_step = "ask_tipo_documento";
-        await sendOptions(remoteJid, "✅ Foto recebida! Só pra eu processar certinho — esse documento é:", [
+        await sendOptions(remoteJid, "✅ Foto recebida! Só pra confirmar — esse documento é:", [
           { id: "rg", title: "🪪 RG" },
           { id: "cnh", title: "🚗 CNH" },
         ]);
@@ -2970,7 +2970,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         await sendText(remoteJid, "📄 Recebi a foto, analisando agora...");
         break;
       }
-      reply = `Me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH — eu reconheço automaticamente.`;
+      reply = `Me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH, o que estiver mais à mão.`;
       updates.conversation_step = "aguardando_doc_auto";
       break;
     }
