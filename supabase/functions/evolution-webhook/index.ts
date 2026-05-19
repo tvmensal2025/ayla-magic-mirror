@@ -143,7 +143,15 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, msg: "rate_limited" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+
+    // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (como se desconectado) ──
+    if (await isConsultantAIDisabled(supabase, instanceData.consultant_id)) {
+      console.log(`🛑 [global-off-silent] IA do consultor ${instanceData.consultant_id} desligada — ignorando inbound de ${phone}`);
+      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
+
 
     // ─── 4) OTP intercept (handled before bot flow) ────────────────────
     const otpResult = await tryInterceptOtp({
