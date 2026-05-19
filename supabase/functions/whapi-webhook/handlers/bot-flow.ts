@@ -430,6 +430,10 @@ function buildConfirmacaoDoc(merged: any): string {
 }
 
 export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
+  if (isQuietHourBRT()) {
+    logQuietSkip("bot-flow", { customer_id: ctx.customer?.id, phone: ctx.phone });
+    return { reply: null, updates: {} } as BotResult;
+  }
   const {
     supabase,
     sender: { sendText, sendButtons, sendMedia },
