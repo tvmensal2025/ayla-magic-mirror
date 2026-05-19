@@ -144,8 +144,13 @@ Deno.serve(async (req) => {
     // Build items list per part request
     type Item = { kind: string; text?: string; media?: any };
     const allItems: Item[] = [];
-    medias.forEach((m) => allItems.push({ kind: String(m.kind || "document").toLowerCase(), media: m }));
-    if (renderedText.trim()) allItems.push({ kind: "text", text: renderedText });
+    medias.forEach((m) => {
+      if ((m as any)._asText) {
+        allItems.push({ kind: "text", text: String((m as any)._transcript || "") });
+      } else {
+        allItems.push({ kind: String(m.kind || "document").toLowerCase(), media: m });
+      }
+    });
 
     let toSend: Item[] = [];
     if (body.part === "all") {
