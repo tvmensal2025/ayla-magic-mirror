@@ -37,7 +37,7 @@ const LicConexaoGreen = () => (
         <div className="product-number mx-auto mb-4">1</div>
         <h2 className="section-heading mb-4">Conexão Green</h2>
         <p className="text-foreground/70 text-lg max-w-3xl mx-auto">
-          Serviço prestado pela iGreen que conecta o cliente a uma de nossas usinas solares, oferecendo um desconto de até 15% na conta de luz todos os meses gratuitamente
+          Serviço prestado pela iGreen que conecta o cliente a uma de nossas usinas solares, oferecendo um desconto de até 20% na conta de luz todos os meses gratuitamente
         </p>
       </div>
 
