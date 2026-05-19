@@ -347,12 +347,40 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
     );
   };
 
+  const globalPausedCount = rows.filter((r) => r.bot_paused_reason === "manual_global_pause").length;
+
   return (
     <div className="space-y-6">
+      <Card className="p-4 border-destructive/40 bg-destructive/5 flex items-center gap-3 flex-wrap">
+        <div className="flex-1 min-w-[220px]">
+          <p className="font-semibold text-foreground text-sm">🛑 Parar IA de todos os meus leads</p>
+          <p className="text-xs text-muted-foreground">
+            Pausa a IA em TODAS as suas conversas ativas. Use quando quiser assumir tudo de uma vez.
+            {globalPausedCount > 0 && <> Atualmente <strong>{globalPausedCount}</strong> lead(s) com pausa global.</>}
+          </p>
+        </div>
+        {globalPausedCount > 0 && (
+          <Button size="sm" variant="outline" onClick={resumeAll} disabled={stopAllBusy} className="gap-2">
+            <Power className="w-4 h-4" /> Religar IA
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={() => setConfirmStopAll(true)}
+          disabled={stopAllBusy || active.length === 0}
+          className="gap-2"
+        >
+          {stopAllBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <PowerOff className="w-4 h-4" />}
+          Parar IA em {active.length} lead(s)
+        </Button>
+      </Card>
+
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{active.length} com IA · {human.length} com humano</p>
         <Button size="sm" variant="ghost" onClick={load} className="gap-2"><RefreshCw className="w-4 h-4" /> Atualizar</Button>
       </div>
+
 
       <Section title="🤖 IA atendendo" rows={active} action={(r) => (
         <Button size="sm" variant="outline" onClick={() => setPaused(r.id, true)} className="gap-2">
