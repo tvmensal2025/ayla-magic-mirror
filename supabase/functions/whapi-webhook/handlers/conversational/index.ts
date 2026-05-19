@@ -653,6 +653,15 @@ function _finalize(stepKey: string, r: BotResult): BotResult {
     tail = tail.replace(/\{\{\s*[^}]+\s*\}\}/g, "").replace(/\s{2,}/g, " ").trim();
     tail = tail.replace(/^[,;:\-\s]+/, "").trim();
 
+    // Sem pergunta no passo atual → não mandar muleta "Tô aqui 👀…".
+    // Esse caso acontece em passos ambient (boas vindas, mídia já entregue) e
+    // resultava em respostas fora de contexto ("me conta um pouquinho mais…"
+    // depois do lead apenas cumprimentar/confirmar).
+    if (!tail) {
+      console.warn(`[conversational] 🤫 reply vazio em passo sem pergunta → silencioso step=${stepKey}`);
+      return { reply: greet || "", updates: { ...r.updates, __suppressed_reentry: true } as any };
+    }
+
     // Suprime repetição da mesma reentrada em curto intervalo.
     const cid = _currentTurnCustomerId;
     if (cid) {
@@ -665,11 +674,8 @@ function _finalize(stepKey: string, r: BotResult): BotResult {
       _lastReentryByCustomer.set(cid, { tail, at: now });
     }
 
-    const reentry = tail
-      ? tail
-      : "Tô aqui 👀 — me conta um pouquinho mais pra eu te ajudar?";
-    console.warn(`[conversational] ⚠️ reply vazio → reentry em step=${stepKey}`);
-    return { reply: applyGreet(reentry), updates: { ...r.updates } };
+    console.warn(`[conversational] ⚠️ reply vazio → reentry com pergunta do passo step=${stepKey}`);
+    return { reply: applyGreet(tail), updates: { ...r.updates } };
   }
 
   // Caso comum: prefixa saudação se aplicável.
