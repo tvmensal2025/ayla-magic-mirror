@@ -53,7 +53,7 @@ const PixelInjector = ({ facebookPixelId: _ignored, googleAnalyticsId }: PixelIn
     return () => {
       scripts.forEach((s) => s.parentNode?.removeChild(s));
     };
-  }, [facebookPixelId, googleAnalyticsId]);
+  }, [googleAnalyticsId]);
 
   return null;
 };
