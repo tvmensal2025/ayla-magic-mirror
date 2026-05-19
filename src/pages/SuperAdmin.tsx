@@ -243,6 +243,7 @@ const SuperAdmin = () => {
   const tabs = [
     { id: "consultores" as const, label: "Consultores", icon: Users, count: consultants.length },
     { id: "captacao" as const, label: "Captação", icon: Target },
+    { id: "gestores_ads" as const, label: "Gestores Ads", icon: UserCheck },
     { id: "saude_rede" as const, label: "Saúde da Rede", icon: Activity },
     { id: "crm" as const, label: "CRM Analytics", icon: BarChart3 },
     { id: "funil" as const, label: "Funil do Bot", icon: Activity },
