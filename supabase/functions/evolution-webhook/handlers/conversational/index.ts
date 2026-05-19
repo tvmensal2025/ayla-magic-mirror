@@ -602,20 +602,22 @@ function _extractTail(t: string): string {
   return (sents[sents.length - 1] || cleaned).trim();
 }
 
-// Wrapper de segurança — NUNCA silencia. Se não há reply nem mídia inline,
-// compõe uma reentrada cortês com a última pergunta do passo atual.
+// Wrapper de segurança. Se não há reply nem mídia inline:
+//   - passo sem pergunta → silencia (evita muleta fora de contexto).
+//   - passo com pergunta → reentry com a pergunta renderizada.
 function _finalize(stepKey: string, r: BotResult): BotResult {
   const reply = (r.reply || "").trim();
   const hasMedia = r.updates?.__inline_sent === true;
   if (!reply && !hasMedia) {
     const rawTail = _extractTail(_currentTurnStepQuestion);
-    // ✅ Renderiza variáveis ({{nome}}, {{valor_conta}}, etc.) antes de enviar.
-    const tail = rawTail ? renderTemplate(rawTail, _currentTurnVars || {}) : "";
-    const reentry = tail
-      ? `Boa! Me ajuda voltando aqui: ${tail}`
-      : `Boa! Pra eu te ajudar do jeito certo, me confirma onde a gente parou? 🙏`;
+    let tail = rawTail ? renderTemplate(rawTail, _currentTurnVars || {}) : "";
+    tail = tail.replace(/\{\{\s*[^}]+\s*\}\}/g, "").replace(/\s{2,}/g, " ").trim();
+    if (!tail) {
+      console.warn(`[conversational] 🤫 reply vazio em passo sem pergunta → silencioso step=${stepKey}`);
+      return { reply: "", updates: { ...r.updates, __suppressed_reentry: true } as any };
+    }
     console.warn(`[conversational] ⚠️ reply vazio → recuperando com reentry em step=${stepKey}`);
-    return { reply: reentry, updates: { ...r.updates } };
+    return { reply: `Boa! Me ajuda voltando aqui: ${tail}`, updates: { ...r.updates } };
   }
   return { reply, updates: r.updates };
 }
