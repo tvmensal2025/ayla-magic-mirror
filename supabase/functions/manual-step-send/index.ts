@@ -182,6 +182,60 @@ Deno.serve(async (req) => {
       if (chosen) toSend = [chosen];
     }
 
+    // Se o passo é de captura (capture_*, confirm_phone, finalizar_cadastro)
+    // e nada foi montado para enviar, gera um prompt automático.
+    const stepType = String((step as any).step_type || "message");
+    const isCaptureStep = stepType !== "message";
+    if (isCaptureStep && toSend.length === 0) {
+      const promptRaw = resolveCapturePrompt(step, renderedText);
+      if (promptRaw) {
+        const prompt = applyVars(promptRaw);
+        const legacyStep = mapCaptureStepToLegacy(stepType, (step as any).id, (step as any).step_key);
+
+        // Debounce: se prompt enviado recentemente e lead já está no destino, pula.
+        const lastPromptAt = (customer as any).last_custom_prompt_at
+          ? new Date((customer as any).last_custom_prompt_at).getTime()
+          : 0;
+        const sameStep = String((customer as any).conversation_step || "") === legacyStep;
+        if (sameStep && Date.now() - lastPromptAt < 20_000) {
+          return json({
+            ok: true,
+            sent: [],
+            skipped: "recent_prompt",
+            message: "Pergunta já enviada há poucos segundos — aguarde a resposta do cliente.",
+          });
+        }
+
+        await sender.sendText(remoteJid, prompt);
+        await supabase.from("conversations").insert({
+          customer_id: customer.id,
+          message_direction: "outbound",
+          message_text: prompt,
+          message_type: "text",
+          conversation_step: legacyStep,
+        });
+        await supabase.from("customers").update({
+          conversation_step: legacyStep,
+          bot_paused: false,
+          bot_paused_reason: null,
+          bot_paused_at: null,
+          bot_paused_until: null,
+          assigned_human_id: null,
+          custom_step_retries: 0,
+          custom_step_retries_step: null,
+          last_custom_prompt_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", customer.id);
+
+        return json({
+          ok: true,
+          sent: [{ kind: "text", auto_prompt: true }],
+          continued: true,
+          next_step: legacyStep,
+        });
+      }
+    }
+
     if (toSend.length === 0) {
       // Nothing to send (step has no media/text for this part). If the caller asked
       // to continue the flow, still reposition the lead onto this step and unpause.
