@@ -15,6 +15,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createWhapiSender } from "../_shared/whapi-api.ts";
+import { isQuietHourBRT, logQuietSkip } from "../_shared/quiet-hours.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
