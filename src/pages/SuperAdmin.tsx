@@ -32,6 +32,7 @@ import { NetworkHealthPanel } from "@/components/admin/super/NetworkHealthPanel"
 import { AdTemplatesPanel } from "@/components/superadmin/AdTemplatesPanel";
 import { AILearningHealthPanel } from "@/components/admin/super/AILearningHealthPanel";
 import { CaptacaoTab } from "@/components/superadmin/CaptacaoTab";
+import { AdManagersTab } from "@/components/superadmin/AdManagersTab";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { logAdminAction } from "@/hooks/useAdminAudit";
 
