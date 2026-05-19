@@ -247,8 +247,7 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
           },
           { count: "exact" },
         )
-        .eq("consultant_id", userId)
-        .or("bot_paused.is.false,bot_paused.is.null");
+        .eq("consultant_id", userId);
       if (error) throw error;
       toast({ title: `🛑 IA pausada em ${count ?? 0} lead(s)` });
       await load();

@@ -22,7 +22,7 @@ import { extractMultiField, buildMultiFieldPatch } from "../_shared/multi-field-
 import { botRequestStore, isTestPhone, logTestOutbound } from "../_shared/test-mode.ts";
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
 import { syncDealStageFromStep } from "../_shared/crm-stage-sync.ts";
-import { isCustomerPausedByHuman } from "../_shared/bot/paused.ts";
+import { isCustomerPausedByHuman, isConsultantAIDisabled } from "../_shared/bot/paused.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -451,6 +451,38 @@ Deno.serve(async (req) => {
       } catch (e) {
         console.warn("[self-intro] falhou:", (e as Error).message);
       }
+    }
+
+    // ─── 🛑 IA GLOBALMENTE DESLIGADA pelo consultor ───────────────────
+    // Switch "IA ativa para meus leads" = OFF → nenhum motor automático
+    // responde, mesmo para leads novos. Marca o customer como pausado para
+    // que a UI mostre "humano atendendo" e nenhum cron tente religar.
+    if (await isConsultantAIDisabled(supabase, superAdminConsultantId)) {
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "inbound",
+        message_text: messageText || (hasAudio ? "[áudio]" : "[arquivo]"),
+        message_type: hasAudio ? "audio" : (isFile ? "image" : "text"),
+        conversation_step: customer.conversation_step,
+      });
+      if (!(customer as any).bot_paused || !(customer as any).assigned_human_id) {
+        try {
+          await supabase.from("customers").update({
+            bot_paused: true,
+            bot_paused_reason: "manual_global_pause",
+            bot_paused_at: new Date().toISOString(),
+            bot_paused_until: null,
+            assigned_human_id: superAdminConsultantId,
+            updated_at: new Date().toISOString(),
+          }).eq("id", customer.id);
+        } catch (e) {
+          console.error("⚠️ [global-off] falha ao marcar customer pausado:", (e as Error).message);
+        }
+      }
+      console.log(`🛑 [global-off] IA desligada pelo consultor ${superAdminConsultantId} — ignorando ${phone}`);
+      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // ─── 🔇 BOT PAUSADO (handoff humano ativo) ────────────────────────
