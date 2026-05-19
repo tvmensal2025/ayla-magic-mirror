@@ -60,6 +60,62 @@ export function PlatformFacebookCard() {
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncReport, setSyncReport] = useState<any>(null);
   const [reportOpen, setReportOpen] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagData, setDiagData] = useState<any>(null);
+  const [migratingId, setMigratingId] = useState<string | null>(null);
+  const [migratingAll, setMigratingAll] = useState(false);
+
+  async function loadDiagnose() {
+    setDiagOpen(true);
+    setDiagLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("facebook-diagnose-pixels", { body: {} });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      setDiagData(data);
+    } catch (e: any) {
+      toast({ title: "Falha ao diagnosticar", description: e?.message, variant: "destructive" });
+    } finally {
+      setDiagLoading(false);
+    }
+  }
+
+  async function migrateOne(adsetId: string) {
+    setMigratingId(adsetId);
+    try {
+      const { data, error } = await supabase.functions.invoke("facebook-migrate-adset-pixel", { body: { adset_id: adsetId } });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      toast({ title: "Adset migrado", description: `Novo adset: ${(data as any)?.new_adset_id || "—"}` });
+      await loadDiagnose();
+    } catch (e: any) {
+      toast({ title: "Falha ao migrar", description: e?.message, variant: "destructive" });
+    } finally {
+      setMigratingId(null);
+    }
+  }
+
+  async function migrateAllWrong() {
+    if (!diagData?.adsets) return;
+    const wrong = diagData.adsets.filter((a: any) => a.adset_id && a.is_correct === false);
+    if (wrong.length === 0) return;
+    if (!confirm(`Migrar ${wrong.length} adset(s) para o pixel correto? Isso reseta aprendizado.`)) return;
+    setMigratingAll(true);
+    let okCount = 0, failCount = 0;
+    for (const a of wrong) {
+      try {
+        const { data, error } = await supabase.functions.invoke("facebook-migrate-adset-pixel", { body: { adset_id: a.adset_id } });
+        if (error || (data as any)?.error) throw new Error(error?.message || (data as any).error);
+        okCount++;
+      } catch {
+        failCount++;
+      }
+    }
+    setMigratingAll(false);
+    toast({ title: "Migração concluída", description: `${okCount} ok · ${failCount} falhas` });
+    await loadDiagnose();
+  }
 
   async function syncAll() {
     setSyncingAll(true);
