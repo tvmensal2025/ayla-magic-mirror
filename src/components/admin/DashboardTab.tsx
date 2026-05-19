@@ -12,8 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { StatCard } from "./StatCard";
 import { CustomerCharts } from "./CustomerCharts";
-import { AnalyticsCharts } from "./AnalyticsCharts";
-import { PerformanceCharts } from "./PerformanceCharts";
+// AnalyticsCharts e PerformanceCharts foram movidos para o SuperAdmin → aba Captação.
 import { LeadSourceCard } from "./LeadSourceCard";
 import { ResultsDashboard } from "./ads/ResultsDashboard";
 import { WalletChip } from "./ads/WalletChip";
