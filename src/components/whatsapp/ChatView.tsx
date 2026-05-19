@@ -261,6 +261,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         onSendAudio={async (base64) => {
           const phone = await getResolvedPhone();
           if (!phone) return;
+          autoTakeoverByPhone(phone, "humano_assumiu_audio").catch(() => {});
           try {
             // useAudioRecorder já gera OGG/Opus real, formato aceito pelo WhatsApp/Whapi.
             const audioDataUrl = `data:audio/ogg;base64,${base64}`;
