@@ -16,16 +16,9 @@ import { isTestMode } from "../../../_shared/test-mode.ts";
 import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
 import { ensureAudioTranscript } from "../../../_shared/audio-transcript.ts";
 import { isStrictScriptMode } from "../../../_shared/ai-decisions.ts";
-
-// Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
-const aiCooldown = new Map<string, number>();
-function aiInCooldown(key: string): boolean {
-  const until = aiCooldown.get(key);
-  return !!until && Date.now() < until;
-}
-function setAiCooldown(key: string) {
-  aiCooldown.set(key, Date.now() + 60_000);
-}
+// Sprint 2.6 — helpers compartilhados (cooldown e dedupe)
+import { aiInCooldown, setAiCooldown } from "../../../_shared/bot/ai-cooldown.ts";
+import { checkAndMarkWebhookDedupe } from "../../../_shared/bot/dedupe.ts";
 
 export { CONVERSATIONAL_STEPS };
 
@@ -663,27 +656,15 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     }
   }
 
-  // ─── Dedupe de mensagem (idempotência) ─────────────────────────────────
-  // Whapi às vezes reenvia o mesmo webhook. Sem isso, capturas são processadas
-  // 2x e auto-advance pula passos. Tabela tem TTL de 24h (pg_cron).
+  // ─── Dedupe de mensagem (idempotência) — Sprint 2.6: extraído para _shared/bot/dedupe.ts
   if (ctx.messageId) {
-    try {
-      const { data: inserted, error: dupErr } = await ctx.supabase
-        .from("webhook_message_dedupe")
-        .insert({ message_id: ctx.messageId, consultant_id: ctx.customer?.consultant_id || null })
-        .select("message_id")
-        .maybeSingle();
-      if (!inserted && !dupErr) {
-        console.log(`[conversational] 🔁 dedupe hit: ${ctx.messageId} já processado`);
-        return { reply: "", updates: { __inline_sent: true } };
-      }
-      // Em caso de conflito (PK violation), o insert retorna erro 23505 — também é dedupe hit.
-      if (dupErr && String((dupErr as any).code) === "23505") {
-        console.log(`[conversational] 🔁 dedupe conflict: ${ctx.messageId}`);
-        return { reply: "", updates: { __inline_sent: true } };
-      }
-    } catch (e) {
-      console.error("[conversational] dedupe check failed (continuando)", e);
+    const dedupe = await checkAndMarkWebhookDedupe(
+      ctx.supabase,
+      ctx.messageId,
+      ctx.customer?.consultant_id,
+    );
+    if (dedupe.duplicate) {
+      return { reply: "", updates: { __inline_sent: true } };
     }
   }
 
