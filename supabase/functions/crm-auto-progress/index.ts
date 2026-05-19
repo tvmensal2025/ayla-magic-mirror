@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.49.4";
+import { isQuietHourBRT, logQuietSkip } from "../_shared/quiet-hours.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -157,6 +158,15 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  if (isQuietHourBRT()) {
+    logQuietSkip("crm-auto-progress");
+    return new Response(JSON.stringify({ skipped: "quiet_hours" }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;

@@ -15,6 +15,7 @@ import { isTestMode } from "../../../_shared/test-mode.ts";
 import { evaluateRules, logRuleFire, _consumeCustomerRateLimit } from "./rules-engine.ts";
 import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
 import { ensureAudioTranscript } from "../../../_shared/audio-transcript.ts";
+import { isQuietHourBRT, logQuietSkip } from "../../../_shared/quiet-hours.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
@@ -679,6 +680,10 @@ function _finalize(stepKey: string, r: BotResult): BotResult {
 }
 
 export async function runConversationalFlow(ctx: BotContext): Promise<BotResult> {
+  if (isQuietHourBRT()) {
+    logQuietSkip("conversational", { customer_id: ctx.customer?.id });
+    return { reply: "", updates: {} } as BotResult;
+  }
   let stepKey = (ctx.customer.conversation_step || "welcome") as string;
   _currentTurnCustomerId = (ctx.customer?.id as string) || null;
   _currentTurnMessageText = (ctx.messageText as string) || "";

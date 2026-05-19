@@ -15,6 +15,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createWhapiSender } from "../_shared/whapi-api.ts";
+import { isQuietHourBRT, logQuietSkip } from "../_shared/quiet-hours.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -28,6 +29,14 @@ const TERMINAL_STEPS = new Set([
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  if (isQuietHourBRT()) {
+    logQuietSkip("bot-followup-checker");
+    return new Response(JSON.stringify({ skipped: "quiet_hours" }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
 
   try {
     const supabase = createClient(

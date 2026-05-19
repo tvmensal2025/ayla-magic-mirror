@@ -1,94 +1,77 @@
-## Diagnóstico
+# Horário de silêncio do bot (21:30 → 08:00 BRT)
 
-Hoje a integração com o Facebook faz só **polling de agregados** a cada 30 min em `facebook-sync-metrics` (campos `impressions, clicks, spend, actions[lead]`). Isso traz **o número de leads**, mas **não traz o lead em si** (nome, telefone, e-mail, respostas do formulário). Por isso "não cai tudo".
+## Objetivo
+Impedir que QUALQUER envio automático (bot-flow, IA, follow-up, crons, agendados não-explícitos) chegue ao cliente entre **21:30 e 08:00 (horário de Brasília)**. Envios manuais do consultor continuam liberados.
 
-Não existe no projeto:
+## 1. Helper compartilhado
 
-- Assinatura de **Webhooks da Meta** (`leadgen`, `messages`, `ads_account`)
-- Endpoint `/leads` da Marketing API sendo consultado por formulário
-- Backfill via `/{form_id}/leads`
-- Validação `X-Hub-Signature-256`
-- CAPI para `Lead` / `CompleteRegistration` (só existe `facebook-capi` genérico — verificar uso)
+Criar `supabase/functions/_shared/quiet-hours.ts`:
 
-## Como empresas sérias fazem (padrão Meta)
+```ts
+// Retorna true se agora (BRT) está dentro do período silencioso 21:30–08:00
+export function isQuietHourBRT(now = new Date()): boolean {
+  const fmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).format(now); // "HH:MM"
+  const [h, m] = fmt.split(":").map(Number);
+  const minutes = h * 60 + m;
+  const start = 21 * 60 + 30; // 21:30
+  const end = 8 * 60;         // 08:00
+  return minutes >= start || minutes < end;
+}
 
-1. **System User token de longa duração** (não OAuth de usuário) — evita expirar a cada 60 dias. *Hoje já usamos `platform_facebook_account` — bom.*
-2. **Webhook `leadgen` no objeto Page** — Meta faz `POST` no nosso endpoint a cada lead. Validar HMAC com `app_secret`.
-3. **Buscar o lead completo** via `GET /{leadgen_id}?fields=field_data,created_time,ad_id,form_id` usando page access token.
-4. **Backfill periódico** (`/{form_id}/leads?since=...`) pra cobrir webhooks perdidos (Meta às vezes falha).
-5. **Fila com retry idempotente** (`leadgen_id` como chave única) — Meta reentrega em caso de 5xx.
-6. **CAPI server-side** mandando evento `Lead` de volta com `fbc/fbp/event_id` pra deduplicar com Pixel.
-7. **Subscribe explícito** por página: `POST /{page-id}/subscribed_apps?subscribed_fields=leadgen` no OAuth callback.
-8. **Monitoramento**: `/{page-id}/subscribed_apps` + tabela de falhas de webhook.
-
-## Plano de implementação
-
-### 1. Edge function `facebook-leadgen-webhook` (pública, `verify_jwt=false`)
-
-- `GET`: verificação de `hub.challenge` com `META_VERIFY_TOKEN`.
-- `POST`: valida `X-Hub-Signature-256` com `FACEBOOK_APP_SECRET`; processa cada `entry.changes[]` field=`leadgen`.
-- Para cada `leadgen_id`: chama `GET /{leadgen_id}` com page token, normaliza `field_data` (nome/phone/email/cidade), upsert em `facebook_leads` (idempotente por `leadgen_id`), cria `customer` + `deal` na stage `novo_lead`, dispara `notifyNewLead` (já existe).
-- Responde **200 imediato** antes do processamento pesado (`EdgeRuntime.waitUntil`) — Meta cancela se demorar >20s.
-
-### 2. Tabelas novas (migração)
-
-- `facebook_leads (id, leadgen_id UNIQUE, form_id, ad_id, campaign_id, consultant_id, page_id, raw_field_data jsonb, normalized jsonb, processed_at, created_at)`
-- `facebook_webhook_events (id, object, field, payload jsonb, signature_valid bool, received_at, processed_at, error)`
-- `facebook_page_subscriptions (page_id PK, consultant_id, page_access_token_encrypted, subscribed_fields[], subscribed_at, status)`
-
-### 3. Subscribe da página no OAuth callback
-
-Em `facebook-oauth-callback`: depois de salvar a conexão, fazer:
-
-- `GET /me/accounts` pra pegar `page_access_token`
-- `POST /{page-id}/subscribed_apps?subscribed_fields=leadgen,messages` com token da página
-- Salvar `page_access_token` criptografado em `facebook_page_subscriptions`
-
-### 4. Backfill `facebook-leads-backfill` (cron a cada 15 min)
-
-- Para cada `form_id` ativo (descoberto via campanhas): `GET /{form_id}/leads?since={last_sync}`
-- Upsert em `facebook_leads` (idempotente). Pega leads que webhook perdeu.
-
-### 5. Secrets necessários
-
-- `FACEBOOK_APP_SECRET` (pra HMAC) — pedir ao usuário
-- `META_VERIFY_TOKEN` (string aleatória que geramos)
-- Configurar Webhook na Meta App Dashboard apontando pra `https://zlzasfhcxcznaprrragl.supabase.co/functions/v1/facebook-leadgen-webhook`
-
-### 6. CAPI Lead (opcional, mas é padrão de mercado)
-
-Após criar lead, disparar `facebook-capi` com `event_name=Lead`, `event_id=leadgen_id`, `user_data` hasheado, `fbp/fbc` se disponíveis — dedup com Pixel.
-
-## Detalhes técnicos
-
-```text
-Meta Lead Form
-  └─ submit
-     └─ Webhook POST → facebook-leadgen-webhook
-        ├─ Validate HMAC
-        ├─ Enqueue (200 OK)
-        └─ waitUntil:
-           ├─ GET /{leadgen_id} → field_data
-           ├─ Upsert facebook_leads (unique leadgen_id)
-           ├─ Create customer + deal[novo_lead]
-           ├─ notifyNewLead()
-           └─ CAPI Lead (dedup com Pixel)
-
-Cron 15 min
-  └─ facebook-leads-backfill → /{form_id}/leads?since=last → backfill
+// Próximo 08:00 BRT em ISO (para reagendar)
+export function nextQuietWindowEndISO(now = new Date()): string {
+  // Calcula 08:00 BRT do próximo dia útil (ou hoje se ainda for madrugada)
+  const brtParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(now).reduce<Record<string,string>>((a,p)=>(a[p.type]=p.value,a),{});
+  const hhmm = Number(brtParts.hour) * 60 + Number(brtParts.minute);
+  // Se já passou de 00:00 BRT mas <08:00 → hoje 08:00; senão amanhã 08:00
+  const targetDate = hhmm < 8 * 60
+    ? `${brtParts.year}-${brtParts.month}-${brtParts.day}`
+    : new Date(Date.UTC(+brtParts.year, +brtParts.month - 1, +brtParts.day + 1))
+        .toISOString().slice(0, 10);
+  return new Date(`${targetDate}T08:00:00-03:00`).toISOString();
+}
 ```
 
-## Perguntas
+## 2. Pontos de bloqueio
 
-1. Você tem acesso ao **App Secret** do app Meta (Dashboard → Settings → Basic)? Vou precisar dele como secret.
-2. Já existe **App Review aprovado** para `leads_retrieval` em modo Live? Sem isso, só leads de admins/dev/testers vêm.
-3. Qinclua **CAPI de Lead** já nesta leva (otimiza campanhas) ou s
-4. Os leads devem entrar como `customer_origin = 'lead_whatsapp'` ou criar uma origem nova `lead_facebook`?
+Adicionar checagem `if (isQuietHourBRT()) { ...skip/reschedule... }` nos seguintes envios automáticos:
 
-Posso implementar tudo de uma vez assim que confirmar essas 4.
+| Arquivo | Comportamento |
+|---|---|
+| `whapi-webhook/handlers/bot-flow.ts` (dispatchStep + replies) | Não responder. Sair silenciosamente; cliente recebe resposta no próximo evento após 08:00 (bot processa mensagem nova). |
+| `whapi-webhook/handlers/conversational/index.ts` (IA respondendo) | Idem — não envia. |
+| `ai-followup-cron` | Pular execução: log `skipped_quiet_hours` e retornar 200. |
+| `ai-closer-cron` | Idem. |
+| `bot-followup-checker` | Idem. |
+| `crm-auto-progress` (msgs automáticas de estágio) | Idem. |
+| `send-scheduled-messages` | Adiar: atualizar `scheduled_at = nextQuietWindowEndISO()` para mensagens elegíveis nesse ciclo (status continua `pending`). |
+| `manual-step-send` | **NÃO bloqueia** — é envio iniciado pelo consultor. |
+| `whapi-proxy` (envio direto do CRM pelo consultor) | **NÃO bloqueia**. |
 
-&nbsp;
+## 3. Observabilidade
 
-Nao [sei.se](http://sei.se) tem o restante faca ficar 100%
+- Log estruturado `quiet_hours_skip` com `{ function, customer_id, reason }` em cada bloqueio.
+- Métrica simples: contagem por dia visível em `supabase--edge_function_logs`.
 
-&nbsp;
+## 4. Configuração futura (não nesta entrega)
+
+Janela 21:30–08:00 fica hardcoded por enquanto. Se quiser depois, viramos por consultor em `consultants.quiet_hours_start/end`. Você quer já nessa primeira entrega ou deixamos fixo?
+
+## Arquivos alterados
+- `supabase/functions/_shared/quiet-hours.ts` (novo)
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
+- `supabase/functions/ai-followup-cron/index.ts`
+- `supabase/functions/ai-closer-cron/index.ts`
+- `supabase/functions/bot-followup-checker/index.ts`
+- `supabase/functions/crm-auto-progress/index.ts`
+- `supabase/functions/send-scheduled-messages/index.ts`
+
+Sem alterações de DB.

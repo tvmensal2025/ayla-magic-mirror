@@ -20,6 +20,7 @@ import {
   TIMEOUT_VIA_CEP,
   logStructured,
 } from "../../_shared/utils.ts";
+import { isQuietHourBRT, logQuietSkip } from "../../_shared/quiet-hours.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../_shared/step-media-order.ts";
 import { canSendMediaOnce } from "../../_shared/media-dedupe.ts";
 import {
@@ -429,6 +430,10 @@ function buildConfirmacaoDoc(merged: any): string {
 }
 
 export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
+  if (isQuietHourBRT()) {
+    logQuietSkip("bot-flow", { customer_id: ctx.customer?.id, phone: ctx.phone });
+    return { reply: null, updates: {} } as BotResult;
+  }
   const {
     supabase,
     sender: { sendText, sendButtons, sendMedia },

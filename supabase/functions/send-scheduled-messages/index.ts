@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.49.4";
 import { captureError } from "../_shared/sentry.ts";
+import { isQuietHourBRT, nextQuietWindowEndISO, logQuietSkip } from "../_shared/quiet-hours.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,6 +26,23 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Em horário de silêncio: adia mensagens devidas para 08:00 BRT e sai.
+    if (isQuietHourBRT()) {
+      const nextRun = nextQuietWindowEndISO();
+      const { data: deferred, error: deferError } = await supabase
+        .from("scheduled_messages")
+        .update({ scheduled_at: nextRun })
+        .eq("status", "pending")
+        .lte("scheduled_at", new Date().toISOString())
+        .select("id");
+      if (deferError) throw deferError;
+      logQuietSkip("send-scheduled-messages", { deferred: deferred?.length ?? 0, next_run: nextRun });
+      return new Response(
+        JSON.stringify({ skipped: "quiet_hours", deferred: deferred?.length ?? 0, next_run: nextRun }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     // Fetch pending messages where scheduled_at <= now
     const { data: messages, error: fetchError } = await supabase
