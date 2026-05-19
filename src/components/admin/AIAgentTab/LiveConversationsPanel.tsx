@@ -22,7 +22,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Pause, Play, RefreshCw, ChevronDown, RotateCcw, Send } from "lucide-react";
+import { Loader2, Pause, Play, RefreshCw, ChevronDown, RotateCcw, Send, PowerOff, Power } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { resetLeadConversation } from "@/services/resetConversation";
