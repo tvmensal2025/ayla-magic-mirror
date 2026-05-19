@@ -521,7 +521,7 @@ export default function FluxoCamila() {
         <FlowAuditPanel
           steps={orderedSteps}
           flowId={flowId}
-          onRepaired={() => userId && reload(userId)}
+          onRepaired={() => userId && reload(userId, editingVariant)}
         />
 
         {/* Atalhos */}
