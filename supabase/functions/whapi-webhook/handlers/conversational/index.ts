@@ -82,18 +82,19 @@ export const CADASTRO_STEPS = new Set([
 
 interface LoadedFlow { flowId: string; steps: DbStep[]; strictMode: boolean; }
 
-async function loadFlow(supabase: any, consultantId: string): Promise<LoadedFlow | null> {
+async function loadFlow(supabase: any, consultantId: string, variant: string = "A"): Promise<LoadedFlow | null> {
   try {
     const { data: flow } = await supabase
       .from("bot_flows")
       .select("id, strict_mode")
       .eq("consultant_id", consultantId)
       .eq("is_active", true)
+      .eq("variant", variant)
       .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle();
     if (!flow?.id) {
-      console.log(`[conversational] loadFlow: no active flow for consultant=${consultantId}`);
+      console.log(`[conversational] loadFlow: no active flow for consultant=${consultantId} variant=${variant}`);
       return null;
     }
 
