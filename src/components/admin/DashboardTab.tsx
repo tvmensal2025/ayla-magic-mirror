@@ -1,31 +1,16 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { Eye, Users, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Megaphone, Trash2, LayoutDashboard, Target } from "lucide-react";
+import { Eye as EyeIcon, EyeOff, Users, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Trash2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { StatCard } from "./StatCard";
 import { CustomerCharts } from "./CustomerCharts";
-// AnalyticsCharts e PerformanceCharts foram movidos para o SuperAdmin → aba Captação.
-import { LeadSourceCard } from "./LeadSourceCard";
-import { ResultsDashboard } from "./ads/ResultsDashboard";
-import { WalletChip } from "./ads/WalletChip";
-import { TerminalTicker } from "./dashboard/TerminalTicker";
-import { MainChart } from "./dashboard/MainChart";
-import { CpcPanel } from "./dashboard/CpcPanel";
-import { RecentClicks } from "./dashboard/RecentClicks";
-import { FunnelStrip } from "./dashboard/FunnelStrip";
-import { AdMetricsCards } from "./dashboard/AdMetricsCards";
-import { AdMetricsCharts } from "./dashboard/AdMetricsCharts";
-import { AdAccountSwitcher } from "./dashboard/AdAccountSwitcher";
-import { useManagedConsultants } from "@/hooks/useManagedConsultants";
-import { Eye as EyeIcon, EyeOff } from "lucide-react";
 
 interface DashboardTabProps {
   userId: string;
@@ -49,9 +34,6 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
   const [exporting, setExporting] = useState(false);
   const [resettingPerf, setResettingPerf] = useState(false);
   const [sharedAccountCount, setSharedAccountCount] = useState(0);
-  const [adAccountId, setAdAccountId] = useState<string>(userId);
-  useEffect(() => { setAdAccountId(userId); }, [userId]);
-  const { data: managedConsultants = [] } = useManagedConsultants(userId);
 
   useEffect(() => {
     const stored = localStorage.getItem("sync_cooldown_until");
@@ -95,7 +77,6 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
 
   const filteredMetrics = useMemo(() => {
     if (!analytics) return null;
-    // Dashboard "Total de Clientes" / consumo / status → CARTEIRA iGreen sincronizada (não leads WhatsApp)
     const walletOnly = analytics.allCustomers.filter((c: any) => c.customer_origin === "igreen_sync");
     const filtered = selectedLicenciado === "all" ? walletOnly : walletOnly.filter((c: any) => c.registered_by_name === selectedLicenciado);
     const totalCustomers = filtered.length;
@@ -160,8 +141,6 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
     } catch (err: unknown) { toast({ title: "Erro ao salvar credenciais", description: err instanceof Error ? err.message : "Erro", variant: "destructive" }); }
   };
 
-  const chartData = analytics?.daily.map((d) => ({ ...d, label: new Date(d.date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) })) || [];
-
   const handleExportPdf = async () => {
     if (!dashboardRef.current) return;
     setExporting(true);
@@ -214,11 +193,20 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
         </div>
       )}
 
-      {/* TOOLBAR — agrupada num container glass */}
+      {/* TOOLBAR */}
       <div className="flex items-center justify-between gap-2 flex-wrap p-2 rounded-xl bg-card/40 border border-border/40 backdrop-blur">
-        <div className="flex items-center gap-2">
-          <WalletChip consultantId={userId} />
-          <AdAccountSwitcher userId={userId} value={adAccountId} onChange={setAdAccountId} />
+        <div className="flex items-center gap-2 flex-wrap">
+          <Select value={selectedLicenciado} onValueChange={setSelectedLicenciado}>
+            <SelectTrigger className="h-8 w-[200px] text-xs"><Filter className="w-3.5 h-3.5 mr-1.5" /><SelectValue placeholder="Filtrar licenciado" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os Licenciados</SelectItem>
+              {licenciadoOptions.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" onClick={handleDashboardSync} disabled={syncingDashboard || syncCooldown > 0} className="h-8 text-xs gap-1.5">
+            {syncingDashboard ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            {syncingDashboard ? "Sincronizando..." : syncCooldown > 0 ? `Aguarde ${syncCooldown}s` : "Sincronizar iGreen"}
+          </Button>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Select value={String(periodDays)} onValueChange={(v) => onPeriodChange(Number(v))}>
@@ -247,91 +235,14 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
         </div>
       </div>
 
-      {/* TERMINAL TICKER — 3 KPIs slim, sem Carteira */}
-      <TerminalTicker kpis={(analytics as any)?.heroKpis} />
+      {/* CLIENTES iGREEN */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+        <StatCard icon={<Users className="w-5 h-5" />} label="Total de Clientes" value={filteredMetrics?.totalCustomers ?? 0} color="primary" />
+        <StatCard icon={<Zap className="w-5 h-5" />} label="Total kW (Consumo)" value={`${(filteredMetrics?.totalKw ?? 0).toLocaleString("pt-BR")} kW`} color="accent" subtitle={`Média: ${(filteredMetrics?.avgKw ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} kW`} />
+        <StatCard icon={<TrendingUp className="w-5 h-5" />} label="Taxa de Conversão" value={`${(analytics?.conversionRate ?? 0).toFixed(1)}%`} color="primary" subtitle="Cliques / Visualizações" />
+      </div>
 
-      {/* TABS */}
-      <Tabs defaultValue="visao" className="w-full">
-        <TabsList className="grid grid-cols-3 w-full max-w-xl">
-          <TabsTrigger value="visao" className="gap-1.5 text-xs sm:text-sm">
-            <LayoutDashboard className="w-3.5 h-3.5" /> Visão Geral
-          </TabsTrigger>
-          <TabsTrigger value="anuncios" className="gap-1.5 text-xs sm:text-sm">
-            <Target className="w-3.5 h-3.5" /> Anúncios & Origem
-          </TabsTrigger>
-          <TabsTrigger value="clientes" className="gap-1.5 text-xs sm:text-sm">
-            <Users className="w-3.5 h-3.5" /> Clientes iGreen
-          </TabsTrigger>
-        </TabsList>
-
-        {/* === VISÃO GERAL === */}
-        <TabsContent value="visao" className="space-y-4 mt-6">
-          <AdMetricsCards consultantId={adAccountId} periodDays={periodDays} />
-          <AdMetricsCharts consultantId={adAccountId} periodDays={periodDays} managed={managedConsultants} />
-          <MainChart data={(analytics as any)?.dailyMain} />
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <CpcPanel data={(analytics as any)?.cpcByTarget} totalCtaClicks={(analytics as any)?.totalCtaClicks} />
-            <RecentClicks clicks={(analytics as any)?.recentClicks} />
-          </div>
-
-          <FunnelStrip funnel={(analytics as any)?.funnel} />
-
-          {/* Tráfego detalhado foi movido para o SuperAdmin → aba "Captação" (visão gerencial global). */}
-
-        </TabsContent>
-
-        {/* === ANÚNCIOS & ORIGEM === */}
-        <TabsContent value="anuncios" className="space-y-6 mt-6">
-          <div className="space-y-3">
-            <h3 className="font-heading font-bold text-foreground text-base flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
-                <Megaphone className="w-4 h-4" />
-              </div>
-              Performance dos seus anúncios
-            </h3>
-            <ResultsDashboard
-              consultantId={userId}
-              externalRange={periodDays <= 7 ? 7 : periodDays >= 90 ? 90 : 30}
-              hidePeriodSelector
-            />
-          </div>
-          <LeadSourceCard consultantId={userId} periodDays={periodDays} />
-        </TabsContent>
-
-        {/* === CLIENTES iGREEN === */}
-        <TabsContent value="clientes" className="space-y-6 mt-6">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h3 className="font-heading font-bold text-foreground text-base flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
-                <Users className="w-4 h-4" />
-              </div>
-              Clientes iGreen
-            </h3>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Select value={selectedLicenciado} onValueChange={setSelectedLicenciado}>
-                <SelectTrigger className="h-8 w-[200px] text-xs"><Filter className="w-3.5 h-3.5 mr-1.5" /><SelectValue placeholder="Filtrar licenciado" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os Licenciados</SelectItem>
-                  {licenciadoOptions.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Button variant="outline" size="sm" onClick={handleDashboardSync} disabled={syncingDashboard || syncCooldown > 0} className="h-8 text-xs gap-1.5">
-                {syncingDashboard ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                {syncingDashboard ? "Sincronizando..." : syncCooldown > 0 ? `Aguarde ${syncCooldown}s` : "Sincronizar iGreen"}
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-            <StatCard icon={<Users className="w-5 h-5" />} label="Total de Clientes" value={filteredMetrics?.totalCustomers ?? 0} color="primary" />
-            <StatCard icon={<Zap className="w-5 h-5" />} label="Total kW (Consumo)" value={`${(filteredMetrics?.totalKw ?? 0).toLocaleString("pt-BR")} kW`} color="accent" subtitle={`Média: ${(filteredMetrics?.avgKw ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} kW`} />
-            <StatCard icon={<TrendingUp className="w-5 h-5" />} label="Taxa de Conversão" value={`${(analytics?.conversionRate ?? 0).toFixed(1)}%`} color="primary" subtitle="Cliques / Visualizações" />
-          </div>
-
-          <CustomerCharts filteredMetrics={filteredMetrics} topLicenciados={analytics?.topLicenciados} />
-        </TabsContent>
-      </Tabs>
+      <CustomerCharts filteredMetrics={filteredMetrics} topLicenciados={analytics?.topLicenciados} />
 
       {/* Credentials Dialog */}
       <Dialog open={showCredentialsDialog} onOpenChange={setShowCredentialsDialog}>
