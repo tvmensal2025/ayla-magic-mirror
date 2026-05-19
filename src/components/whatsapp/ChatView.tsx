@@ -281,6 +281,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         onSendAudioUrl={async (audioUrl) => {
           const phone = await getResolvedPhone();
           if (!phone) return;
+          autoTakeoverByPhone(phone, "humano_assumiu_audio").catch(() => {});
           try {
             const result = await sendWhatsAppMessage({
               instanceName, phone, mediaCategory: "audio", mediaUrl: audioUrl, isWhapi,
