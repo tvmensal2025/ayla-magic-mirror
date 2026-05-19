@@ -156,7 +156,7 @@ export function AIAgentTab({ userId }: { userId: string }) {
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            Atendimento humanizado 24/7. Quando você assumir, ela pausa automaticamente.
+            Atendimento humanizado 24/7. Desligar bloqueia a IA para leads atuais e futuros.
           </p>
         </div>
         <Link
