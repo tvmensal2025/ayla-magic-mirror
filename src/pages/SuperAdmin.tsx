@@ -18,6 +18,7 @@ import { AIKnowledgePanel } from "@/components/superadmin/AIKnowledgePanel";
 import { AIControlPanel } from "@/components/superadmin/AIControlPanel";
 import { AIAuditPanel } from "@/components/superadmin/AIAuditPanel";
 import { ABResultsPanel } from "@/components/superadmin/ABResultsPanel";
+import { LearnedPatternsPanel } from "@/components/superadmin/LearnedPatternsPanel";
 import { CrmAnalyticsTab } from "@/components/superadmin/CrmAnalyticsTab";
 import { AuditLogPanel } from "@/components/superadmin/AuditLogPanel";
 import { BotFunnelPanel } from "@/components/superadmin/BotFunnelPanel";
