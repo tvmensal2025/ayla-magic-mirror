@@ -419,6 +419,57 @@ export type Database = {
         }
         Relationships: []
       }
+      ad_spend_daily: {
+        Row: {
+          campaigns: Json
+          clicks: number
+          consultant_id: string
+          date: string
+          id: string
+          impressions: number
+          leads: number
+          spend_cents: number
+          synced_at: string
+        }
+        Insert: {
+          campaigns?: Json
+          clicks?: number
+          consultant_id: string
+          date: string
+          id?: string
+          impressions?: number
+          leads?: number
+          spend_cents?: number
+          synced_at?: string
+        }
+        Update: {
+          campaigns?: Json
+          clicks?: number
+          consultant_id?: string
+          date?: string
+          id?: string
+          impressions?: number
+          leads?: number
+          spend_cents?: number
+          synced_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ad_spend_daily_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ad_spend_daily_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ad_template_usages: {
         Row: {
           campaign_id: string | null
@@ -1538,6 +1589,66 @@ export type Database = {
           summary?: Json | null
         }
         Relationships: []
+      }
+      capture_diagnostics: {
+        Row: {
+          actions: Json
+          bottlenecks: Json
+          computed_at: string
+          consultant_id: string | null
+          created_at: string
+          id: string
+          kpis: Json
+          model_used: string | null
+          sample_size: number
+          scope: string
+          summary: string | null
+          winners: Json
+        }
+        Insert: {
+          actions?: Json
+          bottlenecks?: Json
+          computed_at?: string
+          consultant_id?: string | null
+          created_at?: string
+          id?: string
+          kpis?: Json
+          model_used?: string | null
+          sample_size?: number
+          scope?: string
+          summary?: string | null
+          winners?: Json
+        }
+        Update: {
+          actions?: Json
+          bottlenecks?: Json
+          computed_at?: string
+          consultant_id?: string | null
+          created_at?: string
+          id?: string
+          kpis?: Json
+          model_used?: string | null
+          sample_size?: number
+          scope?: string
+          summary?: string | null
+          winners?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capture_diagnostics_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "capture_diagnostics_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants_public"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       consultant_ad_settings: {
         Row: {

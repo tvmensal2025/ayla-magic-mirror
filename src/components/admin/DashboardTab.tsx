@@ -1,11 +1,10 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { Eye, Users, MousePointerClick, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Megaphone, ChevronDown, Trash2, LayoutDashboard, Target } from "lucide-react";
+import { Eye, Users, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Megaphone, Trash2, LayoutDashboard, Target } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -13,8 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { StatCard } from "./StatCard";
 import { CustomerCharts } from "./CustomerCharts";
-import { AnalyticsCharts } from "./AnalyticsCharts";
-import { PerformanceCharts } from "./PerformanceCharts";
+// AnalyticsCharts e PerformanceCharts foram movidos para o SuperAdmin → aba Captação.
 import { LeadSourceCard } from "./LeadSourceCard";
 import { ResultsDashboard } from "./ads/ResultsDashboard";
 import { WalletChip } from "./ads/WalletChip";
@@ -269,28 +267,8 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
 
           <FunnelStrip funnel={(analytics as any)?.funnel} />
 
-          {/* Tráfego LP — colapsável */}
-          <Collapsible>
-            <CollapsibleTrigger asChild>
-              <Button variant="outline" size="sm" className="w-full justify-between h-9 text-xs">
-                <span className="flex items-center gap-2">
-                  <Eye className="w-3.5 h-3.5" />
-                  Tráfego detalhado da landing page (opcional)
-                </span>
-                <ChevronDown className="w-3.5 h-3.5 transition-transform data-[state=open]:rotate-180" />
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-4 pt-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-                <StatCard icon={<Eye className="w-5 h-5" />} label="Total de Visualizações" value={analytics?.total ?? 0} color="primary" />
-                <StatCard icon={<Users className="w-5 h-5" />} label="Página Cliente" value={analytics?.totalClient ?? 0} color="accent" />
-                <StatCard icon={<Users className="w-5 h-5" />} label="Página Licenciado" value={analytics?.totalLicenciada ?? 0} color="primary" />
-                <StatCard icon={<MousePointerClick className="w-5 h-5" />} label="Cliques nos Botões" value={analytics?.totalClicks ?? 0} color="accent" />
-              </div>
-              <AnalyticsCharts chartData={chartData} periodDays={periodDays} analytics={analytics} weeklyNewCustomers={filteredMetrics?.weeklyNewCustomers} />
-              <PerformanceCharts analytics={analytics} />
-            </CollapsibleContent>
-          </Collapsible>
+          {/* Tráfego detalhado foi movido para o SuperAdmin → aba "Captação" (visão gerencial global). */}
+
         </TabsContent>
 
         {/* === ANÚNCIOS & ORIGEM === */}
