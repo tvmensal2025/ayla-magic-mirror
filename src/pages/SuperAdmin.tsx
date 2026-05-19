@@ -22,7 +22,7 @@ import { LearnedPatternsPanel } from "@/components/superadmin/LearnedPatternsPan
 import { CrmAnalyticsTab } from "@/components/superadmin/CrmAnalyticsTab";
 import { AuditLogPanel } from "@/components/superadmin/AuditLogPanel";
 import { BotFunnelPanel } from "@/components/superadmin/BotFunnelPanel";
-import { SuppressedRulesPanel } from "@/components/superadmin/SuppressedRulesPanel";
+
 import { WorkerPhaseTimeline } from "@/components/superadmin/WorkerPhaseTimeline";
 import { StuckLeadsWidget } from "@/components/superadmin/StuckLeadsWidget";
 import { SystemHealthPanel } from "@/components/superadmin/SystemHealthPanel";
@@ -507,7 +507,6 @@ const SuperAdmin = () => {
         {activeTab === "funil" && (
           <div className="space-y-4">
             <BotFunnelPanel />
-            <SuppressedRulesPanel />
           </div>
         )}
         {activeTab === "worker" && <WorkerPhaseTimeline />}
