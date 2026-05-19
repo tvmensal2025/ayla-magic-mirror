@@ -353,6 +353,9 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
           </div>
         </div>
         {m.url && m.kind === "audio" && <audio controls src={m.url} className="w-full h-8" />}
+        {m.kind === "audio" && variant === "B" && (
+          <AudioTranscriptEditor media={m} onChange={(t) => setItems(prev => prev.map(x => x.id === m.id ? { ...x, transcript: t } : x))} />
+        )}
         {m.url && m.kind === "image" && <img src={m.url} alt={m.label} className="w-full max-h-32 object-cover rounded" />}
         {m.url && m.kind === "video" && <video controls src={m.url} className="w-full max-h-40 rounded" />}
         <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
