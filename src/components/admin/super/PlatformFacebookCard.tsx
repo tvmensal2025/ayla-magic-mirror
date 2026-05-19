@@ -314,6 +314,10 @@ export function PlatformFacebookCard() {
                 {ensuringPixel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Settings2 className="w-3.5 h-3.5" />}
                 Garantir pixel igreen-tag-site
               </Button>
+              <Button size="sm" variant="outline" onClick={loadDiagnose} className="gap-1.5">
+                <Search className="w-3.5 h-3.5" />
+                Diagnosticar Pixels dos anúncios
+              </Button>
             </div>
           </div>
 
