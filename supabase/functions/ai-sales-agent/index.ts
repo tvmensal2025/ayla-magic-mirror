@@ -686,7 +686,7 @@ Deno.serve(async (req) => {
 
     const billNum = Number(customer.electricity_bill_value || 0);
     const billCalcLine = billNum > 0
-      ? `\n[CÁLCULO PRONTO PRA USAR NO PITCH]\nConta R$ ${billNum.toFixed(0)} → economia ~R$ ${(billNum * 0.12).toFixed(0)}/mês → R$ ${(billNum * 0.12 * 12).toFixed(0)}/ano.\n`
+      ? `\n[CÁLCULO PRONTO PRA USAR NO PITCH]\nConta R$ ${billNum.toFixed(0)} → economia ~R$ ${(billNum * 0.20).toFixed(0)}/mês → R$ ${(billNum * 0.20 * 12).toFixed(0)}/ano.\n`
       : "";
 
     // Nome só é confiável se a fonte for OCR ou auto-apresentação ("meu nome é X").
