@@ -49,13 +49,8 @@ type FlowStep = {
 };
 
 const LEGACY_STEPS: { value: string; label: string }[] = [
-  // Início do funil
-  { value: "welcome", label: "👋 Boas-vindas" },
-  { value: "qualificacao", label: "🎥 Como funciona (vídeo explicativo + valor)" },
-  { value: "checkin_pos_video", label: "💬 Check-in pós-vídeo" },
-  { value: "pitch_conexao_club", label: "🎁 Pitch Conexão Club" },
-  { value: "duvidas_pos_club", label: "❓ Tirar dúvidas finais" },
-  // Cadastro
+  // Passos conversacionais agora vivem no fluxo do consultor (seção "Pular para passo do fluxo").
+  // Aqui ficam só os estados de cadastro/máquina que não têm equivalente direto no admin.
   { value: "aguardando_valor_conta", label: "💰 Aguardando valor da conta" },
   { value: "aguardando_conta", label: "📄 Aguardando foto da conta" },
   { value: "aguardando_doc_auto", label: "🪪 Aguardando documento" },
