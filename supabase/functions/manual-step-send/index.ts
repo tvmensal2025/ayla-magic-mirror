@@ -1,6 +1,7 @@
 // Manual step sender: human takes over a conversation and triggers individual
 // pieces (audio / image / video / text) of a configured flow step, on-demand.
-// Does NOT advance conversation_step or unpause the bot.
+// By default it does NOT advance conversation_step or unpause the bot. When
+// continueFlow=true, it resumes the custom flow after the selected step.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { createWhapiSender } from "../_shared/whapi-api.ts";
@@ -14,6 +15,7 @@ interface Body {
   stepKey?: string;  // alternative lookup
   part: Part;        // which piece to send (or "all")
   mediaId?: string;  // when there are multiple medias of same kind, target one
+  continueFlow?: boolean; // resume flow after sending the selected full step
 }
 
 Deno.serve(async (req) => {
@@ -51,7 +53,7 @@ Deno.serve(async (req) => {
     // Resolve customer + phone
     const { data: customer } = await supabase
       .from("customers")
-      .select("id, name, phone_whatsapp, consultant_id")
+      .select("id, name, phone_whatsapp, consultant_id, electricity_bill_value")
       .eq("id", body.customerId)
       .maybeSingle();
     if (!customer) return json({ error: "customer_not_found" }, 404);
@@ -63,7 +65,7 @@ Deno.serve(async (req) => {
     // Resolve step
     let stepQuery = supabase
       .from("bot_flow_steps")
-      .select("id, step_key, slot_key, message_text, media_order, flow_id")
+      .select("id, step_key, slot_key, message_text, media_order, flow_id, step_type, position, transitions, captures")
       .eq("is_active", true);
     if (body.stepId) stepQuery = stepQuery.eq("id", body.stepId);
     else if (body.stepKey) {
