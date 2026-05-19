@@ -2001,6 +2001,64 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     "aguardando_humano",
   ]);
   const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 🔒 LOCK GLOBAL: consultor com fluxo custom ativo NUNCA cai nos passos
+  // legacy conversacionais. Remapeia "welcome"/"qualificacao"/"pitch_*"/
+  // "duvidas_*"/etc. para o passo equivalente do fluxo do admin.
+  // Estados de cadastro (aguardando_conta, ask_email, etc.) também são
+  // mapeados para o step_type correspondente no fluxo custom — se existir.
+  // Se não houver mapeamento, mantém legacy (fallback seguro).
+  // ═══════════════════════════════════════════════════════════════════
+  const CONVERSATIONAL_LEGACY = new Set<string>([
+    "welcome", "menu_inicial", "qualificacao", "pos_video",
+    "pitch_conexao_club", "duvidas_pos_club", "checkin_pos_video",
+  ]);
+  const STATE_LEGACY_TO_TYPE: Record<string, string> = {
+    "aguardando_conta": "capture_conta",
+    "aguardando_doc_auto": "capture_documento",
+    "ask_email": "capture_email",
+    "ask_phone_confirm": "confirm_phone",
+    "finalizando": "finalizar_cadastro",
+  };
+  if (customer.consultant_id && (CONVERSATIONAL_LEGACY.has(step) || STATE_LEGACY_TO_TYPE[step])) {
+    try {
+      const { data: activeFlow } = await supabase
+        .from("bot_flows").select("id")
+        .eq("consultant_id", customer.consultant_id)
+        .eq("is_active", true).eq("variant", (customer as any)?.flow_variant || "A")
+        .maybeSingle();
+      if (activeFlow?.id) {
+        let mapped: any = null;
+        if (CONVERSATIONAL_LEGACY.has(step)) {
+          const { data } = await supabase
+            .from("bot_flow_steps")
+            .select("id, step_key, position")
+            .eq("flow_id", (activeFlow as any).id).eq("is_active", true)
+            .order("position", { ascending: true }).limit(1);
+          mapped = Array.isArray(data) ? data[0] : null;
+        } else {
+          const wantedType = STATE_LEGACY_TO_TYPE[step];
+          const { data } = await supabase
+            .from("bot_flow_steps")
+            .select("id, step_key, position")
+            .eq("flow_id", (activeFlow as any).id).eq("is_active", true)
+            .eq("step_type", wantedType)
+            .order("position", { ascending: true }).limit(1);
+          mapped = Array.isArray(data) ? data[0] : null;
+        }
+        if (mapped?.id) {
+          console.log(`[legacy→custom] step "${step}" → ${mapped.id} (${mapped.step_key})`);
+          step = String(mapped.id);
+        } else {
+          console.log(`[legacy→custom] sem mapeamento para "${step}" no fluxo ${(activeFlow as any).id} — segue legacy`);
+        }
+      }
+    } catch (e) {
+      console.warn("[legacy→custom] erro:", (e as any)?.message);
+    }
+  }
+
   const stepIsUuid = UUID_RX.test(step);
   const stepIsCustom = !LEGACY_STEPS.has(step) && !step.startsWith("editing_") && !step.startsWith("ask_");
 
