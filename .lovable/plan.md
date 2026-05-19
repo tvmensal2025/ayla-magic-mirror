@@ -1,72 +1,65 @@
-## Diagnóstico
+## Objetivo
 
-### 1. Erro ao "Devolver para o passo"
-A UI (`LiveConversationsPanel.tsx`) chama `manual-step-send` com `continueFlow: true`. A função retornou **HTTP 400** (confirmado nos edge logs às 18:34:56). As causas possíveis dentro do código são `missing_fields`, `missing_step`, ou `customer_no_phone`. Como o `stepId` vem do dropdown (sempre presente), e `consultantId`/`customerId`/`part` também, a hipótese mais provável é `customer_no_phone` em leads importados via Excel cujo `phone_whatsapp` é `sem_celular_xxxxx` (74 registros existem hoje). Hoje a função simplesmente devolve `400 { error: "customer_no_phone" }` e a UI mostra `toast` genérico de erro.
-
-### 2. Erro ao "Desativar IA / Assumir controle"
-`setPaused()` faz `update direto via RLS na tabela `customers`. As colunas existem (`bot_paused`, `bot_paused_reason`, `bot_paused_at`, `assigned_human_id`). O erro real ainda não está nos logs visíveis — precisa instrumentação leve para capturar (mensagem + code do PostgREST) antes de afirmar a causa raiz. Suspeita: gatilho/constraint disparado em `assigned_human_id` ou conflito com a policy de update quando o registro pertence a outro consultor (super admin visualizando leads alheios).
-
-### 3. IA continua mandando msg depois que o humano assume (regra principal)
-Auditei TODOS os senders automáticos. Estado atual:
-
-| Função | Respeita `bot_paused=true`? |
-|---|---|
-| `whapi-webhook` (inbound em tempo real) | ✅ Sim — bloqueia em `index.ts` linha 418 |
-| `ai-followup-cron` | ✅ Sim — `.eq("bot_paused", false)` |
-| `bot-stuck-recovery` (resgate) | ✅ Sim — `.eq("bot_paused", false)` |
-| `bot-followup-checker` (lembretes) | ❌ **Não** — filtra só `bot_paused_until IS NULL` |
-| `send-scheduled-messages` | ❌ **Não** — nem consulta `customers` |
-| `recover-stuck-otp` | ❌ **Não** — nem consulta `bot_paused` |
-| `ai-closer-cron` | ✅ Deprecated/no-op |
-
-Resultado: quando o consultor clica "Assumir", o webhook para, mas os lembretes (`bot-followup-checker`), mensagens agendadas (`send-scheduled-messages`) e recovery de OTP (`recover-stuck-otp`) **continuam** disparando "Oi, ainda está aí?" e outros textos pela IA.
+1. Garantir que, depois de "Devolver para o passo", a Camila siga sozinha o fluxo a partir daquele passo (sem precisar do lead responder de novo).
+2. Adicionar em cada passo, na variante A/B/C, um botão **"✨ Gerar texto (IA)"** que cria uma copy persuasiva de fechamento alinhada com o contexto do passo e da variante.
 
 ---
 
-## Plano
+## Parte 1 — Continuar o fluxo após devolver
 
-### A) Regra de ouro: humano assumiu → IA silenciosa
-Criar helper único `isCustomerPausedByHuman(customer)` em `_shared/bot/paused.ts` que retorna `true` se `bot_paused === true` **OU** `assigned_human_id IS NOT NULL` **OU** `bot_paused_until > now()`. Usar em:
+Hoje o `manual-step-send` (com `part="all"` + `continueFlow=true`) envia mídia/texto do passo e atualiza `customers.conversation_step`, mas só dispara o **próximo passo** quando o cliente responder.
 
-1. **`bot-followup-checker/index.ts`** — adicionar `.eq("bot_paused", false)` nas 2 queries (linhas 69 e 105).
-2. **`send-scheduled-messages/index.ts`** — antes de enviar cada `scheduled_messages`, fazer lookup do customer pelo `remote_jid`+`consultant_id` (via `instance_name`) e pular (status = `skipped_human_takeover`) se pausado. Atualizar `status='skipped'` com `error_message='bot_paused'`.
-3. **`recover-stuck-otp/index.ts`** — adicionar filtro `.eq("bot_paused", false)` na query de candidatos.
-4. **`ai-followup-cron`** e **`bot-stuck-recovery`** — endurecer o filtro existente para também checar `bot_paused_until IS NULL OR bot_paused_until < now()` (hoje só checa o boolean).
-5. **`whapi-webhook/index.ts`** linha 418 — já bloqueia, manter; adicionar log estruturado dizendo qual cron tentou e foi bloqueado para auditoria.
+Mudança:
 
-### B) Erro ao devolver passo
-1. Em `manual-step-send/index.ts`:
-   - Detectar `phone_whatsapp` começando com `sem_celular_` → retornar `400 { error: "lead_sem_whatsapp", message: "Esse lead foi importado via Excel sem celular válido." }`.
-   - Trocar todas as respostas de erro para incluir `message` em PT-BR.
-2. Em `LiveConversationsPanel.tsx` (`returnToStep`):
-   - Mostrar `data.message || data.error` no toast em vez do genérico `e?.message`.
-   - Esconder/desabilitar o botão "Devolver para…" e "Enviar passo" para leads cujo `phone_whatsapp` começa com `sem_celular_`, com tooltip "Lead sem WhatsApp — importado via Excel".
+- Após enviar o passo atual, agendar o próximo passo automaticamente respeitando `next_step_delay_ms` (ou 0/default) e o `text_delay_ms` configurado.
+- Implementação: ao final do envio do passo, se `continueFlow=true` e existe passo seguinte (`position + 1` no mesmo `flow_id`), inserir um registro em `scheduled_messages` (ou chamar `dispatchStepFromFlow` recursivamente com delay) apontando para o próximo step.
+- `send-scheduled-messages` já respeita `bot_paused`, então se o consultor reassumir antes, a cadeia para.
+- Em passos do tipo "pergunta" (com `transitions` esperando resposta), parar a auto-continuação — esses passos exigem input do cliente.
 
-### C) Erro ao desativar IA
-1. Em `setPaused()`: trocar `error.message` por `${error.message} (code=${error.code} details=${error.details})` no toast, e logar o objeto completo no console. Já permite identificar a causa no próximo clique.
-2. Adicionar fallback: se o update direto falhar, chamar nova edge `customer-takeover` que roda com `service_role`, valida que o usuário é dono ou super admin, e faz o update bypassando RLS. Cobre qualquer cenário de policy que esteja barrando.
-3. Garantir que `bot_paused_until` é **limpo** quando o humano assume (senão um valor antigo no futuro mantém o cron `bot-followup-checker` confuso).
+Arquivos:
 
-### D) UX
-- Badge "🤝 Humano no controle" no card do lead pausado já existe; manter e adicionar tooltip explicando que **nenhuma automação** será disparada enquanto estiver assim.
-- No menu "Devolver para…" adicionar item destacado "🤖 Reativar IA (sem mudar passo)" como atalho para o caso de só querer destravar sem reescrever conversation_step.
+- `supabase/functions/manual-step-send/index.ts` — agendar próximo passo quando `continueFlow=true` e o passo atual não tem regras de transição obrigatórias.
 
 ---
 
-## Arquivos tocados
+## Parte 2 — Botão "Gerar texto (IA)" por passo
 
-- `supabase/functions/_shared/bot/paused.ts` (novo)
-- `supabase/functions/bot-followup-checker/index.ts`
-- `supabase/functions/send-scheduled-messages/index.ts`
-- `supabase/functions/recover-stuck-otp/index.ts`
-- `supabase/functions/ai-followup-cron/index.ts`
-- `supabase/functions/bot-stuck-recovery/index.ts`
-- `supabase/functions/manual-step-send/index.ts`
-- `supabase/functions/customer-takeover/index.ts` (novo)
-- `src/components/admin/AIAgentTab/LiveConversationsPanel.tsx`
-- Memória: atualizar `mem://whatsapp/sending-logic` ou criar `mem://whatsapp/human-takeover-silence` documentando a regra de ouro.
+UI no editor `src/pages/FluxoCamila.tsx` (próximo ao `Textarea` de "Mensagem de texto", linhas 828–857):
 
-## O que NÃO está no escopo
-- Não toco no UI de Kanban / SalesFunnelCard (só leitura do `bot_paused`).
-- Não mexo na lógica de qual passo é "terminal" — manter `TERMINAL_STEPS` como está.
-- Não altero estrutura da tabela `customers` (colunas já existem).
+- Botão `✨ Gerar texto (IA)` ao lado do label "Mensagem de texto". USAR O GOOGLE OFICIAL API GEMINE
+- Loading state + toast de erro/sucesso.
+- Preenche o `Textarea` com o resultado e dispara o `onPatch({ message_text })`.
+
+Edge function nova: `supabase/functions/ai-generate-step-text/index.ts`
+
+- Input: `{ consultantId, stepId, variant: "A"|"B"|"C" }`
+- Lógica:
+  - Carrega o passo (`title`, `step_key`, `message_text` atual, transcript do áudio se existir, descrição de mídias do slot).
+  - Carrega os 2 passos anteriores e o seguinte para contexto.
+  - Carrega dados do consultor (`name`, `representante`).
+  - Monta prompt para Lovable AI Gateway (`google/gemini-3-flash-preview`):
+    - **Variante A** (áudio + texto): "Gere uma frase curta de complemento ao áudio, com CTA de fechamento."
+    - **Variante B** (só texto, substituindo áudio): "Gere o texto completo que substitui o áudio, mesmo conteúdo + CTA forte."
+    - **Variante C** (vídeo + texto): "Gere uma frase de apoio ao vídeo de apresentação, conduzindo para o próximo passo / fechamento."
+  - Sempre usar variáveis `{{nome}}`, `{{valor_conta}}`, `{{representante}}` quando fizer sentido.
+  - Tom: iGreen Energy, consultivo, direto, máx ~3 linhas.
+- Output: `{ text: string }`.
+
+Não persiste — o usuário edita e salva via blur normal.
+
+---
+
+## Detalhes técnicos
+
+- Reusar padrão de `ai-followup-cron`/edge functions Gemini já existentes para chamada Lovable AI Gateway (`LOVABLE_API_KEY`, header `Lovable-API-Key`).
+- Tratar `429` (rate limit) e `402` (créditos) com toast claro.
+- Botão só habilitado quando `consultantId` e `stepId` existem (passo já salvo).
+- Não bloquear o `Textarea`: usuário pode regenerar.
+
+## Arquivos
+
+- `supabase/functions/ai-generate-step-text/index.ts` (novo)
+- `supabase/functions/manual-step-send/index.ts` (auto-continuação)
+- `src/pages/FluxoCamila.tsx` (botão no `StepCard`)  
+  
+LEMBRAR DE USAR O GOOGLE GEMINE  
