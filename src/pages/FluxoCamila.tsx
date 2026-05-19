@@ -607,6 +607,7 @@ export default function FluxoCamila() {
               onMoveUp={() => moveStep(step.id, -1)}
               onMoveDown={() => moveStep(step.id, +1)}
               onDelete={() => deleteStep(step.id)}
+              variant={editingVariant}
             />
             {idx < orderedSteps.length - 1 && (
               <div className="flex justify-center my-2"><ArrowDown className="h-5 w-5 text-muted-foreground" /></div>
