@@ -65,25 +65,33 @@ Deno.serve(async (req) => {
     if ((parsed as any).outboundHuman) {
       const outChatId: string = (parsed as any).chatId || "";
       const outSource: string = (parsed as any).source || "";
-      const outPhone = normalizePhone(outChatId.replace("@s.whatsapp.net", ""));
+      const outPhone = normalizePhone(outChatId.replace("@s.whatsapp.net", "")).replace(/\D/g, "");
       console.log(`👤 Outbound humano detectado (source=${outSource}) → pausando bot para ${outPhone}`);
       try {
-        const { data: cust } = await supabase
+        const { data: cust, error: selErr } = await supabase
           .from("customers")
-          .select("id, bot_paused")
-          .eq("phone_digits", outPhone)
+          .select("id, bot_paused, assigned_human_id, consultant_id")
+          .eq("phone_whatsapp", outPhone)
+          .order("updated_at", { ascending: false })
           .limit(1)
           .maybeSingle();
-        if (cust && !cust.bot_paused) {
-          await supabase
+        if (selErr) console.error("⚠️ select customer (outboundHuman):", selErr);
+        if (cust && (!cust.bot_paused || !cust.assigned_human_id)) {
+          const { error: updErr } = await supabase
             .from("customers")
             .update({
               bot_paused: true,
               bot_paused_reason: "humano_assumiu_whatsapp",
               bot_paused_at: new Date().toISOString(),
+              bot_paused_until: null,
+              assigned_human_id: cust.consultant_id ?? cust.assigned_human_id ?? null,
               updated_at: new Date().toISOString(),
             })
             .eq("id", cust.id);
+          if (updErr) console.error("⚠️ update bot_paused (outboundHuman):", updErr);
+          else console.log(`✅ Bot pausado para ${outPhone} (customer ${cust.id})`);
+        } else if (!cust) {
+          console.warn(`⚠️ Nenhum customer encontrado para ${outPhone} — bot não foi pausado`);
         }
       } catch (e) {
         console.error("⚠️ Falha ao pausar bot via outbound humano:", e);
