@@ -130,11 +130,33 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
     };
     if (stepValue !== null) update.conversation_step = stepValue;
     const { error } = await supabase.from("customers").update(update).eq("id", row.id);
-    if (error) toast({ title: "Erro", description: error.message, variant: "destructive" });
-    else {
-      toast({ title: `↩️ Devolvido para: ${label}` });
-      load();
+    if (error) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      return;
     }
+
+    // Se devolveu para um passo específico do fluxo (UUID), dispara o passo já
+    const isFlowStep = !!stepValue && flowSteps.some((s) => s.id === stepValue);
+    if (isFlowStep) {
+      try {
+        const { data, error: invErr } = await supabase.functions.invoke("manual-step-send", {
+          body: { consultantId: userId, customerId: row.id, stepId: stepValue, part: "all" },
+        });
+        if (invErr || (data as any)?.error) {
+          throw new Error(invErr?.message || (data as any)?.error || "falha ao disparar");
+        }
+        toast({ title: `↩️ Devolvido e disparado: ${label}` });
+      } catch (e: any) {
+        toast({
+          title: "Devolvido, mas falhou ao disparar passo",
+          description: e?.message,
+          variant: "destructive",
+        });
+      }
+    } else {
+      toast({ title: `↩️ Devolvido para: ${label}` });
+    }
+    load();
   }
 
   async function doReset(row: Row) {
