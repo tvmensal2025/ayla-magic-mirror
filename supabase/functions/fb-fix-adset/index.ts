@@ -42,7 +42,8 @@ Deno.serve(async (req) => {
 
     const warnings: string[] = [];
     let newAdsetId: string | null = null;
-    let pixelOk = currentPixel === correctPixel;
+    const pixelApplicable = !!(adset.promoted_object && "pixel_id" in (adset.promoted_object as object));
+    let pixelOk = !pixelApplicable || currentPixel === correctPixel;
 
     if (!pixelOk) {
       // tenta atualizar promoted_object diretamente
