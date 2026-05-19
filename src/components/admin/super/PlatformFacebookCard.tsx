@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Facebook, CheckCircle2, AlertCircle, Loader2, Wallet, RefreshCw, Settings2, ShieldCheck, KeyRound } from "lucide-react";
+import { Facebook, CheckCircle2, AlertCircle, Loader2, Wallet, RefreshCw, Settings2, ShieldCheck, KeyRound, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getPlatformFacebookStatus, listFacebookAssets, selectFacebookAssets, startFacebookOAuth, type FbAssets, type PlatformFacebookStatus } from "@/services/facebookAds";
