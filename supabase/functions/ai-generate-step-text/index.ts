@@ -83,14 +83,10 @@ Deno.serve(async (req) => {
     // Consultor (representante)
     const { data: consultant } = await supabase
       .from("consultants")
-      .select("name, representative_name, company_name")
+      .select("name")
       .eq("id", body.consultantId)
       .maybeSingle();
-    const representante =
-      (consultant as any)?.representative_name ||
-      (consultant as any)?.name ||
-      (consultant as any)?.company_name ||
-      "iGreen Energy";
+    const representante = (consultant as any)?.name || "iGreen Energy";
 
     // Prompt por variante
     const variantBrief =
