@@ -66,11 +66,12 @@ interface Props {
   defaultOrder?: ("audio" | "image" | "video" | "text")[];
   initialOrder?: ("audio" | "image" | "video" | "text")[];
   onOrderChange?: (order: ("audio" | "image" | "video" | "text")[]) => void;
+  variant?: "A" | "B";
 }
 
 const DEFAULT_ORDER: ("audio" | "image" | "video" | "text")[] = ["audio", "image", "video", "text"];
 
-export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initialOrder, onOrderChange }: Props) {
+export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initialOrder, onOrderChange, variant = "A" }: Props) {
   const [items, setItems] = useState<Media[]>([]);
   const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<("audio" | "image" | "video" | "text")[]>(initialOrder ?? DEFAULT_ORDER);
