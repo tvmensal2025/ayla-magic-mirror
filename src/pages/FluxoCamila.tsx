@@ -781,7 +781,7 @@ function StepCard(props: {
       </div>
 
       {/* Mídia */}
-      <StepMediaPanel consultantId={consultantId} stepKey={slotKey} slotKeys={[slotKey]} />
+      <StepMediaPanel consultantId={consultantId} stepKey={slotKey} slotKeys={[slotKey]} variant={variant} />
 
       {/* Mensagem de texto */}
       <div className="mt-4">
