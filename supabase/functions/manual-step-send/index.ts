@@ -5,6 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { createWhapiSender } from "../_shared/whapi-api.ts";
+import { ensureAudioTranscript } from "../_shared/audio-transcript.ts";
 
 type Part = "text" | "audio" | "image" | "video" | "document" | "all";
 
@@ -89,7 +90,7 @@ Deno.serve(async (req) => {
     // Resolve medias for slot
     const { data: mediaRows } = await supabase
       .from("ai_media_library")
-      .select("id, kind, url, slot_key, send_order, duration_sec")
+      .select("id, kind, url, slot_key, send_order, duration_sec, transcript, label")
       .eq("consultant_id", body.consultantId)
       .eq("slot_key", slotKey)
       .eq("active", true)
@@ -97,10 +98,20 @@ Deno.serve(async (req) => {
       .order("send_order", { ascending: true });
     let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
     if (variant === "B") {
-      const before = medias.length;
-      medias = medias.filter((m) => String(m.kind).toLowerCase() !== "audio");
-      if (before !== medias.length) console.log(`[manual-step-send] variant=B: removed ${before - medias.length} audio media(s)`);
+      const transformed: any[] = [];
+      for (const m of medias) {
+        if (String(m.kind).toLowerCase() !== "audio") { transformed.push(m); continue; }
+        const transcript = await ensureAudioTranscript(supabase, m);
+        if (transcript && transcript.trim()) {
+          transformed.push({ ...m, _asText: true, _transcript: transcript.trim() });
+          console.log(`[manual-step-send] variant=B: audio "${m.label || m.id}" → text (${transcript.length} chars)`);
+        } else {
+          console.warn(`[manual-step-send] variant=B: audio "${m.label || m.id}" sem transcript → pulado`);
+        }
+      }
+      medias = transformed;
     }
+
 
     // Whapi token
     const { data: settingsRows } = await supabase.from("settings").select("key,value");
@@ -133,7 +144,13 @@ Deno.serve(async (req) => {
     // Build items list per part request
     type Item = { kind: string; text?: string; media?: any };
     const allItems: Item[] = [];
-    medias.forEach((m) => allItems.push({ kind: String(m.kind || "document").toLowerCase(), media: m }));
+    medias.forEach((m) => {
+      if ((m as any)._asText) {
+        allItems.push({ kind: "text", text: String((m as any)._transcript || "") });
+      } else {
+        allItems.push({ kind: String(m.kind || "document").toLowerCase(), media: m });
+      }
+    });
     if (renderedText.trim()) allItems.push({ kind: "text", text: renderedText });
 
     let toSend: Item[] = [];
@@ -185,7 +202,7 @@ Deno.serve(async (req) => {
     }
 
     const flowPatch = body.continueFlow && body.part === "all"
-      ? await buildContinuationPatch(supabase, sender, remoteJid, body.consultantId, customer, step, vars)
+      ? await buildContinuationPatch(supabase, sender, remoteJid, body.consultantId, customer, step, vars, variant)
       : null;
     if (flowPatch) {
       await supabase.from("customers").update(flowPatch).eq("id", customer.id);
@@ -198,7 +215,7 @@ Deno.serve(async (req) => {
   }
 });
 
-async function buildContinuationPatch(supabase: any, sender: any, remoteJid: string, consultantId: string, customer: any, step: any, vars: Record<string, string>) {
+async function buildContinuationPatch(supabase: any, sender: any, remoteJid: string, consultantId: string, customer: any, step: any, vars: Record<string, string>, variant: string = "A") {
   const { data: next } = await supabase
     .from("bot_flow_steps")
     .select("id, step_key, slot_key, message_text, media_order, step_type, position, captures")
@@ -223,7 +240,7 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
     const ntype = String(next.step_type || "message");
     patch.conversation_step = next.id;
     if (ntype === "message") {
-      const sentNext = await sendConfiguredStep(supabase, sender, remoteJid, consultantId, customer.id, next, vars);
+      const sentNext = await sendConfiguredStep(supabase, sender, remoteJid, consultantId, customer.id, next, vars, variant);
       if (sentNext) patch.last_custom_prompt_at = new Date().toISOString();
     }
     if (ntype === "capture_conta") patch.conversation_step = "aguardando_conta";
@@ -243,20 +260,29 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
   return patch;
 }
 
-async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string, consultantId: string, customerId: string, step: any, vars: Record<string, string>) {
+async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string, consultantId: string, customerId: string, step: any, vars: Record<string, string>, variant: string = "A") {
   const applyVars = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
   const slotKey = step.slot_key || step.step_key;
   const { data: mediaRows } = await supabase
     .from("ai_media_library")
-    .select("id, kind, url, slot_key, send_order, duration_sec")
+    .select("id, kind, url, slot_key, send_order, duration_sec, transcript, label")
     .eq("consultant_id", consultantId)
     .eq("slot_key", slotKey)
     .eq("active", true)
     .eq("is_draft", false)
     .order("send_order", { ascending: true });
-  const items: Array<{ kind: string; text?: string; media?: any }> = ((mediaRows as any[]) || [])
-    .filter((m) => !!m?.url)
-    .map((m) => ({ kind: String(m.kind || "document").toLowerCase(), media: m }));
+  const rawRows = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+  const items: Array<{ kind: string; text?: string; media?: any }> = [];
+  for (const m of rawRows) {
+    if (variant === "B" && String(m.kind).toLowerCase() === "audio") {
+      const transcript = await ensureAudioTranscript(supabase, m);
+      if (transcript && transcript.trim()) {
+        items.push({ kind: "text", text: transcript.trim() });
+      }
+      continue;
+    }
+    items.push({ kind: String(m.kind || "document").toLowerCase(), media: m });
+  }
   const text = step.message_text ? applyVars(String(step.message_text)) : "";
   if (text.trim()) items.push({ kind: "text", text });
   if (!items.length) return false;

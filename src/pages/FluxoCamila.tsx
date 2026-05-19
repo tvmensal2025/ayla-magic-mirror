@@ -539,7 +539,7 @@ export default function FluxoCamila() {
                 >Fluxo B (sem áudio)</button>
               </div>
               {editingVariant === "B" && (
-                <span className="text-xs text-muted-foreground">Áudios do passo são ignorados ao enviar para leads do Fluxo B.</span>
+                <span className="text-xs text-muted-foreground">No Fluxo B, cada áudio é enviado como texto usando a transcrição (editável em cada passo).</span>
               )}
             </div>
           )}
@@ -607,6 +607,7 @@ export default function FluxoCamila() {
               onMoveUp={() => moveStep(step.id, -1)}
               onMoveDown={() => moveStep(step.id, +1)}
               onDelete={() => deleteStep(step.id)}
+              variant={editingVariant}
             />
             {idx < orderedSteps.length - 1 && (
               <div className="flex justify-center my-2"><ArrowDown className="h-5 w-5 text-muted-foreground" /></div>
@@ -653,8 +654,9 @@ function StepCard(props: {
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
+  variant?: "A" | "B";
 }) {
-  const { step, numero, total, consultantId, allSteps, mediaCounts, onPatch, onMoveUp, onMoveDown, onDelete } = props;
+  const { step, numero, total, consultantId, allSteps, mediaCounts, onPatch, onMoveUp, onMoveDown, onDelete, variant = "A" } = props;
   const [localText, setLocalText] = useState(step.message_text ?? "");
   const [localTitle, setLocalTitle] = useState(step.title);
   const [localSummary, setLocalSummary] = useState(step.summary ?? "");
@@ -780,7 +782,7 @@ function StepCard(props: {
       </div>
 
       {/* Mídia */}
-      <StepMediaPanel consultantId={consultantId} stepKey={slotKey} slotKeys={[slotKey]} />
+      <StepMediaPanel consultantId={consultantId} stepKey={slotKey} slotKeys={[slotKey]} variant={variant} />
 
       {/* Mensagem de texto */}
       <div className="mt-4">

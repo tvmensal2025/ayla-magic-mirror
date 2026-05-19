@@ -14,6 +14,7 @@ import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-med
 import { isTestMode } from "../../../_shared/test-mode.ts";
 import { evaluateRules, logRuleFire, _consumeCustomerRateLimit } from "./rules-engine.ts";
 import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
+import { ensureAudioTranscript } from "../../../_shared/audio-transcript.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
@@ -358,7 +359,7 @@ async function sendStepMedia(
 
   const { data: mediaRows } = await ctx.supabase
     .from("ai_media_library")
-    .select("id, kind, label, url, slot_key, send_order, duration_sec, delay_before_ms")
+    .select("id, kind, label, url, slot_key, send_order, duration_sec, delay_before_ms, transcript")
     .eq("consultant_id", consultantId)
     .eq("slot_key", slotKey)
     .eq("active", true)
@@ -367,9 +368,18 @@ async function sendStepMedia(
   const variant = (ctx.customer as any)?.flow_variant || "A";
   let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
   if (variant === "B") {
-    const before = medias.length;
-    medias = medias.filter((m) => String(m.kind).toLowerCase() !== "audio");
-    if (before !== medias.length) console.log(`[sendStepMedia] variant=B: removed ${before - medias.length} audio media(s)`);
+    const transformed: any[] = [];
+    for (const m of medias) {
+      if (String(m.kind).toLowerCase() !== "audio") { transformed.push(m); continue; }
+      const transcript = await ensureAudioTranscript(ctx.supabase, m);
+      if (transcript && transcript.trim()) {
+        transformed.push({ ...m, _asText: true, _transcript: transcript.trim() });
+        console.log(`[sendStepMedia] variant=B: audio "${m.label || m.id}" → text (${transcript.length} chars)`);
+      } else {
+        console.warn(`[sendStepMedia] variant=B: audio "${m.label || m.id}" sem transcript → pulado`);
+      }
+    }
+    medias = transformed;
   }
 
   // Precedência: UI (consultants.flow_step_media_order) → step.media_order → default.
@@ -405,22 +415,34 @@ async function sendStepMedia(
       for (const m of taken) {
         const idx = remaining.indexOf(m);
         if (idx >= 0) remaining.splice(idx, 1);
-        const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
-        sequence.push({ kind: k, media: m });
+        if ((m as any)._asText) {
+          sequence.push({ kind: "text", text: String((m as any)._transcript || ""), delayMs: Number(m.delay_before_ms || 0) });
+        } else {
+          const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
+          sequence.push({ kind: k, media: m });
+        }
       }
     }
     // Mídias com kind não listado vão para o fim (preserva send_order)
     for (const m of remaining) {
-      const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
-      sequence.push({ kind: k, media: m });
+      if ((m as any)._asText) {
+        sequence.push({ kind: "text", text: String((m as any)._transcript || ""), delayMs: Number(m.delay_before_ms || 0) });
+      } else {
+        const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
+        sequence.push({ kind: k, media: m });
+      }
     }
     // Se a ordem não menciona "text" mas existe texto, manda no fim
     if (textItem && !textInjected) sequence.push(textItem);
   } else {
     // Sem ordem configurada: mantém comportamento legado (mídias antes, texto depois).
     for (const m of medias) {
-      const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
-      sequence.push({ kind: k, media: m });
+      if ((m as any)._asText) {
+        sequence.push({ kind: "text", text: String((m as any)._transcript || ""), delayMs: Number(m.delay_before_ms || 0) });
+      } else {
+        const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
+        sequence.push({ kind: k, media: m });
+      }
     }
     if (textItem) sequence.push(textItem);
   }
