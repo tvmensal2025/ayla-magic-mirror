@@ -1,54 +1,58 @@
-## Objetivo
+## Situação atual (já verifiquei no banco)
 
-Adicionar **Fluxo C** ao teste A/B existente, transformando em **A/B/C** com distribuição round-robin (1=A, 2=B, 3=C, 4=A…). Fluxo C é uma cópia independente de A onde o consultor poderá colocar um **vídeo no início** (e qualquer outro ajuste). Admin (`/admin/fluxos`) ganha aba/seletor para editar A, B e C.
+A tabela `platform_facebook_account` **já tem tudo configurado** com o token OAuth do Rafael (ainda válido até 17/jul/2026):
 
-## Mudanças no banco
-
-1. `assign_flow_variant(_consultant_id)` — alterar `CASE` para 3 valores:
-   ```
-   v_new_counter % 3 = 1 → 'A'
-   v_new_counter % 3 = 2 → 'B'
-   v_new_counter % 3 = 0 → 'C'
-   ```
-2. Nova função `clone_bot_flow_as_c(_consultant_id)` — idêntica a `clone_bot_flow_as_b`, mas insere `variant='C'` (clona steps + media_order de A). Idempotente: se já existe C ativo, retorna o id atual.
-3. `customers.flow_variant` continua `text` — agora aceita `'A' | 'B' | 'C'`. Nada a alterar no schema.
-
-## Mudanças nos dispatchers (Edge Functions)
-
-Os filtros `.eq("variant", (customer as any)?.flow_variant || "A")` já são genéricos — passam `'C'` naturalmente. Mas o tratamento especial de áudio (filtrar/transcrever) só roda quando `variant === 'B'`. Para C, basta:
-
-| Arquivo | Ajuste |
+| Campo | Valor atual |
 |---|---|
-| `whapi-webhook/handlers/bot-flow.ts` | Nenhum. Já lê `customer.flow_variant` e busca `bot_flows` correspondente. C é tratado como A (envia tudo configurado). |
-| `evolution-webhook/handlers/bot-flow.ts` | Idem. |
-| `manual-step-send/index.ts` | Idem — `variant === 'B'` segue exclusivo para transcript de áudio. |
-| `_shared/audio-transcript.ts` | Sem mudança. |
+| `ad_account_id` | `act_317035519061535` (Rafael Ferreira, BRL) |
+| `access_token_encrypted` | ✅ Token OAuth válido (lê custo/saldo/campanhas) |
+| `pixel_id` | `708759256921383` ❌ **PRECISA TROCAR** |
+| `pixel_name` | `Pixel de Rafael Ferreira` ❌ **PRECISA TROCAR** |
 
-O "vídeo no início" do C não exige código novo: o consultor adiciona um step com mídia tipo `video` na posição 1 do fluxo C pelo próprio admin.
+**Não precisamos** criar System User nem descobrir Ad Account ID — já existe e funciona.
 
-## Mudanças no Admin (`src/pages/FluxoCamila.tsx`)
+## O que vou ajustar
 
-1. State: trocar `editingVariant: "A" | "B"` por `"A" | "B" | "C"`.
-2. `reload()` — passar a contar e buscar também `variant="C"`. `variantCounts` vira `{ A, B, C }`.
-3. Seletor de edição: trocar Tabs/botões A/B por A/B/C (3 abas).
-4. Botão **"Clonar A → C"** (espelha o atual "Clonar A → B"), chamando RPC `clone_bot_flow_as_c`.
-5. Label do switch: "Teste A/B/C (A: original · B: só texto · C: com vídeo inicial)".
-6. Toast: "Teste A/B/C ligado — novos leads alternam A/B/C".
-7. Badges: `A: x | B: y | C: z`.
-8. `StepMediaPanel` recebe `variant="C"` — mesma UI de A (sem editor de transcript que é exclusivo de B).
+### 1. Migration (UPDATE direto)
+Trocar o pixel da plataforma para o que você quer que todos usem:
+```sql
+UPDATE platform_facebook_account
+SET pixel_id = '1521037349653769',
+    pixel_name = 'igreen-app-oficial',
+    updated_at = now()
+WHERE id = true;
+```
+Isso faz **todos os consultores** passarem a usar o Pixel `igreen-app-oficial` automaticamente em:
+- CAPI server-side (Lead, Contact, Purchase)
+- Pixel no navegador (PageView, ViewContent)
+- Métricas de campanhas
+- Saldo da conta
 
-## Observabilidade
+### 2. Edge function `facebook-capi`
+Já refatorada antes — usa `FACEBOOK_CAPI_PIXEL_ID` + `FACEBOOK_CAPI_ACCESS_TOKEN` (globais) como fallback. Vou ajustar para **priorizar** o token global (não o OAuth do consultor), já que o modelo agora é centralizado.
 
-Logs já incluem `variant` quando relevante. Sem mudanças adicionais.
+### 3. Edge function `facebook-ensure-pixel`
+Tem um bug menor (`UPDATE ... WHERE id = true` está ok pois `id` é boolean singleton, mas a checagem de admin bloqueia quem não é o Rafael). Como vamos setar o pixel direto via migration, **não precisamos chamar essa função** — fica intacta para uso futuro.
 
-## Arquivos alterados
+### 4. Frontend (`PixelInjector.tsx` + LP)
+Hoje injeta o `facebook_pixel_id` do consultor (que pode estar vazio). Vou criar um hook `usePlatformPixel()` que lê o `pixel_id` global de `platform_facebook_account` e injeta esse em **todas as landing pages**, ignorando o do consultor.
 
-- **Migration nova** (banco): atualiza `assign_flow_variant` + cria `clone_bot_flow_as_c`.
-- `src/pages/FluxoCamila.tsx` — UI A/B/C.
-- Memória `mem/features/ab-test-audio-vs-text.md` — atualizar para A/B/C.
+### 5. Card admin "Conectar Facebook" (`ConnectFacebookCard.tsx`)
+Vou esconder/desabilitar para consultores comuns — só super admin vê. Para consultores comuns, mostrar badge "✅ Pixel da plataforma ativo" sem botão de ação.
 
-Sem alterações nas Edge Functions.
+## Resultado final
 
-## Pergunta antes de implementar
+| Recurso | Status após mudanças |
+|---|---|
+| Pixel `1521037349653769` carregado em TODAS LPs | ✅ Automático |
+| CAPI envia Leads para esse Pixel | ✅ Via secret global |
+| Métricas de gasto/saldo no admin | ✅ Via OAuth do Rafael (já cadastrado) |
+| Consultores precisam fazer algo | ❌ Não — tudo plug-and-play |
 
-Quer que o **Fluxo C seja criado vazio** (você monta do zero com o vídeo) ou **clonado de A** (já vem com todos os steps de A, você só adiciona o vídeo no início)? Recomendo clonar de A — é mais rápido e segue o padrão do B.
+## Detalhes técnicos
+
+- A migration usa `INSERT tool` (é UPDATE de dado, não schema).
+- Vou rodar a migration, depois deployar `facebook-capi` ajustada e editar 3 arquivos frontend (`PixelInjector.tsx`, hook novo `usePlatformPixel.ts`, `ConnectFacebookCard.tsx`).
+- Nenhuma quebra para consultores existentes — eles continuam vendo dashboards normalmente, só o pixel renderizado muda.
+
+**Posso seguir?**
