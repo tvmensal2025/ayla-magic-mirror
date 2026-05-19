@@ -32,6 +32,8 @@ Deno.serve(async (req) => {
       .neq("sales_phase", "perdido")
       .neq("status", "completed")
       .eq("bot_paused", false)
+      .is("assigned_human_id", null)
+      .or("bot_paused_until.is.null,bot_paused_until.lt." + nowIso)
       .limit(50);
 
     if (error) throw error;

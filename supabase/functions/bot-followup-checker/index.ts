@@ -67,6 +67,8 @@ Deno.serve(async (req) => {
       .gte("last_bot_interaction_at", fortyEightHoursAgo)
       .eq("followup_count", 0)
       .is("bot_paused_until", null)
+      .eq("bot_paused", false)
+      .is("assigned_human_id", null)
       .limit(50);
 
     let sent = 0;
@@ -103,6 +105,8 @@ Deno.serve(async (req) => {
       .gte("followup_count", 1)
       .lte("last_followup_at", fortyEightHoursAgo)
       .is("bot_paused_until", null)
+      .eq("bot_paused", false)
+      .is("assigned_human_id", null)
       .limit(50);
 
     let cooled = 0;
