@@ -652,12 +652,20 @@ Deno.serve(async (req) => {
         customerOverride !== false
       ) {
         try {
-          const { data: activeFlow } = await supabase
+          // 🔑 FIX: Rafael tem fluxos A/B/C ativos simultâneos. Filtrar pela
+          // variant do customer (default "A") evita o erro "multiple rows"
+          // que antes deixava activeFlow=null e fazia o engine cair em sys
+          // (que disparava a IA do welcome legacy em vez do Fluxo da Camila).
+          const variant = (customer as any)?.flow_variant || "A";
+          const { data: activeFlows } = await supabase
             .from("bot_flows")
             .select("id")
             .eq("consultant_id", superAdminConsultantId)
             .eq("is_active", true)
-            .maybeSingle();
+            .eq("variant", variant)
+            .order("created_at", { ascending: true })
+            .limit(1);
+          const activeFlow = activeFlows?.[0] || null;
           if (activeFlow?.id) {
             const { count } = await supabase
               .from("bot_flow_steps")
@@ -669,8 +677,12 @@ Deno.serve(async (req) => {
               // Limpa o step legado para que runConversationalFlow restarte
               // no firstActive do Fluxo da Camila — sem bounce, sem mistura.
               (customer as any).conversation_step = null;
-              console.log(`🚀 [router] forçado para flow (consultor=${superAdminConsultantId}, step legado="${stepBefore}")`);
+              console.log(`🚀 [router] forçado para flow (consultor=${superAdminConsultantId}, variant=${variant}, step legado="${stepBefore}")`);
+            } else {
+              console.warn(`[router] flow ${activeFlow.id} (variant=${variant}) sem steps ativos — mantendo sys`);
             }
+          } else {
+            console.warn(`[router] nenhum bot_flow ativo para variant=${variant} consultor=${superAdminConsultantId} — mantendo sys`);
           }
         } catch (e) {
           console.warn("[router] falha ao verificar flow ativo:", (e as any)?.message);
