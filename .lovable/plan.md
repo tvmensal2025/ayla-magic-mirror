@@ -1,85 +1,67 @@
-# Auditoria Profunda — Plataforma iGreen
+## Problema reportado
 
-## Sinais coletados
+1. Todo novo lead (Excel e WhatsApp espontâneo) deveria começar no **PASSO 1 — Nome do cliente** com o áudio de 10s e seguir 1→10 em ordem. Hoje isso não acontece.
+2. A IA está respondendo no lugar do fluxo. A regra correta é: **IA só responde quando o cliente faz uma pergunta**; caso contrário, o bot segue o script do `/admin/fluxos`.
 
-- **Postgres logs (últimas 24h)**: apenas erros recorrentes de `duplicate key value violates unique constraint "webhook_message_dedup_pkey"` (ruído, não quebra fluxo).
-- **Edge functions**: webhook respondendo, bot-loop-watchdog/bot-stuck-recovery rodando saudáveis, fluxo da Camila ativo. Sem erros 5xx recentes.
-- **Suppressed rules / bot_flow_rule_fires**: nenhuma referência restante no código ou em funções. Limpeza do Sprint 6 foi 100%.
-- **Cron jobs**: todos os 20+ jobs apontam para edge functions existentes. Sem cron órfão.
-- **Linter Supabase**: 105 warnings (2 ERROR + 103 WARN). Detalhe por categoria abaixo.
-- **Bug funcional encontrado**: `[self-intro]` está capturando "Ainda N" como nome do cliente (extraído de "Ainda não" enviado pelo lead). Bug real de qualidade de dados.
-- **Inconsistência de schema**: código usa duas tabelas — `webhook_message_dedup` (audit.ts) e `webhook_message_dedupe` (bot/dedupe.ts). Mantém dois universos de deduplicação.
+## Causas prováveis (a confirmar com 1 query e leitura de 2 trechos)
 
----
+### A) Roteamento `sys` vs `flow` no `whapi-webhook/index.ts`
+- Em `index.ts:632-678`, o engine só vira `"flow"` se:
+  - `consultantData.conversational_flow_enabled === true` (consultor), e
+  - `customer.conversational_flow_enabled !== false`, e
+  - existe `bot_flows.is_active=true` para `superAdminConsultantId` (não para o `consultant_id` do customer).
+- Hipótese 1: leads importados via Excel não recebem `conversational_flow_enabled=true` e o switch global do consultor controla, mas a query usa `superAdminConsultantId`, não o `customer.consultant_id`. Se o fluxo da Camila estiver salvo no consultor, mas a consulta procurar no super admin (ou vice-versa), o engine cai em `sys` e o lead nunca vê o Passo 1.
+- Hipótese 2: `customerOverride` está `false` para alguns leads antigos (ou pra leads onde a flag default ficou em false), causando rebaixamento pra `welcome` legacy.
 
-## Camada 1 — CRÍTICO (corrigir já)
+### B) `runConversationalFlow` em `handlers/conversational/index.ts`
+- Linha 687: `stepKey = customer.conversation_step || "welcome"`. Para novo lead, vira `"welcome"` (que não existe no Fluxo da Camila) → cai no branch `!currentStep` (linha 887) que reinicia no `firstActive`. **Esse caminho deveria** disparar o áudio do Passo 1 — confirmar se o `cursor` realmente envia mídia (não só texto).
+- Linha 1080-1146: `classifyIntent` + `answerFaqWithAI`. Se o classifier marcar como `tem_duvida` mensagens neutras ("oi", "boa tarde", "ok"), o `answerFaqWithAI` (Lovable AI) responde com texto livre e o lead nunca avança. Isso é o que o usuário está vendo como "IA respondendo".
 
-### 1.1 Unificar tabela de dedup do webhook
-- `supabase/functions/_shared/audit.ts` insere em `webhook_message_dedup` **sem** `onConflict`. Cada retry do Whapi gera ERROR no Postgres log.
-- `supabase/functions/_shared/bot/dedupe.ts` usa `webhook_message_dedupe` (nome diferente).
-- **Risco**: poluição de log mascara erros reais; dois caminhos de dedup desconectados deixam brechas para mensagem duplicada ser processada.
-- **Fix**:
-  1. Migration: dropar a tabela órfã (a que tiver menos uso) e padronizar em `webhook_message_dedup`.
-  2. Editar `audit.ts` para usar `.upsert({...}, { onConflict: 'message_id', ignoreDuplicates: true })`.
-  3. Editar `bot/dedupe.ts` para apontar para a mesma tabela.
+### C) Excel import
+- O fluxo de import precisa criar o customer com `customer_origin='lead_whatsapp'` e `conversational_flow_enabled=true` (ou null) para que o roteamento engate. Verificar se o import seta `conversational_flow_enabled=false`.
 
-### 1.2 Bug do nome "Ainda N" / "Sim"/"Não"
-- `whapi-webhook` `[self-intro]` está extraindo a primeira palavra de mensagens curtas como nome. Vimos `name="Ainda N"` no log de produção.
-- **Risco**: nomes lixo poluem CRM, mensagens dinâmicas viram "Oi Ainda N!" — péssimo para conversão.
-- **Fix**: blacklist de tokens comuns (`sim`, `não`, `ainda`, `oi`, `olá`, `bom dia`, `não sei`, etc.) e exigir ≥2 palavras OU regex de nome próprio antes de gravar `name_source=self_intro`.
+## Plano de correção
 
----
+### Passo 1 — Confirmar diagnóstico (read-only, ~3 queries)
+1. SQL: contar customers recentes do consultor com `conversational_flow_enabled` e `conversation_step` por origem (Excel vs WhatsApp). Identificar leads que entraram em step ≠ PASSO 1.
+2. Logs do `whapi-webhook` filtrando `[router]` e `[conversational] entry` nas últimas 24h pra ver qual engine pegou e qual `stepKey` foi resolvido.
+3. Conferir se o `superAdminConsultantId` usado no `index.ts:658` é mesmo o dono do fluxo da Camila (ou se devia ser `customer.consultant_id`).
 
-## Camada 2 — ALTO (corrigir nesta sprint)
+### Passo 2 — Corrigir roteamento (1 arquivo)
+`supabase/functions/whapi-webhook/index.ts`:
+- Trocar a busca de `bot_flows` para usar `customer.consultant_id` (não o super admin), garantindo que CADA consultor com fluxo ativo veja seus leads forçados para `engine="flow"`.
+- Adicionar log explícito `[router] decision={engine, consultant_id, has_active_flow, customerOverride, consultantFlag}` em todos os turnos.
 
-### 2.1 Security Definer Views (2 ERRORs do linter)
-- Duas views com `SECURITY DEFINER` ignoram RLS do consultante.
-- **Fix**: identificar quais views são (rodar `SELECT viewname FROM pg_views WHERE schemaname='public'` + pg_class.relkind) e recriar como `SECURITY INVOKER` ou substituir por function com checagem de role.
+### Passo 3 — Forçar Passo 1 + áudio para novo lead (1 arquivo)
+`supabase/functions/whapi-webhook/handlers/conversational/index.ts`:
+- Linha 687: se `conversation_step` está vazio OU vale `"welcome"` E existe fluxo ativo, setar `stepKey = firstActive.id` IMEDIATAMENTE (antes do dedupe e do classifier), pular `classifyIntent` e dispatch direto via `sendStepMedia` + texto do Passo 1.
+- Garantir que esse caminho:
+  - persista `customer.conversation_step = firstActive.id` no `_finalize`,
+  - NÃO chame `answerFaqWithAI` (porque ainda não houve pergunta).
 
-### 2.2 RLS Policy Always True (9 WARNs)
-- Policies com `USING (true)` ou `WITH CHECK (true)` em INSERT/UPDATE/DELETE.
-- **Risco**: tabela pode estar permitindo escrita por qualquer autenticado.
-- **Fix**: mapear as 9 policies, classificar (algumas podem ser legítimas: tabelas públicas de leitura — mas WARN exclui SELECT, então são de escrita). Reescrever com checagem de owner via `consultant_id = auth.uid()` ou `has_role`.
+### Passo 4 — IA só responde em pergunta explícita
+`handlers/conversational/index.ts:1080-1146`:
+- Endurecer a guarda do AI FAQ: só chamar `answerFaqWithAI` quando:
+  - `cls.intent === "tem_duvida"` E
+  - `cls.confidence >= 0.75` E
+  - a mensagem do lead contém marcador de pergunta (`?`, ou começa com "como/quanto/qual/quando/onde/por que/posso/dá pra"), E
+  - o lead JÁ passou pelo Passo 1 (`conversation_step` já avançou pelo menos uma vez).
+- Para saudações puras ("oi", "bom dia", etc.) e respostas curtas ("ok", "sim", "tá"), pular IA e seguir transição do passo.
 
-### 2.3 Confirmar que `reset_all_consultant_conversations` está corrigida em prod
-- Validar com `pg_get_functiondef` que a versão sem `bot_flow_rule_fires` está ativa.
+### Passo 5 — Excel import (1 arquivo do importer)
+- Garantir que o insert de leads via Excel use `conversational_flow_enabled=true` (ou deixe null) e `conversation_step=null`, para que o roteamento force `engine="flow"` no primeiro inbound.
 
----
+### Passo 6 — Validação
+1. SQL: criar lead de teste com `conversation_step=null`, simular inbound "oi" e conferir nos logs que o engine = `flow`, `currentStep = passo_1`, `sendStepMedia` disparou o áudio de 10s.
+2. Simular mensagem neutra ("ok") em meio ao fluxo → confirma que NÃO chama IA e segue transição.
+3. Simular pergunta explícita ("como funciona a fazenda solar?") → confirma que IA responde via `ai_knowledge_sections` e mantém o `conversation_step` atual.
 
-## Camada 3 — MÉDIO
+## Detalhes técnicos
+- Engines: `runConversationalFlow` (DB-driven Fluxo da Camila) vs `runBotFlow` (legacy hardcoded). O switch correto está no `index.ts`, mas a verificação de existência do flow ativo está consultando o consultor errado.
+- `superAdminConsultantId` é o owner global; o fluxo da Camila pode estar registrado por `consultant_id` individual e por isso não casa.
+- O áudio de 10s vem de `ai_media_library` filtrado por `slot_key` do `firstActive`. O caminho de "unknown step → restart" (linha 887-905) deve cobrir isso, mas vamos validar que `sendStepMedia` é chamado naquele branch.
+- `classifyIntent` é o ponto onde mensagens neutras viram `tem_duvida` indevidamente; o reforço de guarda é puramente defensivo na chamada da IA, sem mexer no classifier.
 
-### 3.1 SECURITY DEFINER functions executáveis por anon (43 WARNs) + por authenticated (38 WARNs)
-- A maioria valida `auth.uid()` internamente. Mas funções como `repair_bot_flow`, `clone_bot_flow_as_b`, `cleanup_bot_test_data`, `seed_default_camila_flow` não deveriam ser chamáveis por anon.
-- **Fix**: `REVOKE EXECUTE ... FROM anon` em todas funções administrativas; manter EXECUTE só para `authenticated` quando a função tem validação interna; remover EXECUTE de `authenticated` em funções puramente admin (`admin_unpause_global_bot`, `log_admin_action`, `cleanup_bot_test_data`).
-
-### 3.2 Public Bucket Allows Listing (5 WARNs)
-- Buckets públicos com SELECT amplo em `storage.objects` permitem listar todo conteúdo.
-- **Risco**: vazamento de nomes de arquivo (URLs preditivas → enumeração de mídias de outros consultores).
-- **Fix**: restringir SELECT a `bucket_id=X AND (storage.foldername(name))[1] = auth.uid()::text` para buckets dinâmicos; manter listing aberto só em buckets de assets estáticos (MinIO já é o canônico para isso, então buckets Supabase públicos devem ser auditados).
-
-### 3.3 Limpeza de edge functions obsoletas
-- 75+ functions. Pela memory: `evolution-*` é "espelho futuro" não usado. Confirmar e desativar/remover (`evolution-proxy`, `evolution-webhook`) ou marcar como reservadas para evitar superfície de ataque/custo.
-
----
-
-## Camada 4 — BAIXO (higiene)
-
-- **RLS Enabled No Policy (1 INFO)**: 1 tabela com RLS ligado e zero policy → ninguém acessa nada. Provavelmente intencional (tabela só acessada por edge function via service role). Documentar.
-- **Métricas A/B**: validar que `flow_variant` está sendo atribuído uniformemente (round-robin A/B/C). Query rápida pós-fix.
-- **DOCUMENTATION.md**: atualizar com sprints recentes (suppressed_rules removida, whitelist de feedback, dedup unificado).
-
----
-
-## Entrega proposta
-
-Uma migration única (Camadas 1.1 + 2.1 + 2.2 + 3.1 + 3.2) + dois edits de edge function (Camadas 1.1 código + 1.2). Antes de codar, eu:
-
-1. Leio as 2 views SECURITY DEFINER e as 9 policies "always true" para validar caso a caso.
-2. Mapeio quais SECURITY DEFINER functions devem perder EXECUTE de anon.
-3. Confirmo via `pg_get_functiondef` o estado real em produção.
-
-Aprovado eu inicio pela **Camada 1** (crítico, baixo risco, alto impacto), depois sequencialmente 2 → 3 → 4. Cada camada vira uma migration revisável separada para você poder pausar/aprovar entre etapas.
-
-### Validação pós-deploy
-
-Por camada: roda linter, confere contagem de warnings, query de sanidade em prod, e tail dos edge function logs por 10min para garantir zero regressão.
+## Não-objetivos
+- Não vamos refatorar o classifier inteiro (`intent-classifier.ts`).
+- Não vamos mexer no fluxo de cadastro (OCR/portal) — esse continua em `bot-flow.ts`.
