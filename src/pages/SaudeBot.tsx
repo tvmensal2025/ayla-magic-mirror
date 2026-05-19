@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, Clock, ArrowLeft, MessageCircle, RefreshCw, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
+import BotHealthIntel from "@/components/admin/saude/BotHealthIntel";
 
 type Alert = {
   id: string;
