@@ -269,7 +269,7 @@ async function findNextActiveFlowStep(
   try {
     const { data: flow } = await supabase
       .from("bot_flows").select("id")
-      .eq("consultant_id", consultantId).eq("is_active", true).maybeSingle();
+      .eq("consultant_id", consultantId).eq("is_active", true).eq("variant", "A").maybeSingle();
     if (!flow?.id) return null;
     let q = supabase.from("bot_flow_steps")
       .select("id, step_key, step_type, position, transitions, message_text")
@@ -485,7 +485,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const { data: flowRow } = await supabase
         .from("bot_flows").select("id")
         .eq("consultant_id", customer.consultant_id)
-        .eq("is_active", true).maybeSingle();
+        .eq("is_active", true).eq("variant", (customer as any)?.flow_variant || "A").maybeSingle();
       if (flowRow?.id) {
         const qa = await matchQA(supabase, (flowRow as any).id, customer.consultant_id, questionText);
         if (qa && (qa.text || qa.mediaUrls.length)) {
@@ -773,7 +773,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const { data: flowRow } = await supabase
         .from("bot_flows").select("id")
         .eq("consultant_id", customer.consultant_id)
-        .eq("is_active", true).maybeSingle();
+        .eq("is_active", true).eq("variant", (customer as any)?.flow_variant || "A").maybeSingle();
       if (flowRow?.id) {
         const qa = await matchQA(supabase, (flowRow as any).id, customer.consultant_id, messageText);
         if (qa && (qa.text || qa.mediaUrls.length)) {
@@ -878,7 +878,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         .from("bot_flows")
         .select("id")
         .eq("consultant_id", customer.consultant_id)
-        .eq("is_active", true)
+        .eq("is_active", true).eq("variant", (customer as any)?.flow_variant || "A")
         .maybeSingle();
       if (!flow?.id) return false;
 
@@ -902,7 +902,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         .eq("active", true)
         .eq("is_draft", false)
         .order("send_order", { ascending: true });
-      const medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+      let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+      const _flowVariant = (customer as any)?.flow_variant || 'A';
+      if (_flowVariant === 'B') {
+        const _before = medias.length;
+        medias = medias.filter((m) => String(m.kind).toLowerCase() !== 'audio');
+        if (_before !== medias.length) console.log(`[dispatch:${stepKey}] variant=B: removed ${_before - medias.length} audio media(s)`);
+      }
 
       const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
       const vars: Record<string, string> = {
@@ -1045,7 +1051,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       .from("bot_flows")
       .select("id")
       .eq("consultant_id", customer.consultant_id)
-      .eq("is_active", true)
+      .eq("is_active", true).eq("variant", (customer as any)?.flow_variant || "A")
       .maybeSingle();
     if (!activeFlow) return null;
 
@@ -1272,7 +1278,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         .from("bot_flows")
         .select("id")
         .eq("consultant_id", customer.consultant_id)
-        .eq("is_active", true)
+        .eq("is_active", true).eq("variant", (customer as any)?.flow_variant || "A")
         .maybeSingle();
       if (hasDynamicFlow?.id) {
         console.log(`[opening-flow] pulado — consultor tem Fluxo da Camila ativo (${(hasDynamicFlow as any).id})`);
@@ -1290,7 +1296,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           .from("bot_flows")
           .select("id")
           .eq("consultant_id", customer.consultant_id)
-          .eq("is_active", true)
+          .eq("is_active", true).eq("variant", (customer as any)?.flow_variant || "A")
           .maybeSingle();
 
         if (activeFlow) {
@@ -1998,7 +2004,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const { data: flow } = await supabase
         .from("bot_flows").select("id")
         .eq("consultant_id", customer.consultant_id)
-        .eq("is_active", true).maybeSingle();
+        .eq("is_active", true).eq("variant", (customer as any)?.flow_variant || "A").maybeSingle();
       if (flow?.id) {
         let stepRow: any = null;
         if (stepIsUuid) {
@@ -2657,7 +2663,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         try {
           const { data: _flowRow } = await supabase
             .from("bot_flows").select("id")
-            .eq("consultant_id", customer.consultant_id).eq("is_active", true).maybeSingle();
+            .eq("consultant_id", customer.consultant_id).eq("is_active", true).eq("variant", (customer as any)?.flow_variant || "A").maybeSingle();
           if (_flowRow?.id) {
             const { data: _captureRow } = await supabase
               .from("bot_flow_steps").select("position")
@@ -3922,7 +3928,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         const { data: flow } = await supabase
           .from("bot_flows").select("id")
           .eq("consultant_id", customer.consultant_id || consultorId)
-          .eq("is_active", true).order("created_at", { ascending: true })
+          .eq("is_active", true).eq("variant", (customer as any)?.flow_variant || "A").order("created_at", { ascending: true })
           .limit(1).maybeSingle();
         if (flow?.id) {
           const { data: passo } = await supabase
@@ -3959,7 +3965,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           const { data: flow } = await supabase
             .from("bot_flows").select("id")
             .eq("consultant_id", customer.consultant_id)
-            .eq("is_active", true).maybeSingle();
+            .eq("is_active", true).eq("variant", (customer as any)?.flow_variant || "A").maybeSingle();
           hasCustomFlow = !!flow?.id;
         } catch (_) { /* noop */ }
 

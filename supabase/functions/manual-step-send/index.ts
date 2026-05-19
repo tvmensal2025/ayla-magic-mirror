@@ -67,6 +67,7 @@ Deno.serve(async (req) => {
       .from("bot_flow_steps")
       .select("id, step_key, slot_key, message_text, media_order, flow_id, step_type, position, transitions, captures")
       .eq("is_active", true);
+    const variant = (customer as any)?.flow_variant || "A";
     if (body.stepId) stepQuery = stepQuery.eq("id", body.stepId);
     else if (body.stepKey) {
       const { data: flow } = await supabase
@@ -74,6 +75,7 @@ Deno.serve(async (req) => {
         .select("id")
         .eq("consultant_id", body.consultantId)
         .eq("is_active", true)
+        .eq("variant", variant)
         .maybeSingle();
       if (!flow?.id) return json({ error: "no_active_flow" }, 404);
       stepQuery = stepQuery.eq("flow_id", flow.id).eq("step_key", body.stepKey);
@@ -93,7 +95,12 @@ Deno.serve(async (req) => {
       .eq("active", true)
       .eq("is_draft", false)
       .order("send_order", { ascending: true });
-    const medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+    let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+    if (variant === "B") {
+      const before = medias.length;
+      medias = medias.filter((m) => String(m.kind).toLowerCase() !== "audio");
+      if (before !== medias.length) console.log(`[manual-step-send] variant=B: removed ${before - medias.length} audio media(s)`);
+    }
 
     // Whapi token
     const { data: settingsRows } = await supabase.from("settings").select("key,value");

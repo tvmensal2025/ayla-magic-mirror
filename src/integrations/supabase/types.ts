@@ -1411,6 +1411,7 @@ export type Database = {
           name: string
           strict_mode: boolean
           updated_at: string
+          variant: string
         }
         Insert: {
           consultant_id: string
@@ -1420,6 +1421,7 @@ export type Database = {
           name?: string
           strict_mode?: boolean
           updated_at?: string
+          variant?: string
         }
         Update: {
           consultant_id?: string
@@ -1429,6 +1431,7 @@ export type Database = {
           name?: string
           strict_mode?: boolean
           updated_at?: string
+          variant?: string
         }
         Relationships: []
       }
@@ -1742,6 +1745,8 @@ export type Database = {
       }
       consultants: {
         Row: {
+          ab_test_counter: number
+          ab_test_enabled: boolean
           approved: boolean | null
           cadastro_url: string
           conversational_flow_enabled: boolean
@@ -1763,6 +1768,8 @@ export type Database = {
           referred_by: string | null
         }
         Insert: {
+          ab_test_counter?: number
+          ab_test_enabled?: boolean
           approved?: boolean | null
           cadastro_url: string
           conversational_flow_enabled?: boolean
@@ -1784,6 +1791,8 @@ export type Database = {
           referred_by?: string | null
         }
         Update: {
+          ab_test_counter?: number
+          ab_test_enabled?: boolean
           approved?: boolean | null
           cadastro_url?: string
           conversational_flow_enabled?: boolean
@@ -2128,6 +2137,7 @@ export type Database = {
           error_message: string | null
           facial_confirmed_at: string | null
           facial_link_sent_at: string | null
+          flow_variant: string | null
           followup_count: number
           id: string
           igreen_code: string | null
@@ -2249,6 +2259,7 @@ export type Database = {
           error_message?: string | null
           facial_confirmed_at?: string | null
           facial_link_sent_at?: string | null
+          flow_variant?: string | null
           followup_count?: number
           id?: string
           igreen_code?: string | null
@@ -2370,6 +2381,7 @@ export type Database = {
           error_message?: string | null
           facial_confirmed_at?: string | null
           facial_link_sent_at?: string | null
+          flow_variant?: string | null
           followup_count?: number
           id?: string
           igreen_code?: string | null
@@ -3816,12 +3828,14 @@ export type Database = {
     }
     Functions: {
       admin_unpause_global_bot: { Args: never; Returns: number }
+      assign_flow_variant: { Args: { _consultant_id: string }; Returns: string }
       cleanup_bot_test_data: { Args: { _run_id: string }; Returns: Json }
       cleanup_webhook_artifacts: { Args: never; Returns: undefined }
       clear_pending_inbound: {
         Args: { _customer_id: string }
         Returns: undefined
       }
+      clone_bot_flow_as_b: { Args: { _consultant_id: string }; Returns: string }
       credit_consultant_wallet:
         | {
             Args: {

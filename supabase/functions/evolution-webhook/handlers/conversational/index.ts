@@ -82,18 +82,19 @@ export const CADASTRO_STEPS = new Set([
 
 interface LoadedFlow { flowId: string; steps: DbStep[]; strictMode: boolean; }
 
-async function loadFlow(supabase: any, consultantId: string): Promise<LoadedFlow | null> {
+async function loadFlow(supabase: any, consultantId: string, variant: string = "A"): Promise<LoadedFlow | null> {
   try {
     const { data: flow } = await supabase
       .from("bot_flows")
       .select("id, strict_mode")
       .eq("consultant_id", consultantId)
       .eq("is_active", true)
+      .eq("variant", variant)
       .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle();
     if (!flow?.id) {
-      console.log(`[conversational] loadFlow: no active flow for consultant=${consultantId}`);
+      console.log(`[conversational] loadFlow: no active flow for consultant=${consultantId} variant=${variant}`);
       return null;
     }
 
@@ -363,7 +364,13 @@ async function sendStepMedia(
     .eq("active", true)
     .order("send_order", { ascending: true });
 
-  const medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+  const variant = (ctx.customer as any)?.flow_variant || "A";
+  let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+  if (variant === "B") {
+    const before = medias.length;
+    medias = medias.filter((m) => String(m.kind).toLowerCase() !== "audio");
+    if (before !== medias.length) console.log(`[sendStepMedia] variant=B: removed ${before - medias.length} audio media(s)`);
+  }
 
   // Precedência: UI (consultants.flow_step_media_order) → step.media_order → default.
   const uiOrder = await getStepMediaOrder(ctx.supabase, consultantId, slotKey);
@@ -670,7 +677,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // bot_flows / bot_flow_steps / bot_flow_qa use the consultant UUID (customer.consultant_id),
   // NOT the iGreen numeric id (consultorId). Prefer the UUID; fall back to consultorId only as last resort.
   const consultantId = ctx.customer?.consultant_id || (ctx as any).consultorId;
-  const loaded = consultantId ? await loadFlow(ctx.supabase, consultantId) : null;
+  const flowVariant = (ctx.customer as any)?.flow_variant || "A";
+  const loaded = consultantId ? await loadFlow(ctx.supabase, consultantId, flowVariant) : null;
   console.log(`[conversational] entry stepKey="${stepKey}" consultantId=${consultantId} dbSteps=${loaded?.steps?.length ?? 0}`);
 
   // Fallback to legacy hardcoded machine if no flow seeded

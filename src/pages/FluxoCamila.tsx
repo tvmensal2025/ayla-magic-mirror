@@ -184,19 +184,31 @@ export default function FluxoCamila() {
   const [showMigrationBanner, setShowMigrationBanner] = useState(
     () => typeof window !== "undefined" && !localStorage.getItem("camila_migration_v2_dismissed")
   );
+  // A/B test state
+  const [editingVariant, setEditingVariant] = useState<"A" | "B">("A");
+  const [hasFlowB, setHasFlowB] = useState(false);
+  const [abEnabled, setAbEnabled] = useState(false);
+  const [variantCounts, setVariantCounts] = useState<{ A: number; B: number }>({ A: 0, B: 0 });
+  const [cloneBusy, setCloneBusy] = useState(false);
 
-  const reload = useCallback(async (uid: string) => {
-    const [{ data: cons }, { data: flows }, { count }] = await Promise.all([
-      supabase.from("consultants").select("conversational_flow_enabled").eq("id", uid).maybeSingle(),
-      supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("is_active", true).order("created_at").limit(1),
+  const reload = useCallback(async (uid: string, variant: "A" | "B" = "A") => {
+    const [{ data: cons }, { data: flows }, { count }, { data: flowB }, vAResp, vBResp] = await Promise.all([
+      supabase.from("consultants").select("conversational_flow_enabled, ab_test_enabled").eq("id", uid).maybeSingle(),
+      supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
       supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("conversational_flow_enabled", true),
+      supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("variant", "B").limit(1),
+      supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "A"),
+      supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "B"),
     ]);
     setGlobalAtivo(!!cons?.conversational_flow_enabled);
+    setAbEnabled(!!(cons as any)?.ab_test_enabled);
     setTestCount(count ?? 0);
+    setHasFlowB((flowB?.length ?? 0) > 0);
+    setVariantCounts({ A: (vAResp as any)?.count ?? 0, B: (vBResp as any)?.count ?? 0 });
 
     let fid = flows?.[0]?.id ?? null;
-    if (!fid) {
-      // garantia: chama a função de seed (idempotente)
+    if (!fid && variant === "A") {
+      // garantia: chama a função de seed (idempotente) — apenas para variante A
       const { data } = await supabase.rpc("seed_default_camila_flow", { _consultant_id: uid });
       fid = (data as string) ?? null;
     }
@@ -213,10 +225,11 @@ export default function FluxoCamila() {
         fallback: parseFallback(r.fallback, r.transitions),
         auto_detect_doc_type: r.auto_detect_doc_type !== false,
       })));
+    } else {
+      setSteps([]);
     }
 
     // Conta mídias ativas por slot_key (e por step_tags como fallback)
-    // para mostrar badges "⚠️ sem áudio/vídeo" nos steps.
     const { data: medias } = await supabase
       .from("ai_media_library")
       .select("kind, slot_key, step_tags, active, is_public, consultant_id")
@@ -243,10 +256,34 @@ export default function FluxoCamila() {
       const uid = data.user?.id ?? null;
       setUserId(uid);
       if (!uid) { navigate("/auth"); return; }
-      await reload(uid);
+      await reload(uid, editingVariant);
       setLoading(false);
     })();
-  }, [navigate, reload]);
+  }, [navigate, reload, editingVariant]);
+
+  async function toggleAbTest(v: boolean) {
+    if (!userId) return;
+    setAbEnabled(v);
+    const { error } = await supabase.from("consultants").update({ ab_test_enabled: v } as any).eq("id", userId);
+    if (error) { toast.error(error.message); setAbEnabled(!v); return; }
+    toast.success(v ? "Teste A/B ligado — novos leads alternam A/B" : "Teste A/B desligado — todos novos leads vão para A");
+  }
+
+  async function cloneFlowB() {
+    if (!userId) return;
+    if (hasFlowB && !confirm("Já existe Fluxo B. Recriar (apaga e copia do A novamente)?")) return;
+    setCloneBusy(true);
+    try {
+      const { error } = await supabase.rpc("clone_bot_flow_as_b" as any, { _consultant_id: userId });
+      if (error) throw error;
+      toast.success("Fluxo B criado a partir do A (sem áudio).");
+      await reload(userId, editingVariant);
+    } catch (e: any) {
+      toast.error(e?.message || "Erro ao clonar");
+    } finally {
+      setCloneBusy(false);
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Mutadores otimistas
@@ -459,6 +496,56 @@ export default function FluxoCamila() {
           </div>
         </Card>
 
+        {/* Teste A/B */}
+        <Card className="p-4 sm:p-5 border-purple-500/30 bg-purple-500/5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex-1 min-w-[220px]">
+              <div className="flex items-center gap-2 mb-1">
+                <FlaskConical className="h-4 w-4 text-purple-500" />
+                <Label className="text-base font-semibold">Teste A/B (com áudio × só texto)</Label>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Quando ligado, novos leads vão alternando: 1º vai pro <strong>Fluxo A</strong> (com áudio), 2º pro <strong>Fluxo B</strong> (sem áudio, só texto/imagem/vídeo), 3º A, 4º B... Texto, imagens e vídeos são <strong>compartilhados</strong> entre A e B — só os áudios diferem.
+              </p>
+            </div>
+            <Switch checked={abEnabled} onCheckedChange={toggleAbTest} disabled={!hasFlowB} />
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-border/60 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3 text-sm flex-wrap">
+              <span>Leads:</span>
+              <Badge variant="secondary">A: {variantCounts.A}</Badge>
+              <Badge variant="secondary">B: {variantCounts.B}</Badge>
+              {!hasFlowB && <span className="text-xs text-muted-foreground">— crie o Fluxo B para habilitar o teste</span>}
+            </div>
+            <Button variant="outline" size="sm" onClick={cloneFlowB} disabled={cloneBusy}>
+              {cloneBusy ? "Clonando…" : hasFlowB ? "Recriar Fluxo B a partir do A" : "Criar Fluxo B (sem áudio)"}
+            </Button>
+          </div>
+
+          {hasFlowB && (
+            <div className="mt-4 pt-4 border-t border-border/60 flex items-center gap-3 flex-wrap">
+              <Label className="text-sm">Editando:</Label>
+              <div className="inline-flex rounded-md border border-border overflow-hidden">
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 text-sm ${editingVariant === "A" ? "bg-primary text-primary-foreground" : "bg-background"}`}
+                  onClick={() => setEditingVariant("A")}
+                >Fluxo A (com áudio)</button>
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 text-sm ${editingVariant === "B" ? "bg-primary text-primary-foreground" : "bg-background"}`}
+                  onClick={() => setEditingVariant("B")}
+                >Fluxo B (sem áudio)</button>
+              </div>
+              {editingVariant === "B" && (
+                <span className="text-xs text-muted-foreground">Áudios do passo são ignorados ao enviar para leads do Fluxo B.</span>
+              )}
+            </div>
+          )}
+        </Card>
+
+
         {showMigrationBanner && (
           <Card className="p-4 border-sky-500/30 bg-sky-500/5 flex items-start gap-3">
             <Sparkles className="h-5 w-5 text-sky-500 mt-0.5 shrink-0" />
@@ -484,7 +571,7 @@ export default function FluxoCamila() {
         <FlowAuditPanel
           steps={orderedSteps}
           flowId={flowId}
-          onRepaired={() => userId && reload(userId)}
+          onRepaired={() => userId && reload(userId, editingVariant)}
         />
 
         {/* Atalhos */}
