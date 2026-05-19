@@ -4196,27 +4196,24 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
   }
 
-  // 🔘 Auto-converter pergunta em botões quando o próximo step for confirmação
-  // de telefone ou complemento de endereço. Evita texto duplicado "1/2".
+  // 📝 Evolution NÃO usa botão (botões reais só no Whapi). Em vez disso,
+  // a pergunta é enviada como texto natural; o parser de captura aceita
+  // "sim", "é meu", "outro número", "adicionar", "pular", "não tem", etc.
   try {
     const nextStep = (updates as any)?.conversation_step;
     if (reply && nextStep === "ask_phone_confirm") {
-      const sent = await sendButtons(remoteJid, reply, [
-        { id: "sim_phone", title: "✅ Sim, é meu" },
-        { id: "editar_phone", title: "📱 Outro número" },
-      ]);
+      const txt = `${reply}\n\nResponda *sim* se eu posso usar esse número, ou me envie *o outro número* (com DDD).`;
+      const sent = await sendText(remoteJid, txt);
       if (sent) { reply = ""; (updates as any).__inline_sent = true; }
     } else if (reply && nextStep === "ask_complement") {
-      const sent = await sendButtons(remoteJid, reply, [
-        { id: "add_complement", title: "✍️ Adicionar" },
-        { id: "skip_complement", title: "⏭️ Pular" },
-        { id: "no_complement", title: "🚫 Não tem" },
-      ]);
+      const txt = `${reply}\n\nSe tiver complemento (apto, bloco, casa, fundos…), me envie agora. Se *não tem* ou quiser pular, responda *pular*.`;
+      const sent = await sendText(remoteJid, txt);
       if (sent) { reply = ""; (updates as any).__inline_sent = true; }
     }
   } catch (e) {
-    console.warn("[bot-flow] auto-buttons wrapper falhou:", (e as any)?.message);
+    console.warn("[bot-flow] inline-question wrapper falhou:", (e as any)?.message);
   }
+
 
   return { reply, updates };
 }
