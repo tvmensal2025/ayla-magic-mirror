@@ -21,6 +21,8 @@ import { MainChart } from "./dashboard/MainChart";
 import { CpcPanel } from "./dashboard/CpcPanel";
 import { RecentClicks } from "./dashboard/RecentClicks";
 import { FunnelStrip } from "./dashboard/FunnelStrip";
+import { AdMetricsCards } from "./dashboard/AdMetricsCards";
+import { AdAccountSwitcher } from "./dashboard/AdAccountSwitcher";
 import { Eye as EyeIcon, EyeOff } from "lucide-react";
 
 interface DashboardTabProps {
