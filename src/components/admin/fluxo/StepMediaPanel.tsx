@@ -547,3 +547,71 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     </div>
   );
 }
+
+function AudioTranscriptEditor({ media, onChange }: { media: Media; onChange: (t: string) => void }) {
+  const [value, setValue] = useState<string>(media.transcript || "");
+  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  async function save(text: string) {
+    setSaving(true);
+    const { error } = await supabase.from("ai_media_library").update({ transcript: text }).eq("id", media.id);
+    setSaving(false);
+    if (error) toast.error("Erro: " + error.message);
+    else { onChange(text); toast.success("Transcrição salva"); }
+  }
+
+  async function transcribe() {
+    if (!media.url) return;
+    setBusy(true);
+    try {
+      const res = await fetch(media.url);
+      const blob = await res.blob();
+      const reader = new FileReader();
+      const base64: string = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      const { data, error } = await supabase.functions.invoke("ai-transcribe-media", {
+        body: { base64, mimeType: blob.type || "audio/ogg", kind: "audio", language: "pt-BR" },
+      });
+      if (error) throw error;
+      const transcript = String((data as any)?.transcript || "").trim();
+      if (!transcript) { toast.error("Transcrição vazia"); return; }
+      setValue(transcript);
+      await save(transcript);
+    } catch (e: any) {
+      toast.error("Falha ao transcrever: " + (e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const hasTranscript = !!(value && value.trim());
+  return (
+    <div className="space-y-1 border-t border-border/40 pt-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Texto enviado no Fluxo B</span>
+        <Badge variant={hasTranscript ? "secondary" : "outline"} className="h-4 px-1 text-[9px]">
+          {hasTranscript ? "transcrito" : "sem transcrição"}
+        </Badge>
+      </div>
+      <textarea
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={(e) => { if (e.target.value !== (media.transcript || "")) save(e.target.value); }}
+        placeholder="Texto que será enviado no lugar deste áudio no Fluxo B…"
+        rows={3}
+        className="w-full text-xs rounded border border-border bg-background p-2"
+      />
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" className="h-6 text-[11px]" onClick={transcribe} disabled={busy || !media.url}>
+          {busy ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+          {hasTranscript ? "Re-transcrever" : "Transcrever áudio"}
+        </Button>
+        {saving && <span className="text-[10px] text-muted-foreground">salvando…</span>}
+      </div>
+    </div>
+  );
+}
