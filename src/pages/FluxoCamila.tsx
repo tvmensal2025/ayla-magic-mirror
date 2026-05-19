@@ -192,7 +192,7 @@ export default function FluxoCamila() {
   const [cloneBusy, setCloneBusy] = useState(false);
 
   const reload = useCallback(async (uid: string, variant: "A" | "B" = "A") => {
-    const [{ data: cons }, { data: flows }, { count }, { data: flowB }, { data: vA }, { data: vB }] = await Promise.all([
+    const [{ data: cons }, { data: flows }, { count }, { data: flowB }, vAResp, vBResp] = await Promise.all([
       supabase.from("consultants").select("conversational_flow_enabled, ab_test_enabled").eq("id", uid).maybeSingle(),
       supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
       supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("conversational_flow_enabled", true),
@@ -204,7 +204,7 @@ export default function FluxoCamila() {
     setAbEnabled(!!(cons as any)?.ab_test_enabled);
     setTestCount(count ?? 0);
     setHasFlowB((flowB?.length ?? 0) > 0);
-    setVariantCounts({ A: (vA as any)?.length ?? 0, B: (vB as any)?.length ?? 0 });
+    setVariantCounts({ A: (vAResp as any)?.count ?? 0, B: (vBResp as any)?.count ?? 0 });
 
     let fid = flows?.[0]?.id ?? null;
     if (!fid && variant === "A") {
