@@ -116,8 +116,8 @@ Deno.serve(async (req) => {
     const { data: customer } = await supabase.from("customers").select("*").eq("id", customer_id).single();
     if (!customer) return new Response(JSON.stringify({ error: "customer not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-    // 2) Se bot pausado, sair (segurança extra)
-    if (customer.bot_paused) {
+    // 2) Se bot pausado OU humano vinculado, sair (segurança extra).
+    if (customer.bot_paused || customer.assigned_human_id) {
       return new Response(JSON.stringify({ ok: true, skipped: "bot_paused" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
