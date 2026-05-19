@@ -827,24 +827,32 @@ function StepCard(props: {
 
       {/* Mensagem de texto */}
       <div className="mt-4">
-        <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
           <Label className="text-xs uppercase tracking-wider text-muted-foreground">Mensagem de texto</Label>
-          <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <span>⏱️ Aguardar antes de enviar:</span>
-            <input
-              type="number"
-              min={0}
-              max={60}
-              step={0.5}
-              defaultValue={((step.text_delay_ms ?? 1500) / 1000).toFixed(1)}
-              onBlur={(e) => {
-                const ms = Math.max(0, Math.min(60000, Math.round(parseFloat(e.target.value || "0") * 1000)));
-                if (ms !== (step.text_delay_ms ?? 1500)) onPatch({ text_delay_ms: ms } as any);
-              }}
-              className="w-14 h-6 px-1.5 text-xs rounded border border-border bg-background"
+          <div className="flex items-center gap-2">
+            <AiGenerateTextButton
+              consultantId={consultantId}
+              stepId={step.id}
+              variant={variant}
+              onGenerated={(t) => { setLocalText(t); onPatch({ message_text: t }); }}
             />
-            <span>seg</span>
-          </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span>⏱️ Aguardar antes:</span>
+              <input
+                type="number"
+                min={0}
+                max={60}
+                step={0.5}
+                defaultValue={((step.text_delay_ms ?? 1500) / 1000).toFixed(1)}
+                onBlur={(e) => {
+                  const ms = Math.max(0, Math.min(60000, Math.round(parseFloat(e.target.value || "0") * 1000)));
+                  if (ms !== (step.text_delay_ms ?? 1500)) onPatch({ text_delay_ms: ms } as any);
+                }}
+                className="w-14 h-6 px-1.5 text-xs rounded border border-border bg-background"
+              />
+              <span>seg</span>
+            </label>
+          </div>
         </div>
         <Textarea
           value={localText}
@@ -855,6 +863,7 @@ function StepCard(props: {
           className="mt-1"
         />
       </div>
+
 
       {/* BLOCO 1 — REGRAS */}
       <BlockShell
@@ -1348,5 +1357,46 @@ function FlowAuditPanel({ steps, flowId, onRepaired }: { steps: Step[]; flowId: 
         ))}
       </ul>
     </Card>
+  );
+}
+
+function AiGenerateTextButton({
+  consultantId, stepId, variant, onGenerated,
+}: { consultantId: string; stepId: string; variant: "A" | "B" | "C"; onGenerated: (t: string) => void }) {
+  const [loading, setLoading] = useState(false);
+  async function gen() {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("ai-generate-step-text", {
+        body: { consultantId, stepId, variant },
+      });
+      const text = (data as any)?.text;
+      if (error || (data as any)?.error || !text) {
+        const msg = (data as any)?.message || error?.message || "Falha ao gerar texto";
+        toast.error(msg);
+        return;
+      }
+      onGenerated(String(text).trim());
+      toast.success("Texto gerado com IA");
+    } catch (e: any) {
+      toast.error(e?.message || "Erro ao chamar a IA");
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      className="h-7 gap-1.5 text-[11px] border-primary/40 text-primary hover:bg-primary/10"
+      onClick={gen}
+      disabled={loading || !consultantId || !stepId}
+      title={`Gerar texto persuasivo (variante ${variant})`}
+    >
+      <Sparkles className={`h-3.5 w-3.5 ${loading ? "animate-pulse" : ""}`} />
+      {loading ? "Gerando..." : "Gerar texto (IA)"}
+    </Button>
   );
 }

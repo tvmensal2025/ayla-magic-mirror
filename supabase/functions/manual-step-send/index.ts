@@ -256,16 +256,6 @@ Deno.serve(async (req) => {
 });
 
 async function buildContinuationPatch(supabase: any, sender: any, remoteJid: string, consultantId: string, customer: any, step: any, vars: Record<string, string>, variant: string = "A") {
-  const { data: next } = await supabase
-    .from("bot_flow_steps")
-    .select("id, step_key, slot_key, message_text, media_order, step_type, position, captures")
-    .eq("flow_id", step.flow_id)
-    .eq("is_active", true)
-    .gt("position", Number(step.position) || 0)
-    .order("position", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
   const patch: any = {
     bot_paused: false,
     bot_paused_reason: null,
@@ -276,27 +266,59 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
     updated_at: new Date().toISOString(),
   };
 
-  if (next) {
-    const ntype = String(next.step_type || "message");
-    patch.conversation_step = next.id;
-    if (ntype === "message") {
-      const sentNext = await sendConfiguredStep(supabase, sender, remoteJid, consultantId, customer.id, next, vars, variant);
-      if (sentNext) patch.last_custom_prompt_at = new Date().toISOString();
-    }
-    if (ntype === "capture_conta") patch.conversation_step = "aguardando_conta";
-    else if (ntype === "capture_documento" || ntype === "capture_doc") patch.conversation_step = "aguardando_doc_auto";
-    else if (ntype === "capture_email") patch.conversation_step = "ask_email";
-    else if (ntype === "confirm_phone") patch.conversation_step = "ask_phone_confirm";
-    else if (ntype === "finalizar_cadastro") patch.conversation_step = "finalizando";
+  // Encadeia passos consecutivos do tipo "message" (sem capture nem aguardando resposta),
+  // até esbarrar num passo que exige input do cliente.
+  let cursorPos = Number(step.position) || 0;
+  let lastReached: any = null;
+  const MAX_CHAIN = 6; // proteção contra loop
 
-    if (String(patch.conversation_step).startsWith("aguardando_") || String(patch.conversation_step).startsWith("ask_")) {
-      patch.last_custom_prompt_at = new Date().toISOString();
+  for (let i = 0; i < MAX_CHAIN; i++) {
+    const { data: next } = await supabase
+      .from("bot_flow_steps")
+      .select("id, step_key, slot_key, message_text, media_order, step_type, position, captures, transitions")
+      .eq("flow_id", step.flow_id)
+      .eq("is_active", true)
+      .gt("position", cursorPos)
+      .order("position", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (!next) {
+      if (!lastReached) patch.conversation_step = "finalizando";
+      break;
     }
-  } else {
-    patch.conversation_step = "finalizando";
+    lastReached = next;
+    cursorPos = Number(next.position) || cursorPos + 1;
+
+    const ntype = String(next.step_type || "message");
+    // Passos que exigem input do cliente — para a cadeia aqui e posiciona o lead.
+    if (ntype !== "message") {
+      patch.conversation_step = next.id;
+      if (ntype === "capture_conta") patch.conversation_step = "aguardando_conta";
+      else if (ntype === "capture_documento" || ntype === "capture_doc") patch.conversation_step = "aguardando_doc_auto";
+      else if (ntype === "capture_email") patch.conversation_step = "ask_email";
+      else if (ntype === "confirm_phone") patch.conversation_step = "ask_phone_confirm";
+      else if (ntype === "finalizar_cadastro") patch.conversation_step = "finalizando";
+      if (String(patch.conversation_step).startsWith("aguardando_") || String(patch.conversation_step).startsWith("ask_")) {
+        patch.last_custom_prompt_at = new Date().toISOString();
+      }
+      break;
+    }
+
+    // Passo do tipo message — envia agora e segue para o próximo.
+    patch.conversation_step = next.id;
+    const sentNext = await sendConfiguredStep(supabase, sender, remoteJid, consultantId, customer.id, next, vars, variant);
+    if (sentNext) patch.last_custom_prompt_at = new Date().toISOString();
+
+    // Se tem regras de transição esperando resposta do cliente, para aqui.
+    const hasTransitions = Array.isArray(next.transitions) && next.transitions.length > 0;
+    if (hasTransitions) break;
+
+    // Pequeno delay entre passos encadeados.
+    await new Promise((r) => setTimeout(r, 2500));
   }
 
-  console.log(`[manual-step-send] continueFlow step=${step.step_key || step.id} consultant=${consultantId} next=${patch.conversation_step}`);
+  console.log(`[manual-step-send] continueFlow step=${step.step_key || step.id} consultant=${consultantId} final=${patch.conversation_step}`);
   return patch;
 }
 
