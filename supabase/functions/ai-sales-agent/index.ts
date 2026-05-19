@@ -609,7 +609,17 @@ Deno.serve(async (req) => {
     const priorOutboundEarly = history.filter((h: any) => h.message_direction !== "inbound");
     const isFirstReply = priorOutboundEarly.length === 0 && mode === "reply";
     const FIRST_SLOTS = new Set(["boas_vindas", "first_response", "first_touch", "primeira_resposta"]);
-    if (isFirstReply && !billAlreadyReceivedEarly) {
+    // Se o consultor tem fluxo customizado ativo, NÃO atalhamos: deixamos o engine
+    // de steps respeitar a ordem (position) configurada em /admin/fluxos.
+    const { data: _hasCustomFlow } = await supabase
+      .from("bot_flows")
+      .select("id")
+      .eq("consultant_id", customer.consultant_id)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+    const hasCustomFlow = !!_hasCustomFlow;
+    if (isFirstReply && !billAlreadyReceivedEarly && !hasCustomFlow) {
       const firstAudio = freshMedia
         .filter((m: any) => m.kind === "audio" && m.slot_key && FIRST_SLOTS.has(m.slot_key))
         .sort((a: any, b: any) => (b.priority || 0) - (a.priority || 0))[0];
