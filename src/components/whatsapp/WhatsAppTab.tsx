@@ -6,7 +6,7 @@ import { useChats } from "@/hooks/useChats";
 import { ConnectionPanel } from "./ConnectionPanel";
 import { ChatSidebar } from "./ChatSidebar";
 import { ChatView } from "./ChatView";
-import { BarChart3, MessageSquare, Send, FileText, Clock, Bot } from "lucide-react";
+import { BarChart3, MessageSquare, Send, FileText, Clock, Bot, History } from "lucide-react";
 
 // Heavy panels — load only when their sub-tab is opened
 const BulkBlockSendPanel = lazy(() => import("./BulkBlockSendPanel").then(m => ({ default: m.BulkBlockSendPanel })));
@@ -14,6 +14,7 @@ const TemplateManager = lazy(() => import("./TemplateManager").then(m => ({ defa
 const SchedulePanel = lazy(() => import("./SchedulePanel").then(m => ({ default: m.SchedulePanel })));
 const WhatsAppDashboard = lazy(() => import("./WhatsAppDashboard").then(m => ({ default: m.WhatsAppDashboard })));
 const AIAgentTab = lazy(() => import("@/components/admin/AIAgentTab").then(m => ({ default: m.AIAgentTab })));
+const AutoMessageLog = lazy(() => import("./AutoMessageLog").then(m => ({ default: m.AutoMessageLog })));
 
 const LazyFallback = () => (
   <div className="flex items-center justify-center py-12">
