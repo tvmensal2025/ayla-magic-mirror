@@ -9,6 +9,7 @@ import { whapiListMessages } from "@/services/whapiApi";
 import { sendWhatsAppMessage, resolveRecipient } from "@/services/messageSender";
 import { supabase } from "@/integrations/supabase/client";
 import { createLogger } from "@/lib/logger";
+import { autoTakeoverByPhone } from "@/lib/whatsapp/auto-takeover";
 
 const logger = createLogger("useMessages");
 
