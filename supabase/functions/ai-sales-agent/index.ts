@@ -7,7 +7,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { geminiGenerate, type GeminiTool } from "../_shared/gemini.ts";
 import { shouldSkipShortCircuit } from "../_shared/bot/orchestrator-gate.ts";
-import { isCustomerPausedByHuman } from "../_shared/bot/paused.ts";
+import { isCustomerPausedByHuman, isConsultantAIDisabled } from "../_shared/bot/paused.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -517,6 +517,15 @@ Deno.serve(async (req) => {
       console.log(`🔇 ai-sales-agent: bot pausado para customer ${customer.id} — abortando`);
       return new Response(
         JSON.stringify({ ok: true, skipped: true, reason: "bot_paused_by_human" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // 🛑 IA globalmente desligada pelo consultor.
+    if (await isConsultantAIDisabled(supabase, (customer as any).consultant_id)) {
+      console.log(`🛑 ai-sales-agent: IA do consultor ${(customer as any).consultant_id} desligada globalmente`);
+      return new Response(
+        JSON.stringify({ ok: true, skipped: true, reason: "global_ai_disabled" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
