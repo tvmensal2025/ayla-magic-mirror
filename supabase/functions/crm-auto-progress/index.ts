@@ -232,7 +232,9 @@ Deno.serve(async (req) => {
       if (error) { console.error("Failed to move deal:", deal.id, error); continue; }
       movedCount++;
 
-      if (stageData.auto_message_enabled && isValidJid(deal.remote_jid) && evolutionUrl && evolutionKey) {
+      if (stageData.auto_message_enabled && isValidJid(deal.remote_jid) && evolutionUrl && evolutionKey
+        && !(await isConsultantAIDisabled(supabase, deal.consultant_id))
+        && !(await isPausedByPhone(supabase, deal.remote_jid.split("@")[0], deal.consultant_id))) {
         let customerName = "";
         if (deal.customer_id) {
           const { data: customer } = await supabase.from("customers").select("name").eq("id", deal.customer_id).single();
@@ -291,7 +293,9 @@ Deno.serve(async (req) => {
       if (error) { console.error("Failed to move rejected deal:", deal.id, error); continue; }
       movedCount++;
 
-      if (stageData.auto_message_enabled && isValidJid(deal.remote_jid) && evolutionUrl && evolutionKey) {
+      if (stageData.auto_message_enabled && isValidJid(deal.remote_jid) && evolutionUrl && evolutionKey
+        && !(await isConsultantAIDisabled(supabase, deal.consultant_id))
+        && !(await isPausedByPhone(supabase, deal.remote_jid.split("@")[0], deal.consultant_id))) {
         let customerName = "";
         if (deal.customer_id) {
           const { data: customer } = await supabase.from("customers").select("name").eq("id", deal.customer_id).single();
