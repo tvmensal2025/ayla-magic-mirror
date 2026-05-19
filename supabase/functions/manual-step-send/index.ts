@@ -448,3 +448,50 @@ function json(body: any, status = 200) {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
+
+/**
+ * Mapeia step_type custom de captura para a chave legada usada pelo bot
+ * (whapi-webhook trata essas chaves nativamente: aguardando_conta, etc).
+ */
+function mapCaptureStepToLegacy(stepType: string, stepId: string, stepKey?: string): string {
+  switch (stepType) {
+    case "capture_conta": return "aguardando_conta";
+    case "capture_documento":
+    case "capture_doc": return "aguardando_doc_auto";
+    case "capture_email": return "ask_email";
+    case "confirm_phone": return "ask_phone_confirm";
+    case "finalizar_cadastro": return "finalizando";
+    default: return stepKey || stepId;
+  }
+}
+
+/**
+ * Resolve o texto a enviar quando o passo é de captura.
+ * Ordem: message_text já renderizado → primeiro captures[].retry_text → fallback por tipo.
+ */
+function resolveCapturePrompt(step: any, renderedText: string): string | null {
+  if (renderedText && renderedText.trim()) return renderedText.trim();
+
+  const caps = Array.isArray(step?.captures) ? step.captures : [];
+  for (const c of caps) {
+    const t = String(c?.retry_text || c?.prompt || "").trim();
+    if (t) return t;
+  }
+
+  const stepType = String(step?.step_type || "");
+  switch (stepType) {
+    case "capture_conta":
+      return "{{nome}}, me manda a foto *ou PDF* da sua conta de luz aqui pelo WhatsApp 📄";
+    case "capture_documento":
+    case "capture_doc":
+      return "Agora me envia uma foto do seu documento (RG ou CNH, frente e verso) 📷";
+    case "capture_email":
+      return "Qual é o seu melhor e-mail? ✉️";
+    case "confirm_phone":
+      return "Esse número é o melhor pra falar com você no WhatsApp? Pode confirmar?";
+    case "finalizar_cadastro":
+      return "Tô finalizando seu cadastro, só um instante… ⏳";
+    default:
+      return null;
+  }
+}
