@@ -30,7 +30,7 @@ interface WhatsAppTabProps {
   customers?: any[];
 }
 
-type SubTab = "dashboard" | "conversas" | "agente" | "envio_massa" | "templates" | "agendamentos";
+type SubTab = "dashboard" | "conversas" | "agente" | "envio_massa" | "templates" | "agendamentos" | "historico";
 
 const SUB_TABS: { key: SubTab; label: string; icon: React.ElementType }[] = [
   { key: "dashboard", label: "Dashboard", icon: BarChart3 },
@@ -39,6 +39,7 @@ const SUB_TABS: { key: SubTab; label: string; icon: React.ElementType }[] = [
   { key: "envio_massa", label: "Envio em Massa", icon: Send },
   { key: "templates", label: "Templates", icon: FileText },
   { key: "agendamentos", label: "Agendamentos", icon: Clock },
+  { key: "historico", label: "Histórico", icon: History },
 ];
 
 export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPendingChatConsumed, customers = [] }: WhatsAppTabProps) {
