@@ -191,10 +191,10 @@ Deno.serve(async (req) => {
   }
 });
 
-async function buildContinuationPatch(supabase: any, consultantId: string, customer: any, step: any) {
+async function buildContinuationPatch(supabase: any, sender: any, remoteJid: string, consultantId: string, customer: any, step: any, vars: Record<string, string>) {
   const { data: next } = await supabase
     .from("bot_flow_steps")
-    .select("id, step_key, step_type, position, captures")
+    .select("id, step_key, slot_key, message_text, media_order, step_type, position, captures")
     .eq("flow_id", step.flow_id)
     .eq("is_active", true)
     .gt("position", Number(step.position) || 0)
@@ -215,6 +215,10 @@ async function buildContinuationPatch(supabase: any, consultantId: string, custo
   if (next) {
     const ntype = String(next.step_type || "message");
     patch.conversation_step = next.id;
+    if (ntype === "message") {
+      const sentNext = await sendConfiguredStep(supabase, sender, remoteJid, consultantId, customer.id, next, vars);
+      if (sentNext) patch.last_custom_prompt_at = new Date().toISOString();
+    }
     if (ntype === "capture_conta") patch.conversation_step = "aguardando_conta";
     else if (ntype === "capture_documento" || ntype === "capture_doc") patch.conversation_step = "aguardando_doc_auto";
     else if (ntype === "capture_email") patch.conversation_step = "ask_email";
@@ -230,6 +234,50 @@ async function buildContinuationPatch(supabase: any, consultantId: string, custo
 
   console.log(`[manual-step-send] continueFlow step=${step.step_key || step.id} consultant=${consultantId} next=${patch.conversation_step}`);
   return patch;
+}
+
+async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string, consultantId: string, customerId: string, step: any, vars: Record<string, string>) {
+  const applyVars = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
+  const slotKey = step.slot_key || step.step_key;
+  const { data: mediaRows } = await supabase
+    .from("ai_media_library")
+    .select("id, kind, url, slot_key, send_order, duration_sec")
+    .eq("consultant_id", consultantId)
+    .eq("slot_key", slotKey)
+    .eq("active", true)
+    .eq("is_draft", false)
+    .order("send_order", { ascending: true });
+  const items = ((mediaRows as any[]) || [])
+    .filter((m) => !!m?.url)
+    .map((m) => ({ kind: String(m.kind || "document").toLowerCase(), media: m }));
+  const text = step.message_text ? applyVars(String(step.message_text)) : "";
+  if (text.trim()) items.push({ kind: "text", text });
+  if (!items.length) return false;
+
+  const order = Array.isArray(step.media_order) && step.media_order.length > 0
+    ? step.media_order.map((k: any) => String(k).toLowerCase())
+    : ["audio", "image", "video", "text", "document"];
+  items.sort((a: any, b: any) => {
+    const ia = order.indexOf(a.kind); const ib = order.indexOf(b.kind);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+  let sent = false;
+  for (let i = 0; i < items.length; i++) {
+    const it: any = items[i];
+    if (it.kind === "text" && it.text) {
+      await sender.sendText(remoteJid, it.text);
+      await supabase.from("conversations").insert({ customer_id: customerId, message_direction: "outbound", message_text: it.text, message_type: "text", conversation_step: step.step_key || step.id });
+      sent = true;
+    } else if (it.media?.url) {
+      const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
+      await sender.sendMedia(remoteJid, it.media.url, "", kind, Number(it.media.duration_sec || 0) || undefined);
+      await supabase.from("conversations").insert({ customer_id: customerId, message_direction: "outbound", message_text: `[${kind}:${it.media.slot_key || slotKey}] (continue)`, message_type: kind, conversation_step: step.step_key || step.id });
+      sent = true;
+    }
+    if (i < items.length - 1) await new Promise((r) => setTimeout(r, 1200));
+  }
+  return sent;
 }
 
 function json(body: any, status = 200) {
