@@ -193,20 +193,23 @@ export default function FluxoCamila() {
   const [cloneBusy, setCloneBusy] = useState(false);
   const [cloneCBusy, setCloneCBusy] = useState(false);
 
-  const reload = useCallback(async (uid: string, variant: "A" | "B" = "A") => {
-    const [{ data: cons }, { data: flows }, { count }, { data: flowB }, vAResp, vBResp] = await Promise.all([
+  const reload = useCallback(async (uid: string, variant: "A" | "B" | "C" = "A") => {
+    const [{ data: cons }, { data: flows }, { count }, { data: flowB }, { data: flowC }, vAResp, vBResp, vCResp] = await Promise.all([
       supabase.from("consultants").select("conversational_flow_enabled, ab_test_enabled").eq("id", uid).maybeSingle(),
       supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
       supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("conversational_flow_enabled", true),
       supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("variant", "B").limit(1),
+      supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("variant", "C").limit(1),
       supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "A"),
       supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "B"),
+      supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "C"),
     ]);
     setGlobalAtivo(!!cons?.conversational_flow_enabled);
     setAbEnabled(!!(cons as any)?.ab_test_enabled);
     setTestCount(count ?? 0);
     setHasFlowB((flowB?.length ?? 0) > 0);
-    setVariantCounts({ A: (vAResp as any)?.count ?? 0, B: (vBResp as any)?.count ?? 0 });
+    setHasFlowC((flowC?.length ?? 0) > 0);
+    setVariantCounts({ A: (vAResp as any)?.count ?? 0, B: (vBResp as any)?.count ?? 0, C: (vCResp as any)?.count ?? 0 });
 
     let fid = flows?.[0]?.id ?? null;
     if (!fid && variant === "A") {
