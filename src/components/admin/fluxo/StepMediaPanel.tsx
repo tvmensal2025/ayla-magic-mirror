@@ -20,6 +20,7 @@ type Media = {
   delay_before_ms?: number | null;
   original_size_bytes?: number | null;
   final_size_bytes?: number | null;
+  transcript?: string | null;
 };
 
 // Whapi (WhatsApp) rejeita .webm com erro 500 em /messages/voice.
