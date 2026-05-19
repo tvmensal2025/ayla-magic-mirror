@@ -1,127 +1,60 @@
-# Inteligência de Captação — SuperAdmin
+# Dashboard Ads no /admin (por consultor) + visão multi-conta
 
-Objetivo: parar de perder cliente. Centralizar tudo que envolve **trazer lead → converter → fechar** numa única tela no SuperAdmin, com IA cruzando funil + criativos + concorrentes.
+## O que aparece no dashboard de cada consultor (/admin)
 
----
+Cards no topo (período: 7d / 30d / custom):
 
-## 1. Reorganização do /admin (consultor)
+- **Gasto Ads** (R$) — soma `ad_spend_daily.spend_cents`
+- **Leads gerados** — count de `customers` criados no período (origem `whatsapp` + `facebook`)
+- **CPL** — gasto / leads
+- **Visitas LP** — count `page_views` no período
+- **Custo por visita LP** — gasto / visitas
+- **Taxa LP → Lead** — leads / visitas
+- Mini-gráfico diário (gasto vs leads) — 14 dias
 
-A aba de Tráfego atual (Horários de Pico, Dispositivos, Origem, Comparativo diário) sai do dashboard do consultor — esses dados são gerenciais, não acionáveis para o consultor individual.
+Tudo já filtrado por `consultant_id = auth.uid()` (RLS atual de `ad_spend_daily`, `customers`, `page_views`).
 
-- Mover esses 4 cards para o SuperAdmin → aba nova **"Captação"**.
-- No `/admin` do consultor, deixar só o que ele usa: leads, WhatsApp, CRM, materiais.
+## Visão multi-conta (Rafael e futuros gestores)
 
-## 2. Nova aba no SuperAdmin: "Captação"
+Rafael (`rafael.ids@icloud.com`) precisa ver o dashboard dele **+ de outros consultores** que ele gerencia. Solução:
 
-Estrutura em 3 blocos:
+1. **Nova tabela `ad_account_managers**`
+  ```
+   manager_user_id uuid   -- auth.users.id do Rafael
+   consultant_id   uuid   -- consultor gerenciado
+   created_at, created_by
+   PK (manager_user_id, consultant_id)
+  ```
+   RLS: super_admin gerencia; manager lê só as próprias linhas.
+2. **Função SQL `get_managed_consultant_ids(_user uuid)**` retorna array de UUIDs:
+  - sempre inclui o próprio `_user`
+  - - tudo de `ad_account_managers` onde `manager_user_id = _user`
+  - super_admin → todos
+3. **Atualizar RLS** de `ad_spend_daily`, `page_views`, e leitura de `customers` para também permitir SELECT quando `consultant_id = ANY(get_managed_consultant_ids(auth.uid()))`.
+4. **UI no /admin**: se o usuário gerencia >1 consultor, mostra um **seletor "Conta de anúncio"** no topo do dashboard (default = próprio). Trocar a conta refiltra todos os cards e gráficos.
+5. **Tela em SuperAdmin → "Gestores de Conta"** para vincular consultores a um manager (multi-select). Só super_admin enxerga.
 
-### Bloco A — KPIs do topo (cards)
+## Origem dos dados de gasto
 
-```text
-┌─────────────────┬─────────────────┬─────────────────┬─────────────────┐
-│ Gasto Total Ads │ Leads Gerados   │ CPL Real        │ Valor Carteira  │
-│ R$ 12.450 (Meta)│ 287 (page_views │ R$ 43,37        │ R$ 1.2M         │
-│ últimos 30d     │ → customers)    │ gasto/leads     │ (deals open+won)│
-├─────────────────┼─────────────────┼─────────────────┼─────────────────┤
-│ Taxa Conversão  │ Ticket Médio    │ ROAS            │ Leads Perdidos  │
-│ LP → Lead: 8.2% │ R$ 4.180        │ 3.4x            │ 42 (sem resposta│
-│ Lead → Cliente  │ por venda fechada│ retorno/gasto  │ +7d ou parado)  │
-└─────────────────┴─────────────────┴─────────────────┴─────────────────┘
-```
+`ad_spend_daily` já existe. Para popular:
 
-Origem dos dados:
+- Edge function `facebook-spend-sync` (cron diário 06:00 BRT) lê `facebook_connections` de cada consultor, busca Insights da API Marketing (campaigns + spend + impressions + clicks + leads) e faz upsert por `(consultant_id, date)`.
+- Reusa segredos `FACEBOOK_APP_ID`/`SECRET` já configurados.
+- Fallback: se consultor sem conexão FB, mostra cards zerados com aviso "Conecte sua conta Meta Ads".
 
-- **Facebook Ads API** (já temos `useFacebookConnection` + `facebookAds.ts`): gasto, impressões, cliques, CPC por consultor.
-- **Interno** (Supabase): `page_views`, `customers`, `deals`, `customer_deals` para leads, conversão, carteira.
-- **CPL Real** = gasto Meta / leads efetivamente criados (não cliques).
-- **Valor Carteira** = soma de `deals.value` por status (aberto vs fechado).
+## Entregáveis técnicos
 
-### Bloco B — Os 4 gráficos que vieram do /admin
+1. Migration:
+  - tabela `ad_account_managers` + RLS
+  - função `get_managed_consultant_ids`
+  - update RLS de `ad_spend_daily` e `page_views` (adiciona policy "managed")
+2. Edge function `facebook-spend-sync` + cron
+3. Hook `useAdMetrics(consultantId, range)` agregando spend/leads/visits/CPL
+4. Componente `AdMetricsCards` + `AdAccountSwitcher` em `DashboardTab.tsx`
+5. Componente `ManagersTab` no SuperAdmin para vincular consultores ao Rafael
+6. Seed inicial: vincular Rafael aos consultores que ele gerencia (você me passa a lista, ou eu mostro UI pra você selecionar)
 
-Horários de Pico, Dispositivos, Origem do Tráfego, Comparativo diário — agora globais (todos consultores) com filtro por consultor.
+## Perguntas rápidas
 
-### Bloco C — Inteligência de Captação (IA)
-
-Painel único que junta o que já existe disperso (`InsightsPanel`, `CompetitorsPanel`, `LearnedPatternsPanel`, `ad_competitor_creatives`) + análise nova de funil:
-
-```text
-┌───────────────────────────────────────────────────────────────────────┐
-│  🧠 IA — Diagnóstico de Captação (atualizado há 2h)                   │
-├───────────────────────────────────────────────────────────────────────┤
-│  📉 ONDE VOCÊ ESTÁ PERDENDO:                                          │
-│  • 38% dos leads param no estágio "aguardando_documentos" >5 dias     │
-│  • Variante de fluxo B (sem áudio) converte 22% menos que A           │
-│  • Anúncios com headline "economia" CPL R$ 67 vs "desconto" R$ 31     │
-│                                                                       │
-│  ✅ O QUE ESTÁ FUNCIONANDO:                                            │
-│  • Criativos com pessoa real + valor de conta = CTR 3.1x média        │
-│  • Leads que recebem áudio nos primeiros 5min fecham 2.4x mais        │
-│                                                                       │
-│  🎯 AÇÕES RECOMENDADAS:                                                │
-│  [Pausar variante B] [Replicar criativo X] [Reaquecer 42 leads frios] │
-└───────────────────────────────────────────────────────────────────────┘
-```
-
-### Bloco D — Inteligência de Concorrentes (já existe, reposicionado)
-
-`ad_competitor_creatives` aparece aqui como inspiração visual para super gerar novos criativos baseados nos vencedores da concorrência.
-
----
-
-## 3. Nova edge function: `captacao-intel`
-
-Cron diário 08:00 BRT. Cruza:
-
-- `ad_creative_insights` (já existe) — padrões vencedores próprios
-- `ad_competitor_creatives` (já existe) — vencedores concorrentes
-- `page_views` + `customers` + `deals` + `messages` — funil interno
-- Facebook Ads spend (via `facebookAds.ts`)
-
-Saída: tabela nova `capture_diagnostics` (jsonb com bottlenecks, winners, actions, kpis).
-
-Modelo: oficial do google, `google/gemini-3-flash-preview`.
-
----
-
-## 4. Mudanças técnicas
-
-```text
-DB (migration):
-  + capture_diagnostics (tenant_id, kpis jsonb, bottlenecks jsonb,
-                         actions jsonb, computed_at)
-  + ad_spend_daily (consultant_id, date, spend_cents, impressions,
-                    clicks, leads — cache do Facebook)
-
-Edge Functions:
-  + captacao-intel       (novo cron — diagnóstico unificado)
-  + facebook-spend-sync  (novo cron — puxa gasto Meta diário)
-
-Frontend:
-  - src/components/admin/DashboardTab.tsx
-      → remover seção de tráfego (Horários, Dispositivos, Origem, Comparativo)
-  + src/pages/SuperAdmin.tsx
-      → adicionar aba "Captação"
-  + src/components/superadmin/CaptacaoTab/
-      ├── KpisRow.tsx             (8 cards do bloco A)
-      ├── TrafficCharts.tsx       (4 gráficos migrados)
-      ├── IntelDiagnostic.tsx     (bloco C — lê capture_diagnostics)
-      └── CompetitorInspiration.tsx (reaproveita CompetitorsPanel)
-```
-
----
-
-## 5. Pré-requisito (antes de implementar)
-
-CADA CONSULTOR VAI TER SEU NOME E SUA CAMAPNHA DEVIDO TER O TELEFONE DELE O NOME DELE MAS O RESTANTE DAS PAGINAS PIXEL VAI SER UMA UNICA, TODOS OS DADOS QUE VAI APARECER PARA ELE SAO DAS CAMAPNHAS DELE
-
----
-
-## Entregáveis
-
-1. Migration: 2 tabelas novas.
-2. 2 edge functions novas (cron).
-3. Remoção da seção de tráfego do `/admin`.
-4. Nova aba "Captação" no SuperAdmin com 4 blocos.
-5. IA gerando diagnóstico diário acionável (não só "insight", mas com botões de ação).
-
-Tempo estimado: implementação em 1 sessão (DB + functions + UI base), refinos visuais em segunda passada.
+1. criar a UI agora e vincular depois
+2. Sincronização do Facebook Ads: rodar  1x ao dia 06:00 (1x/dia 
