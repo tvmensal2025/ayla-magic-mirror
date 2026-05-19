@@ -1,10 +1,12 @@
-import { DollarSign, Users, Target, MousePointerClick, TrendingUp, Eye } from "lucide-react";
+import { DollarSign, Users, Target, Eye, MousePointerClick, TrendingUp } from "lucide-react";
 import { useAdMetrics } from "@/hooks/useAdMetrics";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const fmtBRL = (cents: number) =>
   (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+const fmtNum = (n: number) => n.toLocaleString("pt-BR");
 
 interface Props {
   consultantId: string;
@@ -25,42 +27,12 @@ export function AdMetricsCards({ consultantId, periodDays }: Props) {
   }
 
   const cards = [
-    {
-      icon: DollarSign,
-      label: "Gasto Ads",
-      value: fmtBRL(data?.spendCents ?? 0),
-      tone: "text-emerald-400",
-    },
-    {
-      icon: Users,
-      label: "Leads gerados",
-      value: (data?.leads ?? 0).toLocaleString("pt-BR"),
-      tone: "text-primary",
-    },
-    {
-      icon: Target,
-      label: "CPL",
-      value: data?.cplCents != null ? fmtBRL(data.cplCents) : "—",
-      tone: "text-amber-400",
-    },
-    {
-      icon: Eye,
-      label: "Visitas LP",
-      value: (data?.lpVisits ?? 0).toLocaleString("pt-BR"),
-      tone: "text-sky-400",
-    },
-    {
-      icon: MousePointerClick,
-      label: "Custo / Visita",
-      value: data?.costPerVisitCents != null ? fmtBRL(data.costPerVisitCents) : "—",
-      tone: "text-fuchsia-400",
-    },
-    {
-      icon: TrendingUp,
-      label: "LP → Lead",
-      value: data?.lpToLeadRate != null ? `${(data.lpToLeadRate * 100).toFixed(1)}%` : "—",
-      tone: "text-primary",
-    },
+    { icon: DollarSign, label: "Gasto Ads", value: fmtBRL(data?.spendCents ?? 0), tone: "text-emerald-400" },
+    { icon: Users, label: "Leads WhatsApp", value: fmtNum(data?.leads ?? 0), tone: "text-primary" },
+    { icon: Target, label: "CPL", value: data?.cplCents != null ? fmtBRL(data.cplCents) : "—", tone: "text-amber-400" },
+    { icon: Eye, label: "Impressões", value: fmtNum(data?.impressions ?? 0), tone: "text-sky-400" },
+    { icon: MousePointerClick, label: "Cliques", value: fmtNum(data?.clicks ?? 0), tone: "text-fuchsia-400" },
+    { icon: TrendingUp, label: "CTR", value: data?.ctr != null ? `${(data.ctr * 100).toFixed(2)}%` : "—", tone: "text-primary" },
   ];
 
   return (

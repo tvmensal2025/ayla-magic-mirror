@@ -22,7 +22,9 @@ import { CpcPanel } from "./dashboard/CpcPanel";
 import { RecentClicks } from "./dashboard/RecentClicks";
 import { FunnelStrip } from "./dashboard/FunnelStrip";
 import { AdMetricsCards } from "./dashboard/AdMetricsCards";
+import { AdMetricsCharts } from "./dashboard/AdMetricsCharts";
 import { AdAccountSwitcher } from "./dashboard/AdAccountSwitcher";
+import { useManagedConsultants } from "@/hooks/useManagedConsultants";
 import { Eye as EyeIcon, EyeOff } from "lucide-react";
 
 interface DashboardTabProps {
@@ -49,6 +51,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
   const [sharedAccountCount, setSharedAccountCount] = useState(0);
   const [adAccountId, setAdAccountId] = useState<string>(userId);
   useEffect(() => { setAdAccountId(userId); }, [userId]);
+  const { data: managedConsultants = [] } = useManagedConsultants(userId);
 
   useEffect(() => {
     const stored = localStorage.getItem("sync_cooldown_until");
@@ -264,6 +267,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
         {/* === VISÃO GERAL === */}
         <TabsContent value="visao" className="space-y-4 mt-6">
           <AdMetricsCards consultantId={adAccountId} periodDays={periodDays} />
+          <AdMetricsCharts consultantId={adAccountId} periodDays={periodDays} managed={managedConsultants} />
           <MainChart data={(analytics as any)?.dailyMain} />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
