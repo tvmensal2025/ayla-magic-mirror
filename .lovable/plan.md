@@ -1,56 +1,44 @@
 
-# Dashboard Ads — WhatsApp Only + Gráficos
+# Reorganização /admin — Dashboard só iGreen, tudo de Ads na Central
 
-Reformular o bloco "Ad Metrics" no `/admin` (DashboardTab) para:
-1. Remover métricas de Landing Page (visitas LP, custo/visita, LP→Lead).
-2. Tratar **lead = novo customer no WhatsApp** dentro do período (origem `whatsapp` ou qualquer customer criado, conforme decisão abaixo).
-3. Adicionar gráficos de evolução diária.
+## Estado atual
+- `DashboardTab` tem 3 sub-tabs: **Visão Geral** (cards Ads + MainChart + CpcPanel + RecentClicks + FunnelStrip), **Anúncios & Origem** (ResultsDashboard + LeadSourceCard) e **Clientes iGreen**.
+- `AdsCentralTab` (aba "Central de Anúncios") tem 3 views: Modelos / Campanhas / Inteligência.
+- `PerformanceTab` é uma aba separada no topo.
 
-## Cards (KPIs) — versão final
+## Objetivo
+- **Dashboard** volta a ser exclusivamente "Clientes iGreen" — como era antes (StatCards + CustomerCharts + filtro de licenciado + botão Sincronizar iGreen).
+- **Central de Anúncios** absorve tudo de anúncio/performance, organizado em sub-views.
 
-| Card | Cálculo |
-|---|---|
-| Gasto Ads | sum(`ad_spend_daily.spend_cents`) no período |
-| Leads WhatsApp | count(`customers`) criados no período do consultor selecionado |
-| CPL | Gasto / Leads |
-| Impressões | sum(`ad_spend_daily.impressions`) |
-| Cliques | sum(`ad_spend_daily.clicks`) |
-| CTR | cliques / impressões |
+## Mudanças
 
-## Gráficos novos (Recharts, já no projeto)
+### 1. `DashboardTab.tsx` — enxugar
+- Remover as 3 sub-tabs.
+- Remover imports/uso de: `AdMetricsCards`, `AdMetricsCharts`, `AdAccountSwitcher`, `MainChart`, `CpcPanel`, `RecentClicks`, `FunnelStrip`, `ResultsDashboard`, `LeadSourceCard`, `WalletChip`, `TerminalTicker`, `useManagedConsultants`, `adAccountId`.
+- Manter toolbar slim: período + PDF + Resetar (resetar continua útil para limpar tracking).
+- Renderizar direto o bloco "Clientes iGreen" (header com filtro + Sincronizar, StatCards, `CustomerCharts`).
+- Limpar imports de ícones não usados (Megaphone, Target, LayoutDashboard, Eye etc.).
 
-1. **Gasto x Leads por dia** — LineChart duplo eixo (gasto em R$, leads em count) — últimos 30 dias.
-2. **CPL diário** — AreaChart (spend_dia / leads_dia).
-3. **Leads por consultor** (apenas para managers com >1 conta) — BarChart horizontal: total de leads no período por consultor gerenciado.
-4. **Distribuição por estágio do CRM** — PieChart dos leads do período por `deals.stage` (novo_lead, qualificado, etc.).
+### 2. `AdsCentralTab.tsx` — virar hub completo
+Reestruturar as views (toggle no topo) para:
+- **Dashboard** (novo, default) — toolbar com `WalletChip` + `AdAccountSwitcher` + período; depois `AdMetricsCards` + `AdMetricsCharts` + `MainChart` + `CpcPanel` + `RecentClicks` + `FunnelStrip` + `LeadSourceCard`.
+- **Modelos** (atual gallery)
+- **Campanhas** (atual)
+- **Performance** (atual `ResultsDashboard`, movido pra cá — embute o conteúdo de `PerformanceTab` aqui)
+- **Inteligência** (atual)
 
-## Mudanças técnicas
+Toggle vira: `Dashboard | Modelos | Campanhas | Performance | Inteligência`. Default = Dashboard.
 
-- **`useAdMetrics.ts`**: remover `pageViews`, `costPerVisit`, `lpConversion`. Adicionar `impressions`, `clicks`, `ctr`, e `daily: { date, spend, leads, cpl }[]`.
-  - Leads = `customers` count agrupado por `date(created_at)` filtrado por `consultant_id`.
-  - Gasto/cliques/impressões agrupados por `date` de `ad_spend_daily`.
-- **Novo hook `useLeadsByConsultant(range, consultantIds[])`** — para o gráfico de barras (managers).
-- **Novo hook `useLeadsByStage(consultantId, range)`** — agrega `deals` por `stage` no período.
-- **`AdMetricsCards.tsx`**: trocar os 3 cards de LP por Impressões / Cliques / CTR.
-- **Novo `AdMetricsCharts.tsx`**: 4 gráficos acima usando Recharts + tokens do design system (cores via `hsl(var(--primary))` etc.).
-- **`DashboardTab.tsx`**: renderizar `<AdMetricsCards />` + `<AdMetricsCharts />` logo abaixo do `AdAccountSwitcher`.
+Period selector local (state interno na Central, padrão 30) já que o `periodDays` global do Dashboard não chega aqui — passar via prop é opcional, mas mais simples manter local.
 
-## Pergunta antes de implementar
+### 3. `Admin.tsx` — remover aba Performance duplicada
+- Remover item `{ id: "performance", ... }` do array `tabs` e o bloco `activeTab === "performance"`.
+- Manter import lazy só se ainda for usado pela Central (vou importar direto `ResultsDashboard` dentro da Central, então `PerformanceTab` pode sair).
+- Atualizar tipo do `activeTab` removendo `"performance"`.
 
-Como definir "Lead WhatsApp" no contador?
-- (A) Todo `customer` criado no período do consultor.
-- (B) Apenas `customers` com `customer_origin = 'lead_whatsapp'`.
-- (C) Apenas customers que entraram em algum `deal` no período (estágio `novo_lead`).
+## Arquivos a alterar
+- `src/components/admin/DashboardTab.tsx` (enxugar drasticamente)
+- `src/components/admin/ads/AdsCentralTab.tsx` (adicionar views Dashboard + Performance)
+- `src/pages/Admin.tsx` (remover aba Performance)
 
-Vou assumir **(A)** salvo indicação contrária — é o que melhor reflete "lead gerado pelo anúncio do WhatsApp".
-
-## Arquivos a alterar/criar
-
-- `src/hooks/useAdMetrics.ts` (refactor)
-- `src/hooks/useLeadsByConsultant.ts` (novo)
-- `src/hooks/useLeadsByStage.ts` (novo)
-- `src/components/admin/dashboard/AdMetricsCards.tsx` (refactor)
-- `src/components/admin/dashboard/AdMetricsCharts.tsx` (novo)
-- `src/components/admin/DashboardTab.tsx` (montagem)
-
-Sem migrations — tudo lido das tabelas já existentes (`ad_spend_daily`, `customers`, `deals`).
+Sem migrations. Sem mudanças de business logic — apenas reorganização de UI/composição.
