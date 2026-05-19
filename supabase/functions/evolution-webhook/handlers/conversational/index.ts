@@ -1804,7 +1804,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const nextStep = dbSteps.find((s) => s.id === fb.goto_step_id);
       if (nextStep && nextStep.is_active) {
         const nextIsMediaOnly = !String(nextStep.message_text || "").trim();
-        if (currentStep.captures?.some((c) => c.enabled !== false) && !hasCapture && nextIsMediaOnly) {
+        const requiresHardCapture = Array.isArray(currentStep.captures)
+          && currentStep.captures.some((c: any) =>
+            c?.enabled !== false && !!c?.field && c?.required !== false
+          );
+        if (requiresHardCapture && !hasCapture && nextIsMediaOnly) {
           console.log(`[conversational] fallback goto bloqueado: step=${stepKey} exige captura antes de ${nextStep.step_key}`);
           return _finalize(stepKey, await repeatCurrent());
         }
