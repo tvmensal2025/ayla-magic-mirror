@@ -78,3 +78,6 @@ verify_jwt = false
 [functions.ad-creative-qa]
 verify_jwt = false
 
+
+[functions.fb-fix-adset]
+verify_jwt = false
