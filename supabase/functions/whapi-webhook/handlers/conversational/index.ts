@@ -1120,10 +1120,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       },
     });
   }
-  if (cls.action === "repeat" && cls.intent !== "tem_duvida" && cls.intent !== "quer_cadastrar") {
-    console.log(`[conversational] 🔁 repeat por confiança média (conf=${cls.confidence})`);
-    return _finalize(stepKey, await repeatCurrent());
-  }
+  // Nota: action="repeat" (confiança média) é tratado implicitamente — se
+  // nenhuma transição casar, o fluxo default já é repetir o passo atual.
 
   // ─── AI FAQ Answerer (Lovable AI) ──────────────────────────────────
   // Quando o lead faz pergunta (tem_duvida) que NÃO casou em bot_flow_qa
