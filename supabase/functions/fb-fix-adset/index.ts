@@ -145,6 +145,8 @@ Deno.serve(async (req) => {
       correct_pixel: correctPixel,
       pixel_ok: pixelOk,
       activated,
+      campaign_activated: campaignActivated,
+      ads_activated: adsActivated,
       previous_status: adset.effective_status,
       warnings,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
