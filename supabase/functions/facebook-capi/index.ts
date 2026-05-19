@@ -46,13 +46,25 @@ Deno.serve(async (req) => {
 
     const admin = adminClient();
     const { data: conn } = await admin.from("facebook_connections").select("pixel_id,access_token_encrypted").eq("consultant_id", body.consultant_id).maybeSingle();
-    if (!conn?.pixel_id && !body.offline) {
-      return new Response(JSON.stringify({ skipped: true, reason: "no_pixel" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+    // Fallback global (token CAPI direto do Pixel igreen-app-oficial) quando o consultor não tem OAuth conectado
+    const GLOBAL_TOKEN = Deno.env.get("FACEBOOK_CAPI_ACCESS_TOKEN") ?? "";
+    const GLOBAL_PIXEL = Deno.env.get("FACEBOOK_CAPI_PIXEL_ID") ?? "";
+
+    let token = "";
+    let pixelId = conn?.pixel_id ?? "";
+    let tokenSource: "oauth" | "global" = "oauth";
+
+    if (conn?.access_token_encrypted && conn?.pixel_id) {
+      token = await decryptToken(conn.access_token_encrypted);
+    } else if (GLOBAL_TOKEN && (GLOBAL_PIXEL || body.offline)) {
+      token = GLOBAL_TOKEN;
+      pixelId = pixelId || GLOBAL_PIXEL;
+      tokenSource = "global";
+    } else {
+      return new Response(JSON.stringify({ skipped: true, reason: conn?.pixel_id ? "no_token" : "no_pixel" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-    if (!conn?.access_token_encrypted) {
-      return new Response(JSON.stringify({ skipped: true, reason: "no_token" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    const token = await decryptToken(conn.access_token_encrypted);
+
     const eventId = body.event_id || (body.customer_id ? `${body.event_name}:${body.customer_id}` : crypto.randomUUID());
 
     const userData: Record<string, unknown> = {};
