@@ -507,7 +507,6 @@ const SuperAdmin = () => {
         {activeTab === "funil" && (
           <div className="space-y-4">
             <BotFunnelPanel />
-            <SuppressedRulesPanel />
           </div>
         )}
         {activeTab === "worker" && <WorkerPhaseTimeline />}
