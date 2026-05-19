@@ -184,12 +184,14 @@ export default function FluxoCamila() {
   const [showMigrationBanner, setShowMigrationBanner] = useState(
     () => typeof window !== "undefined" && !localStorage.getItem("camila_migration_v2_dismissed")
   );
-  // A/B test state
-  const [editingVariant, setEditingVariant] = useState<"A" | "B">("A");
+  // A/B/C test state
+  const [editingVariant, setEditingVariant] = useState<"A" | "B" | "C">("A");
   const [hasFlowB, setHasFlowB] = useState(false);
+  const [hasFlowC, setHasFlowC] = useState(false);
   const [abEnabled, setAbEnabled] = useState(false);
-  const [variantCounts, setVariantCounts] = useState<{ A: number; B: number }>({ A: 0, B: 0 });
+  const [variantCounts, setVariantCounts] = useState<{ A: number; B: number; C: number }>({ A: 0, B: 0, C: 0 });
   const [cloneBusy, setCloneBusy] = useState(false);
+  const [cloneCBusy, setCloneCBusy] = useState(false);
 
   const reload = useCallback(async (uid: string, variant: "A" | "B" = "A") => {
     const [{ data: cons }, { data: flows }, { count }, { data: flowB }, vAResp, vBResp] = await Promise.all([
