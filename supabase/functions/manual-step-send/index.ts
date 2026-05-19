@@ -151,6 +151,7 @@ Deno.serve(async (req) => {
         allItems.push({ kind: String(m.kind || "document").toLowerCase(), media: m });
       }
     });
+    if (renderedText.trim()) allItems.push({ kind: "text", text: renderedText });
 
     let toSend: Item[] = [];
     if (body.part === "all") {
