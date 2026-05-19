@@ -13,12 +13,10 @@ export function useKanbanDeals(consultantId: string) {
   const fetchDeals = useCallback(async () => {
     const { data } = await supabase
       .from("crm_deals")
-      .select("*, customers(name, phone_whatsapp, customer_origin)")
+      .select("*, customers(name, phone_whatsapp, customer_origin, conversation_step, last_step_advanced_at)")
       .eq("consultant_id", consultantId)
       .order("created_at", { ascending: false });
     if (data) {
-      // Excluir clientes iGreen sincronizados do Kanban — eles são carteira,
-      // não funil. Aparecem na aba "Clientes iGreen" da página de Clientes.
       const onlyLeads = data.filter((d: any) => {
         const origin = d.customers?.customer_origin;
         return !origin || origin === "whatsapp_lead" || origin === "manual";
@@ -26,6 +24,8 @@ export function useKanbanDeals(consultantId: string) {
       const enriched = onlyLeads.map((d: any) => ({
         ...d,
         customer_name: d.customers?.name || null,
+        conversation_step: d.customers?.conversation_step || null,
+        last_step_advanced_at: d.customers?.last_step_advanced_at || null,
       }));
       setDeals(enriched);
     }
