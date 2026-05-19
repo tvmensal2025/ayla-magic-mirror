@@ -119,17 +119,33 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
   }, [userId]);
 
   async function setPaused(id: string, paused: boolean) {
+    // 1) tenta update direto (rápido, sob RLS do dono)
     const { error } = await supabase.from("customers").update({
       bot_paused: paused,
       bot_paused_reason: paused ? "humano_assumiu" : null,
       bot_paused_at: paused ? new Date().toISOString() : null,
+      bot_paused_until: null,
       assigned_human_id: paused ? userId : null,
     }).eq("id", id);
-    if (error) toast({ title: "Erro", description: error.message, variant: "destructive" });
-    else {
-      toast({ title: paused ? "🤝 Você assumiu este atendimento" : "🤖 IA reativada" });
-      load();
+
+    if (error) {
+      console.warn("[setPaused] update direto falhou, tentando edge customer-takeover:", error);
+      // 2) fallback via edge (cobre super admin agindo em customer de outro consultor)
+      const { data, error: invErr } = await supabase.functions.invoke("customer-takeover", {
+        body: { customerId: id, paused },
+      });
+      if (invErr || (data as any)?.error) {
+        const msg = (data as any)?.message || (data as any)?.error || invErr?.message || error.message;
+        toast({
+          title: "Erro ao alterar atendimento",
+          description: `${msg}${error.code ? ` (code=${error.code})` : ""}`,
+          variant: "destructive",
+        });
+        return;
+      }
     }
+    toast({ title: paused ? "🤝 Você assumiu — a IA não vai mais mandar nada" : "🤖 IA reativada" });
+    load();
   }
 
   function stepsForRow(row: Row): { variant: Variant; bundle: FlowBundle } {
@@ -140,11 +156,17 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
     return { variant, bundle };
   }
 
+  function isLeadWithoutWhatsApp(row: Row): boolean {
+    const p = String(row.phone_whatsapp || "");
+    return p.startsWith("sem_celular_") || p.replace(/\D/g, "").length < 10;
+  }
+
   async function returnToStep(row: Row, stepValue: string | null, label: string) {
     const update: any = {
       bot_paused: false,
       bot_paused_reason: null,
       bot_paused_at: null,
+      bot_paused_until: null,
       assigned_human_id: null,
       last_custom_prompt_at: null,
       updated_at: new Date().toISOString(),
@@ -152,17 +174,39 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
     if (stepValue !== null) update.conversation_step = stepValue;
     const { error } = await supabase.from("customers").update(update).eq("id", row.id);
     if (error) {
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
-      return;
+      // fallback via edge para casos de RLS
+      const { data, error: invErr } = await supabase.functions.invoke("customer-takeover", {
+        body: { customerId: row.id, paused: false },
+      });
+      if (invErr || (data as any)?.error) {
+        toast({
+          title: "Erro ao devolver",
+          description: (data as any)?.message || error.message,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (stepValue) {
+        await supabase.from("customers").update({ conversation_step: stepValue }).eq("id", row.id);
+      }
     }
 
     if (stepValue) {
+      if (isLeadWithoutWhatsApp(row)) {
+        toast({
+          title: `↩️ Devolvido para: ${label}`,
+          description: "Lead sem WhatsApp — passo gravado, mas nada foi enviado.",
+        });
+        load();
+        return;
+      }
       try {
         const { data, error: invErr } = await supabase.functions.invoke("manual-step-send", {
           body: { consultantId: userId, customerId: row.id, stepId: stepValue, part: "all", continueFlow: true },
         });
         if (invErr || (data as any)?.error) {
-          throw new Error(invErr?.message || (data as any)?.error || "falha ao disparar");
+          const errMsg = (data as any)?.message || (data as any)?.error || invErr?.message || "falha ao disparar";
+          throw new Error(errMsg);
         }
         toast({ title: `↩️ Devolvido e fluxo retomado: ${label}` });
       } catch (e: any) {
