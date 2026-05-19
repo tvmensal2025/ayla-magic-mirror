@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
     // Resolve customer + phone
     const { data: customer } = await supabase
       .from("customers")
-      .select("id, name, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant")
+      .select("id, name, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at")
       .eq("id", body.customerId)
       .maybeSingle();
     if (!customer) return json({ error: "customer_not_found", message: "Lead não encontrado." }, 404);
