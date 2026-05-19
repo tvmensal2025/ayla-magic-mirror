@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Zap } from "lucide-react";
 import { KanbanDealCard } from "./KanbanDealCard";
+import { resolveStep, type CustomStepMap } from "@/lib/flowStepResolver";
 import type { Tables } from "@/integrations/supabase/types";
 
 type KanbanStageRow = Tables<"kanban_stages">;
@@ -11,23 +12,34 @@ interface KanbanColumnProps {
   stage: KanbanStageRow;
   deals: CrmDealRow[];
   searchQuery: string;
+  stepFilter?: string; // "all" | "none" | step key
+  customStepMap: CustomStepMap;
   onDrop: (stageKey: string) => void;
   onDragStart: (id: string) => void;
   onEditDeal: (deal: CrmDealRow) => void;
   onDeleteDeal: (id: string) => void;
 }
 
-export function KanbanColumn({ stage, deals, searchQuery, onDrop, onDragStart, onEditDeal, onDeleteDeal }: KanbanColumnProps) {
+export function KanbanColumn({ stage, deals, searchQuery, stepFilter = "all", customStepMap, onDrop, onDragStart, onEditDeal, onDeleteDeal }: KanbanColumnProps) {
   const allStageDeals = deals.filter((d) => d.stage === stage.stage_key);
-  const stageDeals = searchQuery.trim()
-    ? allStageDeals.filter((d) => {
-        const q = searchQuery.toLowerCase();
-        const phone = d.remote_jid?.split("@")[0] || "";
-        const notes = d.notes || "";
-        const name = ((d as any).customer_name || "").toLowerCase();
-        return phone.includes(q) || notes.toLowerCase().includes(q) || name.includes(q);
-      })
-    : allStageDeals;
+  const stageDeals = allStageDeals.filter((d) => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const phone = d.remote_jid?.split("@")[0] || "";
+      const notes = d.notes || "";
+      const name = ((d as any).customer_name || "").toLowerCase();
+      if (!(phone.includes(q) || notes.toLowerCase().includes(q) || name.includes(q))) return false;
+    }
+    if (stepFilter && stepFilter !== "all") {
+      const info = resolveStep((d as any).conversation_step, customStepMap);
+      if (stepFilter === "none") return !info;
+      if (!info) return false;
+      const raw = (d as any).conversation_step as string | null;
+      const stripped = raw?.startsWith("flow:") ? raw.slice(5) : raw;
+      if (info.rawKey !== stepFilter && stripped !== stepFilter) return false;
+    }
+    return true;
+  });
 
   return (
     <div
@@ -58,6 +70,7 @@ export function KanbanColumn({ stage, deals, searchQuery, onDrop, onDragStart, o
             <KanbanDealCard
               key={deal.id}
               deal={deal}
+              stepInfo={resolveStep((deal as any).conversation_step, customStepMap)}
               onDragStart={onDragStart}
               onEdit={onEditDeal}
               onDelete={onDeleteDeal}
