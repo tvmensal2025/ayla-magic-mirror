@@ -539,7 +539,7 @@ export default function FluxoCamila() {
                 >Fluxo B (sem áudio)</button>
               </div>
               {editingVariant === "B" && (
-                <span className="text-xs text-muted-foreground">Áudios do passo são ignorados ao enviar para leads do Fluxo B.</span>
+                <span className="text-xs text-muted-foreground">No Fluxo B, cada áudio é enviado como texto usando a transcrição (editável em cada passo).</span>
               )}
             </div>
           )}
