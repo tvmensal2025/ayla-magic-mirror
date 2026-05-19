@@ -1,72 +1,63 @@
-## Reorganização do Painel do Consultor (`/admin`)
+# Análise IA da Saúde do Bot (últimos 7 dias)
 
-### 1. Navegação principal (limpeza)
-Remover 3 abas da barra: **Preview**, **Histórico** e **Dados**. A barra fica:
+Adicionar no topo do `/admin/saude-bot` um painel premium com **diagnóstico Gemini** que cruza tudo que rolou nos últimos 7 dias com o consultor — texto, áudio, vídeo, imagem, transições de passo, handoffs, conversão por variante A/B/C — e devolve um plano de ação para converter mais.
 
-`Dashboard · CRM · Clientes · Rede · WhatsApp · Central de Anúncios · Links · Materiais`
+## 1. Nova edge function `bot-health-intel`
 
-### 2. Preview → dentro de **Links**
-- `LinksTab.tsx` ganha um sub-toggle no topo: **Links** | **Preview**.
-- Conteúdo atual fica em "Links"; "Preview" renderiza o `PreviewTab` existente (mesmas props que já passamos hoje).
-- Em `Admin.tsx` remover o case `activeTab === "preview"` e o item da array `tabs`.
+Inspirada em `captacao-intel`, mas **por consultor** e janela de **7 dias**.
 
-### 3. Histórico → dentro de **WhatsApp**
-- `WhatsAppTab.tsx` ganha um sub-toggle (ou aba interna) **Conversas** | **Histórico Automático**.
-- "Histórico Automático" renderiza `<AutoMessageLog consultantId={userId} />`.
-- Em `Admin.tsx` remover o case `activeTab === "historico"` e o item da array `tabs`.
+Coleta para o `consultant_id`:
+- **`conversations`** (últimos 7d): agrupa por `message_type` (text/audio/video/image), `message_direction` (in/out), top 30 mensagens recebidas, top 30 enviadas, contagem por `conversation_step`.
+- **`bot_step_transitions`** (7d): from_step → to_step com `intent` e `confidence` médios; identifica passos onde a IA fica com confiança baixa.
+- **`bot_handoff_alerts`** (7d, abertos+resolvidos): agrupa por `reason`.
+- **`customers`** do consultor com `flow_variant`: total / aprovados por variante A/B/C; tempo médio parado por `conversation_step` (via `last_step_advanced_at`).
+- **`bot_message_ab_results`**: variantes de mensagem que estão ganhando.
+- **`ad_creative_insights` + `ad_competitor_creatives`**: contexto do que está convertendo no anúncio para o prompt amarrar "anúncio → primeira mensagem do bot".
 
-### 4. Dados → engrenagem no header
-- No header (ao lado do sino de notificações), adicionar botão `Settings` (ícone engrenagem) que abre um **Sheet/Drawer lateral** com o `DadosTab` atual dentro (sem mudar o componente, só envolver).
-- Remover o item `"dados"` da array `tabs` e o case correspondente.
+Monta prompt para **`google/gemini-2.5-pro`** (via Lovable AI Gateway, header `Lovable-API-Key`, modelo Gemini para análise rica multimodal-textual). Fallback `google/gemini-3-flash-preview` se 429/402. JSON estrito:
 
-### 5. Onboarding obrigatório (gating)
-Antes de liberar o painel, o consultor precisa preencher **4 campos obrigatórios**:
-
-1. Nome completo (`name`)
-2. ID iGreen (`igreen_id`)
-3. WhatsApp principal (`phone`)
-4. WhatsApp para alertas (`notification_phone`)
-
-Implementação:
-- Criar `OnboardingGate.tsx` que recebe `form` e renderiza um **modal fullscreen bloqueante** quando qualquer um dos 4 campos está vazio.
-- O modal mostra um mini-formulário com só esses 4 campos + botão "Liberar painel" (chama o mesmo `handleSave` do `useConsultantForm`).
-- Em `Admin.tsx`, logo após o gate de `approved`, montar `<OnboardingGate>` envolvendo todo o conteúdo. Enquanto não preenchidos, o resto do painel fica inacessível (a engrenagem também não abre — só o gate).
-
-### 6. Auto-sync do telefone para Facebook Ads
-Hoje `loadConsultantAdSettings` (edge function) já faz fallback para `consultants.phone` quando `consultant_ad_settings.whatsapp_destination_number` está vazio, mas só é gravado on-demand. Vamos garantir no momento do save:
-
-- No `useConsultantForm` (handler de save), **logo após** persistir `consultants`, fazer um `upsert` em `consultant_ad_settings`:
-  ```
-  { consultant_id: userId,
-    whatsapp_destination_number: form.phone }   // só dígitos, sem +55
-  ```
-  com `onConflict: "consultant_id"`.
-- Disparado sempre que o usuário salvar com `phone` e `notification_phone` preenchidos (regra do usuário: "assim que ele colocar o telefone para alerta, ativar o telefone principal para o Facebook anunciar").
-- Resultado: novos anúncios criados via plataforma usam o número do consultor como destino do botão WhatsApp do Meta Ads. Leads chegam direto no WhatsApp dele; toda a telemetria (gasto, CPL, CRM) continua centralizada no admin (sem mudança de fluxo de dados).
-
-### Técnico — arquivos tocados
-
-```text
-src/pages/Admin.tsx
-  - remover tabs preview/historico/dados (array + cases)
-  - adicionar botão engrenagem no header → Sheet com <DadosTab/>
-  - envolver <main> com <OnboardingGate form={form} onSave={handleSave}>
-
-src/components/admin/LinksTab.tsx
-  - adicionar Tabs interna [Links | Preview]
-  - importar PreviewTab e renderizar nas mesmas condições
-
-src/components/whatsapp/WhatsAppTab.tsx
-  - adicionar Tabs interna [Conversas | Histórico]
-  - importar AutoMessageLog
-
-src/components/admin/OnboardingGate.tsx  (novo)
-  - modal bloqueante com 4 campos obrigatórios
-
-src/hooks/useConsultantForm.ts
-  - no save, upsert em consultant_ad_settings
-    com whatsapp_destination_number = phone (só dígitos)
+```json
+{
+  "summary": "≤140 chars",
+  "health_score": 0-100,
+  "bottlenecks": [{ "title", "detail", "step", "severity" }],
+  "winners": [{ "title", "detail" }],
+  "lead_drops": [{ "step", "stuck_count", "why", "fix" }],
+  "media_insights": [{ "type": "audio|video|image|text", "observation", "action" }],
+  "ab_recommendation": { "best_variant": "A|B|C", "why", "action" },
+  "actions": [{ "label", "detail", "impact", "type" }]
+}
 ```
 
-Sem migrations — `consultant_ad_settings` já existe.
-Sem mudança de lógica de anúncios/CRM — só plumbing de UI e um upsert.
+Persiste em `capture_diagnostics` com `scope='bot_health'` e `consultant_id` setado (campos já existem). Sem migração.
+
+## 2. UI no `src/pages/SaudeBot.tsx`
+
+Novo card glassmorphism no topo (antes dos 3 cards de resumo):
+
+- Header: "🧠 Análise IA — últimos 7 dias" + botão "Atualizar análise" (chama a edge function) + timestamp do `computed_at`.
+- **Health score** em destaque (gauge/anel verde→vermelho).
+- **Summary** em uma linha grande.
+- Tabs internas: `Gargalos` · `Vencedores` · `Onde perde lead` · `Mídia (áudio/vídeo/imagem)` · `A/B/C` · `Ações`.
+- Cada `action` vira chip clicável com badge de impacto; ações do tipo `tune_handoff` linkam para `/admin/fluxos`, `replicate_creative` para `/admin/anuncios`, etc.
+- Carrega ao montar via `select * from capture_diagnostics where scope='bot_health' and consultant_id=$me order by computed_at desc limit 1`. Se vazio ou >24h, mostra CTA "Gerar primeira análise".
+
+Mantém os blocos atuais (alertas, parados +24h, funil) abaixo.
+
+## 3. Cron diário (opcional, mesma função)
+
+Quando chamada sem body roda para **todos consultores ativos** com leads nos últimos 7d. `pg_cron` 06:30 BRT. Não obrigatório no MVP — botão manual já cobre.
+
+## Detalhes técnicos
+
+- Função: `supabase/functions/bot-health-intel/index.ts`, CORS padrão, aceita `{ consultant_id }` no body; se ausente usa JWT do caller.
+- Sample size guard: se <10 conversas em 7d, devolve `summary: "Poucos dados ainda — rode mais leads"` sem chamar IA (economia).
+- Trunca texto das mensagens em 300 chars no prompt; resume mídia citando só `message_type` + `slot_key` + `conversation_step` (não baixa binário — Gemini analisa o **comportamento** em torno da mídia, não o conteúdo bruto).
+- Reusa helper `openaiChat` se já roteia pro gateway, senão usa fetch direto pro `https://ai.gateway.lovable.dev/v1/chat/completions` com `LOVABLE_API_KEY`.
+- Custo controlado: 1 call por consultor por dia (cache 24h no UI).
+
+## Arquivos
+
+- `supabase/functions/bot-health-intel/index.ts` (novo)
+- `src/pages/SaudeBot.tsx` (adicionar card no topo + hook de carregamento + botão refresh)
+- `src/components/admin/saude/BotHealthIntel.tsx` (novo componente do painel IA)
