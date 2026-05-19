@@ -1,12 +1,14 @@
-import { GripVertical, User, Pencil, Trash2, MoreVertical } from "lucide-react";
+import { GripVertical, User, Pencil, Trash2, MoreVertical, Footprints } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { KanbanSlaIndicator } from "./KanbanSlaIndicator";
 import type { Tables } from "@/integrations/supabase/types";
+import type { FlowStepInfo } from "@/lib/flowStepResolver";
 
 type CrmDealRow = Tables<"crm_deals">;
 
 interface KanbanDealCardProps {
   deal: CrmDealRow;
+  stepInfo?: FlowStepInfo | null;
   onDragStart: (id: string) => void;
   onEdit: (deal: CrmDealRow) => void;
   onDelete: (id: string) => void;
