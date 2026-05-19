@@ -828,13 +828,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
 
   // ═══════════════════════════════════════════════════════════════════
-  // HELPER: Envia opções como TEXTO (botões não funcionam na Evolution API atual)
-  // Formato: mensagem + opções numeradas
+  // HELPER: Evolution NÃO usa botão (botões reais só no Whapi).
+  // Envia mensagem + opções numeradas como texto puro.
   // ═══════════════════════════════════════════════════════════════════
   async function sendOptions(jid: string, msg: string, options: { id: string; title: string }[]): Promise<boolean> {
-    // Tenta enviar como botões reais (funciona no Whapi, fallback texto no Evolution)
-    return sendButtons(jid, msg, options);
+    const textWithOptions = `${msg}\n\n${options.map((b, i) => `*${i + 1}.* ${b.title}`).join("\n")}\n\n_Digite o número da opção desejada._`;
+    return sendText(jid, textWithOptions);
   }
+
 
   // ═══════════════════════════════════════════════════════════════════
   // 🎯 Dispatcher genérico: envia o que está configurado em /admin/fluxos
