@@ -260,20 +260,29 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
   return patch;
 }
 
-async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string, consultantId: string, customerId: string, step: any, vars: Record<string, string>) {
+async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string, consultantId: string, customerId: string, step: any, vars: Record<string, string>, variant: string = "A") {
   const applyVars = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
   const slotKey = step.slot_key || step.step_key;
   const { data: mediaRows } = await supabase
     .from("ai_media_library")
-    .select("id, kind, url, slot_key, send_order, duration_sec")
+    .select("id, kind, url, slot_key, send_order, duration_sec, transcript, label")
     .eq("consultant_id", consultantId)
     .eq("slot_key", slotKey)
     .eq("active", true)
     .eq("is_draft", false)
     .order("send_order", { ascending: true });
-  const items: Array<{ kind: string; text?: string; media?: any }> = ((mediaRows as any[]) || [])
-    .filter((m) => !!m?.url)
-    .map((m) => ({ kind: String(m.kind || "document").toLowerCase(), media: m }));
+  const rawRows = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+  const items: Array<{ kind: string; text?: string; media?: any }> = [];
+  for (const m of rawRows) {
+    if (variant === "B" && String(m.kind).toLowerCase() === "audio") {
+      const transcript = await ensureAudioTranscript(supabase, m);
+      if (transcript && transcript.trim()) {
+        items.push({ kind: "text", text: transcript.trim() });
+      }
+      continue;
+    }
+    items.push({ kind: String(m.kind || "document").toLowerCase(), media: m });
+  }
   const text = step.message_text ? applyVars(String(step.message_text)) : "";
   if (text.trim()) items.push({ kind: "text", text });
   if (!items.length) return false;
