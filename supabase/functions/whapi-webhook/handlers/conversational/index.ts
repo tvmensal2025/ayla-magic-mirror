@@ -726,17 +726,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     }
   }
 
-  // ─── Dedupe de mensagem (idempotência) — Sprint 2.6: extraído para _shared/bot/dedupe.ts
-  if (ctx.messageId) {
-    const dedupe = await checkAndMarkWebhookDedupe(
-      ctx.supabase,
-      ctx.messageId,
-      ctx.customer?.consultant_id,
-    );
-    if (dedupe.duplicate) {
-      return { reply: "", updates: { __inline_sent: true } };
-    }
-  }
+  // ─── Dedupe de mensagem: REMOVIDO daqui.
+  // O whapi-webhook/index.ts já chama checkAndMarkProcessed() bem antes
+  // (instance_name="whapi-superadmin"). Repetir aqui fazia o engine ver
+  // a própria gravação anterior como "duplicada" e abortar silenciosamente
+  // (reply="", __inline_sent=true), travando 100% dos leads do super admin
+  // no welcome. Bug confirmado em 2026-05-19 com leads Michele/Rafael.
 
   // ─── Detour return: se o lead foi desviado por uma regra goto_step no turno
   // anterior, restaura o passo original ANTES de processar a nova mensagem.
