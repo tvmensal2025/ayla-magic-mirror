@@ -508,6 +508,7 @@ const SuperAdmin = () => {
         )}
 
         {activeTab === "captacao" && <CaptacaoTab />}
+        {activeTab === "gestores_ads" && <AdManagersTab />}
         {activeTab === "crm" && <CrmAnalyticsTab />}
         {activeTab === "funil" && (
           <div className="space-y-4">
