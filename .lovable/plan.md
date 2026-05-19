@@ -1,91 +1,61 @@
-## Problema
+## Problema (caso Marcelo, 18/05 23:52)
 
-1. **IA não obedece o "Assumir"**: clicar em "Assumir" no painel "IA ao vivo" seta `customers.bot_paused = true`, mas os webhooks (`whapi-webhook/index.ts` e `evolution-webhook/index.ts`) só checam `bot_paused_until` (timestamp). O boolean é ignorado → bot continua respondendo.
-2. **Sem template rápido dos passos do fluxo**: hoje `/comando` no chat só busca templates manuais; não inclui os passos configurados em `/admin/fluxos`.
-3. **Sem envio passo-a-passo manual**: quando assumo, quero escolher um passo do fluxo e disparar peça por peça (áudio → imagem → texto), confirmando cada uma.
-
-## Mudanças
-
-### 1. Respeitar `bot_paused` em todos os webhooks
-
-Arquivos:
-- `supabase/functions/whapi-webhook/index.ts` (~linha 414)
-- `supabase/functions/evolution-webhook/index.ts` (bloco equivalente)
-
-Antes do bloco de `bot_paused_until`, adicionar:
-
-```text
-if (customer.bot_paused === true) {
-  // loga inbound, não responde
-  insert conversations { inbound, messageText, step }
-  return 200 { ok: true, msg: "bot_paused_manual" }
-}
+Conversa real:
+```
+23:52:07  inbound  "Sou Marcelo"              (step passo_mp8yc0bp)
+23:52:19  inbound  "Amanhã eu mando os documentos"
+23:52:23  outbound "Marcelo, qual o valor médio da sua conta de luz?"
+23:52:30  outbound "Marcelo, qual o valor médio da sua conta de luz?"   ← duplicada
 ```
 
-Isso vale para qualquer motivo (`humano_assumiu`, `lead_pediu_humano`, `muitas_duvidas`, etc.). Cobre o caso reportado: assumi → IA cala.
+O lead mandou 2 mensagens com 12 s de diferença. Cada uma virou uma invocação do `whapi-webhook`. O lock por cliente serializou — mas a segunda invocação rodou logo após a primeira liberar e re-emitiu o MESMO prompt do passo `3e7fb4cd` ("valor da conta de luz"), mesmo o anti-rep de 10 min existindo em `dispatchStepFromFlow`.
 
-Também adicionar a mesma guarda no início de `runConversationalFlow` e no início de `processBotFlow` (defesa em profundidade, caso alguma rota chame direto).
+Causa raiz combinada:
+1. **Sem coalescing**: 2 inbounds próximos são processados como 2 turnos independentes. A 2ª invocação re-entra no resolver de step custom e, como o `step_type="message"` tem capture inline (`electricity_bill_value`), tenta capturar de "Amanhã eu mando os documentos" → extração falha → re-emite.
+2. **Anti-rep contornado**: a re-emissão acontece por um caminho que insere `conversations.conversation_step` com prefixo `flow:` enquanto a 1ª gravou sem prefixo. O `dispatchStepFromFlow` normaliza, mas o segundo envio veio do fluxo final de `reply`/`respondAndReentry`, que NÃO passa pela checagem de anti-rep.
+3. **`last_custom_prompt_at` só é gravado para `capture_*`/`confirm_phone`** (linha 2228 de `bot-flow.ts`). Step `message` com capture inline fica de fora — o guard legacy nunca aciona.
 
-### 2. Painel "IA ao vivo": botão "Enviar passo" quando humano assumiu
+## Plano (escopo cirúrgico)
 
-Arquivo: `src/components/admin/AIAgentTab/LiveConversationsPanel.tsx`
+### 1. Debounce de inbound em rajada (coalescing)
+`supabase/functions/whapi-webhook/index.ts` (perto do bloco de lock, linhas 584‑618):
+- Antes de adquirir o lock: se `customers.last_bot_interaction_at` (ou último outbound) < 4 s, **dormir 3 s** e re-buscar mensagens recebidas nesse intervalo via tabela `whatsapp_message_buffer`, concatenando os textos como um único turno.
+- Se já chegou inbound mais novo do que o que estamos processando, abandonar este e deixar o mais novo prosseguir (descarte idempotente — não envia nada).
 
-Na linha de cada lead em "Você está atendendo", além de "Devolver para…", adicionar **"Enviar passo do fluxo"**:
+Resultado prático: duas mensagens do lead em 12 s viram **1 turno** ("Sou Marcelo. Amanhã eu mando os documentos").
 
-- Abre um dialog listando todos os `bot_flow_steps` ativos (já temos `flowSteps` no estado).
-- Ao escolher um passo, mostra preview do conteúdo (texto + mídias associadas: áudio, imagem, vídeo).
-- Botões: **"Enviar tudo agora"** (sequencial com delays) **e** **"Enviar 1 a 1"** — neste modo o dialog vira uma fila: cada item tem botão "Enviar próximo", o usuário dispara um por um sem fechar a tela.
-- Cada envio chama uma nova edge function `manual-step-send` (abaixo). **Não despausa o bot** — segue pausado até o usuário clicar "Devolver para…".
+### 2. Anti-rep unificado em TODA emissão de step custom
+`supabase/functions/whapi-webhook/handlers/bot-flow.ts`:
+- Extrair a verificação de "já emiti esse step nos últimos 10 min" para um helper `wasStepRecentlyEmitted(stepKey)`.
+- Aplicar esse helper em **3 lugares** (não só em `dispatchStepFromFlow`):
+  a) Antes do `emittedCurrent` na linha 2042.
+  b) Dentro de `respondAndReentry` antes de re-anexar a pergunta final.
+  c) No `default:` do switch (linha ~2241) antes do redispatch idempotente.
+- Normalizar `flow:` prefix nos DOIS lados (já faz, mas garantir cobertura).
 
-### 3. Edge function `manual-step-send`
+### 3. `last_custom_prompt_at` para steps `message` com capture inline
+`supabase/functions/whapi-webhook/handlers/bot-flow.ts` linha 2228:
+- Mudar a condição para também marcar `last_custom_prompt_at` quando o step atual for `message` E tiver `captures[].enabled === true` E `dispatchedAny === true`.
+- Isso fecha a porta para o handler legacy de capture (que já checa esse campo) re-emitir.
 
-Nova função `supabase/functions/manual-step-send/index.ts`:
+### 4. Contador de retry para captures inline falhos
+Quando o step é `message` com capture inline e a captura não conseguiu extrair valor da mensagem do lead:
+- Incrementar `custom_step_retries` (mesma coluna já usada).
+- 1ª falha: enviar mensagem CURTA de reformulação ("Me passa só o valor em R$, ex: 250") — **sem re-enviar áudio/vídeo/imagem do step**.
+- 2ª falha: pausar bot e disparar `notifyHandoff` (mesma lógica já existente, linhas 2104‑2138).
 
-Entrada:
-```text
-{ consultantId, customerId, stepId, partIndex }
-```
-- `partIndex` indica qual peça enviar (0=áudio, 1=imagem/vídeo, 2=texto), ou `"all"` para sequencial.
-- Resolve o passo, baixa mídias, envia via Whapi/Evolution (usa o sender já existente).
-- Loga em `conversations` como `outbound` com `sent_by = "human_via_step"`.
-- **Não altera `conversation_step`** (humano não está avançando o fluxo, só usando como template).
-- Mantém `bot_paused = true`.
+### 5. Espelhar em `evolution-webhook`
+Aplicar exatamente as mudanças 2, 3, 4 em `supabase/functions/evolution-webhook/handlers/bot-flow.ts` (paridade já garantida hoje — não pode divergir).
 
-### 4. Quick reply "/" inclui passos do fluxo
+## Validação
 
-Arquivo: `src/components/whatsapp/QuickReplyMenu.tsx` + `MessageComposer.tsx`
-
-- Carregar `bot_flow_steps` ativos do consultor junto com os templates.
-- No menu, adicionar seção **"Passos do fluxo"** abaixo de "Respostas rápidas".
-- Selecionar um passo:
-  - Se só texto → cola no composer (comportamento atual de template).
-  - Se tem mídias → abre um mini-prompt: "Enviar áudio? Imagem? Texto?" com checkboxes e botão "Enviar selecionados" (reaproveita `manual-step-send`).
+1. Reproduzir o caso enviando 2 mensagens em < 5 s para o bot no step "valor da conta": **deve enviar o prompt apenas 1 vez**.
+2. Enviar resposta inválida ("amanhã eu mando"): deve responder com reformulação curta, **não** repetir o áudio/imagem do step.
+3. Enviar 2 respostas inválidas seguidas: bot pausa e notifica consultor.
+4. Conferir `conversations` do Marcelo (af00073b‑8ba1‑4bed‑9e22‑e010304f3230) em teste — sem 2 outbounds idênticos consecutivos.
 
 ## Fora de escopo
 
-- Não muda lógica do fluxo automático.
-- Não muda `bot_paused_until` (handoff por tempo continua igual).
-- Não muda intents, OCR, cadastro, schema (exceto se faltar `sent_by` na enum de `conversations` — verifico ao implementar).
-
-## Validação mental
-
-- Clico "Assumir" → mando msg pelo WhatsApp → bot **não responde**. ✅
-- Clico "Enviar passo > pitch_conexao_club > 1 a 1" → áudio sai, espero, clico "próximo" → imagem sai, clico "próximo" → texto sai. Bot continua pausado. ✅
-- No chat, digito `/pitch` → vejo o passo na lista, escolho, envio o áudio sozinho. ✅
-- Clico "Devolver para… > Continuar de onde parou" → bot volta ao normal. ✅
-
-## Arquivos
-
-```text
-supabase/functions/whapi-webhook/index.ts            ~ guarda bot_paused
-supabase/functions/evolution-webhook/index.ts        ~ guarda bot_paused
-supabase/functions/whapi-webhook/handlers/conversational/index.ts  ~ guarda defensiva
-supabase/functions/whapi-webhook/handlers/bot-flow.ts              ~ guarda defensiva
-supabase/functions/manual-step-send/index.ts         + nova função
-src/components/admin/AIAgentTab/LiveConversationsPanel.tsx         ~ dialog "Enviar passo"
-src/components/admin/AIAgentTab/ManualStepDialog.tsx               + novo componente
-src/components/whatsapp/QuickReplyMenu.tsx                         ~ seção "Passos do fluxo"
-src/components/whatsapp/MessageComposer.tsx                        ~ carregar steps + handler
-```
-
-Posso seguir?
+- Não mexer no resolver de transitions/intents (já funciona).
+- Não mexer no fluxo de cadastro legacy (aguardando_conta/doc_auto).
+- Não mexer na UI de admin/fluxos.
