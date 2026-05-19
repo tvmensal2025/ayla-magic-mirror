@@ -671,7 +671,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // bot_flows / bot_flow_steps / bot_flow_qa use the consultant UUID (customer.consultant_id),
   // NOT the iGreen numeric id (consultorId). Prefer the UUID; fall back to consultorId only as last resort.
   const consultantId = ctx.customer?.consultant_id || (ctx as any).consultorId;
-  const loaded = consultantId ? await loadFlow(ctx.supabase, consultantId) : null;
+  const flowVariant = (ctx.customer as any)?.flow_variant || "A";
+  const loaded = consultantId ? await loadFlow(ctx.supabase, consultantId, flowVariant) : null;
   console.log(`[conversational] entry stepKey="${stepKey}" consultantId=${consultantId} dbSteps=${loaded?.steps?.length ?? 0}`);
 
   // Fallback to legacy hardcoded machine if no flow seeded
