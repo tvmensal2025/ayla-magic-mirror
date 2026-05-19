@@ -364,7 +364,13 @@ async function sendStepMedia(
     .eq("active", true)
     .order("send_order", { ascending: true });
 
-  const medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+  const variant = (ctx.customer as any)?.flow_variant || "A";
+  let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+  if (variant === "B") {
+    const before = medias.length;
+    medias = medias.filter((m) => String(m.kind).toLowerCase() !== "audio");
+    if (before !== medias.length) console.log(`[sendStepMedia] variant=B: removed ${before - medias.length} audio media(s)`);
+  }
 
   // Precedência: UI (consultants.flow_step_media_order) → step.media_order → default.
   const uiOrder = await getStepMediaOrder(ctx.supabase, consultantId, slotKey);
