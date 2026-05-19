@@ -513,6 +513,7 @@ const SuperAdmin = () => {
         {activeTab === "ia" && (
           <div className="space-y-6">
             <AIControlPanel />
+            <AIAuditPanel />
             <AIKnowledgePanel />
           </div>
         )}
