@@ -1,45 +1,47 @@
 ---
-name: Human Takeover & Global AI Off — silêncio total da IA
-description: Regras únicas para silenciar TODOS os motores automáticos quando humano assume um lead OU quando o switch global "IA ativa para meus leads" está OFF.
+name: Human Takeover & Global AI Silence
+description: Bloqueios absolutos da IA — humano assumiu OU consultor desligou IA — aplicados em webhooks e TODOS os crons.
 type: feature
 ---
 
-## Bloqueios absolutos (qualquer um silencia toda automação)
+# Silêncio total da IA
 
-1. `customers.bot_paused = true`
-2. `customers.assigned_human_id IS NOT NULL`
-3. `customers.bot_paused_until > now()`
-4. `ai_agent_config.enabled = false` para `consultant_id` do lead (switch global do consultor)
+Quando QUALQUER um destes for verdade, NENHUM motor automático envia mensagem:
+- `customers.bot_paused === true` (consultor clicou "Assumir")
+- `customers.assigned_human_id IS NOT NULL` (humano vinculado)
+- `customers.bot_paused_until > now()` (pausa programada)
+- `ai_agent_config.enabled === false` para o `consultant_id` (switch global desligado)
 
-## Helper único — `supabase/functions/_shared/bot/paused.ts`
+## Helper canônico
 
-- `isCustomerPausedByHuman(customer)` — checa 1, 2, 3 em memória.
-- `isPausedByPhone(supabase, phone, consultantId?)` — checa no DB por telefone.
-- `isConsultantAIDisabled(supabase, consultantId)` — checa 4 com cache de 5s.
-- `isAutomationBlocked(supabase, customer, consultantId)` — combina tudo, retorna `{blocked, reason}`.
+`supabase/functions/_shared/bot/paused.ts`:
+- `isCustomerPausedByHuman(customer)` — 3 primeiras regras
+- `isPausedByPhone(supabase, phone, consultantId?)` — variante para crons sem customer carregado
+- `isConsultantAIDisabled(supabase, consultantId)` — checa `ai_agent_config.enabled` com cache de 5s
+- `isAutomationBlocked(supabase, customer, consultantId)` — combinado
 
-## Pontos de enforcement (todos chamam o helper)
+## Pontos de aplicação
 
-- `whapi-webhook/index.ts` — antes do bot-flow, ao entrar inbound:
-  - Se `isConsultantAIDisabled` → registra inbound, pausa o customer com `manual_global_pause`, retorna. **Cobre leads novos.**
-  - Se `isCustomerPausedByHuman` → registra inbound, retorna.
-- `evolution-webhook/index.ts` — espelha a mesma ordem.
-- `ai-sales-agent/index.ts` — aborta se humano assumiu OU consultor desligado.
-- `ai-agent-router/index.ts` — não cai mais no global enabled=true se o consultor explicitamente desativou.
-- `crm-auto-progress/index.ts` — auto-mensagens de Kanban só enviam se IA do consultor estiver ON e o customer não estiver pausado.
+### Webhooks inbound (silêncio total quando IA desligada — como se desconectado)
+- `whapi-webhook`: gate `isConsultantAIDisabled(superAdminConsultantId)` é a PRIMEIRA coisa após `parseWhapiMessage`, ANTES de outboundHuman, dedup, customer-create, notifyNewLead, OTP. Quando OFF retorna `{ ok:true, msg:"global_ai_disabled_silent" }`.
+- `evolution-webhook`: mesmo padrão — gate logo após `instances` lookup, antes de `parseEvolutionMessage`/dedup.
 
-## UI — `/admin` → aba IA
+### Crons automáticos (descartam leads de consultor com IA OFF)
+- `ai-followup-cron`: por lead, checa `isConsultantAIDisabled(lead.consultant_id)`. Se OFF, limpa `next_followup_at` e pula (`reason: skipped_global_ai_off`).
+- `bot-stuck-recovery`: por lead, checa `isConsultantAIDisabled(lead.consultant_id)`. Se OFF, incrementa `stats.skipped_global_off` e pula.
+- `ai-sales-agent`, `ai-agent-router`, `crm-auto-progress`: já checam helper.
 
-- Switch `IA ativa para meus leads`:
-  - OFF: grava `ai_agent_config.enabled=false` E pausa **TODOS** os leads do consultor (não só `bot_paused=false/null`), com `bot_paused_reason='manual_global_pause'` e `assigned_human_id=userId`.
-  - ON: religa apenas os leads pausados com `manual_global_pause` — `humano_assumiu` permanece humano.
-- Botão "Parar IA em todos os meus leads" — mesmo update de `manual_global_pause` em todo o consultor.
-- Botão "Religar IA" — só leva de volta para a IA quem foi pausado com `manual_global_pause`.
+## UI — switch "IA ativa para meus leads"
 
-## Auto-takeover frontend
+`src/components/admin/AIAgentTab/index.tsx`:
+- OFF: persiste `ai_agent_config.enabled=false` E faz UPDATE em massa de TODOS os customers do consultor com `bot_paused=true, bot_paused_reason="manual_global_pause", assigned_human_id=userId`.
+- ON: persiste `enabled=true` E reativa SÓ os leads com `bot_paused_reason="manual_global_pause"` (preserva takeovers humanos reais).
+- `saveConfig` faz select→update OR insert (equivalente a upsert) — garante que o primeiro OFF cria a linha.
 
-- `auto-takeover.ts` é disparado em qualquer envio manual (texto, áudio, imagem, vídeo, documento) e marca `bot_paused=true`, `assigned_human_id=userId`, `bot_paused_reason="humano_assumiu*"`. Fallback: edge `customer-takeover` para super admin atuando em customer de outro consultor.
+## Reflexo temporal
 
-## Backfills aplicados
+Cache `_aiEnabledCache` (5s TTL) em `paused.ts` evita query repetida por inbound. Religar/desligar reflete em até 5s nos webhooks. Crons leem direto do DB.
 
-- 2026-05-19: leads de consultores com `enabled=false` reforçados em `manual_global_pause` (838 do super admin).
+## Backfill histórico
+
+Migration `20260519203812_*.sql` aplicou `bot_paused=true, bot_paused_reason='manual_global_pause'` em todos os leads do consultor com `ai_agent_config.enabled=false` no momento (838 leads). Para consultores que desligarem depois, o próprio toggle faz o update em massa.
