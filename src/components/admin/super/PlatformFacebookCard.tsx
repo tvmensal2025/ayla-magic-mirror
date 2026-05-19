@@ -395,6 +395,61 @@ export function PlatformFacebookCard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-primary" /> Relatório de Sincronização
+            </DialogTitle>
+          </DialogHeader>
+          {syncReport && (
+            <div className="space-y-3 text-sm">
+              <ReportRow
+                title="Pixel ↔ Conta de anúncios"
+                ok={syncReport.pixel_check?.ok}
+                msg={syncReport.pixel_check?.message || syncReport.pixel_check?.error}
+              />
+              <ReportRow
+                title="Saldo da conta"
+                ok={syncReport.balance?.ok}
+                msg={syncReport.balance?.ok
+                  ? `Disponível: ${((syncReport.balance.available_cents || 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: syncReport.balance.currency || "BRL" })} · Gasto: ${((syncReport.balance.amount_spent_cents || 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: syncReport.balance.currency || "BRL" })}`
+                  : syncReport.balance?.error}
+              />
+              <ReportRow
+                title="Métricas de campanhas"
+                ok={syncReport.metrics?.ok}
+                msg={syncReport.metrics?.ok
+                  ? `${syncReport.metrics?.synced ?? 0} campanhas atualizadas`
+                  : syncReport.metrics?.error}
+              />
+              <ReportRow
+                title="Audiências + Lookalike"
+                ok={syncReport.audiences?.ok}
+                msg={syncReport.audiences?.ok
+                  ? `${syncReport.audiences?.uploaded ?? 0} clientes enviados · Lookalike: ${syncReport.audiences?.lal_status || "—"}`
+                  : syncReport.audiences?.error}
+              />
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setReportOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ReportRow({ title, ok, msg }: { title: string; ok?: boolean; msg?: string }) {
+  return (
+    <div className={`rounded-lg border p-3 ${ok ? "border-primary/30 bg-primary/5" : "border-warning/30 bg-warning/5"}`}>
+      <div className="flex items-center gap-2 font-medium">
+        {ok ? <CheckCircle2 className="w-4 h-4 text-primary" /> : <AlertCircle className="w-4 h-4 text-warning" />}
+        {title}
+      </div>
+      {msg && <p className="text-xs text-muted-foreground mt-1 break-words">{msg}</p>}
     </div>
   );
 }
