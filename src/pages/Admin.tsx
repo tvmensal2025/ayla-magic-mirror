@@ -239,6 +239,14 @@ const AdminContent = () => {
                 }}
               />
             </Suspense>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="relative p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-all duration-200"
+              aria-label="Configurações"
+              title="Configurações"
+            >
+              <Settings className="h-5 w-5" />
+            </button>
             <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-foreground gap-2 rounded-xl">
               <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline">Sair</span>
