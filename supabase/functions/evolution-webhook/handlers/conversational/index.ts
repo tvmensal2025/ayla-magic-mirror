@@ -713,7 +713,9 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   }
   const dbSteps = loaded.steps;
   const flowId = loaded.flowId;
-  const strictMode = loaded.strictMode;
+  const globalStrict = await isStrictScriptMode().catch(() => false);
+  const strictMode = loaded.strictMode || globalStrict;
+  if (globalStrict) console.log(`[conversational/evo] 🛑 strict_script_mode=ON (kill switch global)`);
 
   // Helper: encontra o primeiro step ativo de um determinado step_type
   // (usado para resolver goto_special='cadastro' — preferimos ir para o
