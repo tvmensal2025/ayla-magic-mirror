@@ -184,19 +184,31 @@ export default function FluxoCamila() {
   const [showMigrationBanner, setShowMigrationBanner] = useState(
     () => typeof window !== "undefined" && !localStorage.getItem("camila_migration_v2_dismissed")
   );
+  // A/B test state
+  const [editingVariant, setEditingVariant] = useState<"A" | "B">("A");
+  const [hasFlowB, setHasFlowB] = useState(false);
+  const [abEnabled, setAbEnabled] = useState(false);
+  const [variantCounts, setVariantCounts] = useState<{ A: number; B: number }>({ A: 0, B: 0 });
+  const [cloneBusy, setCloneBusy] = useState(false);
 
-  const reload = useCallback(async (uid: string) => {
-    const [{ data: cons }, { data: flows }, { count }] = await Promise.all([
-      supabase.from("consultants").select("conversational_flow_enabled").eq("id", uid).maybeSingle(),
-      supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("is_active", true).order("created_at").limit(1),
+  const reload = useCallback(async (uid: string, variant: "A" | "B" = "A") => {
+    const [{ data: cons }, { data: flows }, { count }, { data: flowB }, { data: vA }, { data: vB }] = await Promise.all([
+      supabase.from("consultants").select("conversational_flow_enabled, ab_test_enabled").eq("id", uid).maybeSingle(),
+      supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
       supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("conversational_flow_enabled", true),
+      supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("variant", "B").limit(1),
+      supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "A"),
+      supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "B"),
     ]);
     setGlobalAtivo(!!cons?.conversational_flow_enabled);
+    setAbEnabled(!!(cons as any)?.ab_test_enabled);
     setTestCount(count ?? 0);
+    setHasFlowB((flowB?.length ?? 0) > 0);
+    setVariantCounts({ A: (vA as any)?.length ?? 0, B: (vB as any)?.length ?? 0 });
 
     let fid = flows?.[0]?.id ?? null;
-    if (!fid) {
-      // garantia: chama a função de seed (idempotente)
+    if (!fid && variant === "A") {
+      // garantia: chama a função de seed (idempotente) — apenas para variante A
       const { data } = await supabase.rpc("seed_default_camila_flow", { _consultant_id: uid });
       fid = (data as string) ?? null;
     }
@@ -213,10 +225,11 @@ export default function FluxoCamila() {
         fallback: parseFallback(r.fallback, r.transitions),
         auto_detect_doc_type: r.auto_detect_doc_type !== false,
       })));
+    } else {
+      setSteps([]);
     }
 
     // Conta mídias ativas por slot_key (e por step_tags como fallback)
-    // para mostrar badges "⚠️ sem áudio/vídeo" nos steps.
     const { data: medias } = await supabase
       .from("ai_media_library")
       .select("kind, slot_key, step_tags, active, is_public, consultant_id")
