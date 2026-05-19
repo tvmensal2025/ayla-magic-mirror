@@ -23,6 +23,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { AdImageLibraryPanel } from "./AdImageLibraryPanel";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
 import type { AdImageLibraryItem } from "@/services/adImageLibrary";
+import { CtwaPreflightCard } from "./CtwaPreflightCard";
+
 
 interface Props {
   open: boolean;
@@ -97,6 +99,9 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
   const [submitting, setSubmitting] = useState(false);
   const [aiResizingIdx, setAiResizingIdx] = useState<number | null>(null);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  // Pré-checagem CTWA: bot + Facebook + pixel + WABA. Bloqueia Publicar quando false.
+  const [ctwaReady, setCtwaReady] = useState(false);
+
 
   // Validação inicial
   const [issues, setIssues] = useState<string[] | null>(null);
