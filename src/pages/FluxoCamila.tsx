@@ -659,7 +659,7 @@ function StepCard(props: {
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
-  variant?: "A" | "B";
+  variant?: "A" | "B" | "C";
 }) {
   const { step, numero, total, consultantId, allSteps, mediaCounts, onPatch, onMoveUp, onMoveDown, onDelete, variant = "A" } = props;
   const [localText, setLocalText] = useState(step.message_text ?? "");
