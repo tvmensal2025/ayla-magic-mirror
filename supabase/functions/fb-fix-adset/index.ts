@@ -102,7 +102,38 @@ Deno.serve(async (req) => {
       });
       activated = true;
     } catch (e) {
-      warnings.push(`Falha ao ativar: ${(e as Error).message}`);
+      warnings.push(`Falha ao ativar adset: ${(e as Error).message}`);
+    }
+
+    // Ativa também a campanha e todos os ads filhos
+    let campaignActivated = false;
+    const adsActivated: string[] = [];
+    try {
+      await fb(`/${adset.campaign_id}?access_token=${tk}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ status: "ACTIVE" }),
+      });
+      campaignActivated = true;
+    } catch (e) {
+      warnings.push(`Falha ao ativar campanha: ${(e as Error).message}`);
+    }
+    try {
+      const adsRes = await fb(`/${targetId}/ads?fields=id,status&limit=50&access_token=${tk}`);
+      for (const ad of (adsRes.data || [])) {
+        try {
+          await fb(`/${ad.id}?access_token=${tk}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({ status: "ACTIVE" }),
+          });
+          adsActivated.push(ad.id);
+        } catch (e) {
+          warnings.push(`Falha ao ativar ad ${ad.id}: ${(e as Error).message}`);
+        }
+      }
+    } catch (e) {
+      warnings.push(`Falha listando ads: ${(e as Error).message}`);
     }
 
     return new Response(JSON.stringify({
