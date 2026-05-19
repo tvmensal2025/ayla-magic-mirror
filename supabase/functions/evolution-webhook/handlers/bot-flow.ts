@@ -2226,7 +2226,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               else if (ntype === "finalizar_cadastro") nextStepValue = "finalizando";
               console.log(`[custom-step-resolver] message→advance final=${current.step_key} type=${ntype} isCapture=${_isCapture}`);
               const _updates: any = { conversation_step: nextStepValue, __inline_sent: (emittedCurrent || dispatchedAny) || undefined };
-              if (_isCapture && (emittedCurrent || dispatchedAny)) {
+              const _currentHasInlineCapture = Array.isArray((current as any)?.captures)
+                && (current as any).captures.some((c: any) => c?.enabled === true);
+              if ((_isCapture || _currentHasInlineCapture) && (emittedCurrent || dispatchedAny)) {
                 _updates.last_custom_prompt_at = new Date().toISOString();
               }
               return { reply: "", updates: _updates };
