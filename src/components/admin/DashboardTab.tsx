@@ -263,6 +263,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
 
         {/* === VISÃO GERAL === */}
         <TabsContent value="visao" className="space-y-4 mt-6">
+          <AdMetricsCards consultantId={adAccountId} periodDays={periodDays} />
           <MainChart data={(analytics as any)?.dailyMain} />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
