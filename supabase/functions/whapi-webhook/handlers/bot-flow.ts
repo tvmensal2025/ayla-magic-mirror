@@ -902,7 +902,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         .eq("active", true)
         .eq("is_draft", false)
         .order("send_order", { ascending: true });
-      const medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+      let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+      const _flowVariant = (customer as any)?.flow_variant || 'A';
+      if (_flowVariant === 'B') {
+        const _before = medias.length;
+        medias = medias.filter((m) => String(m.kind).toLowerCase() !== 'audio');
+        if (_before !== medias.length) console.log(`[dispatch:${stepKey}] variant=B: removed ${_before - medias.length} audio media(s)`);
+      }
 
       const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
       const vars: Record<string, string> = {
