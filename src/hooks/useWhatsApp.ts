@@ -618,6 +618,16 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
     mountedRef.current = true;
     let cancelled = false;
 
+    // Guard: sem consultantId válido (UUID), não consulta nada.
+    if (!consultantId) {
+      setStatus("disconnected");
+      setIsLoading(false);
+      return () => {
+        mountedRef.current = false;
+        stopPolling();
+      };
+    }
+
     async function init() {
       const name = getFixedInstanceName(consultantId);
       setInstanceName(name);

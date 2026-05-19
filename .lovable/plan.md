@@ -1,66 +1,42 @@
-## Objetivo
+## Diagnóstico
 
-Hoje, na variante B, o dispatcher simplesmente **descarta** todos os áudios. O usuário quer que o Fluxo B fique "100%": o conteúdo dos áudios precisa ser **enviado como texto** (transcrição), na **mesma posição** em que o áudio seria enviado no Fluxo A. Assim B = A, só que falado vira escrito.
+O erro visível no preview é o painel Admin quebrando/interrompendo o carregamento. Encontrei dois sinais principais:
 
-Como cada áudio em `ai_media_library` já tem uma coluna `transcript`, vamos reutilizá-la e garantir que toda áudio do consultor tenha transcrição revisada antes de B sair.
+1. O runtime registrou `Failed to fetch dynamically imported module: /src/pages/Admin.tsx`, típico de reload/HMR após erro em módulo lazy.
+2. No carregamento atual do `/admin`, há uma chamada Supabase inválida:
 
----
+```text
+GET /rest/v1/whatsapp_instances?select=id&consultant_id=eq.
+400 invalid input syntax for type uuid: ""
+```
 
-## Comportamento final
+Isso acontece porque `useWhatsApp()` é chamado com `consultantId` vazio antes do `userId` real estar disponível, e ele consulta `whatsapp_instances.consultant_id = ""`.
 
-- **Fluxo A**: continua igual (Áudio → Imagem → Vídeo → Texto, ou ordem configurada).
-- **Fluxo B**: para cada passo, **cada áudio vira uma mensagem de texto** com a transcrição, exatamente na posição em que o áudio sairia. Imagem/vídeo/texto do passo seguem normalmente.
-- Se um áudio não tem `transcript` salvo no momento do envio, o dispatcher chama `ai-transcribe-media` on-demand, salva em `ai_media_library.transcript` e usa.
-- A consultora pode editar o texto transcrito no admin (Fluxo B) — isso atualiza `ai_media_library.transcript` (compartilhado, então não polui o A; o A nunca lê o transcript).
+## Plano de correção
 
----
+1. Tornar `useWhatsApp` seguro quando ainda não existe `consultantId` válido:
+   - não calcular instância;
+   - não consultar `settings`/`whatsapp_instances`;
+   - não iniciar polling;
+   - retornar estado neutro/desconectado até receber um UUID válido.
 
-## Mudanças nas Edge Functions
+2. Ajustar o uso no `Admin.tsx` para evitar inicializar o hook de WhatsApp com string vazia.
 
-Arquivos: `supabase/functions/whapi-webhook/handlers/conversational/index.ts`, `supabase/functions/evolution-webhook/handlers/conversational/index.ts`, `supabase/functions/manual-step-send/index.ts`.
+3. Melhorar o carregamento da aba `Atendente IA`:
+   - manter spinner apenas enquanto os dados realmente carregam;
+   - se a consulta falhar, exibir mensagem de erro e botão de tentar novamente, em vez de ficar travado.
 
-1. Em `sendStepMedia`, substituir o filtro atual:
-   ```
-   if (variant === 'B') medias = medias.filter(m => kind !== 'audio')
-   ```
-   por uma transformação:
-   - Para cada áudio: garantir `transcript` (se vazio, baixar bytes do `url`, chamar `ai-transcribe-media` com `kind:"audio"`, salvar `transcript` na tabela).
-   - Trocar o item de `kind:"audio"` por um **item virtual** `{ kind:"text", text: transcript, delayMs }` na sequência.
-2. Ajustar o builder de sequência: hoje ele agrupa por kind (`audio|video|image|text`). Vamos permitir múltiplos itens text no meio da sequência preservando ordem original do áudio (slot "audio" do `media_order` passa a despejar textos transcritos um a um, com `delay_before_ms` herdado).
-3. Helper novo `ensureAudioTranscript(supabase, mediaRow)` em `_shared/` para evitar duplicação entre os 3 arquivos.
-4. Logs claros: `[variant=B] replaced audio "<label>" with transcript (N chars)` ou `[variant=B] audio "<label>" sem transcript e falhou transcrição → pulado`.
+4. Validar no preview:
+   - abrir `/admin`;
+   - confirmar que não existe mais request `consultant_id=eq.`;
+   - abrir WhatsApp > Atendente IA e confirmar que a aba carrega ou mostra erro recuperável.
 
----
+## Arquivos prováveis
 
-## Mudanças no admin (`src/pages/FluxoCamila.tsx` + `StepMediaPanel.tsx`)
+- `src/hooks/useWhatsApp.ts`
+- `src/pages/Admin.tsx`
+- `src/components/admin/AIAgentTab/index.tsx` e/ou painéis internos como `SlotsPanel.tsx` / `LiveConversationsPanel.tsx`
 
-1. No seletor "Editando: Fluxo B", a seção "ÁUDIOS" deixa de ficar oculta. Em vez disso, vira **"Áudios (enviados como texto no B)"**:
-   - Lista os mesmos áudios do A.
-   - Para cada um: mostra player do áudio + `textarea` editável com `transcript`.
-   - Botão **"Transcrever / Re-transcrever"** que chama `ai-transcribe-media` (já existe) e salva em `ai_media_library.transcript`.
-   - Botão **"Transcrever todos pendentes"** no topo do card, para popular tudo de uma vez.
-2. Banner no topo da variante B: "No Fluxo B, cada áudio é enviado como mensagem de texto usando a transcrição abaixo. Edite o texto para refinar."
-3. Indicador por áudio: badge verde "transcrito" ou amarelo "sem transcrição".
+## Resultado esperado
 
----
-
-## Banco
-
-Nenhuma migração estrutural — `ai_media_library.transcript` já existe. Apenas usaremos/atualizaremos esse campo.
-
----
-
-## Critérios de aceite
-
-- Lead em variante B recebe, na ordem certa, todos os textos dos áudios do A como mensagens normais — mais imagem/vídeo/texto.
-- Editar a transcrição no admin reflete no próximo envio de B.
-- Áudio sem transcript é transcrito on-demand na primeira vez que B precisa dele e persiste para próximos leads.
-- A continua intacto: nunca envia o `transcript`, sempre o `url` do áudio.
-- `manual-step-send` (re-enviar passo manualmente do `LiveConversationsPanel`) respeita a mesma regra.
-
----
-
-## Perguntas
-
-1. Quando um áudio **não tiver** transcript e a transcrição on-demand falhar (rate limit, erro), você prefere (a) **pular o áudio** e seguir o passo, ou (b) **pausar o lead** e notificar? Plano usa (a) com log de erro.
-2. Quer um botão "Transcrever todos" no topo da página que processa todos os áudios do consultor de uma vez (mais rápido para popular), ou só transcrever sob demanda quando abrir cada passo?
+O painel Admin não deve quebrar durante o carregamento, e a aba Atendente IA não deve ficar presa em spinner por erro silencioso de consulta.
