@@ -5,6 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { isQuietHourBRT, logQuietSkip } from "../_shared/quiet-hours.ts";
+import { isConsultantAIDisabled } from "../_shared/bot/paused.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -41,8 +42,17 @@ Deno.serve(async (req) => {
     const results: Array<{ id: string; ok: boolean; error?: string; reason?: string }> = [];
 
     for (const lead of leads ?? []) {
+      // 🛑 Gate global: se a IA do consultor está desligada, pula sem disparar
+      // mensagem. Limpa o slot pra não reprocessar a cada execução.
+      if (await isConsultantAIDisabled(supabase, lead.consultant_id)) {
+        await supabase.from("customers").update({ next_followup_at: null }).eq("id", lead.id);
+        results.push({ id: lead.id, ok: true, reason: "skipped_global_ai_off" });
+        continue;
+      }
+
       // ⚠️ REGRA: IA só atende clientes que escreveram primeiro no WhatsApp.
       // Nunca iniciamos conversa proativa. Se não houver nenhuma mensagem
+      // inbound desse cliente, limpamos o slot e pulamos.
       // inbound desse cliente, limpamos o slot e pulamos.
       const { count: inboundCount } = await supabase
         .from("conversations")

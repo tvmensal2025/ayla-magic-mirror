@@ -62,6 +62,32 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ─── Carregar settings + identificar super admin ANTES de qualquer DB write ─
+    // Necessário para o gate global de IA desligada (silêncio total) rodar antes
+    // de outboundHuman, dedup, customer-create, etc.
+    const { data: settingsRows } = await supabase.from("settings").select("*");
+    const settings: Record<string, string> = {};
+    settingsRows?.forEach((s: any) => { settings[s.key] = s.value; });
+
+    const superAdminConsultantId = settings.superadmin_consultant_id || "";
+    if (!superAdminConsultantId) {
+      console.error("❌ superadmin_consultant_id não configurado na tabela settings");
+      return new Response(JSON.stringify({ error: "Super admin not configured" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (como se desconectado) ──
+    // Antes de outboundHuman, dedup, customer/notify/conversation: se o switch
+    // estiver OFF, simplesmente ignoramos a mensagem. Nada é criado, nada é
+    // notificado, nem mesmo dedup é consumido.
+    if (await isConsultantAIDisabled(supabase, superAdminConsultantId)) {
+      console.log(`🛑 [global-off-silent] IA desligada — ignorando inbound`);
+      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // ─── Outbound humano (consultor digitou no WhatsApp Business/app) ─
     if ((parsed as any).outboundHuman) {
       const outChatId: string = (parsed as any).chatId || "";
@@ -141,11 +167,7 @@ Deno.serve(async (req) => {
 
     const phone = normalizePhone(remoteJid.replace("@s.whatsapp.net", ""));
 
-    // ─── Buscar token Whapi e dados do super admin ─────────────────────
-    const { data: settingsRows } = await supabase.from("settings").select("*");
-    const settings: Record<string, string> = {};
-    settingsRows?.forEach((s: any) => { settings[s.key] = s.value; });
-
+    // ─── Validar token Whapi (settings já carregadas acima) ────────────
     const whapiToken = settings.whapi_token || Deno.env.get("WHAPI_TOKEN") || "";
     if (!whapiToken) {
       console.error("❌ WHAPI_TOKEN não configurado");
@@ -197,16 +219,7 @@ Deno.serve(async (req) => {
         }
       : realSender;
 
-    // ─── Identificar consultor super admin ─────────────────────────────
-    // O super admin tem consultant_id fixo na settings
-    const superAdminConsultantId = settings.superadmin_consultant_id || "";
-    if (!superAdminConsultantId) {
-      console.error("❌ superadmin_consultant_id não configurado na tabela settings");
-      return new Response(JSON.stringify({ error: "Super admin not configured" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
+    // ─── Identificar consultor super admin (id já validado no topo) ────
     const { data: consultantData } = await supabase
       .from("consultants")
       .select("id, name, igreen_id, conversational_flow_enabled")
@@ -217,15 +230,7 @@ Deno.serve(async (req) => {
     const consultorId = consultantData?.igreen_id || "124170";
     console.log(`✅ Whapi super admin: ${nomeRepresentante} (iGreen ID: ${consultorId})`);
 
-    // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (como se desconectado) ──
-    // Antes de qualquer customer/notify/conversation: se o switch estiver OFF,
-    // simplesmente ignoramos a mensagem. Nada é criado, nada é notificado.
-    if (await isConsultantAIDisabled(supabase, superAdminConsultantId)) {
-      console.log(`🛑 [global-off-silent] IA desligada — ignorando inbound de ${phone}`);
-      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+
 
 
 

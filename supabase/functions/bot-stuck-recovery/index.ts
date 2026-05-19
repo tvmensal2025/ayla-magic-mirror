@@ -12,6 +12,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createEvolutionSender } from "../_shared/evolution-api.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { isQuietHourBRT, logQuietSkip } from "../_shared/quiet-hours.ts";
+import { isConsultantAIDisabled } from "../_shared/bot/paused.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -68,6 +69,7 @@ Deno.serve(async (req) => {
   const stats = {
     scanned: 0, rescued: 0, abandoned: 0,
     skipped_cooldown: 0, skipped_offline: 0, skipped_recent_button: 0,
+    skipped_global_off: 0,
     stuck_marked: 0, send_failed: 0, ai_failed: 0,
   };
 
@@ -136,6 +138,12 @@ Deno.serve(async (req) => {
       // Instância offline → pula sem registrar tentativa (não é falha do lead)
       if (offlineConsultants.has(lead.consultant_id)) {
         stats.skipped_offline++;
+        continue;
+      }
+
+      // 🛑 Gate global: IA do consultor desligada → silêncio total
+      if (await isConsultantAIDisabled(supabase, lead.consultant_id)) {
+        stats.skipped_global_off++;
         continue;
       }
 
