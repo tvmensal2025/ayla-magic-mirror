@@ -34,7 +34,11 @@ Deno.serve(async (req) => {
     const correctPixel = plat.pixel_id || "1521037349653769";
 
     const adset = await fb(`/${adsetId}?fields=id,name,status,effective_status,promoted_object,campaign_id&access_token=${tk}`);
+    console.log("ADSET", JSON.stringify(adset));
     const currentPixel = adset.promoted_object?.pixel_id || null;
+    if (body?.inspect_only) {
+      return new Response(JSON.stringify({ ok: true, inspect: true, adset, correct_pixel: correctPixel, current_pixel: currentPixel }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     const warnings: string[] = [];
     let newAdsetId: string | null = null;
