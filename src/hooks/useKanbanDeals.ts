@@ -36,15 +36,18 @@ export function useKanbanDeals(consultantId: string) {
     const needsLookup = rawDeals.filter((d) => !(d as any).customer_name && d.remote_jid);
     if (needsLookup.length === 0) return;
     const phones = needsLookup.map((d) => d.remote_jid!.split("@")[0]);
-    const { data: customers } = await supabase.from("customers").select("name, phone_whatsapp").in("phone_whatsapp", phones);
+    const { data: customers } = await supabase
+      .from("customers")
+      .select("name, phone_whatsapp, conversation_step, last_step_advanced_at")
+      .in("phone_whatsapp", phones);
     if (!customers || customers.length === 0) return;
-    const phoneMap = new Map(customers.map((c) => [c.phone_whatsapp, c.name]));
+    const phoneMap = new Map(customers.map((c: any) => [c.phone_whatsapp, c]));
     setDeals((prev) =>
       prev.map((d) => {
         if ((d as any).customer_name) return d;
         const phone = d.remote_jid?.split("@")[0];
-        const name = phone ? phoneMap.get(phone) : null;
-        return name ? { ...d, customer_name: name } as any : d;
+        const c: any = phone ? phoneMap.get(phone) : null;
+        return c ? { ...d, customer_name: c.name, conversation_step: c.conversation_step, last_step_advanced_at: c.last_step_advanced_at } as any : d;
       })
     );
   }, []);
