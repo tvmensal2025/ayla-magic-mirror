@@ -30,11 +30,19 @@ export async function openaiChat(opts: OpenAIChatOptions): Promise<OpenAIChatRes
   const key = opts.apiKey || Deno.env.get("OPENAI_API_KEY");
   if (!key) throw new Error("OPENAI_API_KEY not configured");
 
+  const model = opts.model || "gpt-5-mini";
+  // gpt-5 / o1 family rejeitam temperature != 1 (default da OpenAI). Omitimos
+  // o campo nesses modelos para evitar 400 "Unsupported value: 'temperature'".
+  const modelLocksTemperature = /^(gpt-5|o1|o3|o4)/i.test(model);
   const body: Record<string, any> = {
-    model: opts.model || "gpt-5-mini",
+    model,
     messages: opts.messages,
-    temperature: opts.temperature ?? 0.2,
   };
+  if (!modelLocksTemperature) {
+    body.temperature = opts.temperature ?? 0.2;
+  } else if (typeof opts.temperature === "number" && opts.temperature !== 1) {
+    // caller passou explicitamente — silenciosamente normaliza para 1
+  }
   if (opts.maxTokens) body.max_tokens = opts.maxTokens;
   if (opts.jsonSchema) {
     body.response_format = {
