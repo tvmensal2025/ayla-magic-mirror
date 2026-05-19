@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
     // Resolve medias for slot
     const { data: mediaRows } = await supabase
       .from("ai_media_library")
-      .select("id, kind, url, slot_key, send_order, duration_sec")
+      .select("id, kind, url, slot_key, send_order, duration_sec, transcript, label")
       .eq("consultant_id", body.consultantId)
       .eq("slot_key", slotKey)
       .eq("active", true)
@@ -98,10 +98,20 @@ Deno.serve(async (req) => {
       .order("send_order", { ascending: true });
     let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
     if (variant === "B") {
-      const before = medias.length;
-      medias = medias.filter((m) => String(m.kind).toLowerCase() !== "audio");
-      if (before !== medias.length) console.log(`[manual-step-send] variant=B: removed ${before - medias.length} audio media(s)`);
+      const transformed: any[] = [];
+      for (const m of medias) {
+        if (String(m.kind).toLowerCase() !== "audio") { transformed.push(m); continue; }
+        const transcript = await ensureAudioTranscript(supabase, m);
+        if (transcript && transcript.trim()) {
+          transformed.push({ ...m, _asText: true, _transcript: transcript.trim() });
+          console.log(`[manual-step-send] variant=B: audio "${m.label || m.id}" → text (${transcript.length} chars)`);
+        } else {
+          console.warn(`[manual-step-send] variant=B: audio "${m.label || m.id}" sem transcript → pulado`);
+        }
+      }
+      medias = transformed;
     }
+
 
     // Whapi token
     const { data: settingsRows } = await supabase.from("settings").select("key,value");
