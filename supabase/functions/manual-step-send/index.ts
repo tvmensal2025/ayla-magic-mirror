@@ -215,7 +215,7 @@ Deno.serve(async (req) => {
   }
 });
 
-async function buildContinuationPatch(supabase: any, sender: any, remoteJid: string, consultantId: string, customer: any, step: any, vars: Record<string, string>) {
+async function buildContinuationPatch(supabase: any, sender: any, remoteJid: string, consultantId: string, customer: any, step: any, vars: Record<string, string>, variant: string = "A") {
   const { data: next } = await supabase
     .from("bot_flow_steps")
     .select("id, step_key, slot_key, message_text, media_order, step_type, position, captures")
@@ -240,7 +240,7 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
     const ntype = String(next.step_type || "message");
     patch.conversation_step = next.id;
     if (ntype === "message") {
-      const sentNext = await sendConfiguredStep(supabase, sender, remoteJid, consultantId, customer.id, next, vars);
+      const sentNext = await sendConfiguredStep(supabase, sender, remoteJid, consultantId, customer.id, next, vars, variant);
       if (sentNext) patch.last_custom_prompt_at = new Date().toISOString();
     }
     if (ntype === "capture_conta") patch.conversation_step = "aguardando_conta";
