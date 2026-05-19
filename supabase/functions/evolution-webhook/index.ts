@@ -26,6 +26,7 @@ import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-nam
 import { captureError } from "../_shared/sentry.ts";
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
 import { syncDealStageFromStep } from "../_shared/crm-stage-sync.ts";
+import { isConsultantAIDisabled } from "../_shared/bot/paused.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -273,6 +274,28 @@ Deno.serve(async (req) => {
       message_type: isFile ? "image" : "text",
       conversation_step: customer.conversation_step,
     });
+
+    // ─── 6.0) IA GLOBALMENTE DESLIGADA pelo consultor ──────────────────
+    if (await isConsultantAIDisabled(supabase, instanceData.consultant_id)) {
+      if (!(customer as any).bot_paused || !(customer as any).assigned_human_id) {
+        try {
+          await supabase.from("customers").update({
+            bot_paused: true,
+            bot_paused_reason: "manual_global_pause",
+            bot_paused_at: new Date().toISOString(),
+            bot_paused_until: null,
+            assigned_human_id: instanceData.consultant_id,
+            updated_at: new Date().toISOString(),
+          }).eq("id", customer.id);
+        } catch (e) {
+          console.error("⚠️ [global-off] update falhou:", (e as Error).message);
+        }
+      }
+      console.log(`🛑 [global-off] IA do consultor ${instanceData.consultant_id} desligada — skip auto-reply para ${customer.id}`);
+      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // ─── 6.1) BOT PAUSED — handoff humano ativo ────────────────────────
     // Se um humano assumiu, NÃO responder. Apenas registrar inbound (acima) e sair.
