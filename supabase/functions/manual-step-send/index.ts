@@ -247,7 +247,7 @@ async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string,
     .eq("active", true)
     .eq("is_draft", false)
     .order("send_order", { ascending: true });
-  const items = ((mediaRows as any[]) || [])
+  const items: Array<{ kind: string; text?: string; media?: any }> = ((mediaRows as any[]) || [])
     .filter((m) => !!m?.url)
     .map((m) => ({ kind: String(m.kind || "document").toLowerCase(), media: m }));
   const text = step.message_text ? applyVars(String(step.message_text)) : "";
