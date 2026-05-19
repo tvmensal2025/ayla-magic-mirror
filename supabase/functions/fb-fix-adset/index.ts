@@ -33,10 +33,8 @@ Deno.serve(async (req) => {
     const tk = await decryptToken(plat.access_token_encrypted);
     const correctPixel = plat.pixel_id || "1521037349653769";
 
-    const adset = await fb(`/${adsetId}?fields=id,name,status,effective_status,promoted_object,tracking_specs,campaign_id&access_token=${tk}`);
-    const currentPixel = adset.promoted_object?.pixel_id
-      || (adset.tracking_specs?.find((s: any) => Array.isArray(s.fb_pixel))?.fb_pixel?.[0])
-      || null;
+    const adset = await fb(`/${adsetId}?fields=id,name,status,effective_status,promoted_object,campaign_id&access_token=${tk}`);
+    const currentPixel = adset.promoted_object?.pixel_id || null;
 
     const warnings: string[] = [];
     let newAdsetId: string | null = null;
