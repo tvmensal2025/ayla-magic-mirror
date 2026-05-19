@@ -516,6 +516,7 @@ const SuperAdmin = () => {
           <div className="space-y-6">
             <AIControlPanel />
             <ABResultsPanel />
+            <LearnedPatternsPanel />
             <AIAuditPanel />
             <AIKnowledgePanel />
           </div>
