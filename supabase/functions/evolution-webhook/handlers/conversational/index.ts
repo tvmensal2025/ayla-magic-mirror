@@ -610,12 +610,6 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     !CADASTRO_STEPS.has(stepKey)
   ) {
     console.log(`[conversational] 📸 arquivo recebido em step="${stepKey}" → redirecionando para aguardando_conta`);
-    try {
-      await ctx.sender.sendText(
-        ctx.remoteJid,
-        "✅ Conta recebida! ⏳ Analisando seus dados...\n\nAguarde alguns instantes...",
-      );
-    } catch (_) { /* noop */ }
     // Reprocessa a mesma mensagem como conta no próximo webhook
     // (que será disparado quando o customer for atualizado).
     // Alternativamente, chama o bot determinístico inline.
