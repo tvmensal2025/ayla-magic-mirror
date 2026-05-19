@@ -16,6 +16,7 @@ import { evaluateRules, logRuleFire, _consumeCustomerRateLimit } from "./rules-e
 import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
 import { ensureAudioTranscript } from "../../../_shared/audio-transcript.ts";
 import { isQuietHourBRT, logQuietSkip } from "../../../_shared/quiet-hours.ts";
+import { isStrictScriptMode } from "../../../_shared/ai-decisions.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
