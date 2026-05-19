@@ -43,10 +43,13 @@ function regexClassify(text: string): Intent | null {
   return null;
 }
 
+export type ClassifyAction = "execute" | "repeat" | "handoff";
+
 export interface ClassifyResult {
   intent: Intent;
   confidence: number;
   source: "regex" | "openai" | "llm" | "fallback";
+  action?: ClassifyAction;
 }
 
 const PROMPT = (text: string, step: string) => `Você classifica mensagens de WhatsApp de leads de energia solar brasileiros.
