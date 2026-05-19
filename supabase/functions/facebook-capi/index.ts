@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
     // Offline conversion vai pro Offline Event Set (precisa do ID); fallback pro pixel se não tiver set.
     const targetId = body.offline && body.offline_event_set_id
       ? body.offline_event_set_id
-      : conn.pixel_id;
+      : pixelId;
 
     const fbRes = await fbFetch(`${FB_GRAPH}/${targetId}/events?access_token=${token}`, {
       method: "POST",
