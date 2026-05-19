@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
     // Resolve customer + phone
     const { data: customer } = await supabase
       .from("customers")
-      .select("id, name, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant")
+      .select("id, name, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at")
       .eq("id", body.customerId)
       .maybeSingle();
     if (!customer) return json({ error: "customer_not_found", message: "Lead não encontrado." }, 404);
@@ -182,6 +182,60 @@ Deno.serve(async (req) => {
       if (chosen) toSend = [chosen];
     }
 
+    // Se o passo é de captura (capture_*, confirm_phone, finalizar_cadastro)
+    // e nada foi montado para enviar, gera um prompt automático.
+    const stepType = String((step as any).step_type || "message");
+    const isCaptureStep = stepType !== "message";
+    if (isCaptureStep && toSend.length === 0) {
+      const promptRaw = resolveCapturePrompt(step, renderedText);
+      if (promptRaw) {
+        const prompt = applyVars(promptRaw);
+        const legacyStep = mapCaptureStepToLegacy(stepType, (step as any).id, (step as any).step_key);
+
+        // Debounce: se prompt enviado recentemente e lead já está no destino, pula.
+        const lastPromptAt = (customer as any).last_custom_prompt_at
+          ? new Date((customer as any).last_custom_prompt_at).getTime()
+          : 0;
+        const sameStep = String((customer as any).conversation_step || "") === legacyStep;
+        if (sameStep && Date.now() - lastPromptAt < 20_000) {
+          return json({
+            ok: true,
+            sent: [],
+            skipped: "recent_prompt",
+            message: "Pergunta já enviada há poucos segundos — aguarde a resposta do cliente.",
+          });
+        }
+
+        await sender.sendText(remoteJid, prompt);
+        await supabase.from("conversations").insert({
+          customer_id: customer.id,
+          message_direction: "outbound",
+          message_text: prompt,
+          message_type: "text",
+          conversation_step: legacyStep,
+        });
+        await supabase.from("customers").update({
+          conversation_step: legacyStep,
+          bot_paused: false,
+          bot_paused_reason: null,
+          bot_paused_at: null,
+          bot_paused_until: null,
+          assigned_human_id: null,
+          custom_step_retries: 0,
+          custom_step_retries_step: null,
+          last_custom_prompt_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", customer.id);
+
+        return json({
+          ok: true,
+          sent: [{ kind: "text", auto_prompt: true }],
+          continued: true,
+          next_step: legacyStep,
+        });
+      }
+    }
+
     if (toSend.length === 0) {
       // Nothing to send (step has no media/text for this part). If the caller asked
       // to continue the flow, still reposition the lead onto this step and unpause.
@@ -291,16 +345,29 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
     cursorPos = Number(next.position) || cursorPos + 1;
 
     const ntype = String(next.step_type || "message");
-    // Passos que exigem input do cliente — para a cadeia aqui e posiciona o lead.
+    // Passos que exigem input do cliente — para a cadeia, posiciona o lead
+    // e dispara o prompt da captura (message_text → retry_text → fallback).
     if (ntype !== "message") {
-      patch.conversation_step = next.id;
-      if (ntype === "capture_conta") patch.conversation_step = "aguardando_conta";
-      else if (ntype === "capture_documento" || ntype === "capture_doc") patch.conversation_step = "aguardando_doc_auto";
-      else if (ntype === "capture_email") patch.conversation_step = "ask_email";
-      else if (ntype === "confirm_phone") patch.conversation_step = "ask_phone_confirm";
-      else if (ntype === "finalizar_cadastro") patch.conversation_step = "finalizando";
-      if (String(patch.conversation_step).startsWith("aguardando_") || String(patch.conversation_step).startsWith("ask_")) {
-        patch.last_custom_prompt_at = new Date().toISOString();
+      const legacy = mapCaptureStepToLegacy(ntype, next.id, next.step_key);
+      patch.conversation_step = legacy;
+      const applyVars = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
+      const rendered = next.message_text ? applyVars(String(next.message_text)) : "";
+      const promptRaw = resolveCapturePrompt(next, rendered);
+      if (promptRaw) {
+        const prompt = applyVars(promptRaw);
+        try {
+          await sender.sendText(remoteJid, prompt);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id,
+            message_direction: "outbound",
+            message_text: prompt,
+            message_type: "text",
+            conversation_step: legacy,
+          });
+          patch.last_custom_prompt_at = new Date().toISOString();
+        } catch (e) {
+          console.error(`[manual-step-send] falha ao enviar prompt do capture (${ntype}):`, (e as Error).message);
+        }
       }
       break;
     }
@@ -380,4 +447,51 @@ function json(body: any, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+/**
+ * Mapeia step_type custom de captura para a chave legada usada pelo bot
+ * (whapi-webhook trata essas chaves nativamente: aguardando_conta, etc).
+ */
+function mapCaptureStepToLegacy(stepType: string, stepId: string, stepKey?: string): string {
+  switch (stepType) {
+    case "capture_conta": return "aguardando_conta";
+    case "capture_documento":
+    case "capture_doc": return "aguardando_doc_auto";
+    case "capture_email": return "ask_email";
+    case "confirm_phone": return "ask_phone_confirm";
+    case "finalizar_cadastro": return "finalizando";
+    default: return stepKey || stepId;
+  }
+}
+
+/**
+ * Resolve o texto a enviar quando o passo é de captura.
+ * Ordem: message_text já renderizado → primeiro captures[].retry_text → fallback por tipo.
+ */
+function resolveCapturePrompt(step: any, renderedText: string): string | null {
+  if (renderedText && renderedText.trim()) return renderedText.trim();
+
+  const caps = Array.isArray(step?.captures) ? step.captures : [];
+  for (const c of caps) {
+    const t = String(c?.retry_text || c?.prompt || "").trim();
+    if (t) return t;
+  }
+
+  const stepType = String(step?.step_type || "");
+  switch (stepType) {
+    case "capture_conta":
+      return "{{nome}}, me manda a foto *ou PDF* da sua conta de luz aqui pelo WhatsApp 📄";
+    case "capture_documento":
+    case "capture_doc":
+      return "Agora me envia uma foto do seu documento (RG ou CNH, frente e verso) 📷";
+    case "capture_email":
+      return "Qual é o seu melhor e-mail? ✉️";
+    case "confirm_phone":
+      return "Esse número é o melhor pra falar com você no WhatsApp? Pode confirmar?";
+    case "finalizar_cadastro":
+      return "Tô finalizando seu cadastro, só um instante… ⏳";
+    default:
+      return null;
+  }
 }
