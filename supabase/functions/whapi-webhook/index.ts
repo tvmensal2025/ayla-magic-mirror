@@ -22,6 +22,7 @@ import { extractMultiField, buildMultiFieldPatch } from "../_shared/multi-field-
 import { botRequestStore, isTestPhone, logTestOutbound } from "../_shared/test-mode.ts";
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
 import { syncDealStageFromStep } from "../_shared/crm-stage-sync.ts";
+import { isCustomerPausedByHuman } from "../_shared/bot/paused.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
