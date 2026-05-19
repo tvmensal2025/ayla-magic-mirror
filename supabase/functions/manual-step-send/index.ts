@@ -182,7 +182,35 @@ Deno.serve(async (req) => {
       if (chosen) toSend = [chosen];
     }
 
-    if (toSend.length === 0) return json({ ok: false, error: "nothing_to_send" }, 400);
+    if (toSend.length === 0) {
+      // Nothing to send (step has no media/text for this part). If the caller asked
+      // to continue the flow, still reposition the lead onto this step and unpause.
+      if (body.continueFlow && body.part === "all") {
+        await supabase.from("customers").update({
+          conversation_step: (step as any).step_key || (step as any).id,
+          bot_paused: false,
+          bot_paused_reason: null,
+          bot_paused_at: null,
+          bot_paused_until: null,
+          assigned_human_id: null,
+          custom_step_retries: 0,
+          custom_step_retries_step: null,
+          updated_at: new Date().toISOString(),
+        }).eq("id", customer.id);
+        return json({
+          ok: true,
+          sent: [],
+          continued: true,
+          next_step: (step as any).step_key || (step as any).id,
+          message: "Passo sem mídia/texto — lead reposicionado sem envio.",
+        });
+      }
+      return json({
+        ok: false,
+        error: "nothing_to_send",
+        message: "Esse passo não tem mídia nem texto configurado para enviar.",
+      }, 400);
+    }
 
     const sentLog: any[] = [];
     for (let i = 0; i < toSend.length; i++) {
