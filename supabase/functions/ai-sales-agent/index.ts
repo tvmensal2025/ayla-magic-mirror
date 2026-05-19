@@ -6,6 +6,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { geminiGenerate, type GeminiTool } from "../_shared/gemini.ts";
+import { shouldSkipShortCircuit } from "../_shared/bot/orchestrator-gate.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -606,20 +607,19 @@ Deno.serve(async (req) => {
     // Se é a 1ª resposta da IA para esse lead E existe áudio com slot_key
     // 'boas_vindas' / 'first_response' / 'first_touch' ainda não enviado,
     // dispara direto sem depender do LLM.
+    //
+    // Sprint 3: gate via `_shared/bot/orchestrator-gate` — consultor com
+    // bot_flows.is_active=true tem o motor custom como fonte única; logamos
+    // a decisão de pular em ai_decisions para observabilidade no AIAuditPanel.
     const priorOutboundEarly = history.filter((h: any) => h.message_direction !== "inbound");
     const isFirstReply = priorOutboundEarly.length === 0 && mode === "reply";
     const FIRST_SLOTS = new Set(["boas_vindas", "first_response", "first_touch", "primeira_resposta"]);
-    // Se o consultor tem fluxo customizado ativo, NÃO atalhamos: deixamos o engine
-    // de steps respeitar a ordem (position) configurada em /admin/fluxos.
-    const { data: _hasCustomFlow } = await supabase
-      .from("bot_flows")
-      .select("id")
-      .eq("consultant_id", customer.consultant_id)
-      .eq("is_active", true)
-      .limit(1)
-      .maybeSingle();
-    const hasCustomFlow = !!_hasCustomFlow;
-    if (isFirstReply && !billAlreadyReceivedEarly && !hasCustomFlow) {
+    const skipShortCircuit = await shouldSkipShortCircuit(
+      supabase,
+      customer.consultant_id,
+      mode,
+    );
+    if (isFirstReply && !billAlreadyReceivedEarly && !skipShortCircuit) {
       const firstAudio = freshMedia
         .filter((m: any) => m.kind === "audio" && m.slot_key && FIRST_SLOTS.has(m.slot_key))
         .sort((a: any, b: any) => (b.priority || 0) - (a.priority || 0))[0];
@@ -641,7 +641,19 @@ Deno.serve(async (req) => {
           phase, latency_ms: Date.now() - t0,
         }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
+    } else if (isFirstReply && skipShortCircuit) {
+      // Observabilidade: registra o skip para o AIAuditPanel mostrar por que o
+      // motor custom assumiu (em vez do atalho deterministic_first_audio).
+      try {
+        await supabase.from("ai_decisions").insert({
+          customer_id, consultant_id: customer.consultant_id, phase,
+          tool_called: "skip", reasoning: "custom_flow_active:short_circuit_bypassed",
+          user_input, ai_output: { mode, reason: "consultant_has_active_bot_flow" },
+          latency_ms: Date.now() - t0, suppressed: true,
+        });
+      } catch (_) { /* best-effort, não bloqueia */ }
     }
+
 
     const formatTags = (arr: any) => {
       const a = Array.isArray(arr) ? arr.filter((x: any) => x && x !== "any") : [];
