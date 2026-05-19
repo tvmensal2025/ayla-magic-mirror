@@ -215,6 +215,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
       <div className="flex items-center justify-between gap-2 flex-wrap p-2 rounded-xl bg-card/40 border border-border/40 backdrop-blur">
         <div className="flex items-center gap-2">
           <WalletChip consultantId={userId} />
+          <AdAccountSwitcher userId={userId} value={adAccountId} onChange={setAdAccountId} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Select value={String(periodDays)} onValueChange={(v) => onPeriodChange(Number(v))}>
