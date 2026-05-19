@@ -1,63 +1,56 @@
-# Análise IA da Saúde do Bot (últimos 7 dias)
+## Objetivo
 
-Adicionar no topo do `/admin/saude-bot` um painel premium com **diagnóstico Gemini** que cruza tudo que rolou nos últimos 7 dias com o consultor — texto, áudio, vídeo, imagem, transições de passo, handoffs, conversão por variante A/B/C — e devolve um plano de ação para converter mais.
+No Funil de Vendas (Kanban do CRM), cada card precisa mostrar **em qual passo do fluxo do bot o lead parou** — numerado (1, 2, 3, …, N) com o título do passo. Assim dá pra olhar a coluna e bater o olho: "esse parou no 3 (envio de conta), aquele no 7 (CPF)".
 
-## 1. Nova edge function `bot-health-intel`
+## O que vai aparecer no card
 
-Inspirada em `captacao-intel`, mas **por consultor** e janela de **7 dias**.
+Logo abaixo do nome/telefone, um badge novo:
 
-Coleta para o `consultant_id`:
-- **`conversations`** (últimos 7d): agrupa por `message_type` (text/audio/video/image), `message_direction` (in/out), top 30 mensagens recebidas, top 30 enviadas, contagem por `conversation_step`.
-- **`bot_step_transitions`** (7d): from_step → to_step com `intent` e `confidence` médios; identifica passos onde a IA fica com confiança baixa.
-- **`bot_handoff_alerts`** (7d, abertos+resolvidos): agrupa por `reason`.
-- **`customers`** do consultor com `flow_variant`: total / aprovados por variante A/B/C; tempo médio parado por `conversation_step` (via `last_step_advanced_at`).
-- **`bot_message_ab_results`**: variantes de mensagem que estão ganhando.
-- **`ad_creative_insights` + `ad_competitor_creatives`**: contexto do que está convertendo no anúncio para o prompt amarrar "anúncio → primeira mensagem do bot".
-
-Monta prompt para **`google/gemini-2.5-pro`** (via Lovable AI Gateway, header `Lovable-API-Key`, modelo Gemini para análise rica multimodal-textual). Fallback `google/gemini-3-flash-preview` se 429/402. JSON estrito:
-
-```json
-{
-  "summary": "≤140 chars",
-  "health_score": 0-100,
-  "bottlenecks": [{ "title", "detail", "step", "severity" }],
-  "winners": [{ "title", "detail" }],
-  "lead_drops": [{ "step", "stuck_count", "why", "fix" }],
-  "media_insights": [{ "type": "audio|video|image|text", "observation", "action" }],
-  "ab_recommendation": { "best_variant": "A|B|C", "why", "action" },
-  "actions": [{ "label", "detail", "impact", "type" }]
-}
+```
+[ 3/10 ] Aguardando conta de luz   · há 2h parado
 ```
 
-Persiste em `capture_diagnostics` com `scope='bot_health'` e `consultant_id` setado (campos já existem). Sem migração.
+- `3/10` → posição do passo dentro do fluxo ativo do consultor.
+- Label → `title` do passo (ou nome amigável da tabela de legados).
+- Tempo parado → `now() - customers.last_step_advanced_at` (já existe).
 
-## 2. UI no `src/pages/SaudeBot.tsx`
+Cor do badge muda por faixa de risco: ≤24h verde, 24-72h âmbar, >72h vermelho.
 
-Novo card glassmorphism no topo (antes dos 3 cards de resumo):
+## Como o passo é resolvido
 
-- Header: "🧠 Análise IA — últimos 7 dias" + botão "Atualizar análise" (chama a edge function) + timestamp do `computed_at`.
-- **Health score** em destaque (gauge/anel verde→vermelho).
-- **Summary** em uma linha grande.
-- Tabs internas: `Gargalos` · `Vencedores` · `Onde perde lead` · `Mídia (áudio/vídeo/imagem)` · `A/B/C` · `Ações`.
-- Cada `action` vira chip clicável com badge de impacto; ações do tipo `tune_handoff` linkam para `/admin/fluxos`, `replicate_creative` para `/admin/anuncios`, etc.
-- Carrega ao montar via `select * from capture_diagnostics where scope='bot_health' and consultant_id=$me order by computed_at desc limit 1`. Se vazio ou >24h, mostra CTA "Gerar primeira análise".
+Cada deal vira lead via `customers.phone_whatsapp = remote_jid`. Pegamos `customers.conversation_step` e mapeamos:
 
-Mantém os blocos atuais (alertas, parados +24h, funil) abaixo.
+1. **Fluxo customizado** (`flow:<uuid>` ou só `<uuid>`): faz lookup em `bot_flow_steps` (já temos `flow_id`, `position`, `title`, `step_key`) do fluxo ativo do consultor e mostra `position+1 / total`.
+2. **Passos legados** (`welcome`, `aguardando_conta`, `ask_cpf`, …): tabela fixa no front com ordem canônica e label PT-BR (reusa o `STEP_LABELS` que já está em `BotFunnelPanel`). Numeração 1..N dentro do grupo "legado".
+3. **Sem `conversation_step`**: badge cinza "Sem interação".
 
-## 3. Cron diário (opcional, mesma função)
+## Filtro novo no topo do funil
 
-Quando chamada sem body roda para **todos consultores ativos** com leads nos últimos 7d. `pg_cron` 06:30 BRT. Não obrigatório no MVP — botão manual já cobre.
+Ao lado do "Buscar por nome…":
+
+- Select **"Parou no passo"** com a lista de passos do fluxo ativo (`1. Boas-vindas`, `2. Vídeo`, `3. Conta de luz`, …) + opção "Todos" e "Sem interação".
+- Filtra os cards do Kanban no client (já temos tudo em memória via `useKanbanDeals`).
+- Contador por coluna passa a refletir o filtro.
+
+## Arquivos a tocar
+
+- `src/hooks/useKanbanDeals.ts` — incluir `customers(conversation_step, last_step_advanced_at, flow_id)` no select; manter mapping para `customer_name`.
+- `src/hooks/useFlowSteps.ts` *(novo)* — hook que carrega `bot_flow_steps` do(s) flow_id(s) ativos do consultor e devolve `Map<step_key|uuid, { position, total, title }>`. Cacheia em `useMemo`.
+- `src/lib/flowStepResolver.ts` *(novo)* — função pura `resolveStep(conversation_step, flowMap, legacyMap) → { number, total, label, lastAdvancedAt }`. Reusa `STEP_LABELS` de `BotFunnelPanel` (mover para esse arquivo e re-exportar).
+- `src/components/whatsapp/KanbanDealCard.tsx` — receber `stepInfo` por prop e renderizar o badge novo (cor por faixa de tempo).
+- `src/components/whatsapp/KanbanColumn.tsx` / `KanbanBoard.tsx` — repassar `stepInfo` por deal e aplicar filtro "Parou no passo".
+- `src/components/whatsapp/CrmTabs.tsx` (ou onde mora o header do Funil) — adicionar o `<Select>` "Parou no passo" controlado.
 
 ## Detalhes técnicos
 
-- Função: `supabase/functions/bot-health-intel/index.ts`, CORS padrão, aceita `{ consultant_id }` no body; se ausente usa JWT do caller.
-- Sample size guard: se <10 conversas em 7d, devolve `summary: "Poucos dados ainda — rode mais leads"` sem chamar IA (economia).
-- Trunca texto das mensagens em 300 chars no prompt; resume mídia citando só `message_type` + `slot_key` + `conversation_step` (não baixa binário — Gemini analisa o **comportamento** em torno da mídia, não o conteúdo bruto).
-- Reusa helper `openaiChat` se já roteia pro gateway, senão usa fetch direto pro `https://ai.gateway.lovable.dev/v1/chat/completions` com `LOVABLE_API_KEY`.
-- Custo controlado: 1 call por consultor por dia (cache 24h no UI).
+- Query extra: `bot_flow_steps` filtrado por `flow_id in (...)` dos fluxos do consultor — uma única chamada na montagem.
+- Numeração: `position` é 0-based no banco → exibir `position + 1`.
+- `total`: `count(*) where flow_id = X` (já vem do array carregado).
+- Legados: ordem fixa em array — mesma ordem do `STEP_LABELS` de `BotFunnelPanel` (welcome → complete). Total = length do array.
+- Estado de "parado": já calculado por `KanbanSlaIndicator` via `updated_at`. Trocar para `customers.last_step_advanced_at` quando existir (mais preciso pro contexto "parou no passo").
+- Sem migração de banco. Sem mexer em edge function.
 
-## Arquivos
+## Fora de escopo
 
-- `supabase/functions/bot-health-intel/index.ts` (novo)
-- `src/pages/SaudeBot.tsx` (adicionar card no topo + hook de carregamento + botão refresh)
-- `src/components/admin/saude/BotHealthIntel.tsx` (novo componente do painel IA)
+- Não muda a lógica de estágios do Kanban (Abertura/Descoberta/Pitch/…). O passo do fluxo é **informação adicional** dentro do card, ortogonal ao estágio comercial.
+- Não mexe na aba "Clientes iGreen" (filtrada do funil já).
