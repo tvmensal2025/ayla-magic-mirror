@@ -653,8 +653,9 @@ function StepCard(props: {
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
+  variant?: "A" | "B";
 }) {
-  const { step, numero, total, consultantId, allSteps, mediaCounts, onPatch, onMoveUp, onMoveDown, onDelete } = props;
+  const { step, numero, total, consultantId, allSteps, mediaCounts, onPatch, onMoveUp, onMoveDown, onDelete, variant = "A" } = props;
   const [localText, setLocalText] = useState(step.message_text ?? "");
   const [localTitle, setLocalTitle] = useState(step.title);
   const [localSummary, setLocalSummary] = useState(step.summary ?? "");
