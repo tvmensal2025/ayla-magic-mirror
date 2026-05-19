@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Facebook, CheckCircle2, AlertCircle, Loader2, Wallet, RefreshCw, Settings2, ShieldCheck, KeyRound } from "lucide-react";
+import { Facebook, CheckCircle2, AlertCircle, Loader2, Wallet, RefreshCw, Settings2, ShieldCheck, KeyRound, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getPlatformFacebookStatus, listFacebookAssets, selectFacebookAssets, startFacebookOAuth, type FbAssets, type PlatformFacebookStatus } from "@/services/facebookAds";
@@ -57,6 +57,24 @@ export function PlatformFacebookCard() {
   const [manualPage, setManualPage] = useState("");
   const [manualPixel, setManualPixel] = useState("");
   const [ensuringPixel, setEnsuringPixel] = useState(false);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncReport, setSyncReport] = useState<any>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+
+  async function syncAll() {
+    setSyncingAll(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("facebook-platform-sync-all", { body: {} });
+      if (error) throw error;
+      setSyncReport(data);
+      setReportOpen(true);
+      await loadStatus();
+    } catch (e: any) {
+      toast({ title: "Falha ao sincronizar", description: e?.message, variant: "destructive" });
+    } finally {
+      setSyncingAll(false);
+    }
+  }
 
   async function ensurePixel() {
     setEnsuringPixel(true);
@@ -232,6 +250,10 @@ export function PlatformFacebookCard() {
               <Field label="Usuário FB" value={status.fb_user_name || "—"} />
             </dl>
             <div className="flex flex-wrap gap-2 pt-2">
+              <Button size="sm" onClick={syncAll} disabled={syncingAll} className="gap-1.5">
+                {syncingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                Sincronizar tudo
+              </Button>
               <Button size="sm" variant="secondary" onClick={ensurePixel} disabled={ensuringPixel} className="gap-1.5">
                 {ensuringPixel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Settings2 className="w-3.5 h-3.5" />}
                 Garantir pixel igreen-tag-site
@@ -373,6 +395,61 @@ export function PlatformFacebookCard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-primary" /> Relatório de Sincronização
+            </DialogTitle>
+          </DialogHeader>
+          {syncReport && (
+            <div className="space-y-3 text-sm">
+              <ReportRow
+                title="Pixel ↔ Conta de anúncios"
+                ok={syncReport.pixel_check?.ok}
+                msg={syncReport.pixel_check?.message || syncReport.pixel_check?.error}
+              />
+              <ReportRow
+                title="Saldo da conta"
+                ok={syncReport.balance?.ok}
+                msg={syncReport.balance?.ok
+                  ? `Disponível: ${((syncReport.balance.available_cents || 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: syncReport.balance.currency || "BRL" })} · Gasto: ${((syncReport.balance.amount_spent_cents || 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: syncReport.balance.currency || "BRL" })}`
+                  : syncReport.balance?.error}
+              />
+              <ReportRow
+                title="Métricas de campanhas"
+                ok={syncReport.metrics?.ok}
+                msg={syncReport.metrics?.ok
+                  ? `${syncReport.metrics?.synced ?? 0} campanhas atualizadas`
+                  : syncReport.metrics?.error}
+              />
+              <ReportRow
+                title="Audiências + Lookalike"
+                ok={syncReport.audiences?.ok}
+                msg={syncReport.audiences?.ok
+                  ? `${syncReport.audiences?.uploaded ?? 0} clientes enviados · Lookalike: ${syncReport.audiences?.lal_status || "—"}`
+                  : syncReport.audiences?.error}
+              />
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setReportOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ReportRow({ title, ok, msg }: { title: string; ok?: boolean; msg?: string }) {
+  return (
+    <div className={`rounded-lg border p-3 ${ok ? "border-primary/30 bg-primary/5" : "border-warning/30 bg-warning/5"}`}>
+      <div className="flex items-center gap-2 font-medium">
+        {ok ? <CheckCircle2 className="w-4 h-4 text-primary" /> : <AlertCircle className="w-4 h-4 text-warning" />}
+        {title}
+      </div>
+      {msg && <p className="text-xs text-muted-foreground mt-1 break-words">{msg}</p>}
     </div>
   );
 }
