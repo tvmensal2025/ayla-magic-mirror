@@ -1025,7 +1025,27 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     });
   }
 
-  const cls = await classifyIntent(ctx.messageText, stepKey as ConversationalStep, ctx.geminiApiKey);
+  const cls = await classifyIntent(
+    ctx.messageText,
+    stepKey as ConversationalStep,
+    ctx.geminiApiKey,
+    { customerId: ctx.customer?.id, consultantId: consultantId || null, traceId: ctx.messageId },
+  );
+
+  // Sprint 1.5: honra threshold de handoff (conf < 0.5) — pausa bot, consultor assume.
+  if (cls.action === "handoff" && cls.intent !== "tem_duvida") {
+    console.log(`[conversational/evo] 🤝 handoff por baixa confiança (conf=${cls.confidence})`);
+    return _finalize(stepKey, {
+      reply: "",
+      updates: {
+        conversation_step: stepKey,
+        bot_paused: true,
+        bot_paused_reason: "low_confidence_handoff",
+        bot_paused_at: new Date().toISOString(),
+        ...restoreDetourUpdates,
+      },
+    });
+  }
 
   // ─── AI FAQ Answerer (Lovable AI) ──────────────────────────────────
   // Quando o lead faz pergunta (tem_duvida) que NÃO casou em bot_flow_qa
