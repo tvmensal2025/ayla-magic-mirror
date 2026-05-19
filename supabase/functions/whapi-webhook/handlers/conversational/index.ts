@@ -1822,7 +1822,15 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const nextStep = dbSteps.find((s) => s.id === fb.goto_step_id);
       if (nextStep && nextStep.is_active) {
         const nextIsMediaOnly = !String(nextStep.message_text || "").trim();
-        if (currentStep.captures?.some((c) => c.enabled !== false) && !hasCapture && nextIsMediaOnly) {
+        // Só bloqueia o goto se o passo atual realmente exige uma captura "dura"
+        // (com field obrigatório), não qualquer capture textual opcional.
+        // Caso contrário, passos message→message (boas-vindas → vídeo) ficavam
+        // travados aguardando uma "resposta" que nunca era exigida pelo consultor.
+        const requiresHardCapture = Array.isArray(currentStep.captures)
+          && currentStep.captures.some((c: any) =>
+            c?.enabled !== false && !!c?.field && c?.required !== false
+          );
+        if (requiresHardCapture && !hasCapture && nextIsMediaOnly) {
           console.log(`[conversational] fallback goto bloqueado: step=${stepKey} exige captura antes de ${nextStep.step_key}`);
           return _finalize(stepKey, await repeatCurrent());
         }
