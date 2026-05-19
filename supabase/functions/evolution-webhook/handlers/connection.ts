@@ -31,12 +31,41 @@ export async function handleConnectionUpdate(args: HandleConnectionArgs): Promis
     const ownerPhone = ownerJid ? ownerJid.replace(/@.*$/, "") : "";
     if (ownerPhone) {
       console.log(`📱 Saving connected phone: ${ownerPhone} for instance: ${connInstance}`);
-      await supabase
+      const { data: inst } = await supabase
         .from("whatsapp_instances")
         .update({ connected_phone: ownerPhone })
-        .eq("instance_name", connInstance);
+        .eq("instance_name", connInstance)
+        .select("consultant_id")
+        .maybeSingle();
+
+      // 🔗 CTWA bridge: se o consultor ainda não tem whatsapp_destination_number
+      // configurado em consultant_ad_settings (usado para o anúncio Click-to-WhatsApp
+      // do Facebook), aproveita o número que acabou de conectar via QR como default.
+      // O consultor pode sobrescrever depois no formulário de Dados ou via WABA real.
+      const consultantId = (inst as any)?.consultant_id;
+      if (consultantId) {
+        try {
+          const { data: existing } = await supabase
+            .from("consultant_ad_settings")
+            .select("whatsapp_destination_number")
+            .eq("consultant_id", consultantId)
+            .maybeSingle();
+          if (!existing?.whatsapp_destination_number) {
+            await supabase
+              .from("consultant_ad_settings")
+              .upsert(
+                { consultant_id: consultantId, whatsapp_destination_number: ownerPhone },
+                { onConflict: "consultant_id" }
+              );
+            console.log(`🔗 Sync QR→WABA default: consultant=${consultantId} number=${ownerPhone}`);
+          }
+        } catch (e: any) {
+          console.warn("[connection] sync whatsapp_destination_number falhou:", e?.message);
+        }
+      }
     }
   }
+
 
   if (
     connState === "close" &&
