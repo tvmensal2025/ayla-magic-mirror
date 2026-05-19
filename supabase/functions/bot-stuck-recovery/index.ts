@@ -69,6 +69,7 @@ Deno.serve(async (req) => {
   const stats = {
     scanned: 0, rescued: 0, abandoned: 0,
     skipped_cooldown: 0, skipped_offline: 0, skipped_recent_button: 0,
+    skipped_global_off: 0,
     stuck_marked: 0, send_failed: 0, ai_failed: 0,
   };
 
