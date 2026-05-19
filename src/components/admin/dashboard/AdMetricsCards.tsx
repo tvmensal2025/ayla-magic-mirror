@@ -1,0 +1,91 @@
+import { DollarSign, Users, Target, MousePointerClick, TrendingUp, Eye } from "lucide-react";
+import { useAdMetrics } from "@/hooks/useAdMetrics";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+
+const fmtBRL = (cents: number) =>
+  (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+interface Props {
+  consultantId: string;
+  periodDays: number;
+}
+
+export function AdMetricsCards({ consultantId, periodDays }: Props) {
+  const { data, isLoading } = useAdMetrics(consultantId, periodDays);
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-24 rounded-xl" />
+        ))}
+      </div>
+    );
+  }
+
+  const cards = [
+    {
+      icon: DollarSign,
+      label: "Gasto Ads",
+      value: fmtBRL(data?.spendCents ?? 0),
+      tone: "text-emerald-400",
+    },
+    {
+      icon: Users,
+      label: "Leads gerados",
+      value: (data?.leads ?? 0).toLocaleString("pt-BR"),
+      tone: "text-primary",
+    },
+    {
+      icon: Target,
+      label: "CPL",
+      value: data?.cplCents != null ? fmtBRL(data.cplCents) : "—",
+      tone: "text-amber-400",
+    },
+    {
+      icon: Eye,
+      label: "Visitas LP",
+      value: (data?.lpVisits ?? 0).toLocaleString("pt-BR"),
+      tone: "text-sky-400",
+    },
+    {
+      icon: MousePointerClick,
+      label: "Custo / Visita",
+      value: data?.costPerVisitCents != null ? fmtBRL(data.costPerVisitCents) : "—",
+      tone: "text-fuchsia-400",
+    },
+    {
+      icon: TrendingUp,
+      label: "LP → Lead",
+      value: data?.lpToLeadRate != null ? `${(data.lpToLeadRate * 100).toFixed(1)}%` : "—",
+      tone: "text-primary",
+    },
+  ];
+
+  return (
+    <div className="space-y-2">
+      {!data?.hasConnection && (data?.spendCents ?? 0) === 0 && (
+        <div className="text-[11px] text-muted-foreground/70 px-1">
+          Sem conexão Meta Ads — conecte sua conta para popular gasto, impressões e CPL.
+        </div>
+      )}
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+        {cards.map((c) => (
+          <Card
+            key={c.label}
+            className="p-3 bg-card/60 border-border/40 backdrop-blur hover:bg-card/80 transition-colors"
+          >
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <c.icon className={`w-3.5 h-3.5 ${c.tone}`} />
+              <span className="truncate">{c.label}</span>
+            </div>
+            <div className="mt-1.5 font-bold text-lg text-foreground tabular-nums">
+              {c.value}
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}

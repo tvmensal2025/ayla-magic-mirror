@@ -21,6 +21,8 @@ import { MainChart } from "./dashboard/MainChart";
 import { CpcPanel } from "./dashboard/CpcPanel";
 import { RecentClicks } from "./dashboard/RecentClicks";
 import { FunnelStrip } from "./dashboard/FunnelStrip";
+import { AdMetricsCards } from "./dashboard/AdMetricsCards";
+import { AdAccountSwitcher } from "./dashboard/AdAccountSwitcher";
 import { Eye as EyeIcon, EyeOff } from "lucide-react";
 
 interface DashboardTabProps {
@@ -45,6 +47,8 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
   const [exporting, setExporting] = useState(false);
   const [resettingPerf, setResettingPerf] = useState(false);
   const [sharedAccountCount, setSharedAccountCount] = useState(0);
+  const [adAccountId, setAdAccountId] = useState<string>(userId);
+  useEffect(() => { setAdAccountId(userId); }, [userId]);
 
   useEffect(() => {
     const stored = localStorage.getItem("sync_cooldown_until");
@@ -211,6 +215,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
       <div className="flex items-center justify-between gap-2 flex-wrap p-2 rounded-xl bg-card/40 border border-border/40 backdrop-blur">
         <div className="flex items-center gap-2">
           <WalletChip consultantId={userId} />
+          <AdAccountSwitcher userId={userId} value={adAccountId} onChange={setAdAccountId} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Select value={String(periodDays)} onValueChange={(v) => onPeriodChange(Number(v))}>
@@ -258,6 +263,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
 
         {/* === VISÃO GERAL === */}
         <TabsContent value="visao" className="space-y-4 mt-6">
+          <AdMetricsCards consultantId={adAccountId} periodDays={periodDays} />
           <MainChart data={(analytics as any)?.dailyMain} />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

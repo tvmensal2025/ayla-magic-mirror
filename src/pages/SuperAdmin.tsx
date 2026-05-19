@@ -32,6 +32,7 @@ import { NetworkHealthPanel } from "@/components/admin/super/NetworkHealthPanel"
 import { AdTemplatesPanel } from "@/components/superadmin/AdTemplatesPanel";
 import { AILearningHealthPanel } from "@/components/admin/super/AILearningHealthPanel";
 import { CaptacaoTab } from "@/components/superadmin/CaptacaoTab";
+import { AdManagersTab } from "@/components/superadmin/AdManagersTab";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { logAdminAction } from "@/hooks/useAdminAudit";
 
@@ -66,7 +67,7 @@ const SuperAdmin = () => {
   const [loadingData, setLoadingData] = useState(true);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [resettingId, setResettingId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"consultores" | "captacao" | "ia" | "ia_aprendendo" | "crm" | "auditoria" | "funil" | "worker" | "plataforma_fb" | "financeiro" | "templates_ads" | "saude_rede">("consultores");
+  const [activeTab, setActiveTab] = useState<"consultores" | "captacao" | "gestores_ads" | "ia" | "ia_aprendendo" | "crm" | "auditoria" | "funil" | "worker" | "plataforma_fb" | "financeiro" | "templates_ads" | "saude_rede">("consultores");
   const [searchTerm, setSearchTerm] = useState("");
   const accessDeniedToastShownRef = useRef(false);
   const { isAdmin, loading: roleLoading } = useUserRole(userId);
@@ -242,6 +243,7 @@ const SuperAdmin = () => {
   const tabs = [
     { id: "consultores" as const, label: "Consultores", icon: Users, count: consultants.length },
     { id: "captacao" as const, label: "Captação", icon: Target },
+    { id: "gestores_ads" as const, label: "Gestores Ads", icon: UserCheck },
     { id: "saude_rede" as const, label: "Saúde da Rede", icon: Activity },
     { id: "crm" as const, label: "CRM Analytics", icon: BarChart3 },
     { id: "funil" as const, label: "Funil do Bot", icon: Activity },
@@ -506,6 +508,7 @@ const SuperAdmin = () => {
         )}
 
         {activeTab === "captacao" && <CaptacaoTab />}
+        {activeTab === "gestores_ads" && <AdManagersTab />}
         {activeTab === "crm" && <CrmAnalyticsTab />}
         {activeTab === "funil" && (
           <div className="space-y-4">
