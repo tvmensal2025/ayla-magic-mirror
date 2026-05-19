@@ -107,6 +107,15 @@ Deno.serve(async (req) => {
 
     const sender = createEvolutionSender(EVOLUTION_API_URL, EVOLUTION_API_KEY, instanceName);
 
+    // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (antes de tudo) ──
+    // Antes do parse/dedup/customer: se o switch está OFF, ignora e retorna ok.
+    if (await isConsultantAIDisabled(supabase, instanceData.consultant_id)) {
+      console.log(`🛑 [global-off-silent] IA do consultor ${instanceData.consultant_id} desligada — ignorando inbound`);
+      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // ─── 3) Parse + dedupe + filter ────────────────────────────────────
     const parsed = parseEvolutionMessage(body, instanceData.connected_phone);
     if (!parsed) {
@@ -145,15 +154,6 @@ Deno.serve(async (req) => {
       });
     }
 
-
-
-    // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (como se desconectado) ──
-    if (await isConsultantAIDisabled(supabase, instanceData.consultant_id)) {
-      console.log(`🛑 [global-off-silent] IA do consultor ${instanceData.consultant_id} desligada — ignorando inbound de ${phone}`);
-      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
 
 
     // ─── 4) OTP intercept (handled before bot flow) ────────────────────
