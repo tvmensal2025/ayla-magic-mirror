@@ -381,6 +381,14 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
           </div>
         )}
 
+        {activeSubTab === "historico" && (
+          <div className="p-4 overflow-auto h-full">
+            <Suspense fallback={<LazyFallback />}>
+              <AutoMessageLog consultantId={userId} />
+            </Suspense>
+          </div>
+        )}
+
       </div>
     </div>
   );
