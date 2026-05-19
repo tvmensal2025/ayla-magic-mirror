@@ -1,6 +1,7 @@
 // Manual step sender: human takes over a conversation and triggers individual
 // pieces (audio / image / video / text) of a configured flow step, on-demand.
-// Does NOT advance conversation_step or unpause the bot.
+// By default it does NOT advance conversation_step or unpause the bot. When
+// continueFlow=true, it resumes the custom flow after the selected step.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { createWhapiSender } from "../_shared/whapi-api.ts";
@@ -14,6 +15,7 @@ interface Body {
   stepKey?: string;  // alternative lookup
   part: Part;        // which piece to send (or "all")
   mediaId?: string;  // when there are multiple medias of same kind, target one
+  continueFlow?: boolean; // resume flow after sending the selected full step
 }
 
 Deno.serve(async (req) => {
@@ -51,7 +53,7 @@ Deno.serve(async (req) => {
     // Resolve customer + phone
     const { data: customer } = await supabase
       .from("customers")
-      .select("id, name, phone_whatsapp, consultant_id")
+      .select("id, name, phone_whatsapp, consultant_id, electricity_bill_value")
       .eq("id", body.customerId)
       .maybeSingle();
     if (!customer) return json({ error: "customer_not_found" }, 404);
@@ -63,7 +65,7 @@ Deno.serve(async (req) => {
     // Resolve step
     let stepQuery = supabase
       .from("bot_flow_steps")
-      .select("id, step_key, slot_key, message_text, media_order, flow_id")
+      .select("id, step_key, slot_key, message_text, media_order, flow_id, step_type, position, transitions, captures")
       .eq("is_active", true);
     if (body.stepId) stepQuery = stepQuery.eq("id", body.stepId);
     else if (body.stepKey) {
@@ -104,11 +106,19 @@ Deno.serve(async (req) => {
 
     // Build variables for text rendering
     const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
+    const billValue = Number((customer as any).electricity_bill_value || 0);
+    const fmtBRL = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const vars: Record<string, string> = {
       "{nome}": firstName,
       "{{nome}}": firstName,
       "{nome_completo}": String((customer as any).name || ""),
       "{{nome_completo}}": String((customer as any).name || ""),
+      "{valor}": fmtBRL(billValue),
+      "{{valor}}": fmtBRL(billValue),
+      "{economia_mensal}": fmtBRL(billValue * 0.20),
+      "{{economia_mensal}}": fmtBRL(billValue * 0.20),
+      "{economia_anual}": fmtBRL(billValue * 0.20 * 12),
+      "{{economia_anual}}": fmtBRL(billValue * 0.20 * 12),
     };
     const applyVars = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
     const renderedText = (step as any).message_text ? applyVars(String((step as any).message_text)) : "";
@@ -167,12 +177,108 @@ Deno.serve(async (req) => {
       if (!isLast) await new Promise((r) => setTimeout(r, 1200));
     }
 
-    return json({ ok: true, sent: sentLog });
+    const flowPatch = body.continueFlow && body.part === "all"
+      ? await buildContinuationPatch(supabase, sender, remoteJid, body.consultantId, customer, step, vars)
+      : null;
+    if (flowPatch) {
+      await supabase.from("customers").update(flowPatch).eq("id", customer.id);
+    }
+
+    return json({ ok: true, sent: sentLog, continued: !!flowPatch, next_step: flowPatch?.conversation_step });
   } catch (e) {
     console.error("[manual-step-send] error", (e as Error).message);
     return json({ error: (e as Error).message }, 500);
   }
 });
+
+async function buildContinuationPatch(supabase: any, sender: any, remoteJid: string, consultantId: string, customer: any, step: any, vars: Record<string, string>) {
+  const { data: next } = await supabase
+    .from("bot_flow_steps")
+    .select("id, step_key, slot_key, message_text, media_order, step_type, position, captures")
+    .eq("flow_id", step.flow_id)
+    .eq("is_active", true)
+    .gt("position", Number(step.position) || 0)
+    .order("position", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  const patch: any = {
+    bot_paused: false,
+    bot_paused_reason: null,
+    bot_paused_at: null,
+    assigned_human_id: null,
+    custom_step_retries: 0,
+    custom_step_retries_step: null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (next) {
+    const ntype = String(next.step_type || "message");
+    patch.conversation_step = next.id;
+    if (ntype === "message") {
+      const sentNext = await sendConfiguredStep(supabase, sender, remoteJid, consultantId, customer.id, next, vars);
+      if (sentNext) patch.last_custom_prompt_at = new Date().toISOString();
+    }
+    if (ntype === "capture_conta") patch.conversation_step = "aguardando_conta";
+    else if (ntype === "capture_documento" || ntype === "capture_doc") patch.conversation_step = "aguardando_doc_auto";
+    else if (ntype === "capture_email") patch.conversation_step = "ask_email";
+    else if (ntype === "confirm_phone") patch.conversation_step = "ask_phone_confirm";
+    else if (ntype === "finalizar_cadastro") patch.conversation_step = "finalizando";
+
+    if (String(patch.conversation_step).startsWith("aguardando_") || String(patch.conversation_step).startsWith("ask_")) {
+      patch.last_custom_prompt_at = new Date().toISOString();
+    }
+  } else {
+    patch.conversation_step = "finalizando";
+  }
+
+  console.log(`[manual-step-send] continueFlow step=${step.step_key || step.id} consultant=${consultantId} next=${patch.conversation_step}`);
+  return patch;
+}
+
+async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string, consultantId: string, customerId: string, step: any, vars: Record<string, string>) {
+  const applyVars = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
+  const slotKey = step.slot_key || step.step_key;
+  const { data: mediaRows } = await supabase
+    .from("ai_media_library")
+    .select("id, kind, url, slot_key, send_order, duration_sec")
+    .eq("consultant_id", consultantId)
+    .eq("slot_key", slotKey)
+    .eq("active", true)
+    .eq("is_draft", false)
+    .order("send_order", { ascending: true });
+  const items: Array<{ kind: string; text?: string; media?: any }> = ((mediaRows as any[]) || [])
+    .filter((m) => !!m?.url)
+    .map((m) => ({ kind: String(m.kind || "document").toLowerCase(), media: m }));
+  const text = step.message_text ? applyVars(String(step.message_text)) : "";
+  if (text.trim()) items.push({ kind: "text", text });
+  if (!items.length) return false;
+
+  const order = Array.isArray(step.media_order) && step.media_order.length > 0
+    ? step.media_order.map((k: any) => String(k).toLowerCase())
+    : ["audio", "image", "video", "text", "document"];
+  items.sort((a: any, b: any) => {
+    const ia = order.indexOf(a.kind); const ib = order.indexOf(b.kind);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+  let sent = false;
+  for (let i = 0; i < items.length; i++) {
+    const it: any = items[i];
+    if (it.kind === "text" && it.text) {
+      await sender.sendText(remoteJid, it.text);
+      await supabase.from("conversations").insert({ customer_id: customerId, message_direction: "outbound", message_text: it.text, message_type: "text", conversation_step: step.step_key || step.id });
+      sent = true;
+    } else if (it.media?.url) {
+      const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
+      await sender.sendMedia(remoteJid, it.media.url, "", kind, Number(it.media.duration_sec || 0) || undefined);
+      await supabase.from("conversations").insert({ customer_id: customerId, message_direction: "outbound", message_text: `[${kind}:${it.media.slot_key || slotKey}] (continue)`, message_type: kind, conversation_step: step.step_key || step.id });
+      sent = true;
+    }
+    if (i < items.length - 1) await new Promise((r) => setTimeout(r, 1200));
+  }
+  return sent;
+}
 
 function json(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
