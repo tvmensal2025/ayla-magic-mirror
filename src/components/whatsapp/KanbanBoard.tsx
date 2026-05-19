@@ -171,6 +171,16 @@ export function KanbanBoard({ consultantId, instanceName }: KanbanBoardProps) {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input placeholder="Buscar lead..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="h-7 text-xs pl-8 w-[180px]" />
           </div>
+          <Select value={stepFilter} onValueChange={setStepFilter}>
+            <SelectTrigger className="h-7 text-xs w-[200px]"><SelectValue placeholder="Parou no passo" /></SelectTrigger>
+            <SelectContent className="max-h-[320px]">
+              <SelectItem value="all" className="text-xs">Todos os passos</SelectItem>
+              <SelectItem value="none" className="text-xs">Sem interação</SelectItem>
+              {stepOptions.map((o) => (
+                <SelectItem key={o.key} value={o.key} className="text-xs">{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <AddLeadDialog consultantId={consultantId} stages={stages.map((s) => ({ stage_key: s.stage_key, label: s.label, color: s.color }))} onLeadAdded={fetchDeals} />
           <Dialog open={showSettings} onOpenChange={setShowSettings}>
             <DialogTrigger asChild>
