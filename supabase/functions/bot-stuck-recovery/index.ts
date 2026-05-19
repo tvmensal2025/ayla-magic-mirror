@@ -141,6 +141,12 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      // 🛑 Gate global: IA do consultor desligada → silêncio total
+      if (await isConsultantAIDisabled(supabase, lead.consultant_id)) {
+        stats.skipped_global_off++;
+        continue;
+      }
+
       const idleMinutes = (Date.now() - new Date(lead.last_bot_reply_at).getTime()) / 60_000;
       const attempts = lead.rescue_attempts || 0;
 
