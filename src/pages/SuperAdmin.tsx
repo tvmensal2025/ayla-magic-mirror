@@ -509,7 +509,12 @@ const SuperAdmin = () => {
         )}
         {activeTab === "worker" && <WorkerPhaseTimeline />}
         {activeTab === "auditoria" && <AuditLogPanel />}
-        {activeTab === "ia" && <AIKnowledgePanel />}
+        {activeTab === "ia" && (
+          <div className="space-y-6">
+            <AIControlPanel />
+            <AIKnowledgePanel />
+          </div>
+        )}
         {activeTab === "plataforma_fb" && <PlatformFacebookCard />}
        {activeTab === "templates_ads" && <AdTemplatesPanel />}
         {activeTab === "financeiro" && <PlatformPnLCard />}
