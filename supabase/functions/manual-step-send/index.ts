@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
     }
 
     const flowPatch = body.continueFlow && body.part === "all"
-      ? await buildContinuationPatch(supabase, sender, remoteJid, body.consultantId, customer, step, vars)
+      ? await buildContinuationPatch(supabase, sender, remoteJid, body.consultantId, customer, step, vars, variant)
       : null;
     if (flowPatch) {
       await supabase.from("customers").update(flowPatch).eq("id", customer.id);
