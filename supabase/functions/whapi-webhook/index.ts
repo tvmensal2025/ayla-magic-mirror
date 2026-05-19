@@ -219,16 +219,7 @@ Deno.serve(async (req) => {
         }
       : realSender;
 
-    // ─── Identificar consultor super admin ─────────────────────────────
-    // O super admin tem consultant_id fixo na settings
-    const superAdminConsultantId = settings.superadmin_consultant_id || "";
-    if (!superAdminConsultantId) {
-      console.error("❌ superadmin_consultant_id não configurado na tabela settings");
-      return new Response(JSON.stringify({ error: "Super admin not configured" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
+    // ─── Identificar consultor super admin (id já validado no topo) ────
     const { data: consultantData } = await supabase
       .from("consultants")
       .select("id, name, igreen_id, conversational_flow_enabled")
@@ -239,15 +230,7 @@ Deno.serve(async (req) => {
     const consultorId = consultantData?.igreen_id || "124170";
     console.log(`✅ Whapi super admin: ${nomeRepresentante} (iGreen ID: ${consultorId})`);
 
-    // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (como se desconectado) ──
-    // Antes de qualquer customer/notify/conversation: se o switch estiver OFF,
-    // simplesmente ignoramos a mensagem. Nada é criado, nada é notificado.
-    if (await isConsultantAIDisabled(supabase, superAdminConsultantId)) {
-      console.log(`🛑 [global-off-silent] IA desligada — ignorando inbound de ${phone}`);
-      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+
 
 
 
