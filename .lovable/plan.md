@@ -1,44 +1,72 @@
+## Reorganização do Painel do Consultor (`/admin`)
 
-# Reorganização /admin — Dashboard só iGreen, tudo de Ads na Central
+### 1. Navegação principal (limpeza)
+Remover 3 abas da barra: **Preview**, **Histórico** e **Dados**. A barra fica:
 
-## Estado atual
-- `DashboardTab` tem 3 sub-tabs: **Visão Geral** (cards Ads + MainChart + CpcPanel + RecentClicks + FunnelStrip), **Anúncios & Origem** (ResultsDashboard + LeadSourceCard) e **Clientes iGreen**.
-- `AdsCentralTab` (aba "Central de Anúncios") tem 3 views: Modelos / Campanhas / Inteligência.
-- `PerformanceTab` é uma aba separada no topo.
+`Dashboard · CRM · Clientes · Rede · WhatsApp · Central de Anúncios · Links · Materiais`
 
-## Objetivo
-- **Dashboard** volta a ser exclusivamente "Clientes iGreen" — como era antes (StatCards + CustomerCharts + filtro de licenciado + botão Sincronizar iGreen).
-- **Central de Anúncios** absorve tudo de anúncio/performance, organizado em sub-views.
+### 2. Preview → dentro de **Links**
+- `LinksTab.tsx` ganha um sub-toggle no topo: **Links** | **Preview**.
+- Conteúdo atual fica em "Links"; "Preview" renderiza o `PreviewTab` existente (mesmas props que já passamos hoje).
+- Em `Admin.tsx` remover o case `activeTab === "preview"` e o item da array `tabs`.
 
-## Mudanças
+### 3. Histórico → dentro de **WhatsApp**
+- `WhatsAppTab.tsx` ganha um sub-toggle (ou aba interna) **Conversas** | **Histórico Automático**.
+- "Histórico Automático" renderiza `<AutoMessageLog consultantId={userId} />`.
+- Em `Admin.tsx` remover o case `activeTab === "historico"` e o item da array `tabs`.
 
-### 1. `DashboardTab.tsx` — enxugar
-- Remover as 3 sub-tabs.
-- Remover imports/uso de: `AdMetricsCards`, `AdMetricsCharts`, `AdAccountSwitcher`, `MainChart`, `CpcPanel`, `RecentClicks`, `FunnelStrip`, `ResultsDashboard`, `LeadSourceCard`, `WalletChip`, `TerminalTicker`, `useManagedConsultants`, `adAccountId`.
-- Manter toolbar slim: período + PDF + Resetar (resetar continua útil para limpar tracking).
-- Renderizar direto o bloco "Clientes iGreen" (header com filtro + Sincronizar, StatCards, `CustomerCharts`).
-- Limpar imports de ícones não usados (Megaphone, Target, LayoutDashboard, Eye etc.).
+### 4. Dados → engrenagem no header
+- No header (ao lado do sino de notificações), adicionar botão `Settings` (ícone engrenagem) que abre um **Sheet/Drawer lateral** com o `DadosTab` atual dentro (sem mudar o componente, só envolver).
+- Remover o item `"dados"` da array `tabs` e o case correspondente.
 
-### 2. `AdsCentralTab.tsx` — virar hub completo
-Reestruturar as views (toggle no topo) para:
-- **Dashboard** (novo, default) — toolbar com `WalletChip` + `AdAccountSwitcher` + período; depois `AdMetricsCards` + `AdMetricsCharts` + `MainChart` + `CpcPanel` + `RecentClicks` + `FunnelStrip` + `LeadSourceCard`.
-- **Modelos** (atual gallery)
-- **Campanhas** (atual)
-- **Performance** (atual `ResultsDashboard`, movido pra cá — embute o conteúdo de `PerformanceTab` aqui)
-- **Inteligência** (atual)
+### 5. Onboarding obrigatório (gating)
+Antes de liberar o painel, o consultor precisa preencher **4 campos obrigatórios**:
 
-Toggle vira: `Dashboard | Modelos | Campanhas | Performance | Inteligência`. Default = Dashboard.
+1. Nome completo (`name`)
+2. ID iGreen (`igreen_id`)
+3. WhatsApp principal (`phone`)
+4. WhatsApp para alertas (`notification_phone`)
 
-Period selector local (state interno na Central, padrão 30) já que o `periodDays` global do Dashboard não chega aqui — passar via prop é opcional, mas mais simples manter local.
+Implementação:
+- Criar `OnboardingGate.tsx` que recebe `form` e renderiza um **modal fullscreen bloqueante** quando qualquer um dos 4 campos está vazio.
+- O modal mostra um mini-formulário com só esses 4 campos + botão "Liberar painel" (chama o mesmo `handleSave` do `useConsultantForm`).
+- Em `Admin.tsx`, logo após o gate de `approved`, montar `<OnboardingGate>` envolvendo todo o conteúdo. Enquanto não preenchidos, o resto do painel fica inacessível (a engrenagem também não abre — só o gate).
 
-### 3. `Admin.tsx` — remover aba Performance duplicada
-- Remover item `{ id: "performance", ... }` do array `tabs` e o bloco `activeTab === "performance"`.
-- Manter import lazy só se ainda for usado pela Central (vou importar direto `ResultsDashboard` dentro da Central, então `PerformanceTab` pode sair).
-- Atualizar tipo do `activeTab` removendo `"performance"`.
+### 6. Auto-sync do telefone para Facebook Ads
+Hoje `loadConsultantAdSettings` (edge function) já faz fallback para `consultants.phone` quando `consultant_ad_settings.whatsapp_destination_number` está vazio, mas só é gravado on-demand. Vamos garantir no momento do save:
 
-## Arquivos a alterar
-- `src/components/admin/DashboardTab.tsx` (enxugar drasticamente)
-- `src/components/admin/ads/AdsCentralTab.tsx` (adicionar views Dashboard + Performance)
-- `src/pages/Admin.tsx` (remover aba Performance)
+- No `useConsultantForm` (handler de save), **logo após** persistir `consultants`, fazer um `upsert` em `consultant_ad_settings`:
+  ```
+  { consultant_id: userId,
+    whatsapp_destination_number: form.phone }   // só dígitos, sem +55
+  ```
+  com `onConflict: "consultant_id"`.
+- Disparado sempre que o usuário salvar com `phone` e `notification_phone` preenchidos (regra do usuário: "assim que ele colocar o telefone para alerta, ativar o telefone principal para o Facebook anunciar").
+- Resultado: novos anúncios criados via plataforma usam o número do consultor como destino do botão WhatsApp do Meta Ads. Leads chegam direto no WhatsApp dele; toda a telemetria (gasto, CPL, CRM) continua centralizada no admin (sem mudança de fluxo de dados).
 
-Sem migrations. Sem mudanças de business logic — apenas reorganização de UI/composição.
+### Técnico — arquivos tocados
+
+```text
+src/pages/Admin.tsx
+  - remover tabs preview/historico/dados (array + cases)
+  - adicionar botão engrenagem no header → Sheet com <DadosTab/>
+  - envolver <main> com <OnboardingGate form={form} onSave={handleSave}>
+
+src/components/admin/LinksTab.tsx
+  - adicionar Tabs interna [Links | Preview]
+  - importar PreviewTab e renderizar nas mesmas condições
+
+src/components/whatsapp/WhatsAppTab.tsx
+  - adicionar Tabs interna [Conversas | Histórico]
+  - importar AutoMessageLog
+
+src/components/admin/OnboardingGate.tsx  (novo)
+  - modal bloqueante com 4 campos obrigatórios
+
+src/hooks/useConsultantForm.ts
+  - no save, upsert em consultant_ad_settings
+    com whatsapp_destination_number = phone (só dígitos)
+```
+
+Sem migrations — `consultant_ad_settings` já existe.
+Sem mudança de lógica de anúncios/CRM — só plumbing de UI e um upsert.
