@@ -169,12 +169,60 @@ Deno.serve(async (req) => {
       if (!isLast) await new Promise((r) => setTimeout(r, 1200));
     }
 
-    return json({ ok: true, sent: sentLog });
+    const flowPatch = body.continueFlow && body.part === "all"
+      ? await buildContinuationPatch(supabase, body.consultantId, customer, step)
+      : null;
+    if (flowPatch) {
+      await supabase.from("customers").update(flowPatch).eq("id", customer.id);
+    }
+
+    return json({ ok: true, sent: sentLog, continued: !!flowPatch, next_step: flowPatch?.conversation_step });
   } catch (e) {
     console.error("[manual-step-send] error", (e as Error).message);
     return json({ error: (e as Error).message }, 500);
   }
 });
+
+async function buildContinuationPatch(supabase: any, consultantId: string, customer: any, step: any) {
+  const { data: next } = await supabase
+    .from("bot_flow_steps")
+    .select("id, step_key, step_type, position, captures")
+    .eq("flow_id", step.flow_id)
+    .eq("is_active", true)
+    .gt("position", Number(step.position) || 0)
+    .order("position", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  const patch: any = {
+    bot_paused: false,
+    bot_paused_reason: null,
+    bot_paused_at: null,
+    assigned_human_id: null,
+    custom_step_retries: 0,
+    custom_step_retries_step: null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (next) {
+    const ntype = String(next.step_type || "message");
+    patch.conversation_step = next.id;
+    if (ntype === "capture_conta") patch.conversation_step = "aguardando_conta";
+    else if (ntype === "capture_documento" || ntype === "capture_doc") patch.conversation_step = "aguardando_doc_auto";
+    else if (ntype === "capture_email") patch.conversation_step = "ask_email";
+    else if (ntype === "confirm_phone") patch.conversation_step = "ask_phone_confirm";
+    else if (ntype === "finalizar_cadastro") patch.conversation_step = "finalizando";
+
+    if (String(patch.conversation_step).startsWith("aguardando_") || String(patch.conversation_step).startsWith("ask_")) {
+      patch.last_custom_prompt_at = new Date().toISOString();
+    }
+  } else {
+    patch.conversation_step = "finalizando";
+  }
+
+  console.log(`[manual-step-send] continueFlow step=${step.step_key || step.id} consultant=${consultantId} next=${patch.conversation_step}`);
+  return patch;
+}
 
 function json(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
