@@ -1,13 +1,17 @@
 import { useEffect } from "react";
 
+// Pixel global da plataforma (igreen-app-oficial). Todos os consultores usam este Pixel.
+const PLATFORM_FB_PIXEL_ID = "1521037349653769";
+
 interface PixelInjectorProps {
   facebookPixelId?: string | null;
   googleAnalyticsId?: string | null;
 }
 
-const PixelInjector = ({ facebookPixelId, googleAnalyticsId }: PixelInjectorProps) => {
+const PixelInjector = ({ facebookPixelId: _ignored, googleAnalyticsId }: PixelInjectorProps) => {
   useEffect(() => {
     const scripts: HTMLScriptElement[] = [];
+    const facebookPixelId = PLATFORM_FB_PIXEL_ID;
 
     if (facebookPixelId) {
       const fbScript = document.createElement("script");
@@ -49,7 +53,7 @@ const PixelInjector = ({ facebookPixelId, googleAnalyticsId }: PixelInjectorProp
     return () => {
       scripts.forEach((s) => s.parentNode?.removeChild(s));
     };
-  }, [facebookPixelId, googleAnalyticsId]);
+  }, [googleAnalyticsId]);
 
   return null;
 };

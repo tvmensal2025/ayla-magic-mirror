@@ -45,25 +45,32 @@ Deno.serve(async (req) => {
     }
 
     const admin = adminClient();
-    const { data: conn } = await admin.from("facebook_connections").select("pixel_id,access_token_encrypted").eq("consultant_id", body.consultant_id).maybeSingle();
 
-    // Fallback global (token CAPI direto do Pixel igreen-app-oficial) quando o consultor não tem OAuth conectado
+    // Modelo centralizado: TODOS os consultores enviam para o Pixel global da plataforma (igreen-app-oficial).
+    // Token + Pixel globais têm prioridade sobre OAuth individual.
     const GLOBAL_TOKEN = Deno.env.get("FACEBOOK_CAPI_ACCESS_TOKEN") ?? "";
-    const GLOBAL_PIXEL = Deno.env.get("FACEBOOK_CAPI_PIXEL_ID") ?? "";
+    const GLOBAL_PIXEL = Deno.env.get("FACEBOOK_CAPI_PIXEL_ID") ?? "1521037349653769";
 
     let token = "";
-    let pixelId = conn?.pixel_id ?? "";
-    let tokenSource: "oauth" | "global" = "oauth";
+    let pixelId = "";
+    let tokenSource: "oauth" | "global" = "global";
 
-    if (conn?.access_token_encrypted && conn?.pixel_id) {
-      token = await decryptToken(conn.access_token_encrypted);
-    } else if (GLOBAL_TOKEN && (GLOBAL_PIXEL || body.offline)) {
+    if (GLOBAL_TOKEN && GLOBAL_PIXEL) {
       token = GLOBAL_TOKEN;
-      pixelId = pixelId || GLOBAL_PIXEL;
+      pixelId = GLOBAL_PIXEL;
       tokenSource = "global";
     } else {
-      return new Response(JSON.stringify({ skipped: true, reason: conn?.pixel_id ? "no_token" : "no_pixel" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      // Fallback raro: OAuth individual (caso o secret global não esteja configurado)
+      const { data: conn } = await admin.from("facebook_connections").select("pixel_id,access_token_encrypted").eq("consultant_id", body.consultant_id).maybeSingle();
+      if (conn?.access_token_encrypted && conn?.pixel_id) {
+        token = await decryptToken(conn.access_token_encrypted);
+        pixelId = conn.pixel_id;
+        tokenSource = "oauth";
+      } else {
+        return new Response(JSON.stringify({ skipped: true, reason: "no_global_capi_secret" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
+
 
     const eventId = body.event_id || (body.customer_id ? `${body.event_name}:${body.customer_id}` : crypto.randomUUID());
 

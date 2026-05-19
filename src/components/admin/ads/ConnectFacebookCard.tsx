@@ -137,31 +137,32 @@ export function ConnectFacebookCard({ connection, onReconnect }: Props) {
 
   if (!connection) {
     return (
-      <div className="rounded-2xl border border-border bg-card/60 backdrop-blur-sm p-6 sm:p-8 space-y-4">
+      <div className="rounded-2xl border border-green-500/30 bg-green-500/5 backdrop-blur-sm p-6 sm:p-8 space-y-3">
         <div className="flex items-start gap-4">
-          <div className="rounded-xl bg-blue-500/10 p-3">
-            <Facebook className="w-6 h-6 text-blue-500" />
+          <div className="rounded-xl bg-green-500/10 p-3">
+            <CheckCircle2 className="w-6 h-6 text-green-500" />
           </div>
           <div className="flex-1">
-            <h3 className="text-lg font-bold text-foreground">Conectar Facebook</h3>
+            <h3 className="text-lg font-bold text-foreground">Pixel da plataforma ativo</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              Conecte sua conta do Business Manager para criar anúncios pré-configurados que enviam leads direto pro seu WhatsApp.
+              Você já está usando o Pixel oficial da iGreen (<code className="text-xs">igreen-app-oficial</code>). Todos os eventos (PageView, Lead, Cadastro) são rastreados automaticamente — não precisa conectar nada.
+            </p>
+            <p className="text-xs text-muted-foreground/70 mt-2">
+              Quer rodar campanhas no seu próprio Business Manager? Conecte abaixo (opcional).
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => handleConnect("connect")} disabled={loading} className="gap-2">
+        <div className="flex flex-wrap gap-2 pl-[60px]">
+          <Button onClick={() => handleConnect("connect")} disabled={loading} variant="outline" size="sm" className="gap-2">
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Facebook className="w-4 h-4" />}
-            {loading ? "Abrindo Facebook..." : "Conectar com Facebook"}
-          </Button>
-          <Button onClick={() => setSwitchOpen(true)} variant="outline" disabled={loading} className="gap-2">
-            <LogOut className="w-4 h-4" /> Já abriu a conta errada?
+            {loading ? "Abrindo..." : "Conectar minha conta (opcional)"}
           </Button>
         </div>
         <SwitchConfirmDialog open={switchOpen} setOpen={setSwitchOpen} onConfirm={handleLogoutAndSwitch} />
       </div>
     );
   }
+
 
   const isExpired = connection.status !== "active";
   const expiresAt = connection.token_expires_at ? new Date(connection.token_expires_at) : null;
