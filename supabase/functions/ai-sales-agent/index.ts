@@ -511,6 +511,16 @@ Deno.serve(async (req) => {
     }
 
     const { customer, history, persona, tone, customPrompt, summaryFresh, memoryFacts, knowledgeBlock } = ctx;
+
+    // 🔇 Humano assumiu → IA não responde. Para qualquer modo (reply, rescue, etc.).
+    if (isCustomerPausedByHuman(customer as any)) {
+      console.log(`🔇 ai-sales-agent: bot pausado para customer ${customer.id} — abortando`);
+      return new Response(
+        JSON.stringify({ ok: true, skipped: true, reason: "bot_paused_by_human" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const phase = customer.sales_phase || "abertura";
 
     // ---------- INTENT-FIRST short-circuit (sem LLM) ----------
