@@ -1,13 +1,11 @@
-// Single source of truth: "humano assumiu o controle" → IA TOTALMENTE silenciosa.
+// Single source of truth: "humano assumiu o controle" OU "IA globalmente desligada"
+// → NENHUM motor automático envia mensagem.
 //
-// Quando qualquer um destes for verdade, NENHUM cron, scheduler ou webhook deve
-// disparar mensagem automática para o cliente:
+// Bloqueios verificados:
 //   - bot_paused === true  (consultor clicou "Assumir")
 //   - assigned_human_id IS NOT NULL  (humano vinculado)
 //   - bot_paused_until > now()  (pausa programada ainda no futuro)
-//
-// Use isCustomerPausedByHuman() em memória OU pausedFilter() para queries
-// Supabase (precisa rodar checagem extra por causa da limitação de OR no client).
+//   - ai_agent_config.enabled === false para o consultor (switch global desligado)
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 
@@ -49,4 +47,51 @@ export async function isPausedByPhone(
   if (consultantId) q = q.eq("consultant_id", consultantId);
   const { data } = await q.maybeSingle();
   return isCustomerPausedByHuman(data as PausableCustomer | null);
+}
+
+// Cache leve em memória do estado global do consultor (5s) — evita uma query
+// extra em cada inbound. O switch desligar/religar reflete em até 5s.
+const _aiEnabledCache = new Map<string, { v: boolean; t: number }>();
+const AI_ENABLED_TTL_MS = 5_000;
+
+/**
+ * Retorna true quando a IA do consultor está GLOBALMENTE desligada.
+ * Lê `ai_agent_config.enabled` do consultor (sem fallback global — desligar é
+ * decisão explícita do dono dos leads).
+ */
+export async function isConsultantAIDisabled(
+  supabase: SupabaseClient,
+  consultantId: string | null | undefined,
+): Promise<boolean> {
+  if (!consultantId) return false;
+  const cached = _aiEnabledCache.get(consultantId);
+  if (cached && Date.now() - cached.t < AI_ENABLED_TTL_MS) {
+    return cached.v === false;
+  }
+  const { data } = await supabase
+    .from("ai_agent_config")
+    .select("enabled")
+    .eq("consultant_id", consultantId)
+    .maybeSingle();
+  // Se o consultor nunca configurou, considera ATIVO (default histórico).
+  const enabled = data ? !!(data as any).enabled : true;
+  _aiEnabledCache.set(consultantId, { v: enabled, t: Date.now() });
+  return enabled === false;
+}
+
+/**
+ * Bloqueio total: humano assumiu OU IA globalmente desligada.
+ */
+export async function isAutomationBlocked(
+  supabase: SupabaseClient,
+  customer: PausableCustomer | null | undefined,
+  consultantId: string | null | undefined,
+): Promise<{ blocked: boolean; reason: string | null }> {
+  if (isCustomerPausedByHuman(customer)) {
+    return { blocked: true, reason: "human_takeover" };
+  }
+  if (await isConsultantAIDisabled(supabase, consultantId)) {
+    return { blocked: true, reason: "global_ai_disabled" };
+  }
+  return { blocked: false, reason: null };
 }

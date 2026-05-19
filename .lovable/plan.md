@@ -1,38 +1,40 @@
 ## Diagnóstico
 
-O erro vem do botão/switch **“IA ativa para meus leads”** no topo da aba IA. Ele faz `upsert` em `ai_agent_config` com `onConflict: "consultant_id"`, mas a tabela hoje tem apenas índice único parcial em `consultant_id`, então o PostgREST retorna:
+- O switch `IA ativa para meus leads` já gravou `ai_agent_config.enabled=false` para o consultor atual.
+- A maioria dos leads existentes foi pausada, mas ainda apareceu lead novo com `bot_paused=false` e mensagens automáticas enviadas depois do desligamento.
+- Causa principal: o webhook `whapi-webhook` não consulta `ai_agent_config.enabled` antes de criar/processar lead novo e antes de rodar o motor de fluxo (`runConversationalFlow`/`runBotFlow`). Então leads futuros ainda entram no fluxo mesmo com a IA desligada.
+- Também existem outros disparadores automáticos que precisam respeitar a trava global: `ai-sales-agent`, `ai-agent-router`, `evolution-webhook`, `manual-step-send` quando usado para “devolver/continuar fluxo”, e `crm-auto-progress` para auto-mensagens de Kanban.
 
-```text
-there is no unique or exclusion constraint matching the ON CONFLICT specification
-```
+## Plano de implementação
 
-Também há risco de a pausa global só alterar leads com `bot_paused = false`, deixando casos inconsistentes fora da regra.
+1. **Criar uma checagem única de “automação desligada”**
+   - Expandir o helper compartilhado de pausa para consultar `ai_agent_config.enabled` por `consultant_id`.
+   - Regra: se `enabled=false`, nenhum motor automático envia mensagem, mesmo se o lead ainda estiver com `bot_paused=false`.
+   - Manter `bot_paused=true`, `assigned_human_id` e `bot_paused_until` como bloqueios absolutos.
 
-## Plano de correção
+2. **Blindar o `whapi-webhook` para leads atuais e futuros**
+   - Após identificar/criar o customer e antes de handoff, transcrição, lock e fluxo, consultar a trava global.
+   - Se a IA estiver desligada:
+     - registrar apenas a mensagem inbound;
+     - marcar o customer como `bot_paused=true`, `bot_paused_reason='manual_global_pause'`, `assigned_human_id=consultant_id`;
+     - retornar sem enviar texto, áudio, vídeo, botão ou passo de fluxo.
+   - Isso cobre leads novos que chegarem depois do desligamento.
 
-1. **Corrigir o switch “IA ativa para meus leads”**
-   - Trocar o `upsert(..., { onConflict: "consultant_id" })` por lógica segura: procurar config existente do consultor; se existir, `update`; se não existir, `insert`.
-   - Aplicar o mesmo padrão ao salvar o nome da persona.
-   - Assim o botão para/religa a IA sem depender de `ON CONFLICT`.
+3. **Blindar os outros motores automáticos**
+   - `evolution-webhook`: aplicar a mesma regra antes de `ai-agent-router` e antes de `runBotFlow/runConversationalFlow`.
+   - `ai-sales-agent`: incluir `enabled` na config carregada e abortar se estiver desativada.
+   - `ai-agent-router`: além de `bot_paused`, também bloquear se `assigned_human_id` existir ou se `ai_agent_config.enabled=false`.
+   - `crm-auto-progress`: continuar movendo estágio se necessário, mas não enviar auto-mensagem quando a IA global do consultor estiver desligada ou o customer estiver pausado.
 
-2. **Fazer o desligamento do switch pausar também os leads ativos**
-   - Quando o usuário desligar a IA, além de salvar `enabled=false`, atualizar os `customers` do consultor para `bot_paused=true`, `assigned_human_id=userId` e motivo `manual_global_pause`.
-   - Quando religar, limpar apenas pausas com motivo `manual_global_pause`, sem mexer em leads assumidos manualmente por outro motivo.
+4. **Ajustar botões de pausa para todos os leads**
+   - No switch e no botão “Parar IA de todos os meus leads”, atualizar todos os leads do consultor, não só os que estão com `bot_paused=false/null`.
+   - Garantir que a tela recarregue após pausar/religar e que o texto deixe claro: desligado bloqueia leads atuais e futuros.
 
-3. **Endurecer o botão “Parar IA de todos os meus leads”**
-   - Remover filtro frágil que só atualiza `bot_paused=false`.
-   - Pausar todos os leads do consultor que ainda não estão em atendimento humano, garantindo `assigned_human_id` e `bot_paused=true`.
-   - Manter o botão “Religar IA” revertendo somente `manual_global_pause`.
+5. **Executar backfill imediato no banco**
+   - Aplicar update nos leads do consultor atual que ainda estejam sem pausa (`bot_paused=false/null`) para `manual_global_pause`.
+   - Confirmar por consulta que não restou nenhum lead ativo sem pausa enquanto `enabled=false`.
 
-4. **Garantir que o fluxo respeite a pausa global**
-   - Revisar os pontos de decisão do `whapi-webhook`/`bot-flow` que leem `ai_agent_config.enabled` e `bot_paused` para manter a regra: se `enabled=false`, `bot_paused=true` ou `assigned_human_id` preenchido, a IA não envia mensagem.
-
-5. **Ajuste opcional de banco, se necessário**
-   - Se ainda houver necessidade de `upsert` em outros lugares, criar uma constraint única real ou substituir esses `upsert`s por update/insert. Para este erro específico, a correção no frontend já elimina a chamada quebrada.
-
-## Validação
-
-- Clicar no switch “IA ativa para meus leads” para desligar e confirmar que não aparece mais o erro vermelho.
-- Verificar que os leads saem de “IA atendendo” e entram como pausados/humano.
-- Clicar em “Parar IA em todos” e confirmar que todos os leads ativos ficam pausados.
-- Conferir no fluxo/webhook que mensagens novas não disparam IA quando o lead está pausado ou com humano assumido.
+6. **Validação**
+   - Consultar o banco para confirmar `ai_agent_config.enabled=false` e zero leads ativos para o consultor atual.
+   - Revisar logs/fluxo dos webhooks para confirmar que chamadas futuras retornam “global disabled” sem envio.
+   - Garantir que “Devolver para…” e “Enviar passo” continuem funcionando apenas como ação manual explícita; automação contínua só volta quando o switch for religado.
