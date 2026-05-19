@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Facebook, CheckCircle2, AlertCircle, Loader2, Wallet, RefreshCw, Settings2, ShieldCheck, KeyRound, Zap } from "lucide-react";
+import { Facebook, CheckCircle2, AlertCircle, Loader2, Wallet, RefreshCw, Settings2, ShieldCheck, KeyRound, Zap, Search, ArrowRightLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getPlatformFacebookStatus, listFacebookAssets, selectFacebookAssets, startFacebookOAuth, type FbAssets, type PlatformFacebookStatus } from "@/services/facebookAds";
@@ -60,6 +60,62 @@ export function PlatformFacebookCard() {
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncReport, setSyncReport] = useState<any>(null);
   const [reportOpen, setReportOpen] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagData, setDiagData] = useState<any>(null);
+  const [migratingId, setMigratingId] = useState<string | null>(null);
+  const [migratingAll, setMigratingAll] = useState(false);
+
+  async function loadDiagnose() {
+    setDiagOpen(true);
+    setDiagLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("facebook-diagnose-pixels", { body: {} });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      setDiagData(data);
+    } catch (e: any) {
+      toast({ title: "Falha ao diagnosticar", description: e?.message, variant: "destructive" });
+    } finally {
+      setDiagLoading(false);
+    }
+  }
+
+  async function migrateOne(adsetId: string) {
+    setMigratingId(adsetId);
+    try {
+      const { data, error } = await supabase.functions.invoke("facebook-migrate-adset-pixel", { body: { adset_id: adsetId } });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      toast({ title: "Adset migrado", description: `Novo adset: ${(data as any)?.new_adset_id || "—"}` });
+      await loadDiagnose();
+    } catch (e: any) {
+      toast({ title: "Falha ao migrar", description: e?.message, variant: "destructive" });
+    } finally {
+      setMigratingId(null);
+    }
+  }
+
+  async function migrateAllWrong() {
+    if (!diagData?.adsets) return;
+    const wrong = diagData.adsets.filter((a: any) => a.adset_id && a.is_correct === false);
+    if (wrong.length === 0) return;
+    if (!confirm(`Migrar ${wrong.length} adset(s) para o pixel correto? Isso reseta aprendizado.`)) return;
+    setMigratingAll(true);
+    let okCount = 0, failCount = 0;
+    for (const a of wrong) {
+      try {
+        const { data, error } = await supabase.functions.invoke("facebook-migrate-adset-pixel", { body: { adset_id: a.adset_id } });
+        if (error || (data as any)?.error) throw new Error(error?.message || (data as any).error);
+        okCount++;
+      } catch {
+        failCount++;
+      }
+    }
+    setMigratingAll(false);
+    toast({ title: "Migração concluída", description: `${okCount} ok · ${failCount} falhas` });
+    await loadDiagnose();
+  }
 
   async function syncAll() {
     setSyncingAll(true);
@@ -258,6 +314,10 @@ export function PlatformFacebookCard() {
                 {ensuringPixel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Settings2 className="w-3.5 h-3.5" />}
                 Garantir pixel igreen-tag-site
               </Button>
+              <Button size="sm" variant="outline" onClick={loadDiagnose} className="gap-1.5">
+                <Search className="w-3.5 h-3.5" />
+                Diagnosticar Pixels dos anúncios
+              </Button>
             </div>
           </div>
 
@@ -435,6 +495,71 @@ export function PlatformFacebookCard() {
           )}
           <DialogFooter>
             <Button onClick={() => setReportOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={diagOpen} onOpenChange={setDiagOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Search className="w-4 h-4 text-primary" /> Diagnóstico de Pixels dos anúncios
+            </DialogTitle>
+          </DialogHeader>
+          {diagLoading ? (
+            <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+          ) : diagData ? (
+            <div className="space-y-3">
+              <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-sm space-y-1">
+                <p><strong>Pixel correto:</strong> {diagData.correct_pixel_name} (<code className="text-xs">{diagData.correct_pixel_id}</code>)</p>
+                <p>{diagData.total_adsets} adset(s) ativo(s) · <span className={diagData.wrong_count > 0 ? "text-warning font-medium" : "text-primary"}>{diagData.wrong_count} com pixel errado/ausente</span></p>
+              </div>
+              {diagData.wrong_count > 0 && (
+                <Button onClick={migrateAllWrong} disabled={migratingAll} className="w-full gap-2">
+                  {migratingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}
+                  Migrar TODOS para o pixel correto ({diagData.wrong_count})
+                </Button>
+              )}
+              <div className="space-y-2">
+                {(diagData.adsets || []).map((a: any, i: number) => (
+                  <div key={a.adset_id || i} className={`rounded-lg border p-3 text-sm ${a.is_correct ? "border-primary/20 bg-primary/5" : "border-warning/30 bg-warning/5"}`}>
+                    {a.error ? (
+                      <p className="text-destructive text-xs">⚠ {a.campaign_name}: {a.error}</p>
+                    ) : (
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {a.is_correct ? <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" /> : <AlertCircle className="w-4 h-4 text-warning flex-shrink-0" />}
+                            <span className="font-medium truncate">{a.adset_name}</span>
+                            <Badge variant="outline" className="text-xs">{a.effective_status}</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1 truncate">Campanha: {a.campaign_name}</p>
+                          <p className="text-xs mt-1">
+                            Pixel: {a.has_pixel ? (
+                              <><span className={a.is_correct ? "text-primary" : "text-warning"}>{a.current_pixel_name}</span> <code className="text-muted-foreground">({a.current_pixel_id})</code></>
+                            ) : (
+                              <span className="text-destructive">Sem pixel</span>
+                            )}
+                          </p>
+                        </div>
+                        {!a.is_correct && (
+                          <Button size="sm" variant="outline" disabled={migratingId === a.adset_id || migratingAll} onClick={() => migrateOne(a.adset_id)} className="gap-1.5 flex-shrink-0">
+                            {migratingId === a.adset_id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowRightLeft className="w-3.5 h-3.5" />}
+                            Migrar
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="ghost" onClick={loadDiagnose} disabled={diagLoading} className="gap-1.5">
+              <RefreshCw className="w-3.5 h-3.5" /> Recarregar
+            </Button>
+            <Button onClick={() => setDiagOpen(false)}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

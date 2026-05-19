@@ -212,11 +212,17 @@ Deno.serve(async (req) => {
       }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     // Adapter: mantém o resto do código falando com "conn".
+    // PIXEL TRAVADO: todo novo anúncio sai com o pixel oficial da plataforma,
+    // independente do que estiver salvo em platform_facebook_account.pixel_id.
+    const REQUIRED_PIXEL_ID = "1521037349653769";
+    if (platform.pixel_id && platform.pixel_id !== REQUIRED_PIXEL_ID) {
+      console.warn(`[fb-create-campaign] platform.pixel_id=${platform.pixel_id} difere do REQUIRED_PIXEL_ID=${REQUIRED_PIXEL_ID}; usando o travado.`);
+    }
     const conn = {
       token: platform.token,
       ad_account_id: platform.ad_account_id,
       page_id: platform.page_id,
-      pixel_id: platform.pixel_id,
+      pixel_id: REQUIRED_PIXEL_ID,
       ig_account_id: platform.ig_account_id,
       whatsapp_phone_number_id: null as string | null,
       whatsapp_destination_number: waNumberSetting,
