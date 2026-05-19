@@ -14,8 +14,10 @@ import { DropConfirmDialog } from "./DropConfirmDialog";
 import { KanbanColumn } from "./KanbanColumn";
 import { useKanbanStages, COLOR_OPTIONS } from "@/hooks/useKanbanStages";
 import { useKanbanDeals } from "@/hooks/useKanbanDeals";
+import { useFlowSteps } from "@/hooks/useFlowSteps";
 import { sendWhatsAppMessage, resolveRecipient } from "@/services/messageSender";
 import type { MediaCategory } from "@/services/messageSender";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Tables } from "@/integrations/supabase/types";
 
 type KanbanStageRow = Tables<"kanban_stages">;
