@@ -12,7 +12,7 @@ import {
 } from "../../../_shared/captureExtractors.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
 import { isTestMode } from "../../../_shared/test-mode.ts";
-import { evaluateRules, logRuleFire, _consumeCustomerRateLimit } from "./rules-engine.ts";
+// rules-engine removido em Sprint 2.5 (bot_flow_rules = 0 linhas, código morto)
 import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
 import { ensureAudioTranscript } from "../../../_shared/audio-transcript.ts";
 import { isStrictScriptMode } from "../../../_shared/ai-decisions.ts";
@@ -1743,83 +1743,9 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     }
   }
 
-  // 1.75) GLOBAL KEYWORD RULES — fallback inteligente, com rate-limit por customer
-  const rateLimitOk = ctx.customer.id ? _consumeCustomerRateLimit(String(ctx.customer.id)) : true;
-  if (!rateLimitOk) {
-    console.warn(`[conversational] ⛔ rate-limit: pulando regras para customer=${ctx.customer.id}`);
-  }
-  if (rateLimitOk) try {
-    const ruleHit = await evaluateRules({
-      supabase: ctx.supabase,
-      flowId,
-      consultantId,
-      customerId: ctx.customer.id || null,
-      currentStepId: currentStep.id,
-      messageText: ctx.messageText || "",
-      lastRuleFireAt: (ctx.customer as any).last_rule_fire_at || null,
-      lastRuleId: (ctx.customer as any).last_rule_id || null,
-      hasCapture,
-    });
-    if (ruleHit) {
-      const { rule, matchedKeyword } = ruleHit;
-      console.log(`[conversational] 🎯 rule hit "${rule.name}" (${matchedKeyword}) at step="${stepKey}" → ${rule.return_behavior}`);
+  // 1.75) GLOBAL KEYWORD RULES — removido em Sprint 2.5 (bot_flow_rules = 0).
+  //       Para reativar: restaurar rules-engine.ts e o bloco evaluateRules aqui.
 
-      if (rule.media_id) {
-        const { data: mr } = await ctx.supabase
-          .from("ai_media_library").select("url, kind").eq("id", rule.media_id).maybeSingle();
-        if (mr?.url) {
-          const kind = ["audio","video","image"].includes(String(mr.kind)) ? String(mr.kind) : "document";
-          let canSend = true;
-          if (kind === "audio" || kind === "video" || kind === "image") {
-            const { data } = await ctx.supabase.rpc("try_log_media_send", {
-              _consultant_id: consultantId, _customer_id: ctx.customer.id,
-              _media_id: rule.media_id, _slot_key: null, _kind: kind,
-            });
-            canSend = data !== false;
-          }
-          if (canSend) { try { await ctx.sender.sendMedia(ctx.remoteJid, mr.url, "", kind, Number((mr as any).duration_sec || 0) || undefined); } catch (_) {} }
-        }
-      }
-
-      let nextStepKey: string = stepKey;
-      const extraUpdates: Record<string, any> = {
-        last_rule_id: rule.id, last_rule_fire_at: new Date().toISOString(),
-      };
-      if (rule.return_behavior === "goto_step" && rule.goto_step_id) {
-        const target = dbSteps.find((s) => s.id === rule.goto_step_id);
-        if (target) { nextStepKey = target.id; extraUpdates.previous_conversation_step = stepKey; }
-      } else if (rule.return_behavior === "restart") {
-        nextStepKey = firstActive.id; extraUpdates.previous_conversation_step = null;
-      } else if (rule.return_behavior === "handoff") {
-        nextStepKey = "aguardando_humano";
-        extraUpdates.bot_paused = true;
-        extraUpdates.bot_paused_reason = "rule_handoff";
-        extraUpdates.bot_paused_at = new Date().toISOString();
-      }
-
-      await logRuleFire(ctx.supabase, {
-        ruleId: rule.id, consultantId, customerId: ctx.customer.id || null,
-        matchedKeyword, messageText: ctx.messageText || "",
-        stepBefore: stepKey, stepAfter: nextStepKey, returnBehavior: rule.return_behavior,
-      });
-
-      const replyText = rule.response_text ? renderTemplate(rule.response_text, vars) : "";
-      const hasReply = !!(replyText && replyText.trim().length > 0);
-      const inlineSent = hasReply || !!rule.media_id;
-      return _finalize(stepKey, {
-        reply: hasReply ? replyText : "",
-        updates: {
-          conversation_step: nextStepKey,
-          __inline_sent: inlineSent || undefined,
-          ...captureUpdates,
-          ...extraUpdates,
-          ...restoreDetourUpdates,
-        },
-      });
-    }
-  } catch (e) {
-    console.error("[conversational] rules-engine failed (ignorando)", e);
-  }
 
   // 2) FALLBACK (Plano B)
   const fb = currentStep.fallback || { mode: "repeat" };
