@@ -1096,7 +1096,34 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     });
   }
 
-  const cls = await classifyIntent(ctx.messageText, stepKey as ConversationalStep, ctx.geminiApiKey);
+  const cls = await classifyIntent(
+    ctx.messageText,
+    stepKey as ConversationalStep,
+    ctx.geminiApiKey,
+    { customerId: ctx.customer?.id, consultantId: consultantId || null, traceId: ctx.messageId },
+  );
+
+  // Sprint 1.5: honra thresholds de confiança (action=handoff/repeat/execute).
+  // - handoff (conf < 0.5): pausa o bot e devolve mensagem neutra; o consultor assume.
+  // - repeat  (0.5–0.75): repete o passo atual sem avançar.
+  // Quando a intenção é tem_duvida deixamos passar (cai no AI FAQ logo abaixo).
+  if (cls.action === "handoff" && cls.intent !== "tem_duvida") {
+    console.log(`[conversational] 🤝 handoff por baixa confiança (conf=${cls.confidence})`);
+    return _finalize(stepKey, {
+      reply: "",
+      updates: {
+        conversation_step: stepKey,
+        bot_paused: true,
+        bot_paused_reason: "low_confidence_handoff",
+        bot_paused_at: new Date().toISOString(),
+        ...restoreDetourUpdates,
+      },
+    });
+  }
+  if (cls.action === "repeat" && cls.intent !== "tem_duvida" && cls.intent !== "quer_cadastrar") {
+    console.log(`[conversational] 🔁 repeat por confiança média (conf=${cls.confidence})`);
+    return _finalize(stepKey, await repeatCurrent());
+  }
 
   // ─── AI FAQ Answerer (Lovable AI) ──────────────────────────────────
   // Quando o lead faz pergunta (tem_duvida) que NÃO casou em bot_flow_qa
