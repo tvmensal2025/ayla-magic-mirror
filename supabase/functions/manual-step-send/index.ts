@@ -106,11 +106,19 @@ Deno.serve(async (req) => {
 
     // Build variables for text rendering
     const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
+    const billValue = Number((customer as any).electricity_bill_value || 0);
+    const fmtBRL = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const vars: Record<string, string> = {
       "{nome}": firstName,
       "{{nome}}": firstName,
       "{nome_completo}": String((customer as any).name || ""),
       "{{nome_completo}}": String((customer as any).name || ""),
+      "{valor}": fmtBRL(billValue),
+      "{{valor}}": fmtBRL(billValue),
+      "{economia_mensal}": fmtBRL(billValue * 0.20),
+      "{{economia_mensal}}": fmtBRL(billValue * 0.20),
+      "{economia_anual}": fmtBRL(billValue * 0.20 * 12),
+      "{{economia_anual}}": fmtBRL(billValue * 0.20 * 12),
     };
     const applyVars = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
     const renderedText = (step as any).message_text ? applyVars(String((step as any).message_text)) : "";
@@ -170,7 +178,7 @@ Deno.serve(async (req) => {
     }
 
     const flowPatch = body.continueFlow && body.part === "all"
-      ? await buildContinuationPatch(supabase, body.consultantId, customer, step)
+      ? await buildContinuationPatch(supabase, sender, remoteJid, body.consultantId, customer, step, vars)
       : null;
     if (flowPatch) {
       await supabase.from("customers").update(flowPatch).eq("id", customer.id);
