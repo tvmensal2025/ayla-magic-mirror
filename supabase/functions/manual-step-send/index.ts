@@ -345,16 +345,29 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
     cursorPos = Number(next.position) || cursorPos + 1;
 
     const ntype = String(next.step_type || "message");
-    // Passos que exigem input do cliente — para a cadeia aqui e posiciona o lead.
+    // Passos que exigem input do cliente — para a cadeia, posiciona o lead
+    // e dispara o prompt da captura (message_text → retry_text → fallback).
     if (ntype !== "message") {
-      patch.conversation_step = next.id;
-      if (ntype === "capture_conta") patch.conversation_step = "aguardando_conta";
-      else if (ntype === "capture_documento" || ntype === "capture_doc") patch.conversation_step = "aguardando_doc_auto";
-      else if (ntype === "capture_email") patch.conversation_step = "ask_email";
-      else if (ntype === "confirm_phone") patch.conversation_step = "ask_phone_confirm";
-      else if (ntype === "finalizar_cadastro") patch.conversation_step = "finalizando";
-      if (String(patch.conversation_step).startsWith("aguardando_") || String(patch.conversation_step).startsWith("ask_")) {
-        patch.last_custom_prompt_at = new Date().toISOString();
+      const legacy = mapCaptureStepToLegacy(ntype, next.id, next.step_key);
+      patch.conversation_step = legacy;
+      const applyVars = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
+      const rendered = next.message_text ? applyVars(String(next.message_text)) : "";
+      const promptRaw = resolveCapturePrompt(next, rendered);
+      if (promptRaw) {
+        const prompt = applyVars(promptRaw);
+        try {
+          await sender.sendText(remoteJid, prompt);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id,
+            message_direction: "outbound",
+            message_text: prompt,
+            message_type: "text",
+            conversation_step: legacy,
+          });
+          patch.last_custom_prompt_at = new Date().toISOString();
+        } catch (e) {
+          console.error(`[manual-step-send] falha ao enviar prompt do capture (${ntype}):`, (e as Error).message);
+        }
       }
       break;
     }
