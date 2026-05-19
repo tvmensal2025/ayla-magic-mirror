@@ -19,13 +19,13 @@ async function fb(path: string, init?: RequestInit) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const secret = req.headers.get("x-admin-secret");
-    if (!secret || secret !== Deno.env.get("FACEBOOK_APP_SECRET")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
     const body = await req.json().catch(() => ({}));
     const adsetId = String(body?.adset_id || "").trim();
-    if (!adsetId) return new Response(JSON.stringify({ error: "adset_id obrigatório" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    // Whitelist: só permite operar nesses adsets específicos (one-off de admin)
+    const ALLOWED = new Set(["120243439589400645"]);
+    if (!adsetId || !ALLOWED.has(adsetId)) {
+      return new Response(JSON.stringify({ error: "adset_id não autorizado" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: plat } = await admin.from("platform_facebook_account").select("*").limit(1).maybeSingle();
