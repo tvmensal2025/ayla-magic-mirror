@@ -1,60 +1,70 @@
-## Diagnóstico (lead Carson 5516992299779)
+## Diagnóstico
 
-- `conversation_step = 80188e5f` (step "Valor da conta", slot `como_funciona`, posição 5). Bot pausado com `humano_assumiu`.
-- Quando o consultor manda "Devolver para o passo → Conta de energia" (step `capture_conta` na posição 9, slot `passo_mp70jl99`), o `manual-step-send`:
-  - Não acha mídia nem `message_text` (capture_conta no editor não tem texto — só `captures[0].retry_text`).
-  - Retorna **`nothing_to_send` 400** sem mandar nada. Bot fica em silêncio.
-- Mesmo cenário acontece ao "continuar fluxo" e a cadeia parar num `capture_*`: `buildContinuationPatch` só seta `conversation_step='aguardando_conta'`, **sem disparar pergunta**. Lead fica esperando o upload sem saber que tem que mandar.
-- Vale para todos os capture_*: `capture_documento`, `capture_email`, `confirm_phone`, `finalizar_cadastro`.
+1. **Texto do "como funciona"** — Os passos com `slot_key='como_funciona'` no `bot_flow_steps` estão TODOS com `message_text` vazio (validei no DB). Ou seja, o bot está caindo no fallback de IA: ou no `ai-faq-answerer` (Lovable AI) ou no `ai-sales-agent`, que monta a resposta a partir de:
+  - `ai_knowledge_sections` → "FAQ 2 — DESCONTO E COBRANÇA": *"O desconto varia entre 10% e 20%…"* → IA arredonda para "≈15%".
+  - `ai-sales-agent/index.ts:256, 689` → prompt diz `**≈12% sobre o valor**` e calcula `billNum * 0.12`. Esse 12% combinado com texto solto vira o "15%" inconsistente.
+  - `evolution-webhook` e `whapi-webhook/handlers/bot-flow.ts` já usam `* 0.20` para `{economia_mensal/anual}` — está certo, mas convive com o 12% do agente.
+2. **Tempo de digitação** — `supabase/functions/_shared/human-pace.ts`:
+  `ms = clamp(1500 + len*35, 1500, 7000)` com jitter ±20%. Textão curto sai em ~1,5 s, texto médio em 2-3 s — soa "bot-rápido", especialmente sem mostrar "digitando…".
 
-Resumo: o fluxo "Devolver para passo de captura" nunca dispara o prompt — só reposiciona.
+## Plano de correção
 
-## Correção
+### 1. Preencher o passo "como funciona" com o texto curto e agradável
 
-### 1. `supabase/functions/manual-step-send/index.ts`
+Edge function nova/uso de migration para `update bot_flow_steps set message_text = $TEXTO where slot_key='como_funciona' and coalesce(message_text,'')=''` (não sobrescreve quem já personalizou).
 
-Adicionar helper `resolveCapturePrompt(step)` que devolve o texto a enviar quando o passo é de captura:
+**Texto novo** (markdown WhatsApp leve, 3 linhas, com `{{nome}}`, fechando com CTA):
 
-1. `step.message_text` se preenchido.
-2. Primeiro `captures[].retry_text` não-vazio.
-3. Fallback por `step_type` (texto curto padrão iGreen, com `{{nome}}`):
-   - `capture_conta` → "{{nome}}, me manda a foto **ou PDF** da sua conta de luz aqui pelo WhatsApp 📄"
-   - `capture_documento`/`capture_doc` → "Agora me envia uma foto do seu documento (RG ou CNH, frente e verso) 📷"
-   - `capture_email` → "Qual é o seu melhor e-mail? ✉️"
-   - `confirm_phone` → "Esse número é o melhor pra falar com você no WhatsApp? Pode confirmar?"
-   - `finalizar_cadastro` → "Tô finalizando seu cadastro, só um instante… ⏳"
+```
+Funciona assim, {{nome}}: você continua recebendo a conta da sua distribuidora normal — só que a iGreen entra com *até 20% de desconto* todo mês.
 
-Usar em duas situações:
+Sem obra, sem instalação, sem mudar fiação. 💚
+```
 
-**(a) Passo selecionado direto é `capture_*`** (resolve antes do `nothing_to_send`):
-- Se `step.step_type !== 'message'`, montar `toSend = [{ kind: 'text', text: prompt }]` com o prompt resolvido.
-- Setar `conversation_step` mapeado (`aguardando_conta`, `aguardando_doc_auto`, `ask_email`, `ask_phone_confirm`, `finalizando`).
-- Sempre despausar (mesmo sem `continueFlow=true`), porque sem o bot ativo o upload não será capturado.
-- Salvar `last_custom_prompt_at = now()`.
-- Idempotência: se `last_custom_prompt_at` < 20 s atrás **e** `conversation_step` já bate com o destino, pular o envio e retornar `{ ok: true, sent: [], skipped: 'recent_prompt' }` (evita duplicar quando consultor clica 2× rápido).
+### 2. Padronizar desconto em 20% (eliminar 12% e 15% da IA)
 
-**(b) Cadeia em `buildContinuationPatch` para num `capture_*`**:
-- Antes do `break`, chamar `sender.sendText(remoteJid, prompt)` + insert em `conversations` (igual ao `sendConfiguredStep`).
-- Manter o mapeamento de `conversation_step` legado.
+- `supabase/functions/ai-sales-agent/index.ts`
+  - Linha 256: trocar "≈12% sobre o valor" por **"≈20% sobre o valor"**.
+  - Linha 689: `billNum * 0.12` (mês e ano) → `billNum * 0.20`.
+- `ai_knowledge_sections` (migration update) — seção "FAQ 2 — DESCONTO E COBRANÇA":
+  - "O desconto varia entre **10% e 20%**" → "O desconto é de **até 20%** sobre o valor da energia consumida, conforme sua distribuidora e perfil."
+  - Demais menções a "15%" em LP (`HowItWorksSection.tsx`, `LicConexaoGreen.tsx`, `ConsultantPage.tsx` meta description) → **20%** para ficar consistente em todo lugar onde o lead pode ver.
 
-### 2. Frontend (`src/pages/.../ChatView` ou onde mora "Devolver para o passo")
+### 3. Tempo de digitação mais humano
 
-Sem mudança funcional. Só tratar resposta `skipped: 'recent_prompt'` como sucesso silencioso ("Pergunta já enviada agora há pouco — aguarde a resposta do cliente.").
+`supabase/functions/_shared/human-pace.ts`:
 
-### 3. Reposicionar o lead em produção
+```ts
+// antes: base = 1500 + len*35; min 1500; max 7000
+// depois:
+const base = 2200 + len * 55;     // ~60% mais lento
+const jitter = (Math.random()*0.5 - 0.25) * base; // ±25%
+const min = opts?.minMs ?? 2200;
+const max = opts?.maxMs ?? 11000;
+```
 
-Como teste imediato após deploy: reenviar Carson para o passo `Conta de energia` — deve receber o texto "Me manda a foto ou PDF…" e o bot fica em `aguardando_conta`, ativo, pronto para receber o upload.
+Resultado prático:
+
+- Texto de 30 chars: ~3,8 s (antes ~2,5 s)
+- Texto de 120 chars: ~8,8 s (antes ~5,7 s) — soa lendo + digitando, não bot.
+
+`pauseBetweenMessages`: subir para `1800 + Math.random()*2000` (1,8-3,8 s entre mensagens consecutivas).
 
 ### 4. Memória
 
-Atualizar `mem://features/ai-generate-step-text` (ou criar `mem://features/manual-step-capture-prompt`) registrando: "Manual-step-send em capture_* dispara prompt automático (message_text → retry_text → fallback por tipo), com debounce de 20 s."
+Atualizar `mem://features/whatsapp-message-variables` (ou criar `mem://copy/discount-rate-20`) registrando: **desconto oficial em todos os textos e cálculos = 20%** (substitui 12%/15% antigos).
 
 ## Arquivos tocados
 
-- `supabase/functions/manual-step-send/index.ts` (helpers + dois pontos de uso + idempotência)
-- `mem://features/manual-step-capture-prompt` (novo) + `mem://index.md`
+- `supabase/functions/_shared/human-pace.ts` — novos tempos
+- `supabase/functions/ai-sales-agent/index.ts` — 12% → 20%
+- `src/components/HowItWorksSection.tsx` — 15% → 20%
+- `src/components/licenciada/LicConexaoGreen.tsx` — 15% → 20% (2 ocorrências)
+- `src/pages/ConsultantPage.tsx` — meta description 15% → 20%
+- **Migration** — `update ai_knowledge_sections` na seção FAQ 2; `update bot_flow_steps` preenchendo `message_text` em passos `como_funciona` vazios
 
 ## Não faremos
 
-- Não vamos mexer no editor de fluxos para forçar `message_text` em capture_*: o ideal é que o passo funcione mesmo se o consultor deixar vazio.
-- Não vamos alterar `whapi-webhook` — a captura propriamente dita (`aguardando_conta`) já funciona corretamente.
+- Não vou ativar presence "digitando…" no WhatsApp agora (você não pediu — fica para próximo passo se quiser).
+- Não vou sobrescrever passos `como_funciona` que algum consultor já personalizou no editor.
+- Não vou mexer no Conexão Club / Career Plan (15% lá é comissão de licenciado, não desconto do cliente).
