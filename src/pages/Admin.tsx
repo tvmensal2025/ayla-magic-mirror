@@ -255,6 +255,8 @@ const AdminContent = () => {
         </div>
       </header>
 
+      <OnboardingGate form={form} saving={saving} onFormChange={handleFormChange} onSave={handleSave}>
+
       {/* Tab Navigation */}
       <nav className="border-b border-border bg-card/50 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-2 sm:px-6">
