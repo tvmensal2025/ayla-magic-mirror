@@ -14,8 +14,10 @@ import { DropConfirmDialog } from "./DropConfirmDialog";
 import { KanbanColumn } from "./KanbanColumn";
 import { useKanbanStages, COLOR_OPTIONS } from "@/hooks/useKanbanStages";
 import { useKanbanDeals } from "@/hooks/useKanbanDeals";
+import { useFlowSteps } from "@/hooks/useFlowSteps";
 import { sendWhatsAppMessage, resolveRecipient } from "@/services/messageSender";
 import type { MediaCategory } from "@/services/messageSender";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Tables } from "@/integrations/supabase/types";
 
 type KanbanStageRow = Tables<"kanban_stages">;
@@ -29,7 +31,9 @@ interface KanbanBoardProps {
 export function KanbanBoard({ consultantId, instanceName }: KanbanBoardProps) {
   const { stages, fetchStages, addStage, updateStage, deleteStage, saveAutoMessage, toggleAutoMessage, reorderStages } = useKanbanStages(consultantId);
   const { deals, fetchDeals, resolveNames, moveDeal, editDeal, deleteDeal } = useKanbanDeals(consultantId);
+  const { customStepMap, stepOptions } = useFlowSteps(consultantId);
 
+  const [stepFilter, setStepFilter] = useState<string>("all");
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [editingStage, setEditingStage] = useState<KanbanStageRow | null>(null);
@@ -167,6 +171,16 @@ export function KanbanBoard({ consultantId, instanceName }: KanbanBoardProps) {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input placeholder="Buscar lead..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="h-7 text-xs pl-8 w-[180px]" />
           </div>
+          <Select value={stepFilter} onValueChange={setStepFilter}>
+            <SelectTrigger className="h-7 text-xs w-[200px]"><SelectValue placeholder="Parou no passo" /></SelectTrigger>
+            <SelectContent className="max-h-[320px]">
+              <SelectItem value="all" className="text-xs">Todos os passos</SelectItem>
+              <SelectItem value="none" className="text-xs">Sem interação</SelectItem>
+              {stepOptions.map((o) => (
+                <SelectItem key={o.key} value={o.key} className="text-xs">{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <AddLeadDialog consultantId={consultantId} stages={stages.map((s) => ({ stage_key: s.stage_key, label: s.label, color: s.color }))} onLeadAdded={fetchDeals} />
           <Dialog open={showSettings} onOpenChange={setShowSettings}>
             <DialogTrigger asChild>
@@ -231,7 +245,7 @@ export function KanbanBoard({ consultantId, instanceName }: KanbanBoardProps) {
       {/* Kanban columns */}
       <div className="flex gap-3 overflow-x-auto pb-2">
         {stages.map((s) => (
-          <KanbanColumn key={s.id} stage={s} deals={deals} searchQuery={searchQuery} onDrop={handleDrop} onDragStart={setDraggedId} onEditDeal={openEditDeal} onDeleteDeal={setDeletingDealId} />
+          <KanbanColumn key={s.id} stage={s} deals={deals} searchQuery={searchQuery} stepFilter={stepFilter} customStepMap={customStepMap} onDrop={handleDrop} onDragStart={setDraggedId} onEditDeal={openEditDeal} onDeleteDeal={setDeletingDealId} />
         ))}
       </div>
 

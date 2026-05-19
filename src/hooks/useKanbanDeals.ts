@@ -13,12 +13,10 @@ export function useKanbanDeals(consultantId: string) {
   const fetchDeals = useCallback(async () => {
     const { data } = await supabase
       .from("crm_deals")
-      .select("*, customers(name, phone_whatsapp, customer_origin)")
+      .select("*, customers(name, phone_whatsapp, customer_origin, conversation_step, last_step_advanced_at)")
       .eq("consultant_id", consultantId)
       .order("created_at", { ascending: false });
     if (data) {
-      // Excluir clientes iGreen sincronizados do Kanban — eles são carteira,
-      // não funil. Aparecem na aba "Clientes iGreen" da página de Clientes.
       const onlyLeads = data.filter((d: any) => {
         const origin = d.customers?.customer_origin;
         return !origin || origin === "whatsapp_lead" || origin === "manual";
@@ -26,6 +24,8 @@ export function useKanbanDeals(consultantId: string) {
       const enriched = onlyLeads.map((d: any) => ({
         ...d,
         customer_name: d.customers?.name || null,
+        conversation_step: d.customers?.conversation_step || null,
+        last_step_advanced_at: d.customers?.last_step_advanced_at || null,
       }));
       setDeals(enriched);
     }
@@ -36,15 +36,18 @@ export function useKanbanDeals(consultantId: string) {
     const needsLookup = rawDeals.filter((d) => !(d as any).customer_name && d.remote_jid);
     if (needsLookup.length === 0) return;
     const phones = needsLookup.map((d) => d.remote_jid!.split("@")[0]);
-    const { data: customers } = await supabase.from("customers").select("name, phone_whatsapp").in("phone_whatsapp", phones);
+    const { data: customers } = await supabase
+      .from("customers")
+      .select("name, phone_whatsapp, conversation_step, last_step_advanced_at")
+      .in("phone_whatsapp", phones);
     if (!customers || customers.length === 0) return;
-    const phoneMap = new Map(customers.map((c) => [c.phone_whatsapp, c.name]));
+    const phoneMap = new Map(customers.map((c: any) => [c.phone_whatsapp, c]));
     setDeals((prev) =>
       prev.map((d) => {
         if ((d as any).customer_name) return d;
         const phone = d.remote_jid?.split("@")[0];
-        const name = phone ? phoneMap.get(phone) : null;
-        return name ? { ...d, customer_name: name } as any : d;
+        const c: any = phone ? phoneMap.get(phone) : null;
+        return c ? { ...d, customer_name: c.name, conversation_step: c.conversation_step, last_step_advanced_at: c.last_step_advanced_at } as any : d;
       })
     );
   }, []);

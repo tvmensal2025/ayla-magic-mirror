@@ -1,18 +1,29 @@
-import { GripVertical, User, Pencil, Trash2, MoreVertical } from "lucide-react";
+import { GripVertical, User, Pencil, Trash2, MoreVertical, Footprints } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { KanbanSlaIndicator } from "./KanbanSlaIndicator";
 import type { Tables } from "@/integrations/supabase/types";
+import type { FlowStepInfo } from "@/lib/flowStepResolver";
 
 type CrmDealRow = Tables<"crm_deals">;
 
 interface KanbanDealCardProps {
   deal: CrmDealRow;
+  stepInfo?: FlowStepInfo | null;
   onDragStart: (id: string) => void;
   onEdit: (deal: CrmDealRow) => void;
   onDelete: (id: string) => void;
 }
 
-export function KanbanDealCard({ deal, onDragStart, onEdit, onDelete }: KanbanDealCardProps) {
+export function KanbanDealCard({ deal, stepInfo, onDragStart, onEdit, onDelete }: KanbanDealCardProps) {
+  const lastAdvanced = (deal as any).last_step_advanced_at || deal.updated_at || deal.created_at;
+  const hoursStuck = lastAdvanced ? (Date.now() - new Date(lastAdvanced).getTime()) / 36e5 : 0;
+  const stepTone = !stepInfo
+    ? "bg-muted/40 text-muted-foreground border-border/40"
+    : hoursStuck > 72
+      ? "bg-red-500/15 text-red-300 border-red-500/30"
+      : hoursStuck > 24
+        ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
+        : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
   return (
     <div
       draggable
@@ -35,8 +46,16 @@ export function KanbanDealCard({ deal, onDragStart, onEdit, onDelete }: KanbanDe
           <span className="text-[10px] text-muted-foreground truncate block sensitive-phone">
             {deal.remote_jid?.split("@")[0] || "Sem contato"}
           </span>
+          <div className={`mt-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-medium ${stepTone}`}
+            title={stepInfo ? `Parou em: ${stepInfo.label}` : "Sem interação registrada no bot"}
+          >
+            <Footprints className="h-2.5 w-2.5" />
+            {stepInfo
+              ? <span>{stepInfo.number}{stepInfo.total ? `/${stepInfo.total}` : ""} · <span className="truncate max-w-[110px] inline-block align-bottom">{stepInfo.label}</span></span>
+              : <span>Sem interação</span>}
+          </div>
           <div className="mt-1">
-            <KanbanSlaIndicator enteredAt={deal.updated_at || deal.created_at} />
+            <KanbanSlaIndicator enteredAt={lastAdvanced} />
           </div>
           {deal.approved_at && (
             <p className="text-[9px] text-emerald-500/80 mt-1">
