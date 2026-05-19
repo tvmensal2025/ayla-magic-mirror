@@ -217,6 +217,18 @@ Deno.serve(async (req) => {
     const consultorId = consultantData?.igreen_id || "124170";
     console.log(`✅ Whapi super admin: ${nomeRepresentante} (iGreen ID: ${consultorId})`);
 
+    // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (como se desconectado) ──
+    // Antes de qualquer customer/notify/conversation: se o switch estiver OFF,
+    // simplesmente ignoramos a mensagem. Nada é criado, nada é notificado.
+    if (await isConsultantAIDisabled(supabase, superAdminConsultantId)) {
+      console.log(`🛑 [global-off-silent] IA desligada — ignorando inbound de ${phone}`);
+      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+
+
     // ─── 🔑 OTP INTERCEPT (antes do bot-flow) ─────────────────────────
     // Se o cliente está em awaiting_otp/portal_submitting e mandou um código
     // numérico, capturamos e notificamos o worker. Bypassa o fluxo conversacional.
@@ -453,37 +465,10 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── 🛑 IA GLOBALMENTE DESLIGADA pelo consultor ───────────────────
-    // Switch "IA ativa para meus leads" = OFF → nenhum motor automático
-    // responde, mesmo para leads novos. Marca o customer como pausado para
-    // que a UI mostre "humano atendendo" e nenhum cron tente religar.
-    if (await isConsultantAIDisabled(supabase, superAdminConsultantId)) {
-      await supabase.from("conversations").insert({
-        customer_id: customer.id,
-        message_direction: "inbound",
-        message_text: messageText || (hasAudio ? "[áudio]" : "[arquivo]"),
-        message_type: hasAudio ? "audio" : (isFile ? "image" : "text"),
-        conversation_step: customer.conversation_step,
-      });
-      if (!(customer as any).bot_paused || !(customer as any).assigned_human_id) {
-        try {
-          await supabase.from("customers").update({
-            bot_paused: true,
-            bot_paused_reason: "manual_global_pause",
-            bot_paused_at: new Date().toISOString(),
-            bot_paused_until: null,
-            assigned_human_id: superAdminConsultantId,
-            updated_at: new Date().toISOString(),
-          }).eq("id", customer.id);
-        } catch (e) {
-          console.error("⚠️ [global-off] falha ao marcar customer pausado:", (e as Error).message);
-        }
-      }
-      console.log(`🛑 [global-off] IA desligada pelo consultor ${superAdminConsultantId} — ignorando ${phone}`);
-      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // (Gate global de IA desligada foi movido para o topo — antes mesmo de
+    // criar customer ou notificar. Veja bloco "global-off-silent" no início.)
+
+
 
     // ─── 🔇 BOT PAUSADO (handoff humano ativo) ────────────────────────
     // Respeita bot_paused, assigned_human_id E bot_paused_until via helper único.

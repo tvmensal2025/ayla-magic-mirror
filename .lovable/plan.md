@@ -1,40 +1,26 @@
-## Diagnóstico
+## Objetivo
 
-- O switch `IA ativa para meus leads` já gravou `ai_agent_config.enabled=false` para o consultor atual.
-- A maioria dos leads existentes foi pausada, mas ainda apareceu lead novo com `bot_paused=false` e mensagens automáticas enviadas depois do desligamento.
-- Causa principal: o webhook `whapi-webhook` não consulta `ai_agent_config.enabled` antes de criar/processar lead novo e antes de rodar o motor de fluxo (`runConversationalFlow`/`runBotFlow`). Então leads futuros ainda entram no fluxo mesmo com a IA desligada.
-- Também existem outros disparadores automáticos que precisam respeitar a trava global: `ai-sales-agent`, `ai-agent-router`, `evolution-webhook`, `manual-step-send` quando usado para “devolver/continuar fluxo”, e `crm-auto-progress` para auto-mensagens de Kanban.
+Quando o switch "IA ativa para meus leads" estiver OFF, os webhooks devem agir como se o WhatsApp estivesse **desconectado**: nenhum lead novo é criado, nenhuma notificação dispara, nenhuma conversa é registrada, nenhuma extração roda. Apenas retorna `ok` silenciosamente.
 
-## Plano de implementação
+Hoje o gate `isConsultantAIDisabled` existe, mas só bloqueia **depois** de criar customer, disparar `notifyNewLead`, rodar self-intro etc. Para o consultor, parece que "ainda está chegando coisa".
 
-1. **Criar uma checagem única de “automação desligada”**
-   - Expandir o helper compartilhado de pausa para consultar `ai_agent_config.enabled` por `consultant_id`.
-   - Regra: se `enabled=false`, nenhum motor automático envia mensagem, mesmo se o lead ainda estiver com `bot_paused=false`.
-   - Manter `bot_paused=true`, `assigned_human_id` e `bot_paused_until` como bloqueios absolutos.
+## Mudanças
 
-2. **Blindar o `whapi-webhook` para leads atuais e futuros**
-   - Após identificar/criar o customer e antes de handoff, transcrição, lock e fluxo, consultar a trava global.
-   - Se a IA estiver desligada:
-     - registrar apenas a mensagem inbound;
-     - marcar o customer como `bot_paused=true`, `bot_paused_reason='manual_global_pause'`, `assigned_human_id=consultant_id`;
-     - retornar sem enviar texto, áudio, vídeo, botão ou passo de fluxo.
-   - Isso cobre leads novos que chegarem depois do desligamento.
+### 1. `supabase/functions/whapi-webhook/index.ts`
+- Mover o bloco `isConsultantAIDisabled(supabase, superAdminConsultantId)` para **logo após** resolver `superAdminConsultantId` e antes de:
+  - `find-customer` / criação de customer (linha ~349)
+  - `notifyNewLead` (linhas 381 e 401)
+  - extração self-intro e qualquer `update`/`insert`
+- Quando desligado: retornar `{ ok: true, msg: "global_ai_disabled_silent" }` sem tocar em `customers` nem `conversations`. Apenas um `console.log` curto.
+- Remover o bloco antigo (linhas ~456-486) que ficava no meio do fluxo.
 
-3. **Blindar os outros motores automáticos**
-   - `evolution-webhook`: aplicar a mesma regra antes de `ai-agent-router` e antes de `runBotFlow/runConversationalFlow`.
-   - `ai-sales-agent`: incluir `enabled` na config carregada e abortar se estiver desativada.
-   - `ai-agent-router`: além de `bot_paused`, também bloquear se `assigned_human_id` existir ou se `ai_agent_config.enabled=false`.
-   - `crm-auto-progress`: continuar movendo estágio se necessário, mas não enviar auto-mensagem quando a IA global do consultor estiver desligada ou o customer estiver pausado.
+### 2. `supabase/functions/evolution-webhook/index.ts`
+- Mesma mudança: mover o `isConsultantAIDisabled(supabase, instanceData.consultant_id)` para imediatamente após o lookup da instância (após linha ~94), antes de qualquer `notifyNewLead`, criação de customer e processamento.
+- Retornar silenciosamente.
 
-4. **Ajustar botões de pausa para todos os leads**
-   - No switch e no botão “Parar IA de todos os meus leads”, atualizar todos os leads do consultor, não só os que estão com `bot_paused=false/null`.
-   - Garantir que a tela recarregue após pausar/religar e que o texto deixe claro: desligado bloqueia leads atuais e futuros.
+### 3. Validação
+- Confirmar via `supabase--edge_function_logs` que, com switch OFF, novos números não criam linhas em `customers` nem `conversations` e que `notifyNewLead` não dispara.
 
-5. **Executar backfill imediato no banco**
-   - Aplicar update nos leads do consultor atual que ainda estejam sem pausa (`bot_paused=false/null`) para `manual_global_pause`.
-   - Confirmar por consulta que não restou nenhum lead ativo sem pausa enquanto `enabled=false`.
-
-6. **Validação**
-   - Consultar o banco para confirmar `ai_agent_config.enabled=false` e zero leads ativos para o consultor atual.
-   - Revisar logs/fluxo dos webhooks para confirmar que chamadas futuras retornam “global disabled” sem envio.
-   - Garantir que “Devolver para…” e “Enviar passo” continuem funcionando apenas como ação manual explícita; automação contínua só volta quando o switch for religado.
+## Não faz parte
+- UI do switch e migration de backfill — já feitos no loop anterior.
+- Lógica de reativação — quando o switch volta a ON, futuros inbounds passam normalmente pelo fluxo (sem necessidade de "ressuscitar" leads que nunca foram criados).
