@@ -389,7 +389,7 @@ async function loadContext(supabase: any, customerId: string) {
   const { data: customer } = await supabase
     .from("customers")
     .select(
-      "id, consultant_id, name, name_source, phone_whatsapp, distribuidora, address_city, address_state, address_street, electricity_bill_value, electricity_bill_photo_url, ocr_done, bill_requested_at, numero_instalacao, pain_point, sales_phase, qualification_score, lead_source, customer_referred_by_name, conversation_summary, summary_updated_at",
+      "id, consultant_id, name, name_source, phone_whatsapp, distribuidora, address_city, address_state, address_street, electricity_bill_value, electricity_bill_photo_url, ocr_done, bill_requested_at, numero_instalacao, pain_point, sales_phase, qualification_score, lead_source, customer_referred_by_name, conversation_summary, summary_updated_at, bot_paused, bot_paused_until, assigned_human_id",
     )
     .eq("id", customerId)
     .maybeSingle();
