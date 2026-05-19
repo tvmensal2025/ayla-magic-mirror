@@ -1359,3 +1359,44 @@ function FlowAuditPanel({ steps, flowId, onRepaired }: { steps: Step[]; flowId: 
     </Card>
   );
 }
+
+function AiGenerateTextButton({
+  consultantId, stepId, variant, onGenerated,
+}: { consultantId: string; stepId: string; variant: "A" | "B" | "C"; onGenerated: (t: string) => void }) {
+  const [loading, setLoading] = useState(false);
+  async function gen() {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("ai-generate-step-text", {
+        body: { consultantId, stepId, variant },
+      });
+      const text = (data as any)?.text;
+      if (error || (data as any)?.error || !text) {
+        const msg = (data as any)?.message || error?.message || "Falha ao gerar texto";
+        toast.error(msg);
+        return;
+      }
+      onGenerated(String(text).trim());
+      toast.success("Texto gerado com IA");
+    } catch (e: any) {
+      toast.error(e?.message || "Erro ao chamar a IA");
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      className="h-7 gap-1.5 text-[11px] border-primary/40 text-primary hover:bg-primary/10"
+      onClick={gen}
+      disabled={loading || !consultantId || !stepId}
+      title={`Gerar texto persuasivo (variante ${variant})`}
+    >
+      <Sparkles className={`h-3.5 w-3.5 ${loading ? "animate-pulse" : ""}`} />
+      {loading ? "Gerando..." : "Gerar texto (IA)"}
+    </Button>
+  );
+}
