@@ -517,19 +517,19 @@ export default function FluxoCamila() {
           </div>
         </Card>
 
-        {/* Teste A/B */}
+        {/* Teste A/B/C */}
         <Card className="p-4 sm:p-5 border-purple-500/30 bg-purple-500/5">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="flex-1 min-w-[220px]">
               <div className="flex items-center gap-2 mb-1">
                 <FlaskConical className="h-4 w-4 text-purple-500" />
-                <Label className="text-base font-semibold">Teste A/B (com áudio × só texto)</Label>
+                <Label className="text-base font-semibold">Teste A/B/C (áudio × só texto × vídeo inicial)</Label>
               </div>
               <p className="text-sm text-muted-foreground">
-                Quando ligado, novos leads vão alternando: 1º vai pro <strong>Fluxo A</strong> (com áudio), 2º pro <strong>Fluxo B</strong> (sem áudio, só texto/imagem/vídeo), 3º A, 4º B... Texto, imagens e vídeos são <strong>compartilhados</strong> entre A e B — só os áudios diferem.
+                Quando ligado, novos leads alternam entre os 3 fluxos: 1º <strong>A</strong> (com áudio), 2º <strong>B</strong> (sem áudio, só texto), 3º <strong>C</strong> (com vídeo no início), 4º A, 5º B, 6º C... Cada fluxo é editado de forma independente.
               </p>
             </div>
-            <Switch checked={abEnabled} onCheckedChange={toggleAbTest} disabled={!hasFlowB} />
+            <Switch checked={abEnabled} onCheckedChange={toggleAbTest} disabled={!hasFlowB || !hasFlowC} />
           </div>
 
           <div className="mt-4 pt-4 border-t border-border/60 flex items-center justify-between gap-3 flex-wrap">
@@ -537,14 +537,24 @@ export default function FluxoCamila() {
               <span>Leads:</span>
               <Badge variant="secondary">A: {variantCounts.A}</Badge>
               <Badge variant="secondary">B: {variantCounts.B}</Badge>
-              {!hasFlowB && <span className="text-xs text-muted-foreground">— crie o Fluxo B para habilitar o teste</span>}
+              <Badge variant="secondary">C: {variantCounts.C}</Badge>
+              {(!hasFlowB || !hasFlowC) && (
+                <span className="text-xs text-muted-foreground">
+                  — crie os Fluxos {!hasFlowB ? "B" : ""}{!hasFlowB && !hasFlowC ? " e " : ""}{!hasFlowC ? "C" : ""} para habilitar o teste
+                </span>
+              )}
             </div>
-            <Button variant="outline" size="sm" onClick={cloneFlowB} disabled={cloneBusy}>
-              {cloneBusy ? "Clonando…" : hasFlowB ? "Recriar Fluxo B a partir do A" : "Criar Fluxo B (sem áudio)"}
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button variant="outline" size="sm" onClick={cloneFlowB} disabled={cloneBusy}>
+                {cloneBusy ? "Clonando…" : hasFlowB ? "Recriar B a partir do A" : "Criar Fluxo B (sem áudio)"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={cloneFlowC} disabled={cloneCBusy}>
+                {cloneCBusy ? "Clonando…" : hasFlowC ? "Recriar C a partir do A" : "Criar Fluxo C (com vídeo)"}
+              </Button>
+            </div>
           </div>
 
-          {hasFlowB && (
+          {(hasFlowB || hasFlowC) && (
             <div className="mt-4 pt-4 border-t border-border/60 flex items-center gap-3 flex-wrap">
               <Label className="text-sm">Editando:</Label>
               <div className="inline-flex rounded-md border border-border overflow-hidden">
@@ -555,12 +565,22 @@ export default function FluxoCamila() {
                 >Fluxo A (com áudio)</button>
                 <button
                   type="button"
-                  className={`px-3 py-1.5 text-sm ${editingVariant === "B" ? "bg-primary text-primary-foreground" : "bg-background"}`}
+                  disabled={!hasFlowB}
+                  className={`px-3 py-1.5 text-sm border-l border-border ${editingVariant === "B" ? "bg-primary text-primary-foreground" : "bg-background"} disabled:opacity-50`}
                   onClick={() => setEditingVariant("B")}
                 >Fluxo B (sem áudio)</button>
+                <button
+                  type="button"
+                  disabled={!hasFlowC}
+                  className={`px-3 py-1.5 text-sm border-l border-border ${editingVariant === "C" ? "bg-primary text-primary-foreground" : "bg-background"} disabled:opacity-50`}
+                  onClick={() => setEditingVariant("C")}
+                >Fluxo C (vídeo inicial)</button>
               </div>
               {editingVariant === "B" && (
                 <span className="text-xs text-muted-foreground">No Fluxo B, cada áudio é enviado como texto usando a transcrição (editável em cada passo).</span>
+              )}
+              {editingVariant === "C" && (
+                <span className="text-xs text-muted-foreground">No Fluxo C, adicione um vídeo no primeiro passo para começar a conversa com um vídeo de apresentação.</span>
               )}
             </div>
           )}
