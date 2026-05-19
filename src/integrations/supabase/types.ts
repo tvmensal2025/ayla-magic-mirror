@@ -3836,6 +3836,7 @@ export type Database = {
         Returns: undefined
       }
       clone_bot_flow_as_b: { Args: { _consultant_id: string }; Returns: string }
+      clone_bot_flow_as_c: { Args: { _consultant_id: string }; Returns: string }
       credit_consultant_wallet:
         | {
             Args: {
