@@ -27,7 +27,7 @@ const AutoMessageLog = lazy(() => import("@/components/whatsapp/AutoMessageLog")
 const MaterialsTab = lazy(() => import("@/components/admin/MaterialsTab").then(m => ({ default: m.MaterialsTab })));
 const NetworkPanel = lazy(() => import("@/components/admin/NetworkPanel").then(m => ({ default: m.NetworkPanel })));
 const PanfletoModal = lazy(() => import("@/components/admin/PanfletoModal").then(m => ({ default: m.PanfletoModal })));
-const PerformanceTab = lazy(() => import("@/components/admin/ads/PerformanceTab").then(m => ({ default: m.PerformanceTab })));
+
 const AdsCentralTab = lazy(() => import("@/components/admin/ads/AdsCentralTab").then(m => ({ default: m.AdsCentralTab })));
 import { SupportChatButton } from "@/components/support/SupportChatButton";
 
@@ -38,11 +38,10 @@ const AdminContent = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "dados" | "links" | "preview" | "whatsapp" | "crm" | "clientes" | "historico" | "rede" | "performance" | "central-anuncios">(() => {
+  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "dados" | "links" | "preview" | "whatsapp" | "crm" | "clientes" | "historico" | "rede" | "central-anuncios">(() => {
     if (typeof window !== "undefined") {
       const tab = new URLSearchParams(window.location.search).get("tab");
-      if (tab === "performance" || tab === "anuncios") return "performance";
-      if (tab === "central-anuncios") return "central-anuncios";
+      if (tab === "performance" || tab === "anuncios" || tab === "central-anuncios") return "central-anuncios";
       if (tab === "agente") return "whatsapp";
     }
     return "dashboard";
@@ -163,7 +162,7 @@ const AdminContent = () => {
     { id: "clientes" as const, label: "Clientes", icon: Users },
     { id: "rede" as const, label: "Rede", icon: Network },
     { id: "whatsapp" as const, label: "WhatsApp", icon: MessageSquare },
-    { id: "performance" as const, label: "Performance", icon: TrendingUp },
+    
     { id: "central-anuncios" as const, label: "Central de Anúncios", icon: Megaphone },
     { id: "historico" as const, label: "Histórico", icon: History },
     { id: "links" as const, label: "Links", icon: LinkIcon },
@@ -339,9 +338,6 @@ const AdminContent = () => {
             <AutoMessageLog consultantId={userId} />
           )}
 
-          {userId && activeTab === "performance" && (
-            <PerformanceTab consultantId={userId} onGoToCentral={() => setActiveTab("central-anuncios")} />
-          )}
 
           {userId && activeTab === "central-anuncios" && (
             <AdsCentralTab consultantId={userId} />
