@@ -55,6 +55,15 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  if (isQuietHourBRT()) {
+    logQuietSkip("bot-stuck-recovery");
+    return new Response(JSON.stringify({ skipped: "quiet_hours" }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+
+
   const startedAt = Date.now();
   const stats = {
     scanned: 0, rescued: 0, abandoned: 0,
