@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.49.4";
 import { captureError } from "../_shared/sentry.ts";
+import { isQuietHourBRT, nextQuietWindowEndISO, logQuietSkip } from "../_shared/quiet-hours.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
