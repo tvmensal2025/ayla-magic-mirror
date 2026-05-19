@@ -143,6 +143,9 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, msg: "rate_limited" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+
 
     // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (como se desconectado) ──
     if (await isConsultantAIDisabled(supabase, instanceData.consultant_id)) {
