@@ -15,6 +15,7 @@ import { isTestMode } from "../../../_shared/test-mode.ts";
 import { evaluateRules, logRuleFire, _consumeCustomerRateLimit } from "./rules-engine.ts";
 import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
 import { ensureAudioTranscript } from "../../../_shared/audio-transcript.ts";
+import { isStrictScriptMode } from "../../../_shared/ai-decisions.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
@@ -712,7 +713,9 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   }
   const dbSteps = loaded.steps;
   const flowId = loaded.flowId;
-  const strictMode = loaded.strictMode;
+  const globalStrict = await isStrictScriptMode().catch(() => false);
+  const strictMode = loaded.strictMode || globalStrict;
+  if (globalStrict) console.log(`[conversational/evo] 🛑 strict_script_mode=ON (kill switch global)`);
 
   // Helper: encontra o primeiro step ativo de um determinado step_type
   // (usado para resolver goto_special='cadastro' — preferimos ir para o
@@ -1022,7 +1025,27 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     });
   }
 
-  const cls = await classifyIntent(ctx.messageText, stepKey as ConversationalStep, ctx.geminiApiKey);
+  const cls = await classifyIntent(
+    ctx.messageText,
+    stepKey as ConversationalStep,
+    ctx.geminiApiKey,
+    { customerId: ctx.customer?.id, consultantId: consultantId || null, traceId: ctx.messageId },
+  );
+
+  // Sprint 1.5: honra threshold de handoff (conf < 0.5) — pausa bot, consultor assume.
+  if (cls.action === "handoff" && cls.intent !== "tem_duvida") {
+    console.log(`[conversational/evo] 🤝 handoff por baixa confiança (conf=${cls.confidence})`);
+    return _finalize(stepKey, {
+      reply: "",
+      updates: {
+        conversation_step: stepKey,
+        bot_paused: true,
+        bot_paused_reason: "low_confidence_handoff",
+        bot_paused_at: new Date().toISOString(),
+        ...restoreDetourUpdates,
+      },
+    });
+  }
 
   // ─── AI FAQ Answerer (Lovable AI) ──────────────────────────────────
   // Quando o lead faz pergunta (tem_duvida) que NÃO casou em bot_flow_qa

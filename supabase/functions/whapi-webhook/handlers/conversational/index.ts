@@ -16,6 +16,7 @@ import { evaluateRules, logRuleFire, _consumeCustomerRateLimit } from "./rules-e
 import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
 import { ensureAudioTranscript } from "../../../_shared/audio-transcript.ts";
 import { isQuietHourBRT, logQuietSkip } from "../../../_shared/quiet-hours.ts";
+import { isStrictScriptMode } from "../../../_shared/ai-decisions.ts";
 
 // Cache simples por (consultor) — quando IA degradar, pula chamadas por 60s.
 const aiCooldown = new Map<string, number>();
@@ -782,7 +783,10 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   }
   const dbSteps = loaded.steps;
   const flowId = loaded.flowId;
-  const strictMode = loaded.strictMode;
+  // Sprint 1.5: OR com kill switch global (settings.strict_script_mode).
+  const globalStrict = await isStrictScriptMode().catch(() => false);
+  const strictMode = loaded.strictMode || globalStrict;
+  if (globalStrict) console.log(`[conversational] 🛑 strict_script_mode=ON (kill switch global)`);
 
   // Helper: encontra o primeiro step ativo de um determinado step_type
   // (usado para resolver goto_special='cadastro' — preferimos ir para o
@@ -1092,7 +1096,32 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     });
   }
 
-  const cls = await classifyIntent(ctx.messageText, stepKey as ConversationalStep, ctx.geminiApiKey);
+  const cls = await classifyIntent(
+    ctx.messageText,
+    stepKey as ConversationalStep,
+    ctx.geminiApiKey,
+    { customerId: ctx.customer?.id, consultantId: consultantId || null, traceId: ctx.messageId },
+  );
+
+  // Sprint 1.5: honra thresholds de confiança (action=handoff/repeat/execute).
+  // - handoff (conf < 0.5): pausa o bot e devolve mensagem neutra; o consultor assume.
+  // - repeat  (0.5–0.75): repete o passo atual sem avançar.
+  // Quando a intenção é tem_duvida deixamos passar (cai no AI FAQ logo abaixo).
+  if (cls.action === "handoff" && cls.intent !== "tem_duvida") {
+    console.log(`[conversational] 🤝 handoff por baixa confiança (conf=${cls.confidence})`);
+    return _finalize(stepKey, {
+      reply: "",
+      updates: {
+        conversation_step: stepKey,
+        bot_paused: true,
+        bot_paused_reason: "low_confidence_handoff",
+        bot_paused_at: new Date().toISOString(),
+        ...restoreDetourUpdates,
+      },
+    });
+  }
+  // Nota: action="repeat" (confiança média) é tratado implicitamente — se
+  // nenhuma transição casar, o fluxo default já é repetir o passo atual.
 
   // ─── AI FAQ Answerer (Lovable AI) ──────────────────────────────────
   // Quando o lead faz pergunta (tem_duvida) que NÃO casou em bot_flow_qa
