@@ -2,7 +2,9 @@ import React, { useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, BarChart3, LinkIcon, Settings, Monitor, MessageSquare, LayoutGrid, Users, Copy, Download, X, History, Sparkles, FolderDown, Network, Eye, EyeOff, Megaphone, TrendingUp } from "lucide-react";
+import { LogOut, BarChart3, LinkIcon, Settings, MessageSquare, LayoutGrid, Users, Copy, Download, X, Sparkles, FolderDown, Network, Eye, EyeOff, Megaphone } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { OnboardingGate } from "@/components/admin/OnboardingGate";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { PrivacyModeProvider, usePrivacyMode } from "@/contexts/PrivacyModeContext";
 import { useQueryClient } from "@tanstack/react-query";
@@ -17,13 +19,13 @@ const QRCodeSVG = lazy(() => import("qrcode.react").then(m => ({ default: m.QRCo
 const DashboardTab = lazy(() => import("@/components/admin/DashboardTab").then(m => ({ default: m.DashboardTab })));
 const DadosTab = lazy(() => import("@/components/admin/DadosTab").then(m => ({ default: m.DadosTab })));
 const LinksTab = lazy(() => import("@/components/admin/LinksTab").then(m => ({ default: m.LinksTab })));
-const PreviewTab = lazy(() => import("@/components/admin/PreviewTab").then(m => ({ default: m.PreviewTab })));
+
 const NotificationCenter = lazy(() => import("@/components/admin/NotificationCenter").then(m => ({ default: m.NotificationCenter })));
 const AIChatPanel = lazy(() => import("@/components/admin/AIChatPanel").then(m => ({ default: m.AIChatPanel })));
 const WhatsAppTab = lazy(() => import("@/components/whatsapp/WhatsAppTab").then(m => ({ default: m.WhatsAppTab })));
 const CrmTabs = lazy(() => import("@/components/whatsapp/CrmTabs").then(m => ({ default: m.CrmTabs })));
 const CustomerManager = lazy(() => import("@/components/whatsapp/CustomerManager").then(m => ({ default: m.CustomerManager })));
-const AutoMessageLog = lazy(() => import("@/components/whatsapp/AutoMessageLog").then(m => ({ default: m.AutoMessageLog })));
+
 const MaterialsTab = lazy(() => import("@/components/admin/MaterialsTab").then(m => ({ default: m.MaterialsTab })));
 const NetworkPanel = lazy(() => import("@/components/admin/NetworkPanel").then(m => ({ default: m.NetworkPanel })));
 const PanfletoModal = lazy(() => import("@/components/admin/PanfletoModal").then(m => ({ default: m.PanfletoModal })));
@@ -38,11 +40,12 @@ const AdminContent = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "dados" | "links" | "preview" | "whatsapp" | "crm" | "clientes" | "historico" | "rede" | "central-anuncios">(() => {
+  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "links" | "whatsapp" | "crm" | "clientes" | "rede" | "central-anuncios">(() => {
     if (typeof window !== "undefined") {
       const tab = new URLSearchParams(window.location.search).get("tab");
       if (tab === "performance" || tab === "anuncios" || tab === "central-anuncios") return "central-anuncios";
-      if (tab === "agente") return "whatsapp";
+      if (tab === "agente" || tab === "historico") return "whatsapp";
+      if (tab === "preview") return "links";
     }
     return "dashboard";
   });
@@ -51,6 +54,7 @@ const AdminContent = () => {
   const [qrModal, setQrModal] = useState<{ url: string; label: string } | null>(null);
   const [panfletoOpen, setPanfletoOpen] = useState(false);
   const [aiChatOpen, setAiChatOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [periodDays, setPeriodDays] = useState(30);
 
   const { instanceName } = useWhatsApp(userId || "");
@@ -157,16 +161,12 @@ const AdminContent = () => {
 
   const tabs = [
     { id: "dashboard" as const, label: "Dashboard", icon: BarChart3 },
-    { id: "preview" as const, label: "Preview", icon: Monitor },
     { id: "crm" as const, label: "CRM", icon: LayoutGrid },
     { id: "clientes" as const, label: "Clientes", icon: Users },
     { id: "rede" as const, label: "Rede", icon: Network },
     { id: "whatsapp" as const, label: "WhatsApp", icon: MessageSquare },
-    
     { id: "central-anuncios" as const, label: "Central de Anúncios", icon: Megaphone },
-    { id: "historico" as const, label: "Histórico", icon: History },
     { id: "links" as const, label: "Links", icon: LinkIcon },
-    { id: "dados" as const, label: "Dados", icon: Settings },
     { id: "materiais" as const, label: "Materiais", icon: FolderDown },
   ];
 
@@ -239,6 +239,14 @@ const AdminContent = () => {
                 }}
               />
             </Suspense>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="relative p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-all duration-200"
+              aria-label="Configurações"
+              title="Configurações"
+            >
+              <Settings className="h-5 w-5" />
+            </button>
             <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-foreground gap-2 rounded-xl">
               <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline">Sair</span>
@@ -246,6 +254,8 @@ const AdminContent = () => {
           </div>
         </div>
       </header>
+
+      <OnboardingGate form={form} saving={saving} onFormChange={handleFormChange} onSave={handleSave}>
 
       {/* Tab Navigation */}
       <nav className="border-b border-border bg-card/50 backdrop-blur-sm">
@@ -283,10 +293,6 @@ const AdminContent = () => {
         <Suspense fallback={<div className="flex justify-center py-12"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>}>
           {activeTab === "dashboard" && userId && (
             <DashboardTab userId={userId} form={form} onFormUpdate={handleFormChange} periodDays={periodDays} onPeriodChange={setPeriodDays} />
-          )}
-
-          {activeTab === "dados" && (
-            <DadosTab form={form} photoPreview={effectivePhotoPreview} saving={saving} onFormChange={handleFormChange} onPhotoChange={handlePhotoChange} onSave={handleSave} userId={userId || ""} />
           )}
 
           {activeTab === "links" && (
@@ -334,21 +340,26 @@ const AdminContent = () => {
             </WhatsAppErrorBoundary>
           )}
 
-          {userId && activeTab === "historico" && (
-            <AutoMessageLog consultantId={userId} />
-          )}
-
-
           {userId && activeTab === "central-anuncios" && (
             <AdsCentralTab consultantId={userId} />
           )}
 
-          {activeTab === "preview" && (
-            <PreviewTab slug={slug} baseUrl={baseUrl} />
-          )}
-
         </Suspense>
       </main>
+
+      </OnboardingGate>
+
+      {/* Settings Sheet (Dados) */}
+      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Configurações</SheetTitle>
+          </SheetHeader>
+          <div className="mt-6">
+            <DadosTab form={form} photoPreview={effectivePhotoPreview} saving={saving} onFormChange={handleFormChange} onPhotoChange={handlePhotoChange} onSave={handleSave} userId={userId || ""} />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* QR Code Modal */}
       {qrModal && (

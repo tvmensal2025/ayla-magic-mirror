@@ -103,6 +103,20 @@ export function useConsultantForm(
       if (error) throw error;
       setForm((prev) => ({ ...prev, license: savedConsultant?.license || finalLicense }));
       if (savedConsultant?.photo_url) { setPhotoPreview(savedConsultant.photo_url); setPhotoFile(null); setLocalPhotoPreview(null); }
+
+      // Auto-ativa telefone principal como destino dos anúncios do Facebook.
+      const phoneDigits = form.phone.replace(/\D/g, "");
+      if (phoneDigits) {
+        try {
+          await supabase.from("consultant_ad_settings").upsert(
+            { consultant_id: userId, whatsapp_destination_number: phoneDigits },
+            { onConflict: "consultant_id" },
+          );
+        } catch (adsErr) {
+          console.warn("[useConsultantForm] falha ao sincronizar whatsapp_destination_number", adsErr);
+        }
+      }
+
       toast({ title: "✅ Dados salvos com sucesso!", ...(licenseAdjusted ? { description: `A licença foi ajustada automaticamente para ${savedConsultant?.license || finalLicense}.` } : {}) });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : typeof error === "string" ? error : JSON.stringify(error);
