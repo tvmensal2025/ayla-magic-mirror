@@ -1,60 +1,56 @@
-# Dashboard Ads no /admin (por consultor) + visão multi-conta
 
-## O que aparece no dashboard de cada consultor (/admin)
+# Dashboard Ads — WhatsApp Only + Gráficos
 
-Cards no topo (período: 7d / 30d / custom):
+Reformular o bloco "Ad Metrics" no `/admin` (DashboardTab) para:
+1. Remover métricas de Landing Page (visitas LP, custo/visita, LP→Lead).
+2. Tratar **lead = novo customer no WhatsApp** dentro do período (origem `whatsapp` ou qualquer customer criado, conforme decisão abaixo).
+3. Adicionar gráficos de evolução diária.
 
-- **Gasto Ads** (R$) — soma `ad_spend_daily.spend_cents`
-- **Leads gerados** — count de `customers` criados no período (origem `whatsapp` + `facebook`)
-- **CPL** — gasto / leads
-- **Visitas LP** — count `page_views` no período
-- **Custo por visita LP** — gasto / visitas
-- **Taxa LP → Lead** — leads / visitas
-- Mini-gráfico diário (gasto vs leads) — 14 dias
+## Cards (KPIs) — versão final
 
-Tudo já filtrado por `consultant_id = auth.uid()` (RLS atual de `ad_spend_daily`, `customers`, `page_views`).
+| Card | Cálculo |
+|---|---|
+| Gasto Ads | sum(`ad_spend_daily.spend_cents`) no período |
+| Leads WhatsApp | count(`customers`) criados no período do consultor selecionado |
+| CPL | Gasto / Leads |
+| Impressões | sum(`ad_spend_daily.impressions`) |
+| Cliques | sum(`ad_spend_daily.clicks`) |
+| CTR | cliques / impressões |
 
-## Visão multi-conta (Rafael e futuros gestores)
+## Gráficos novos (Recharts, já no projeto)
 
-Rafael (`rafael.ids@icloud.com`) precisa ver o dashboard dele **+ de outros consultores** que ele gerencia. Solução:
+1. **Gasto x Leads por dia** — LineChart duplo eixo (gasto em R$, leads em count) — últimos 30 dias.
+2. **CPL diário** — AreaChart (spend_dia / leads_dia).
+3. **Leads por consultor** (apenas para managers com >1 conta) — BarChart horizontal: total de leads no período por consultor gerenciado.
+4. **Distribuição por estágio do CRM** — PieChart dos leads do período por `deals.stage` (novo_lead, qualificado, etc.).
 
-1. **Nova tabela `ad_account_managers**`
-  ```
-   manager_user_id uuid   -- auth.users.id do Rafael
-   consultant_id   uuid   -- consultor gerenciado
-   created_at, created_by
-   PK (manager_user_id, consultant_id)
-  ```
-   RLS: super_admin gerencia; manager lê só as próprias linhas.
-2. **Função SQL `get_managed_consultant_ids(_user uuid)**` retorna array de UUIDs:
-  - sempre inclui o próprio `_user`
-  - - tudo de `ad_account_managers` onde `manager_user_id = _user`
-  - super_admin → todos
-3. **Atualizar RLS** de `ad_spend_daily`, `page_views`, e leitura de `customers` para também permitir SELECT quando `consultant_id = ANY(get_managed_consultant_ids(auth.uid()))`.
-4. **UI no /admin**: se o usuário gerencia >1 consultor, mostra um **seletor "Conta de anúncio"** no topo do dashboard (default = próprio). Trocar a conta refiltra todos os cards e gráficos.
-5. **Tela em SuperAdmin → "Gestores de Conta"** para vincular consultores a um manager (multi-select). Só super_admin enxerga.
+## Mudanças técnicas
 
-## Origem dos dados de gasto
+- **`useAdMetrics.ts`**: remover `pageViews`, `costPerVisit`, `lpConversion`. Adicionar `impressions`, `clicks`, `ctr`, e `daily: { date, spend, leads, cpl }[]`.
+  - Leads = `customers` count agrupado por `date(created_at)` filtrado por `consultant_id`.
+  - Gasto/cliques/impressões agrupados por `date` de `ad_spend_daily`.
+- **Novo hook `useLeadsByConsultant(range, consultantIds[])`** — para o gráfico de barras (managers).
+- **Novo hook `useLeadsByStage(consultantId, range)`** — agrega `deals` por `stage` no período.
+- **`AdMetricsCards.tsx`**: trocar os 3 cards de LP por Impressões / Cliques / CTR.
+- **Novo `AdMetricsCharts.tsx`**: 4 gráficos acima usando Recharts + tokens do design system (cores via `hsl(var(--primary))` etc.).
+- **`DashboardTab.tsx`**: renderizar `<AdMetricsCards />` + `<AdMetricsCharts />` logo abaixo do `AdAccountSwitcher`.
 
-`ad_spend_daily` já existe. Para popular:
+## Pergunta antes de implementar
 
-- Edge function `facebook-spend-sync` (cron diário 06:00 BRT) lê `facebook_connections` de cada consultor, busca Insights da API Marketing (campaigns + spend + impressions + clicks + leads) e faz upsert por `(consultant_id, date)`.
-- Reusa segredos `FACEBOOK_APP_ID`/`SECRET` já configurados.
-- Fallback: se consultor sem conexão FB, mostra cards zerados com aviso "Conecte sua conta Meta Ads".
+Como definir "Lead WhatsApp" no contador?
+- (A) Todo `customer` criado no período do consultor.
+- (B) Apenas `customers` com `customer_origin = 'lead_whatsapp'`.
+- (C) Apenas customers que entraram em algum `deal` no período (estágio `novo_lead`).
 
-## Entregáveis técnicos
+Vou assumir **(A)** salvo indicação contrária — é o que melhor reflete "lead gerado pelo anúncio do WhatsApp".
 
-1. Migration:
-  - tabela `ad_account_managers` + RLS
-  - função `get_managed_consultant_ids`
-  - update RLS de `ad_spend_daily` e `page_views` (adiciona policy "managed")
-2. Edge function `facebook-spend-sync` + cron
-3. Hook `useAdMetrics(consultantId, range)` agregando spend/leads/visits/CPL
-4. Componente `AdMetricsCards` + `AdAccountSwitcher` em `DashboardTab.tsx`
-5. Componente `ManagersTab` no SuperAdmin para vincular consultores ao Rafael
-6. Seed inicial: vincular Rafael aos consultores que ele gerencia (você me passa a lista, ou eu mostro UI pra você selecionar)
+## Arquivos a alterar/criar
 
-## Perguntas rápidas
+- `src/hooks/useAdMetrics.ts` (refactor)
+- `src/hooks/useLeadsByConsultant.ts` (novo)
+- `src/hooks/useLeadsByStage.ts` (novo)
+- `src/components/admin/dashboard/AdMetricsCards.tsx` (refactor)
+- `src/components/admin/dashboard/AdMetricsCharts.tsx` (novo)
+- `src/components/admin/DashboardTab.tsx` (montagem)
 
-1. criar a UI agora e vincular depois
-2. Sincronização do Facebook Ads: rodar  1x ao dia 06:00 (1x/dia 
+Sem migrations — tudo lido das tabelas já existentes (`ad_spend_daily`, `customers`, `deals`).
