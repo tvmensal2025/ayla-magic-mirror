@@ -245,7 +245,7 @@ export function KanbanBoard({ consultantId, instanceName }: KanbanBoardProps) {
       {/* Kanban columns */}
       <div className="flex gap-3 overflow-x-auto pb-2">
         {stages.map((s) => (
-          <KanbanColumn key={s.id} stage={s} deals={deals} searchQuery={searchQuery} onDrop={handleDrop} onDragStart={setDraggedId} onEditDeal={openEditDeal} onDeleteDeal={setDeletingDealId} />
+          <KanbanColumn key={s.id} stage={s} deals={deals} searchQuery={searchQuery} stepFilter={stepFilter} customStepMap={customStepMap} onDrop={handleDrop} onDragStart={setDraggedId} onEditDeal={openEditDeal} onDeleteDeal={setDeletingDealId} />
         ))}
       </div>
 
