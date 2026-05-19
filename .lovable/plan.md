@@ -1,63 +1,64 @@
+# Bot sempre 100% no fluxo do admin
+
+## Problema
+
+Hoje, no `whapi-webhook/handlers/bot-flow.ts`, o resolver de passos customizados (linha 2005) só roda quando o `conversation_step` do cliente **não** está na lista `LEGACY_STEPS` (welcome, qualificacao, pitch_conexao_club, duvidas_pos_club, ask_*, editing_*, etc.). Quando o step é legacy, a execução cai num `switch` hardcoded (linha 2268+) com textos fixos — ignorando completamente o fluxo que o consultor montou no `/admin/fluxos`.
+
+Resultado: leads novos (que começam em `"welcome"`) e leads que voltaram pra qualquer step legacy via "Devolver para…" rodam o roteiro antigo da Camila/sistema, e não o fluxo do Erasmo, da Camila, etc.
+
 ## Objetivo
 
-Garantir que todos os anúncios da conta `act_317035519061535` usem o Pixel correto (`1521037349653769` — `igreen-app-oficial`):
-1. **Diagnosticar** todos os adsets ativos e mostrar qual Pixel cada um está usando.
-2. **Migrar** adsets que estão com pixel errado para o pixel correto.
-3. **Travar** o pixel correto no código de criação de novos anúncios.
+Quando o consultor tem um `bot_flow` ativo, **toda** decisão de próximo passo deve vir desse fluxo. O switch legacy fica como fallback **só** para consultores que não têm fluxo ativo.
 
-## O que será feito
+## Mudanças
 
-### 1. Nova Edge Function: `facebook-diagnose-pixels`
-Lista todas as campaigns → adsets ativos da conta, e para cada adset retorna:
-- `campaign_name`, `adset_id`, `adset_name`, `status`, `effective_status`
-- `current_pixel_id` (extraído de `promoted_object.pixel_id` e/ou `tracking_specs[].fb_pixel`)
-- `current_pixel_name`
-- `is_correct` (true se já está no `1521037349653769`)
-- `created_by_platform` (heurística: se o nome bate com o padrão `[license] - ...` usado por `facebook-create-campaign`)
+### 1. Entrada de novos leads — começar no Passo 1 do fluxo, não em `welcome`
 
-Restrita a `admin` / `super_admin`.
+Em `bot-flow.ts` linha 1265 (`let step = customer.conversation_step || "welcome"`):
+- Se `conversation_step` está vazio E o consultor tem fluxo ativo, buscar o primeiro `bot_flow_steps` ativo (menor `position`) e usar o `id`/`step_key` dele como `step` inicial.
+- Mesma mudança aplicada onde quer que um novo customer seja inserido com `conversation_step: 'welcome'` — varrer para garantir consistência.
 
-### 2. Nova Edge Function: `facebook-migrate-adset-pixel`
-Recebe `{ adset_id }` e migra para o Pixel correto:
-- Como Meta **não** permite trocar pixel em adset com entrega ativa, a função:
-  1. Pausa o adset original.
-  2. Duplica o adset (`/copies`) com o mesmo targeting/budget.
-  3. No novo adset, atualiza `promoted_object.pixel_id` e `tracking_specs` para `1521037349653769`.
-  4. Copia os ads (criativos) do adset antigo para o novo.
-  5. Ativa o novo adset; mantém o antigo pausado para histórico.
-- Retorna `{ ok, old_adset_id, new_adset_id, warnings[] }`.
-- Aviso claro no retorno: **reseta aprendizado**.
+### 2. Mapeamento legacy → custom antes do switch
 
-### 3. UI no `PlatformFacebookCard.tsx`
-- Novo botão **"Diagnosticar Pixels"** → abre um dialog com tabela:
-  - Colunas: Campanha · Adset · Status · Pixel atual · Correto? · Ação
-  - Linhas com pixel errado mostram botão **"Migrar para pixel correto"** (chama `facebook-migrate-adset-pixel`).
-  - Botão **"Migrar tudo que está errado"** no topo (loop sequencial com feedback por linha).
+Logo antes do bloco em linha 2007, adicionar um passo: se o consultor tem fluxo ativo E o `step` atual é legacy, tentar mapear pra um passo do fluxo custom:
 
-### 4. Travar pixel nos novos anúncios
-Em `supabase/functions/facebook-create-campaign/index.ts`:
-- Constante `REQUIRED_PIXEL_ID = "1521037349653769"`.
-- No bloco onde monta `conn` (linha ~219), substituir `pixel_id: platform.pixel_id` por `pixel_id: REQUIRED_PIXEL_ID` (com warning no log se `platform.pixel_id` divergir).
-- Garante que **todo novo adset** já nasce com `promoted_object.pixel_id` e `tracking_specs.fb_pixel` corretos.
+- `welcome`, `menu_inicial`, `qualificacao`, `pos_video`, `pitch_conexao_club`, `duvidas_pos_club` → primeiro passo `message` do fluxo (por position) ou um passo com `step_key` igual.
+- `ask_bill_value` → primeiro passo com `captures` de `electricity_bill_value`.
+- `aguardando_conta` / `aguardando_doc_auto` / `ask_email` / `ask_phone_confirm` / `finalizando` → continuam mapeando para o `step_type` correspondente (capture_conta, capture_documento, capture_email, confirm_phone, finalizar_cadastro) **buscando o passo do fluxo custom** com aquele type, em vez de cair no handler legacy.
 
-### 5. (Opcional, recomendado) Migration
-Adicionar `platform_facebook_account.pixel_id_locked boolean default true` só pra deixar registrado que o pixel é travado por código — informativo, não usado em lógica.
+Se um mapeamento é encontrado, sobrescreve `step` com o `id` do passo custom e segue pelo resolver normal (linha 2007). Se não há match, mantém legacy como fallback final.
 
-## Detalhes técnicos
+### 3. Lock global: fluxo ativo bloqueia switch legacy
 
-- **Endpoints Meta usados:**
-  - `GET /{ad_account_id}/campaigns?fields=id,name,status,effective_status&effective_status=['ACTIVE']`
-  - `GET /{campaign_id}/adsets?fields=id,name,status,effective_status,promoted_object,tracking_specs,daily_budget,targeting,billing_event,optimization_goal,bid_strategy,start_time,end_time`
-  - `GET /{pixel_id}?fields=name`
-  - `POST /{adset_id}` com `status=PAUSED`
-  - `POST /{adset_id}/copies` com `deep_copy=true, status_option=PAUSED`
-  - `POST /{new_adset_id}` para atualizar `promoted_object` + `tracking_specs`
-- **Permissões:** ambas as funções exigem role `admin`/`super_admin` via `has_role`.
-- **Idempotência:** `facebook-diagnose-pixels` é read-only; pode ser chamado quantas vezes quiser. `facebook-migrate-adset-pixel` valida se o adset já está com pixel correto antes de duplicar.
-- **Sem mudanças de schema obrigatórias** (a migration do item 5 é opcional).
+No início do `switch (step)` legacy (linha 2268), se o consultor tem fluxo ativo E o `step` ainda é legacy (não conseguiu mapear), logar um warning e **redirecionar** para o primeiro passo do fluxo via `dispatchStepFromFlow`, em vez de executar o case hardcoded. Garante "nunca mais cair no roteiro antigo" mesmo se aparecer um step legacy novo no futuro.
 
-## Fora de escopo
+Exceções que **continuam** rodando o legacy (precisam de lógica do sistema, não conteúdo de mensagem):
+- `processando_ocr_conta`, `confirmando_dados_conta`, `editing_conta_*`, `editing_doc_*` (telas de edição), `confirmar_titularidade`, `validacao_facial`, `cadastro_em_analise`, `aguardando_facial`, `otp_falhou`, `aguardando_humano`, `complete`, `valor_baixo`.
 
-- Anúncios criados direto no Gerenciador da Meta (você confirmou que são pela plataforma).
-- Mudar pixel em adsets já encerrados/arquivados.
-- Refatorar `facebook-ensure-pixel` (continua válido para criar/garantir o pixel na conta).
+Esses são "estados de máquina" do cadastro, não conteúdo conversacional, então ficam.
+
+### 4. UI — refletir a mudança na tela "Devolver para…"
+
+Em `src/components/admin/AIAgentTab/LiveConversationsPanel.tsx`:
+- Remover do `LEGACY_STEPS` os 5 itens conversacionais (`welcome`, `qualificacao`, `checkin_pos_video`, `pitch_conexao_club`, `duvidas_pos_club`) — agora esses passos **vivem no fluxo do consultor** e já aparecem na seção "Pular para passo do fluxo".
+- Manter apenas os passos de cadastro/estado (`aguardando_valor_conta`, `aguardando_conta`, `aguardando_doc_auto`, `confirmando_dados_conta`, `ask_email`, `ask_phone_confirm`, `finalizando`) que não têm equivalente no fluxo do admin.
+
+### 5. Migration (opcional, segurança)
+
+Atualizar customers existentes que estão "presos" em steps legacy conversacionais com fluxo ativo:
+- `UPDATE customers SET conversation_step = NULL WHERE conversation_step IN ('welcome','qualificacao','pitch_conexao_club','duvidas_pos_club','pos_video') AND consultant_id IN (SELECT consultant_id FROM bot_flows WHERE is_active = true);`
+
+Na próxima mensagem deles, o item 1 leva pro Passo 1 do fluxo custom.
+
+## Fora do escopo
+
+- Reescrever o `switch` legacy (continua existindo pra consultores sem fluxo).
+- Mudar A/B/C variant logic — segue como está.
+- Mudar Plano B (`branch_intent`/`branch_keywords`/IA) dos passos do fluxo custom — usuário não pediu, e Plano B já é configurável passo-a-passo.
+
+## Validação
+
+1. Lead novo do Erasmo manda "oi" → recebe Passo 1 do fluxo do Erasmo (não o "👋 Olá!" da Camila).
+2. Lead existente da Camila com `conversation_step='welcome'` manda mensagem → recebe Passo 1 do fluxo da Camila.
+3. Logs `[custom-step-resolver]` aparecem em vez do switch legacy.
+4. Cadastro (foto da conta, OCR, doc, e-mail) continua funcionando — esses estados não foram tocados.
