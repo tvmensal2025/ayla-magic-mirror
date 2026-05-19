@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AIKnowledgePanel } from "@/components/superadmin/AIKnowledgePanel";
+import { AIControlPanel } from "@/components/superadmin/AIControlPanel";
 import { CrmAnalyticsTab } from "@/components/superadmin/CrmAnalyticsTab";
 import { AuditLogPanel } from "@/components/superadmin/AuditLogPanel";
 import { BotFunnelPanel } from "@/components/superadmin/BotFunnelPanel";
