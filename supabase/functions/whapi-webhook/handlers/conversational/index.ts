@@ -359,7 +359,7 @@ async function sendStepMedia(
 
   const { data: mediaRows } = await ctx.supabase
     .from("ai_media_library")
-    .select("id, kind, label, url, slot_key, send_order, duration_sec, delay_before_ms")
+    .select("id, kind, label, url, slot_key, send_order, duration_sec, delay_before_ms, transcript")
     .eq("consultant_id", consultantId)
     .eq("slot_key", slotKey)
     .eq("active", true)
@@ -367,11 +367,24 @@ async function sendStepMedia(
 
   const variant = (ctx.customer as any)?.flow_variant || "A";
   let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+  // Variante B: cada áudio vira um item de texto (transcript) na mesma posição.
+  // Mantemos `kind: 'audio'` no item para que o slot "audio" do media_order
+  // continue casando; o flag `_asText` faz a sequência empurrar como text item.
   if (variant === "B") {
-    const before = medias.length;
-    medias = medias.filter((m) => String(m.kind).toLowerCase() !== "audio");
-    if (before !== medias.length) console.log(`[sendStepMedia] variant=B: removed ${before - medias.length} audio media(s)`);
+    const transformed: any[] = [];
+    for (const m of medias) {
+      if (String(m.kind).toLowerCase() !== "audio") { transformed.push(m); continue; }
+      const transcript = await ensureAudioTranscript(ctx.supabase, m);
+      if (transcript && transcript.trim()) {
+        transformed.push({ ...m, _asText: true, _transcript: transcript.trim() });
+        console.log(`[sendStepMedia] variant=B: audio "${m.label || m.id}" → text (${transcript.length} chars)`);
+      } else {
+        console.warn(`[sendStepMedia] variant=B: audio "${m.label || m.id}" sem transcript → pulado`);
+      }
+    }
+    medias = transformed;
   }
+
 
   // Precedência: UI (consultants.flow_step_media_order) → step.media_order → default.
   const uiOrder = await getStepMediaOrder(ctx.supabase, consultantId, slotKey);
