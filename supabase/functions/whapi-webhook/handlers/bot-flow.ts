@@ -608,6 +608,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
   // ═══════════════════════════════════════════════════════════════════
   if (
     (customer as any).bot_paused &&
+    !(customer as any).assigned_human_id &&
     ["lead_nao_pronto", "lead_quer_pensar"].includes(String((customer as any).bot_paused_reason || ""))
   ) {
     console.log(`[auto-resume] Despausando bot — lead voltou a falar (motivo: ${(customer as any).bot_paused_reason})`);

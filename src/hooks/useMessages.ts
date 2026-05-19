@@ -9,6 +9,7 @@ import { whapiListMessages } from "@/services/whapiApi";
 import { sendWhatsAppMessage, resolveRecipient } from "@/services/messageSender";
 import { supabase } from "@/integrations/supabase/client";
 import { createLogger } from "@/lib/logger";
+import { autoTakeoverByPhone } from "@/lib/whatsapp/auto-takeover";
 
 const logger = createLogger("useMessages");
 
@@ -320,38 +321,7 @@ export function useMessages(
         // Auto-takeover: ao consultor enviar manualmente, assume o controle
         // e silencia o bot até "Devolver para o passo" via UI.
         try {
-          const phoneDigits = recipient.replace(/\D/g, "");
-          if (phoneDigits) {
-            const { data: cust } = await supabase
-              .from("customers")
-              .select("id, bot_paused, assigned_human_id")
-              .eq("phone_whatsapp", phoneDigits)
-              .order("updated_at", { ascending: false })
-              .limit(1)
-              .maybeSingle();
-            if (cust && (!cust.bot_paused || !cust.assigned_human_id)) {
-              const { data: userRes } = await supabase.auth.getUser();
-              const uid = userRes?.user?.id || null;
-              const patch: any = {
-                bot_paused: true,
-                bot_paused_reason: "humano_assumiu",
-                bot_paused_at: new Date().toISOString(),
-                bot_paused_until: null,
-                assigned_human_id: uid,
-                updated_at: new Date().toISOString(),
-              };
-              const { error: updErr } = await supabase
-                .from("customers")
-                .update(patch)
-                .eq("id", cust.id);
-              if (updErr) {
-                logger.warn("auto-takeover RLS falhou, tentando edge", updErr);
-                await supabase.functions.invoke("customer-takeover", {
-                  body: { customerId: cust.id, paused: true, reason: "humano_assumiu" },
-                });
-              }
-            }
-          }
+          await autoTakeoverByPhone(recipient, "humano_assumiu");
         } catch (e) {
           logger.warn("auto-takeover error (não bloqueia envio):", e);
         }

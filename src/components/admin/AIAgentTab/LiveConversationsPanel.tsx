@@ -22,7 +22,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Pause, Play, RefreshCw, ChevronDown, RotateCcw, Send } from "lucide-react";
+import { Loader2, Pause, Play, RefreshCw, ChevronDown, RotateCcw, Send, PowerOff, Power } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { resetLeadConversation } from "@/services/resetConversation";
@@ -229,6 +229,67 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
     setConfirmReset(null);
   }
 
+  const [confirmStopAll, setConfirmStopAll] = useState(false);
+  const [stopAllBusy, setStopAllBusy] = useState(false);
+  async function stopAll() {
+    setStopAllBusy(true);
+    try {
+      const { error, count } = await supabase
+        .from("customers")
+        .update(
+          {
+            bot_paused: true,
+            bot_paused_reason: "manual_global_pause",
+            bot_paused_at: new Date().toISOString(),
+            bot_paused_until: null,
+            assigned_human_id: userId,
+            updated_at: new Date().toISOString(),
+          },
+          { count: "exact" },
+        )
+        .eq("consultant_id", userId)
+        .eq("bot_paused", false);
+      if (error) throw error;
+      toast({ title: `🛑 IA pausada em ${count ?? 0} lead(s)` });
+      await load();
+    } catch (e: any) {
+      toast({ title: "Erro ao pausar", description: e?.message, variant: "destructive" });
+    } finally {
+      setStopAllBusy(false);
+      setConfirmStopAll(false);
+    }
+  }
+
+  async function resumeAll() {
+    setStopAllBusy(true);
+    try {
+      const { error, count } = await supabase
+        .from("customers")
+        .update(
+          {
+            bot_paused: false,
+            bot_paused_reason: null,
+            bot_paused_at: null,
+            bot_paused_until: null,
+            assigned_human_id: null,
+            updated_at: new Date().toISOString(),
+          },
+          { count: "exact" },
+        )
+        .eq("consultant_id", userId)
+        .eq("bot_paused", true)
+        .eq("bot_paused_reason", "manual_global_pause");
+      if (error) throw error;
+      toast({ title: `🤖 IA religada em ${count ?? 0} lead(s)` });
+      await load();
+    } catch (e: any) {
+      toast({ title: "Erro ao religar", description: e?.message, variant: "destructive" });
+    } finally {
+      setStopAllBusy(false);
+    }
+  }
+
+
   if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
 
   const active = rows.filter((r) => !r.bot_paused);
@@ -286,12 +347,40 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
     );
   };
 
+  const globalPausedCount = rows.filter((r) => r.bot_paused_reason === "manual_global_pause").length;
+
   return (
     <div className="space-y-6">
+      <Card className="p-4 border-destructive/40 bg-destructive/5 flex items-center gap-3 flex-wrap">
+        <div className="flex-1 min-w-[220px]">
+          <p className="font-semibold text-foreground text-sm">🛑 Parar IA de todos os meus leads</p>
+          <p className="text-xs text-muted-foreground">
+            Pausa a IA em TODAS as suas conversas ativas. Use quando quiser assumir tudo de uma vez.
+            {globalPausedCount > 0 && <> Atualmente <strong>{globalPausedCount}</strong> lead(s) com pausa global.</>}
+          </p>
+        </div>
+        {globalPausedCount > 0 && (
+          <Button size="sm" variant="outline" onClick={resumeAll} disabled={stopAllBusy} className="gap-2">
+            <Power className="w-4 h-4" /> Religar IA
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={() => setConfirmStopAll(true)}
+          disabled={stopAllBusy || active.length === 0}
+          className="gap-2"
+        >
+          {stopAllBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <PowerOff className="w-4 h-4" />}
+          Parar IA em {active.length} lead(s)
+        </Button>
+      </Card>
+
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{active.length} com IA · {human.length} com humano</p>
         <Button size="sm" variant="ghost" onClick={load} className="gap-2"><RefreshCw className="w-4 h-4" /> Atualizar</Button>
       </div>
+
 
       <Section title="🤖 IA atendendo" rows={active} action={(r) => (
         <Button size="sm" variant="outline" onClick={() => setPaused(r.id, true)} className="gap-2">
@@ -313,6 +402,23 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={() => confirmReset && doReset(confirmReset)}>
               Reiniciar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmStopAll} onOpenChange={setConfirmStopAll}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Parar IA em todos os {active.length} lead(s) ativos?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A IA não vai responder a nenhuma das suas conversas até você clicar em <strong>Religar IA</strong> ou <strong>Devolver para…</strong> em cada lead.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={stopAll} className="bg-destructive hover:bg-destructive/90">
+              Sim, parar tudo
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

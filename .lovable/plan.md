@@ -1,70 +1,94 @@
+# Garantir que a IA pare quando o humano assume
+
 ## Diagnóstico
 
-1. **Texto do "como funciona"** — Os passos com `slot_key='como_funciona'` no `bot_flow_steps` estão TODOS com `message_text` vazio (validei no DB). Ou seja, o bot está caindo no fallback de IA: ou no `ai-faq-answerer` (Lovable AI) ou no `ai-sales-agent`, que monta a resposta a partir de:
-  - `ai_knowledge_sections` → "FAQ 2 — DESCONTO E COBRANÇA": *"O desconto varia entre 10% e 20%…"* → IA arredonda para "≈15%".
-  - `ai-sales-agent/index.ts:256, 689` → prompt diz `**≈12% sobre o valor**` e calcula `billNum * 0.12`. Esse 12% combinado com texto solto vira o "15%" inconsistente.
-  - `evolution-webhook` e `whapi-webhook/handlers/bot-flow.ts` já usam `* 0.20` para `{economia_mensal/anual}` — está certo, mas convive com o 12% do agente.
-2. **Tempo de digitação** — `supabase/functions/_shared/human-pace.ts`:
-  `ms = clamp(1500 + len*35, 1500, 7000)` com jitter ±20%. Textão curto sai em ~1,5 s, texto médio em 2-3 s — soa "bot-rápido", especialmente sem mostrar "digitando…".
+Testei o fluxo no replay e no banco. Achei **4 bugs** que fazem o "Assumir" parecer que não funciona:
 
-## Plano de correção
-
-### 1. Preencher o passo "como funciona" com o texto curto e agradável
-
-Edge function nova/uso de migration para `update bot_flow_steps set message_text = $TEXTO where slot_key='como_funciona' and coalesce(message_text,'')=''` (não sobrescreve quem já personalizou).
-
-**Texto novo** (markdown WhatsApp leve, 3 linhas, com `{{nome}}`, fechando com CTA):
-
-```
-Funciona assim, {{nome}}: você continua recebendo a conta da sua distribuidora normal — só que a iGreen entra com *até 20% de desconto* todo mês.
-
-Sem obra, sem instalação, sem mudar fiação. 💚
-```
-
-### 2. Padronizar desconto em 20% (eliminar 12% e 15% da IA)
-
-- `supabase/functions/ai-sales-agent/index.ts`
-  - Linha 256: trocar "≈12% sobre o valor" por **"≈20% sobre o valor"**.
-  - Linha 689: `billNum * 0.12` (mês e ano) → `billNum * 0.20`.
-- `ai_knowledge_sections` (migration update) — seção "FAQ 2 — DESCONTO E COBRANÇA":
-  - "O desconto varia entre **10% e 20%**" → "O desconto é de **até 20%** sobre o valor da energia consumida, conforme sua distribuidora e perfil."
-  - Demais menções a "15%" em LP (`HowItWorksSection.tsx`, `LicConexaoGreen.tsx`, `ConsultantPage.tsx` meta description) → **20%** para ficar consistente em todo lugar onde o lead pode ver.
-
-### 3. Tempo de digitação mais humano
-
-`supabase/functions/_shared/human-pace.ts`:
-
+### Bug 1 — Coluna inexistente no auto-pause do WhatsApp
+`supabase/functions/whapi-webhook/index.ts:74` faz:
 ```ts
-// antes: base = 1500 + len*35; min 1500; max 7000
-// depois:
-const base = 2200 + len * 55;     // ~60% mais lento
-const jitter = (Math.random()*0.5 - 0.25) * base; // ±25%
-const min = opts?.minMs ?? 2200;
-const max = opts?.maxMs ?? 11000;
+.eq("phone_digits", outPhone)
 ```
+A coluna `phone_digits` **não existe** em `customers` (só `phone_whatsapp`). Então, quando o consultor responde direto pelo WhatsApp Web/celular, o webhook detecta `outboundHuman=true` mas a query devolve `null` e **o bot nunca é pausado**. Resultado: IA continua respondendo em paralelo com o humano.
 
-Resultado prático:
+### Bug 2 — Auto-takeover só dispara no envio de texto
+`src/hooks/useMessages.ts:320-357` só chama o auto-takeover dentro de `sendMessage` (texto). Se o consultor envia áudio/imagem/documento pelo painel, **não pausa o bot**.
 
-- Texto de 30 chars: ~3,8 s (antes ~2,5 s)
-- Texto de 120 chars: ~8,8 s (antes ~5,7 s) — soa lendo + digitando, não bot.
+### Bug 3 — Outbound API não pausa nada
+Quando o consultor manda do painel (Whapi com `source=api`), o `parseWhapiMessage` retorna `null` (linha 369-371 do `_shared/whapi-api.ts`) e o webhook nem chega no bloco de pausa. O auto-pause depende 100% do front-end ter chamado o update — que falha silenciosamente em mídia (Bug 2) e em RLS sem fallback claro.
 
-`pauseBetweenMessages`: subir para `1800 + Math.random()*2000` (1,8-3,8 s entre mensagens consecutivas).
+### Bug 4 — Helper `isCustomerPausedByHuman` existe mas ninguém usa
+`supabase/functions/_shared/bot/paused.ts` define o helper de verdade ("bot_paused OR assigned_human_id OR paused_until>now"), mas **0 imports** no projeto. O webhook (`index.ts:449-451`) só checa `bot_paused` e `bot_paused_until`, **ignora `assigned_human_id`**. Então se um humano está vinculado mas o `bot_paused` foi pra `false` por qualquer caminho (Devolver mal-feito, race condition, edge case), a IA volta a falar.
 
-### 4. Memória
+### Bonus: não existe botão "Parar TUDO"
+Hoje só existe pause por lead. Não há um interruptor "desliga a IA de todos os meus leads agora" — o `admin_unpause_global_bot` é só pra religar.
 
-Atualizar `mem://features/whatsapp-message-variables` (ou criar `mem://copy/discount-rate-20`) registrando: **desconto oficial em todos os textos e cálculos = 20%** (substitui 12%/15% antigos).
+---
 
-## Arquivos tocados
+## O que vou fazer
 
-- `supabase/functions/_shared/human-pace.ts` — novos tempos
-- `supabase/functions/ai-sales-agent/index.ts` — 12% → 20%
-- `src/components/HowItWorksSection.tsx` — 15% → 20%
-- `src/components/licenciada/LicConexaoGreen.tsx` — 15% → 20% (2 ocorrências)
-- `src/pages/ConsultantPage.tsx` — meta description 15% → 20%
-- **Migration** — `update ai_knowledge_sections` na seção FAQ 2; `update bot_flow_steps` preenchendo `message_text` em passos `como_funciona` vazios
+### A. Corrigir o auto-pause do WhatsApp (Bug 1)
+Em `whapi-webhook/index.ts` linha 71-77, trocar:
+```ts
+.eq("phone_digits", outPhone)
+```
+por:
+```ts
+.eq("phone_whatsapp", outPhone.replace(/\D/g, ""))
+```
+e usar `consultant_id` quando disponível para evitar pegar lead de outro consultor.
 
-## Não faremos
+### B. Auto-takeover universal (Bugs 2 e 3)
+Centralizar em um helper `src/lib/whatsapp/auto-takeover.ts` chamado por **toda** ação de envio do consultor (texto, áudio, imagem, documento, template, follow-up manual). O helper:
+1. Atualiza `customers` com `bot_paused=true`, `assigned_human_id=userId`, `bot_paused_reason="humano_assumiu"`.
+2. Se RLS falhar, cai em `customer-takeover` edge function (já existe).
+3. Loga no console o sucesso/falha pra debug.
 
-- Não vou ativar presence "digitando…" no WhatsApp agora (você não pediu — fica para próximo passo se quiser).
-- Não vou sobrescrever passos `como_funciona` que algum consultor já personalizou no editor.
-- Não vou mexer no Conexão Club / Career Plan (15% lá é comissão de licenciado, não desconto do cliente).
+Chamar antes do `sendWhapi…` ou imediatamente em paralelo, não depois — assim a IA já está silenciada quando o envio é processado.
+
+### C. Usar o helper compartilhado em todos os pontos de saída de IA (Bug 4)
+Importar `isCustomerPausedByHuman` em:
+- `whapi-webhook/index.ts` (substituir o check manual da linha 449-451)
+- `whapi-webhook/handlers/bot-flow.ts` (no início do `dispatchStepFromFlow`)
+- `whapi-webhook/handlers/conversational/index.ts`
+- `ai-sales-agent/index.ts`
+- `bot-followup-checker`, `bot-stuck-recovery`, `ai-followup-cron`, `send-scheduled-messages` (revisar e padronizar — alguns já fazem certo, outros só checam `bot_paused`)
+
+Garantir que TODO caminho de envio passe por `isCustomerPausedByHuman(customer)` antes do dispatch.
+
+### D. Botão "🛑 Parar IA de todos os meus leads"
+Adicionar em `/admin/whatsapp` (e `/admin/saude-bot`) um botão grande no topo:
+- Pausa global por consultor: `UPDATE customers SET bot_paused=true, bot_paused_reason='manual_global_pause', assigned_human_id=<userId> WHERE consultant_id=<userId> AND bot_paused=false`.
+- Mostra "X leads silenciados".
+- Botão paralelo "Religar IA" usa o RPC existente `admin_unpause_global_bot` (ou variante por consultor).
+- Confirmação dupla pra evitar clique acidental.
+
+### E. Migration de saneamento
+Backfill: `UPDATE customers SET bot_paused=true WHERE assigned_human_id IS NOT NULL AND bot_paused=false` — fecha o gap pra leads onde o humano está vinculado mas o flag está errado.
+
+---
+
+## Detalhes técnicos
+
+**Arquivos editados:**
+- `supabase/functions/whapi-webhook/index.ts` — fix coluna, usar `isCustomerPausedByHuman`
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — checar pause antes de `dispatchStepFromFlow`
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` — idem
+- `supabase/functions/ai-sales-agent/index.ts` — idem no entrypoint
+- `supabase/functions/bot-followup-checker/index.ts`, `bot-stuck-recovery/index.ts`, `ai-followup-cron/index.ts`, `send-scheduled-messages/index.ts` — padronizar via helper
+- `src/hooks/useMessages.ts` — extrair auto-takeover pra helper
+- `src/lib/whatsapp/auto-takeover.ts` (novo) — função `autoTakeover(customerId, reason?)`
+- Pontos de envio de mídia/template no painel — chamar `autoTakeover` (vou mapear quais são durante a edição)
+- `src/components/admin/AIAgentTab/LiveConversationsPanel.tsx` ou novo componente — botão "Parar IA de todos"
+- Migration: backfill `bot_paused` quando `assigned_human_id` está setado
+
+**Sem mudança em:**
+- UI por lead (Assumir/Devolver continuam iguais)
+- Schema (só backfill)
+- `customer-takeover` edge function (continua sendo fallback)
+
+---
+
+## Memory a atualizar
+
+`mem://whatsapp/human-takeover-silence` — registrar que o enforcement agora é via helper compartilhado `_shared/bot/paused.ts` (importado em todos os crons + webhook + ai-sales-agent), que o auto-pause cobre texto+mídia+API+app, e que existe botão de panic stop por consultor.

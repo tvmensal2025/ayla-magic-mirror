@@ -7,6 +7,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { geminiGenerate, type GeminiTool } from "../_shared/gemini.ts";
 import { shouldSkipShortCircuit } from "../_shared/bot/orchestrator-gate.ts";
+import { isCustomerPausedByHuman } from "../_shared/bot/paused.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -389,7 +390,7 @@ async function loadContext(supabase: any, customerId: string) {
   const { data: customer } = await supabase
     .from("customers")
     .select(
-      "id, consultant_id, name, name_source, phone_whatsapp, distribuidora, address_city, address_state, address_street, electricity_bill_value, electricity_bill_photo_url, ocr_done, bill_requested_at, numero_instalacao, pain_point, sales_phase, qualification_score, lead_source, customer_referred_by_name, conversation_summary, summary_updated_at",
+      "id, consultant_id, name, name_source, phone_whatsapp, distribuidora, address_city, address_state, address_street, electricity_bill_value, electricity_bill_photo_url, ocr_done, bill_requested_at, numero_instalacao, pain_point, sales_phase, qualification_score, lead_source, customer_referred_by_name, conversation_summary, summary_updated_at, bot_paused, bot_paused_until, assigned_human_id",
     )
     .eq("id", customerId)
     .maybeSingle();
@@ -510,6 +511,16 @@ Deno.serve(async (req) => {
     }
 
     const { customer, history, persona, tone, customPrompt, summaryFresh, memoryFacts, knowledgeBlock } = ctx;
+
+    // 🔇 Humano assumiu → IA não responde. Para qualquer modo (reply, rescue, etc.).
+    if (isCustomerPausedByHuman(customer as any)) {
+      console.log(`🔇 ai-sales-agent: bot pausado para customer ${customer.id} — abortando`);
+      return new Response(
+        JSON.stringify({ ok: true, skipped: true, reason: "bot_paused_by_human" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const phase = customer.sales_phase || "abertura";
 
     // ---------- INTENT-FIRST short-circuit (sem LLM) ----------
