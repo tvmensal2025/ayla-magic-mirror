@@ -4,17 +4,37 @@ import { CampaignsList } from "./CampaignsList";
 import { WalletChip } from "./WalletChip";
 import { AdTemplatesGallery } from "./AdTemplatesGallery";
 import { IntelligenceTab } from "./IntelligenceTab";
+import { ResultsDashboard } from "./ResultsDashboard";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Megaphone, Plus, ListChecks, LayoutGrid, Brain, Sparkles } from "lucide-react";
+import { Megaphone, Plus, ListChecks, LayoutGrid, Brain, Sparkles, LayoutDashboard, TrendingUp } from "lucide-react";
+import { useManagedConsultants } from "@/hooks/useManagedConsultants";
+import { AdMetricsCards } from "../dashboard/AdMetricsCards";
+import { AdMetricsCharts } from "../dashboard/AdMetricsCharts";
+import { AdAccountSwitcher } from "../dashboard/AdAccountSwitcher";
+import { MainChart } from "../dashboard/MainChart";
+import { CpcPanel } from "../dashboard/CpcPanel";
+import { RecentClicks } from "../dashboard/RecentClicks";
+import { FunnelStrip } from "../dashboard/FunnelStrip";
+import { LeadSourceCard } from "../LeadSourceCard";
+import { useAnalytics } from "@/hooks/useAnalytics";
 
 interface Props { consultantId: string }
+
+type View = "dashboard" | "gallery" | "campaigns" | "performance" | "intel";
 
 export function AdsCentralTab({ consultantId }: Props) {
   const { toast } = useToast();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [view, setView] = useState<"gallery" | "campaigns" | "intel">("gallery");
+  const [view, setView] = useState<View>("dashboard");
+  const [periodDays, setPeriodDays] = useState<number>(30);
+  const [adAccountId, setAdAccountId] = useState<string>(consultantId);
+  useEffect(() => { setAdAccountId(consultantId); }, [consultantId]);
+
+  const { data: managedConsultants = [] } = useManagedConsultants(consultantId);
+  const { data: analytics } = useAnalytics(adAccountId, periodDays);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -31,6 +51,14 @@ export function AdsCentralTab({ consultantId }: Props) {
     window.history.replaceState({}, "", clean);
   }, [toast]);
 
+  const navItems: { id: View; label: string; icon: any }[] = [
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "gallery", label: "Modelos", icon: LayoutGrid },
+    { id: "campaigns", label: "Campanhas", icon: ListChecks },
+    { id: "performance", label: "Performance", icon: TrendingUp },
+    { id: "intel", label: "Inteligência", icon: Brain },
+  ];
+
   return (
     <div className="space-y-5">
       <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
@@ -40,7 +68,7 @@ export function AdsCentralTab({ consultantId }: Props) {
             Central de Anúncios
           </h2>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            Escolha um modelo pronto, gerencie suas campanhas e use a inteligência para otimizar. Para ver resultados, acesse a aba <strong className="text-foreground">Performance</strong>.
+            Tudo de anúncios em um só lugar: dashboard, modelos prontos, campanhas, performance e inteligência.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
@@ -52,30 +80,69 @@ export function AdsCentralTab({ consultantId }: Props) {
       </header>
 
       <div className="flex items-center gap-1 rounded-lg bg-secondary p-1 w-full sm:w-fit overflow-x-auto">
-        <Button size="sm" variant={view === "gallery" ? "default" : "ghost"} onClick={() => setView("gallery")} className="h-8 gap-1.5 shrink-0">
-          <LayoutGrid className="w-3.5 h-3.5" /> Modelos
-        </Button>
-        <Button size="sm" variant={view === "campaigns" ? "default" : "ghost"} onClick={() => setView("campaigns")} className="h-8 gap-1.5 shrink-0">
-          <ListChecks className="w-3.5 h-3.5" /> Campanhas
-        </Button>
-        <Button size="sm" variant={view === "intel" ? "default" : "ghost"} onClick={() => setView("intel")} className="h-8 gap-1.5 shrink-0">
-          <Brain className="w-3.5 h-3.5" /> Inteligência
-        </Button>
+        {navItems.map((n) => {
+          const Icon = n.icon;
+          return (
+            <Button
+              key={n.id}
+              size="sm"
+              variant={view === n.id ? "default" : "ghost"}
+              onClick={() => setView(n.id)}
+              className="h-8 gap-1.5 shrink-0"
+            >
+              <Icon className="w-3.5 h-3.5" /> {n.label}
+            </Button>
+          );
+        })}
       </div>
+
+      {view === "dashboard" && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-2 flex-wrap p-2 rounded-xl bg-card/40 border border-border/40 backdrop-blur">
+            <AdAccountSwitcher userId={consultantId} value={adAccountId} onChange={setAdAccountId} />
+            <Select value={String(periodDays)} onValueChange={(v) => setPeriodDays(Number(v))}>
+              <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7">Últimos 7 dias</SelectItem>
+                <SelectItem value="15">Últimos 15 dias</SelectItem>
+                <SelectItem value="30">Últimos 30 dias</SelectItem>
+                <SelectItem value="90">Últimos 90 dias</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <AdMetricsCards consultantId={adAccountId} periodDays={periodDays} />
+          <AdMetricsCharts consultantId={adAccountId} periodDays={periodDays} managed={managedConsultants} />
+          <MainChart data={(analytics as any)?.dailyMain} />
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <CpcPanel data={(analytics as any)?.cpcByTarget} totalCtaClicks={(analytics as any)?.totalCtaClicks} />
+            <RecentClicks clicks={(analytics as any)?.recentClicks} />
+          </div>
+
+          <FunnelStrip funnel={(analytics as any)?.funnel} />
+          <LeadSourceCard consultantId={adAccountId} periodDays={periodDays} />
+        </div>
+      )}
 
       {view === "gallery" && (
         <AdTemplatesGallery consultantId={consultantId} onPublished={() => { setRefreshKey(k => k + 1); setView("campaigns"); }} />
       )}
       {view === "campaigns" && <CampaignsList consultantId={consultantId} refreshKey={refreshKey} />}
+      {view === "performance" && (
+        <ResultsDashboard consultantId={consultantId} onCreateClick={() => setView("gallery")} />
+      )}
       {view === "intel" && <IntelligenceTab consultantId={consultantId} />}
 
-      <div className="rounded-xl border border-dashed border-border/50 bg-card/30 p-3 flex items-start gap-2 text-xs text-muted-foreground">
-        <Sparkles className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" />
-        <div>
-          Recarregue sua carteira no botão acima e escolha um modelo pronto na <strong className="text-foreground">Galeria</strong>. A campanha sobe pré-otimizada em seu nome
-          e os leads caem no WhatsApp já conectado em <strong className="text-foreground">Dados</strong>.
+      {view !== "dashboard" && view !== "performance" && (
+        <div className="rounded-xl border border-dashed border-border/50 bg-card/30 p-3 flex items-start gap-2 text-xs text-muted-foreground">
+          <Sparkles className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" />
+          <div>
+            Recarregue sua carteira no botão acima e escolha um modelo pronto na <strong className="text-foreground">Galeria</strong>. A campanha sobe pré-otimizada em seu nome
+            e os leads caem no WhatsApp já conectado em <strong className="text-foreground">Dados</strong>.
+          </div>
         </div>
-      </div>
+      )}
 
       <CreateCampaignWizard
         open={wizardOpen}
