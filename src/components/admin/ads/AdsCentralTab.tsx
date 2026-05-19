@@ -3,6 +3,8 @@ import { CreateCampaignWizard } from "./CreateCampaignWizard";
 import { CampaignsList } from "./CampaignsList";
 import { WalletChip } from "./WalletChip";
 import { AdTemplatesGallery } from "./AdTemplatesGallery";
+import { CtwaConnectGuide } from "./CtwaConnectGuide";
+
 import { IntelligenceTab } from "./IntelligenceTab";
 import { ResultsDashboard } from "./ResultsDashboard";
 import { Button } from "@/components/ui/button";
@@ -78,6 +80,10 @@ export function AdsCentralTab({ consultantId }: Props) {
           </Button>
         </div>
       </header>
+
+      <CtwaConnectGuide consultantId={consultantId} />
+
+
 
       <div className="flex items-center gap-1 rounded-lg bg-secondary p-1 w-full sm:w-fit overflow-x-auto">
         {navItems.map((n) => {

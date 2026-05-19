@@ -828,13 +828,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
 
   // ═══════════════════════════════════════════════════════════════════
-  // HELPER: Envia opções como TEXTO (botões não funcionam na Evolution API atual)
-  // Formato: mensagem + opções numeradas
+  // HELPER: Evolution NÃO usa botão (botões reais só no Whapi).
+  // Envia mensagem + opções numeradas como texto puro.
   // ═══════════════════════════════════════════════════════════════════
   async function sendOptions(jid: string, msg: string, options: { id: string; title: string }[]): Promise<boolean> {
-    // Tenta enviar como botões reais (funciona no Whapi, fallback texto no Evolution)
-    return sendButtons(jid, msg, options);
+    const textWithOptions = `${msg}\n\n${options.map((b, i) => `*${i + 1}.* ${b.title}`).join("\n")}\n\n_Digite o número da opção desejada._`;
+    return sendText(jid, textWithOptions);
   }
+
 
   // ═══════════════════════════════════════════════════════════════════
   // 🎯 Dispatcher genérico: envia o que está configurado em /admin/fluxos
@@ -4196,27 +4197,24 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
   }
 
-  // 🔘 Auto-converter pergunta em botões quando o próximo step for confirmação
-  // de telefone ou complemento de endereço. Evita texto duplicado "1/2".
+  // 📝 Evolution NÃO usa botão (botões reais só no Whapi). Em vez disso,
+  // a pergunta é enviada como texto natural; o parser de captura aceita
+  // "sim", "é meu", "outro número", "adicionar", "pular", "não tem", etc.
   try {
     const nextStep = (updates as any)?.conversation_step;
     if (reply && nextStep === "ask_phone_confirm") {
-      const sent = await sendButtons(remoteJid, reply, [
-        { id: "sim_phone", title: "✅ Sim, é meu" },
-        { id: "editar_phone", title: "📱 Outro número" },
-      ]);
+      const txt = `${reply}\n\nResponda *sim* se eu posso usar esse número, ou me envie *o outro número* (com DDD).`;
+      const sent = await sendText(remoteJid, txt);
       if (sent) { reply = ""; (updates as any).__inline_sent = true; }
     } else if (reply && nextStep === "ask_complement") {
-      const sent = await sendButtons(remoteJid, reply, [
-        { id: "add_complement", title: "✍️ Adicionar" },
-        { id: "skip_complement", title: "⏭️ Pular" },
-        { id: "no_complement", title: "🚫 Não tem" },
-      ]);
+      const txt = `${reply}\n\nSe tiver complemento (apto, bloco, casa, fundos…), me envie agora. Se *não tem* ou quiser pular, responda *pular*.`;
+      const sent = await sendText(remoteJid, txt);
       if (sent) { reply = ""; (updates as any).__inline_sent = true; }
     }
   } catch (e) {
-    console.warn("[bot-flow] auto-buttons wrapper falhou:", (e as any)?.message);
+    console.warn("[bot-flow] inline-question wrapper falhou:", (e as any)?.message);
   }
+
 
   return { reply, updates };
 }

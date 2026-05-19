@@ -23,6 +23,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { AdImageLibraryPanel } from "./AdImageLibraryPanel";
 import { SaveTemplateDialog } from "./SaveTemplateDialog";
 import type { AdImageLibraryItem } from "@/services/adImageLibrary";
+import { CtwaPreflightCard } from "./CtwaPreflightCard";
+
 
 interface Props {
   open: boolean;
@@ -97,6 +99,9 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
   const [submitting, setSubmitting] = useState(false);
   const [aiResizingIdx, setAiResizingIdx] = useState<number | null>(null);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  // Pré-checagem CTWA: bot + Facebook + pixel + WABA. Bloqueia Publicar quando false.
+  const [ctwaReady, setCtwaReady] = useState(false);
+
 
   // Validação inicial
   const [issues, setIssues] = useState<string[] | null>(null);
@@ -1183,11 +1188,13 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
 
             {step === 4 && (
               <div className="space-y-5">
+                <CtwaPreflightCard consultantId={consultantId} onReadyChange={setCtwaReady} />
                 <div>
                   <Label>Orçamento diário: <span className="text-primary font-bold">R$ {budget}</span></Label>
                   <Slider min={20} max={500} step={5} value={[budget]} onValueChange={v => setBudget(v[0])} />
                   <div className="flex justify-between text-xs text-muted-foreground mt-1"><span>R$ 20</span><span>R$ 500</span></div>
                 </div>
+
                 <div>
                   <Label>Duração: <span className="text-primary font-bold">{duration === 0 ? "Sem fim (até pausar)" : `${duration} dias`}</span></Label>
                   <Slider min={0} max={30} step={1} value={[duration]} onValueChange={v => setDuration(v[0])} />
@@ -1308,11 +1315,21 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
                     Salvar como template
                   </Button>
                 )}
-                <Button onClick={handleNext} disabled={submitting || copyLoading || (step === 4 && preflightLoading)}>
+                <Button
+                  onClick={handleNext}
+                  disabled={
+                    submitting ||
+                    copyLoading ||
+                    (step === 4 && preflightLoading) ||
+                    (step === 4 && !ctwaReady && !isSuperAdmin)
+                  }
+                  title={step === 4 && !ctwaReady && !isSuperAdmin ? "Complete a pré-checagem CTWA acima antes de publicar" : undefined}
+                >
                   {submitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Publicando...</> : (
                     <>{step === 4 ? "Publicar campanha" : "Próximo"} <ChevronRight className="w-4 h-4 ml-1" /></>
                   )}
                 </Button>
+
               </div>
             </div>
           </div>

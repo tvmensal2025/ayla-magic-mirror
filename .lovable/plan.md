@@ -1,56 +1,142 @@
-## Objetivo
+## Auditoria — Evolution (consultores) vs. Whapi (super admin) + FB Ads
 
-No Funil de Vendas (Kanban do CRM), cada card precisa mostrar **em qual passo do fluxo do bot o lead parou** — numerado (1, 2, 3, …, N) com o título do passo. Assim dá pra olhar a coluna e bater o olho: "esse parou no 3 (envio de conta), aquele no 7 (CPF)".
+### TL;DR
 
-## O que vai aparecer no card
+- **Evolution NÃO está 100% pronto pra outros consultores.** Funcionalmente a engine de fluxo roda, mas **2 pontos travam ou degradam a experiência hoje**: (1) o fluxo ainda chama `sendButtons` em 2 lugares (telefone / endereço) — no Evolution isso cai pra fallback de texto numerado (não quebra, mas não é o que você pediu); (2) **nenhum consultor está com instância conectada** no banco (`whatsapp_instances` só tem 2 registros, ambos `unknown`/`needs_reconnect`).
+- **Conectar WhatsApp Business pelo Facebook ≠ conectar Evolution.** São fluxos diferentes. Hoje, pra rodar **anúncio CTWA + bot Evolution**, o consultor precisa **das duas coisas**, e o sistema **não amarra uma à outra**.
 
-Logo abaixo do nome/telefone, um badge novo:
+---
 
-```
-[ 3/10 ] Aguardando conta de luz   · há 2h parado
-```
+## 1. Engine do bot — paridade Whapi vs Evolution
 
-- `3/10` → posição do passo dentro do fluxo ativo do consultor.
-- Label → `title` do passo (ou nome amigável da tabela de legados).
-- Tempo parado → `now() - customers.last_step_advanced_at` (já existe).
 
-Cor do badge muda por faixa de risco: ≤24h verde, 24-72h âmbar, >72h vermelho.
+| Item                         | Whapi                                 | Evolution                                                | Status                 |
+| ---------------------------- | ------------------------------------- | -------------------------------------------------------- | ---------------------- |
+| Webhook orchestrator         | `whapi-webhook/index.ts` (856 linhas) | `evolution-webhook/index.ts` (681 linhas)                | OK                     |
+| Handler de fluxo             | `handlers/bot-flow.ts` 4292 linhas    | `handlers/bot-flow.ts` 4226 linhas                       | ~98% paridade          |
+| Conversational flow          | ✅                                     | ✅                                                        | OK                     |
+| OTP intercept                | ✅                                     | ✅                                                        | OK                     |
+| CRM sync, notify lead, audit | ✅                                     | ✅                                                        | OK                     |
+| Dedup, rate-limit            | ✅                                     | ✅                                                        | OK                     |
+| Botões nativos               | ✅ (`/messages/interactive`)           | ⚠️ tenta `/message/sendButtons` e cai pra texto numerado | Você pediu "sem botão" |
 
-## Como o passo é resolvido
 
-Cada deal vira lead via `customers.phone_whatsapp = remote_jid`. Pegamos `customers.conversation_step` e mapeamos:
+**Onde o código ainda manda botão no Evolution** (`evolution-webhook/handlers/bot-flow.ts`):
 
-1. **Fluxo customizado** (`flow:<uuid>` ou só `<uuid>`): faz lookup em `bot_flow_steps` (já temos `flow_id`, `position`, `title`, `step_key`) do fluxo ativo do consultor e mostra `position+1 / total`.
-2. **Passos legados** (`welcome`, `aguardando_conta`, `ask_cpf`, …): tabela fixa no front com ordem canônica e label PT-BR (reusa o `STEP_LABELS` que já está em `BotFunnelPanel`). Numeração 1..N dentro do grupo "legado".
-3. **Sem `conversation_step`**: badge cinza "Sem interação".
+- linha 836 — wrapper `sendOptions` que delega pra `sendButtons`
+- linha 4204 — confirmação de telefone (`ask_phone_confirm`)
+- linha 4210 — pergunta de complemento de endereço (`ask_complement`)
 
-## Filtro novo no topo do funil
+No Evolution o `sendButtons` (`_shared/evolution-api.ts:113-148`) tenta a API e, falhando, faz fallback pra texto numerado. **Cliente recebe, mas é fluxo "1. Sim / 2. Outro número" — gambiarra.**
 
-Ao lado do "Buscar por nome…":
+### O que vamos fazer (próxima execução)
 
-- Select **"Parou no passo"** com a lista de passos do fluxo ativo (`1. Boas-vindas`, `2. Vídeo`, `3. Conta de luz`, …) + opção "Todos" e "Sem interação".
-- Filtra os cards do Kanban no client (já temos tudo em memória via `useKanbanDeals`).
-- Contador por coluna passa a refletir o filtro.
+1. Criar flag interna `WHATSAPP_PROVIDER = "whapi" | "evolution"` no shared, derivada do `instance` no momento do envio.
+2. No `evolution-webhook/handlers/bot-flow.ts`:
+  - substituir os 3 pontos acima por `sendText` direto com prompt em linguagem natural ("Esse número que você está me mandando mensagem agora é o mesmo onde você quer receber o cadastro? Pode responder *sim* ou me mandar o outro número.")
+  - manter `sendButtons` no arquivo (não remover) — só não chamar.
+3. No `whapi-webhook/handlers/bot-flow.ts`: **mantém botão idêntico**.
+4. Capturar entrada como texto livre nos passos `ask_phone_confirm` / `ask_complement` — já existe parser, só ampliar regex pra aceitar "sim/é meu/pode usar/troca pra…".
 
-## Arquivos a tocar
+---
 
-- `src/hooks/useKanbanDeals.ts` — incluir `customers(conversation_step, last_step_advanced_at, flow_id)` no select; manter mapping para `customer_name`.
-- `src/hooks/useFlowSteps.ts` *(novo)* — hook que carrega `bot_flow_steps` do(s) flow_id(s) ativos do consultor e devolve `Map<step_key|uuid, { position, total, title }>`. Cacheia em `useMemo`.
-- `src/lib/flowStepResolver.ts` *(novo)* — função pura `resolveStep(conversation_step, flowMap, legacyMap) → { number, total, label, lastAdvancedAt }`. Reusa `STEP_LABELS` de `BotFunnelPanel` (mover para esse arquivo e re-exportar).
-- `src/components/whatsapp/KanbanDealCard.tsx` — receber `stepInfo` por prop e renderizar o badge novo (cor por faixa de tempo).
-- `src/components/whatsapp/KanbanColumn.tsx` / `KanbanBoard.tsx` — repassar `stepInfo` por deal e aplicar filtro "Parou no passo".
-- `src/components/whatsapp/CrmTabs.tsx` (ou onde mora o header do Funil) — adicionar o `<Select>` "Parou no passo" controlado.
+## 2. Conexão WhatsApp do consultor
 
-## Detalhes técnicos
+Hoje:
 
-- Query extra: `bot_flow_steps` filtrado por `flow_id in (...)` dos fluxos do consultor — uma única chamada na montagem.
-- Numeração: `position` é 0-based no banco → exibir `position + 1`.
-- `total`: `count(*) where flow_id = X` (já vem do array carregado).
-- Legados: ordem fixa em array — mesma ordem do `STEP_LABELS` de `BotFunnelPanel` (welcome → complete). Total = length do array.
-- Estado de "parado": já calculado por `KanbanSlaIndicator` via `updated_at`. Trocar para `customers.last_step_advanced_at` quando existir (mais preciso pro contexto "parou no passo").
-- Sem migração de banco. Sem mexer em edge function.
+- Frontend (`useWhatsApp.ts` + `whatsappStateChecks.ts` + `useWhatsAppInstanceDb.ts`) cria instância **Evolution** automática `igreen-<8charsConsultantId>`, registra webhook `/functions/v1/evolution-webhook`, pede QR.
+- `whatsapp_instances` no banco: **2 registros, ambos não conectados**. → Hoje só o super admin (Whapi) está realmente operando.
 
-## Fora de escopo
+### Pré-condições pro Evolution rodar pra um consultor novo
 
-- Não muda a lógica de estágios do Kanban (Abertura/Descoberta/Pitch/…). O passo do fluxo é **informação adicional** dentro do card, ortogonal ao estágio comercial.
-- Não mexe na aba "Clientes iGreen" (filtrada do funil já).
+1. `EVOLUTION_API_URL` + `EVOLUTION_API_KEY` configurados como secrets (✅ existem — referenciados em `evolution-webhook/index.ts:36-37` e `evolution-proxy/index.ts:312-313`).
+2. Servidor Evolution alvo aceitando criar instância + retornando QR. **Não validado nesta auditoria — recomendado rodar smoke test via `code--exec curl` no `EVOLUTION_API_URL`.**
+3. Consultor escanear o QR → `CONNECTION_UPDATE` no webhook grava `connected_phone`.
+
+### Gaps identificados
+
+
+| #   | Gap                                                                                                                                     | Severidade |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| G1  | Sem health-check exibido pro consultor após o "conectado" — não dá pra distinguir "tá conectado mas servidor Evolution caiu"            | Média      |
+| G2  | `connected_phone` não é sincronizado pra `consultant_ad_settings.whatsapp_destination_number` quando vem por QR (só pelo form de Dados) | Alta       |
+| G3  | Nada bloqueia o consultor de tentar publicar anúncio sem ter conectado WhatsApp / Facebook                                              | Alta       |
+
+
+---
+
+## 3. Conectar **WhatsApp Business no Facebook** (CTWA)
+
+**Esse é o ponto mais confuso e onde você pode perder o consultor.** Existem 3 coisas diferentes que o sistema chama de "WhatsApp":
+
+1. **WhatsApp do bot (Evolution)** — número que recebe lead, roda o fluxo, manda áudio, faz cadastro.
+  - Conexão: QR Code via Evolution API.
+  - Onde aparece: `whatsapp_instances`.
+2. **WhatsApp Business "comum"** (app verde do celular) — não tem API, não conecta no FB pra rodar ad CTWA oficial.
+3. **WhatsApp Business API / WABA** — número registrado na Meta Business Suite, **vinculado à Página do Facebook**, com pixel + CAPI. **Esse é o número que vai em `whatsapp_destination_number` e que o anúncio CTWA vai usar** (`facebook-create-campaign/index.ts:285-360` exige).
+
+### O que está implementado hoje
+
+- `useConsultantForm.ts:111` — quando o consultor preenche `whatsapp_principal` no form, faz upsert em `consultant_ad_settings.whatsapp_destination_number`. ✅
+- `facebook-create-campaign/index.ts:285` — bloqueia criação de campanha sem `whatsapp_destination_number`. ✅
+- `useFacebookConnection.ts` — lê a conexão OAuth da Meta com pixel/page/account/IG. ✅
+
+### O que ainda NÃO está coberto
+
+
+| #   | Item                                                                                                                                                                                                                       | Risco |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| F1  | Sistema não valida se o número que o consultor digitou está **realmente registrado como WABA na Página dele**. Se ele digitar o número do WhatsApp comum, o `facebook-create-campaign` vai dar erro só na hora de publicar | Alto  |
+| F2  | Não há fluxo guiado "conecte sua Página → conecte seu WABA → autorize pixel". Hoje o consultor precisa saber o que fazer no Meta Business Suite                                                                            | Alto  |
+| F3  | Mesmo consultor pode acabar com **número do bot ≠ número do anúncio** (bot QR em um chip, WABA registrada em outro) e ninguém avisa                                                                                        | Médio |
+| F4  | `facebook-oauth-callback` salva pixel/page/ad_account, mas **não detecta automaticamente o WABA da Página** via `/{page_id}/whatsapp_business_account`                                                                     | Médio |
+
+
+### Plano de fix (próxima execução)
+
+1. **Edge function nova `facebook-detect-waba**`: dado `page_id` + token, chama `GET /{page_id}?fields=connected_whatsapp_business_account` na Graph e devolve número. Auto-preenche `whatsapp_destination_number` se vazio e marca `consultant_ad_settings.waba_verified=true`.
+2. **Card de pré-checagem** no `/admin/anuncios` (componente `HealthSummaryCard.tsx` já existe — estender):
+  - ✅/❌ WhatsApp do bot conectado (Evolution)
+  - ✅/❌ Facebook conectado (OAuth válido + token não expirado)
+  - ✅/❌ Pixel configurado
+  - ✅/❌ WABA registrado na Página + bate com `whatsapp_destination_number`
+  - ✅/❌ Onboarding completo (já existe `OnboardingGate.tsx`)
+3. **Bloquear o botão "Publicar anúncio"** enquanto os 4 itens acima não estiverem verdes. Mensagem clara: "Antes de anunciar, conecte seu WhatsApp Business à sua Página do Facebook — [passo a passo]".
+4. **Sincronizar QR conectado → `whatsapp_destination_number**`: no `evolution-webhook/handlers/connection.ts`, quando `CONNECTION_UPDATE` setar `connected_phone`, fazer `upsert` em `consultant_ad_settings.whatsapp_destination_number` SE o consultor ainda não tiver WABA configurado (resolve G2 e F3 para o caso comum).
+
+---
+
+## 4. Resposta direta às suas perguntas
+
+> **"O sistema da Evolution com o fluxo sem botão (porque botão é só Whapi), para outros consultores está 100%?"**
+
+Não. Hoje:
+
+- Engine roda, mas **3 chamadas de `sendButtons` ainda estão ativas** no fluxo Evolution (telefone + endereço). Caem pra texto numerado quando o Evolution não suporta — funciona mas não é o "sem botão" que você quer.
+- **Nenhum consultor está com instância Evolution conectada** no banco no momento.
+- Fix é cirúrgico: remover as 3 chamadas e substituir por `sendText` em linguagem natural + ampliar o parser de resposta.
+
+> **"Se ele conectar, ele vai poder fazer tudo conectando o WhatsApp Business dele no Facebook?"**
+
+Não automaticamente. Hoje conectar o Facebook (OAuth) **não vincula sozinho** o WhatsApp Business do consultor à Página. Ele precisa:
+
+1. Conectar Evolution (QR) → bot funciona.
+2. Conectar Facebook (OAuth) → pixel, page, ad_account ficam disponíveis.
+3. **Manualmente** ir no Meta Business Suite e amarrar o número WABA dele à Página, e
+4. **Manualmente** digitar esse número no form de Dados (que sincroniza pra `whatsapp_destination_number`).
+
+Se ele pular o passo 3, a campanha CTWA dele vai falhar na publicação (`WHATSAPP_BUSINESS_REQUIRED`).
+
+---
+
+## 5. Próximas execuções recomendadas (em ordem)
+
+1. **[Bot Evolution sem botão]** Remover `sendButtons` dos 3 pontos de `evolution-webhook/handlers/bot-flow.ts`, manter Whapi intacto.
+2. **[Sync número]** No `evolution-webhook/handlers/connection.ts`, quando QR conectar, fazer upsert do `connected_phone` em `consultant_ad_settings.whatsapp_destination_number`.
+3. **[Pré-flight CTWA]** Estender `HealthSummaryCard` com os 4 checks + bloqueio do botão "Publicar".
+4. **[WABA auto-detect]** Nova edge `facebook-detect-waba` + integração no `facebook-oauth-callback`.
+5. **[Doc consultor]** Tooltip / wizard de 4 passos no `/admin` explicando "conectar bot ≠ conectar Página ≠ conectar WABA".
+
+Quer que eu já comece pelo item 1 e faca o 112345 todos
+
+&nbsp;
