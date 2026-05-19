@@ -602,20 +602,22 @@ function _extractTail(t: string): string {
   return (sents[sents.length - 1] || cleaned).trim();
 }
 
-// Wrapper de segurança — NUNCA silencia. Se não há reply nem mídia inline,
-// compõe uma reentrada cortês com a última pergunta do passo atual.
+// Wrapper de segurança. Se não há reply nem mídia inline:
+//   - passo sem pergunta → silencia (evita muleta fora de contexto).
+//   - passo com pergunta → reentry com a pergunta renderizada.
 function _finalize(stepKey: string, r: BotResult): BotResult {
   const reply = (r.reply || "").trim();
   const hasMedia = r.updates?.__inline_sent === true;
   if (!reply && !hasMedia) {
     const rawTail = _extractTail(_currentTurnStepQuestion);
-    // ✅ Renderiza variáveis ({{nome}}, {{valor_conta}}, etc.) antes de enviar.
-    const tail = rawTail ? renderTemplate(rawTail, _currentTurnVars || {}) : "";
-    const reentry = tail
-      ? `Boa! Me ajuda voltando aqui: ${tail}`
-      : `Boa! Pra eu te ajudar do jeito certo, me confirma onde a gente parou? 🙏`;
+    let tail = rawTail ? renderTemplate(rawTail, _currentTurnVars || {}) : "";
+    tail = tail.replace(/\{\{\s*[^}]+\s*\}\}/g, "").replace(/\s{2,}/g, " ").trim();
+    if (!tail) {
+      console.warn(`[conversational] 🤫 reply vazio em passo sem pergunta → silencioso step=${stepKey}`);
+      return { reply: "", updates: { ...r.updates, __suppressed_reentry: true } as any };
+    }
     console.warn(`[conversational] ⚠️ reply vazio → recuperando com reentry em step=${stepKey}`);
-    return { reply: reentry, updates: { ...r.updates } };
+    return { reply: `Boa! Me ajuda voltando aqui: ${tail}`, updates: { ...r.updates } };
   }
   return { reply, updates: r.updates };
 }
@@ -1382,17 +1384,17 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       } catch (_) { /* best-effort */ }
     }
 
-    // Se o passo `message` não tem texto E não enviou nada inline (sem mídia válida),
-    // não devemos cascatear silenciosamente — isso faz o lead "perder" passos.
-    // Persistimos o lead nele e paramos; a próxima inbound dispara repeat e emite mídia anexada.
+    // Passo `message` sem texto E sem inline pode ser:
+    //   (a) marcador/mídia já entregue → seguir cascateando (default goto);
+    //   (b) realmente espera resposta → cursorCascades cuida disso.
     const firstIsSilentEmpty = !cadastroStep
       && !replyText
       && !inlineSent
       && !String(s.message_text || "").trim();
     if (firstIsSilentEmpty) {
-      console.log(`[cascade-stop] pos=${s.position} step=${s.step_key} motivo=step-vazio-sem-midia`);
+      console.log(`[cascade-stop-check] pos=${s.position} step=${s.step_key} motivo=step-vazio-sem-midia (avaliando cascata)`);
     }
-    let cursor: DbStep | null = (cadastroStep || firstIsSilentEmpty) ? null : s;
+    let cursor: DbStep | null = cadastroStep ? null : s;
     // Helper para achar próximo step. ORDEM DE PRIORIDADE:
     //   1) transitions[default].goto_step_id — configuração explícita do consultor
     //   2) fallback.goto_step_id — somente se não houver transition default
@@ -1802,7 +1804,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const nextStep = dbSteps.find((s) => s.id === fb.goto_step_id);
       if (nextStep && nextStep.is_active) {
         const nextIsMediaOnly = !String(nextStep.message_text || "").trim();
-        if (currentStep.captures?.some((c) => c.enabled !== false) && !hasCapture && nextIsMediaOnly) {
+        const requiresHardCapture = Array.isArray(currentStep.captures)
+          && currentStep.captures.some((c: any) =>
+            c?.enabled !== false && !!c?.field && c?.required !== false
+          );
+        if (requiresHardCapture && !hasCapture && nextIsMediaOnly) {
           console.log(`[conversational] fallback goto bloqueado: step=${stepKey} exige captura antes de ${nextStep.step_key}`);
           return _finalize(stepKey, await repeatCurrent());
         }

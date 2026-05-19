@@ -653,6 +653,15 @@ function _finalize(stepKey: string, r: BotResult): BotResult {
     tail = tail.replace(/\{\{\s*[^}]+\s*\}\}/g, "").replace(/\s{2,}/g, " ").trim();
     tail = tail.replace(/^[,;:\-\s]+/, "").trim();
 
+    // Sem pergunta no passo atual → não mandar muleta "Tô aqui 👀…".
+    // Esse caso acontece em passos ambient (boas vindas, mídia já entregue) e
+    // resultava em respostas fora de contexto ("me conta um pouquinho mais…"
+    // depois do lead apenas cumprimentar/confirmar).
+    if (!tail) {
+      console.warn(`[conversational] 🤫 reply vazio em passo sem pergunta → silencioso step=${stepKey}`);
+      return { reply: greet || "", updates: { ...r.updates, __suppressed_reentry: true } as any };
+    }
+
     // Suprime repetição da mesma reentrada em curto intervalo.
     const cid = _currentTurnCustomerId;
     if (cid) {
@@ -665,11 +674,8 @@ function _finalize(stepKey: string, r: BotResult): BotResult {
       _lastReentryByCustomer.set(cid, { tail, at: now });
     }
 
-    const reentry = tail
-      ? tail
-      : "Tô aqui 👀 — me conta um pouquinho mais pra eu te ajudar?";
-    console.warn(`[conversational] ⚠️ reply vazio → reentry em step=${stepKey}`);
-    return { reply: applyGreet(reentry), updates: { ...r.updates } };
+    console.warn(`[conversational] ⚠️ reply vazio → reentry com pergunta do passo step=${stepKey}`);
+    return { reply: applyGreet(tail), updates: { ...r.updates } };
   }
 
   // Caso comum: prefixa saudação se aplicável.
@@ -1403,16 +1409,24 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     }
 
     // Se o passo `message` não tem texto E não enviou nada inline (sem mídia válida),
-    // não devemos cascatear silenciosamente — isso faz o lead "perder" passos.
-    // Persistimos o lead nele e paramos; a próxima inbound dispara repeat e emite mídia anexada.
+    // duas situações são possíveis:
+    //   (a) passo é puro marcador / mídia já entregue em sessão anterior — devemos
+    //       seguir cascateando para o próximo passo (default goto), senão o lead
+    //       fica preso recebendo a muleta "Tô aqui 👀…" a cada inbound.
+    //   (b) passo realmente espera resposta — para se houver capture ou pergunta.
+    // O guard `cursorCascades` mais abaixo já cuida do caso (b).
     const firstIsSilentEmpty = !cadastroStep
       && !replyText
       && !inlineSent
       && !String(s.message_text || "").trim();
     if (firstIsSilentEmpty) {
-      console.log(`[cascade-stop] pos=${s.position} step=${s.step_key} motivo=step-vazio-sem-midia`);
+      console.log(`[cascade-stop-check] pos=${s.position} step=${s.step_key} motivo=step-vazio-sem-midia (avaliando cascata)`);
     }
-    let cursor: DbStep | null = (cadastroStep || firstIsSilentEmpty) ? null : s;
+    // ANTES: cursor = (cadastroStep || firstIsSilentEmpty) ? null : s;
+    // AGORA: só cancela cascata em cadastroStep. Se o passo é silent-empty mas
+    // tem default goto, deixamos `cursorCascades` decidir (que continua honrando
+    // capture/pergunta).
+    let cursor: DbStep | null = cadastroStep ? null : s;
     // Helper para achar próximo step. ORDEM DE PRIORIDADE:
     //   1) transitions[default].goto_step_id — configuração explícita do consultor
     //   2) fallback.goto_step_id — somente se não houver transition default
@@ -1822,7 +1836,15 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const nextStep = dbSteps.find((s) => s.id === fb.goto_step_id);
       if (nextStep && nextStep.is_active) {
         const nextIsMediaOnly = !String(nextStep.message_text || "").trim();
-        if (currentStep.captures?.some((c) => c.enabled !== false) && !hasCapture && nextIsMediaOnly) {
+        // Só bloqueia o goto se o passo atual realmente exige uma captura "dura"
+        // (com field obrigatório), não qualquer capture textual opcional.
+        // Caso contrário, passos message→message (boas-vindas → vídeo) ficavam
+        // travados aguardando uma "resposta" que nunca era exigida pelo consultor.
+        const requiresHardCapture = Array.isArray(currentStep.captures)
+          && currentStep.captures.some((c: any) =>
+            c?.enabled !== false && !!c?.field && c?.required !== false
+          );
+        if (requiresHardCapture && !hasCapture && nextIsMediaOnly) {
           console.log(`[conversational] fallback goto bloqueado: step=${stepKey} exige captura antes de ${nextStep.step_key}`);
           return _finalize(stepKey, await repeatCurrent());
         }
