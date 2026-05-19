@@ -3,6 +3,7 @@
 
 import type { Intent } from "./state-machine.ts";
 import { openaiChat } from "../../../_shared/openai.ts";
+import { getConfidenceThresholds, logAiDecision } from "../../../_shared/ai-decisions.ts";
 
 const INTENTS: Intent[] = [
   "saudacao",
