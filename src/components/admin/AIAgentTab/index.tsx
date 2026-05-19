@@ -70,7 +70,8 @@ export function AIAgentTab({ userId }: { userId: string }) {
       return;
     }
 
-    // Propaga a decisão: ao desligar, pausa todas as conversas ativas; ao religar, libera as pausadas globalmente.
+    // Propaga a decisão: ao desligar, pausa TODAS as conversas do consultor
+    // (atuais e qualquer status). Ao religar, libera só as pausadas globalmente.
     try {
       if (!v) {
         const { error: pErr, count } = await supabase
@@ -86,10 +87,12 @@ export function AIAgentTab({ userId }: { userId: string }) {
             },
             { count: "exact" },
           )
-          .eq("consultant_id", userId)
-          .or("bot_paused.is.false,bot_paused.is.null");
+          .eq("consultant_id", userId);
         if (pErr) throw pErr;
-        toast({ title: "⏸️ IA pausada para seus leads", description: `${count ?? 0} conversa(s) silenciadas.` });
+        toast({
+          title: "🛑 IA desligada",
+          description: `${count ?? 0} lead(s) silenciados. Leads novos também não receberão mensagens automáticas.`,
+        });
       } else {
         const { error: rErr, count } = await supabase
           .from("customers")
@@ -108,7 +111,7 @@ export function AIAgentTab({ userId }: { userId: string }) {
           .eq("bot_paused", true)
           .eq("bot_paused_reason", "manual_global_pause");
         if (rErr) throw rErr;
-        toast({ title: "🤖 IA ativada", description: `${count ?? 0} conversa(s) religadas.` });
+        toast({ title: "🤖 IA reativada", description: `${count ?? 0} lead(s) religados.` });
       }
     } catch (e: any) {
       toast({ title: "Config salva, mas falhou ao propagar", description: e?.message, variant: "destructive" });
