@@ -57,6 +57,24 @@ export function PlatformFacebookCard() {
   const [manualPage, setManualPage] = useState("");
   const [manualPixel, setManualPixel] = useState("");
   const [ensuringPixel, setEnsuringPixel] = useState(false);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncReport, setSyncReport] = useState<any>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+
+  async function syncAll() {
+    setSyncingAll(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("facebook-platform-sync-all", { body: {} });
+      if (error) throw error;
+      setSyncReport(data);
+      setReportOpen(true);
+      await loadStatus();
+    } catch (e: any) {
+      toast({ title: "Falha ao sincronizar", description: e?.message, variant: "destructive" });
+    } finally {
+      setSyncingAll(false);
+    }
+  }
 
   async function ensurePixel() {
     setEnsuringPixel(true);
