@@ -65,7 +65,7 @@ const ConsultantPage = () => {
       <PixelInjector facebookPixelId={consultant.facebook_pixel_id} googleAnalyticsId={consultant.google_analytics_id} />
       <SEOHead
         title={`${consultant.name} – iGreen Energy`}
-        description={`Descubra como receber até 15% de desconto na sua conta de luz com ${consultant.name}, consultor(a) iGreen Energy`}
+        description={`Descubra como receber até 20% de desconto na sua conta de luz com ${consultant.name}, consultor(a) iGreen Energy`}
       />
       <div className="min-h-screen">
         <HeroSection cadastroUrl={consultant.cadastro_url} whatsappUrl={whatsappUrl} consultantId={consultant.id} />

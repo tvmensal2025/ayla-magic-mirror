@@ -4,7 +4,7 @@ import LazyVideo from "@/components/ui/LazyVideo";
 
 const howItWorks = [
   "Nossas usinas produzem energia solar, a energia é injetada na rede da distribuidora, a distribuidora envia a energia para a casa ou empresa dos clientes, os clientes economizam de forma gratuita sem investimentos",
-  "Como a nossa energia solar é mais barata do que a energia hidrelétrica normalmente utilizada pelas distribuidoras, nós conseguimos oferecer um desconto de até 15% por mês para nossos clientes",
+  "Como a nossa energia solar é mais barata do que a energia hidrelétrica normalmente utilizada pelas distribuidoras, nós conseguimos oferecer um desconto de até 20% por mês para nossos clientes",
   "Os clientes não pagam nenhum centavo para ter acesso a esses descontos, não precisam instalar placas solares, não alteramos sua instalação de energia, não tem obras, não tem taxa de adesão, não tem mensalidade, não tem fidelidade. Todo o cadastro é 100% online e gratuito",
   "Nós atendemos casas, apartamentos, prédios, condomínios, fazendas, comércios e empresas",
   "Nosso trabalho está regulamentado pela Lei Federal 14.300 de 6 de Janeiro de 2022. Os consumidores já podem escolher o tipo de energia que desejam utilizar em suas residências e empresas, se é a energia hidrelétrica ou a energia solar renovável e mais barata",
@@ -37,7 +37,7 @@ const LicConexaoGreen = () => (
         <div className="product-number mx-auto mb-4">1</div>
         <h2 className="section-heading mb-4">Conexão Green</h2>
         <p className="text-foreground/70 text-lg max-w-3xl mx-auto">
-          Serviço prestado pela iGreen que conecta o cliente a uma de nossas usinas solares, oferecendo um desconto de até 15% na conta de luz todos os meses gratuitamente
+          Serviço prestado pela iGreen que conecta o cliente a uma de nossas usinas solares, oferecendo um desconto de até 20% na conta de luz todos os meses gratuitamente
         </p>
       </div>
 
