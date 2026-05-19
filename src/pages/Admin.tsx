@@ -285,10 +285,6 @@ const AdminContent = () => {
             <DashboardTab userId={userId} form={form} onFormUpdate={handleFormChange} periodDays={periodDays} onPeriodChange={setPeriodDays} />
           )}
 
-          {activeTab === "dados" && (
-            <DadosTab form={form} photoPreview={effectivePhotoPreview} saving={saving} onFormChange={handleFormChange} onPhotoChange={handlePhotoChange} onSave={handleSave} userId={userId || ""} />
-          )}
-
           {activeTab === "links" && (
             <LinksTab
               slug={slug}
@@ -334,17 +330,8 @@ const AdminContent = () => {
             </WhatsAppErrorBoundary>
           )}
 
-          {userId && activeTab === "historico" && (
-            <AutoMessageLog consultantId={userId} />
-          )}
-
-
           {userId && activeTab === "central-anuncios" && (
             <AdsCentralTab consultantId={userId} />
-          )}
-
-          {activeTab === "preview" && (
-            <PreviewTab slug={slug} baseUrl={baseUrl} />
           )}
 
         </Suspense>
