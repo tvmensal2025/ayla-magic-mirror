@@ -1,30 +1,38 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
+export interface AdMetricsDailyPoint {
+  date: string;
+  spend_cents: number;
+  leads: number;
+  cpl_cents: number | null;
+  impressions: number;
+  clicks: number;
+}
+
 export interface AdMetrics {
   spendCents: number;
   leads: number;
   cplCents: number | null;
-  lpVisits: number;
-  costPerVisitCents: number | null;
-  lpToLeadRate: number | null;
   impressions: number;
   clicks: number;
-  daily: { date: string; spend_cents: number; leads: number }[];
+  ctr: number | null;
+  daily: AdMetricsDailyPoint[];
   hasConnection: boolean;
 }
 
 export function useAdMetrics(consultantId: string | undefined | null, periodDays: number) {
   return useQuery({
-    queryKey: ["ad-metrics", consultantId, periodDays],
+    queryKey: ["ad-metrics-wa", consultantId, periodDays],
     enabled: !!consultantId,
     queryFn: async (): Promise<AdMetrics> => {
       const since = new Date();
       since.setDate(since.getDate() - periodDays);
+      since.setHours(0, 0, 0, 0);
       const sinceISO = since.toISOString();
       const sinceDate = sinceISO.slice(0, 10);
 
-      const [spendRes, leadsRes, visitsRes, fbRes] = await Promise.all([
+      const [spendRes, leadsRes, fbRes] = await Promise.all([
         supabase
           .from("ad_spend_daily")
           .select("date, spend_cents, leads, impressions, clicks")
@@ -33,15 +41,10 @@ export function useAdMetrics(consultantId: string | undefined | null, periodDays
           .order("date", { ascending: true }),
         supabase
           .from("customers")
-          .select("id", { count: "exact", head: true })
+          .select("created_at")
           .eq("consultant_id", consultantId!)
-          .eq("customer_origin", "whatsapp")
-          .gte("created_at", sinceISO),
-        supabase
-          .from("page_views")
-          .select("id", { count: "exact", head: true })
-          .eq("consultant_id", consultantId!)
-          .gte("created_at", sinceISO),
+          .gte("created_at", sinceISO)
+          .limit(10000),
         supabase
           .from("facebook_connections")
           .select("id")
@@ -49,25 +52,56 @@ export function useAdMetrics(consultantId: string | undefined | null, periodDays
           .maybeSingle(),
       ]);
 
-      const rows = spendRes.data ?? [];
-      const spendCents = rows.reduce((s, r: any) => s + Number(r.spend_cents || 0), 0);
-      const fbLeads = rows.reduce((s, r: any) => s + Number(r.leads || 0), 0);
-      const impressions = rows.reduce((s, r: any) => s + Number(r.impressions || 0), 0);
-      const clicks = rows.reduce((s, r: any) => s + Number(r.clicks || 0), 0);
-      const leads = leadsRes.count ?? 0;
-      const lpVisits = visitsRes.count ?? 0;
-      const effectiveLeads = leads || fbLeads;
+      const spendRows = spendRes.data ?? [];
+      const customerRows = leadsRes.data ?? [];
+
+      // Aggregate leads by day (date in YYYY-MM-DD)
+      const leadsByDay = new Map<string, number>();
+      for (const c of customerRows as any[]) {
+        const d = String(c.created_at).slice(0, 10);
+        leadsByDay.set(d, (leadsByDay.get(d) ?? 0) + 1);
+      }
+
+      // Build day range (since → today)
+      const days: string[] = [];
+      const cursor = new Date(since);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      while (cursor <= today) {
+        days.push(cursor.toISOString().slice(0, 10));
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
+      const spendByDay = new Map<string, any>();
+      for (const r of spendRows as any[]) spendByDay.set(String(r.date).slice(0, 10), r);
+
+      const daily: AdMetricsDailyPoint[] = days.map((d) => {
+        const s = spendByDay.get(d);
+        const spend_cents = Number(s?.spend_cents ?? 0);
+        const leads = leadsByDay.get(d) ?? 0;
+        return {
+          date: d,
+          spend_cents,
+          leads,
+          cpl_cents: leads > 0 ? Math.round(spend_cents / leads) : null,
+          impressions: Number(s?.impressions ?? 0),
+          clicks: Number(s?.clicks ?? 0),
+        };
+      });
+
+      const spendCents = daily.reduce((s, r) => s + r.spend_cents, 0);
+      const leads = customerRows.length;
+      const impressions = daily.reduce((s, r) => s + r.impressions, 0);
+      const clicks = daily.reduce((s, r) => s + r.clicks, 0);
 
       return {
         spendCents,
-        leads: effectiveLeads,
-        cplCents: effectiveLeads > 0 ? Math.round(spendCents / effectiveLeads) : null,
-        lpVisits,
-        costPerVisitCents: lpVisits > 0 ? Math.round(spendCents / lpVisits) : null,
-        lpToLeadRate: lpVisits > 0 ? effectiveLeads / lpVisits : null,
+        leads,
+        cplCents: leads > 0 ? Math.round(spendCents / leads) : null,
         impressions,
         clicks,
-        daily: rows as any,
+        ctr: impressions > 0 ? clicks / impressions : null,
+        daily,
         hasConnection: !!fbRes.data,
       };
     },
