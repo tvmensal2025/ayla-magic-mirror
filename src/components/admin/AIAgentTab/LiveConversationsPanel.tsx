@@ -407,6 +407,23 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog open={confirmStopAll} onOpenChange={setConfirmStopAll}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Parar IA em todos os {active.length} lead(s) ativos?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A IA não vai responder a nenhuma das suas conversas até você clicar em <strong>Religar IA</strong> ou <strong>Devolver para…</strong> em cada lead.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={stopAll} className="bg-destructive hover:bg-destructive/90">
+              Sim, parar tudo
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {manualStepFor && (
         <ManualStepDialog
           open={!!manualStepFor}
