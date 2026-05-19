@@ -62,10 +62,36 @@ Deno.serve(async (req) => {
 
     let sentCount = 0;
     let failedCount = 0;
+    let skippedPaused = 0;
 
     for (const msg of messages) {
       try {
-        const phone = msg.remote_jid.split("@")[0];
+        const phone = msg.remote_jid.split("@")[0].replace(/\D/g, "");
+
+        // 🛑 Regra de ouro: humano assumiu → IA NÃO manda nada
+        if (phone) {
+          const { data: cust } = await supabase
+            .from("customers")
+            .select("bot_paused, assigned_human_id, bot_paused_until")
+            .eq("phone_whatsapp", phone)
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          const paused =
+            !!cust?.bot_paused ||
+            !!cust?.assigned_human_id ||
+            (cust?.bot_paused_until && new Date(cust.bot_paused_until).getTime() > Date.now());
+          if (paused) {
+            await supabase
+              .from("scheduled_messages")
+              .update({ status: "skipped" })
+              .eq("id", msg.id);
+            console.log(`⏭️ [scheduled] msg ${msg.id} pulada — humano assumiu (phone=${phone})`);
+            skippedPaused++;
+            continue;
+          }
+        }
+
         const res = await fetch(`${evolutionUrl}/message/sendText/${msg.instance_name}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", apikey: evolutionKey },
@@ -103,7 +129,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ sent: sentCount, failed: failedCount, total: messages.length }),
+      JSON.stringify({ sent: sentCount, failed: failedCount, skipped_paused: skippedPaused, total: messages.length }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
