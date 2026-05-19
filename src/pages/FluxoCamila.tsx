@@ -496,6 +496,56 @@ export default function FluxoCamila() {
           </div>
         </Card>
 
+        {/* Teste A/B */}
+        <Card className="p-4 sm:p-5 border-purple-500/30 bg-purple-500/5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex-1 min-w-[220px]">
+              <div className="flex items-center gap-2 mb-1">
+                <FlaskConical className="h-4 w-4 text-purple-500" />
+                <Label className="text-base font-semibold">Teste A/B (com áudio × só texto)</Label>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Quando ligado, novos leads vão alternando: 1º vai pro <strong>Fluxo A</strong> (com áudio), 2º pro <strong>Fluxo B</strong> (sem áudio, só texto/imagem/vídeo), 3º A, 4º B... Texto, imagens e vídeos são <strong>compartilhados</strong> entre A e B — só os áudios diferem.
+              </p>
+            </div>
+            <Switch checked={abEnabled} onCheckedChange={toggleAbTest} disabled={!hasFlowB} />
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-border/60 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3 text-sm flex-wrap">
+              <span>Leads:</span>
+              <Badge variant="secondary">A: {variantCounts.A}</Badge>
+              <Badge variant="secondary">B: {variantCounts.B}</Badge>
+              {!hasFlowB && <span className="text-xs text-muted-foreground">— crie o Fluxo B para habilitar o teste</span>}
+            </div>
+            <Button variant="outline" size="sm" onClick={cloneFlowB} disabled={cloneBusy}>
+              {cloneBusy ? "Clonando…" : hasFlowB ? "Recriar Fluxo B a partir do A" : "Criar Fluxo B (sem áudio)"}
+            </Button>
+          </div>
+
+          {hasFlowB && (
+            <div className="mt-4 pt-4 border-t border-border/60 flex items-center gap-3 flex-wrap">
+              <Label className="text-sm">Editando:</Label>
+              <div className="inline-flex rounded-md border border-border overflow-hidden">
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 text-sm ${editingVariant === "A" ? "bg-primary text-primary-foreground" : "bg-background"}`}
+                  onClick={() => setEditingVariant("A")}
+                >Fluxo A (com áudio)</button>
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 text-sm ${editingVariant === "B" ? "bg-primary text-primary-foreground" : "bg-background"}`}
+                  onClick={() => setEditingVariant("B")}
+                >Fluxo B (sem áudio)</button>
+              </div>
+              {editingVariant === "B" && (
+                <span className="text-xs text-muted-foreground">Áudios do passo são ignorados ao enviar para leads do Fluxo B.</span>
+              )}
+            </div>
+          )}
+        </Card>
+
+
         {showMigrationBanner && (
           <Card className="p-4 border-sky-500/30 bg-sky-500/5 flex items-start gap-3">
             <Sparkles className="h-5 w-5 text-sky-500 mt-0.5 shrink-0" />
