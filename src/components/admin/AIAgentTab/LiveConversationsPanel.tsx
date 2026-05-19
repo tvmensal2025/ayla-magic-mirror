@@ -140,12 +140,12 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
     if (isFlowStep) {
       try {
         const { data, error: invErr } = await supabase.functions.invoke("manual-step-send", {
-          body: { consultantId: userId, customerId: row.id, stepId: stepValue, part: "all" },
+          body: { consultantId: userId, customerId: row.id, stepId: stepValue, part: "all", continueFlow: true },
         });
         if (invErr || (data as any)?.error) {
           throw new Error(invErr?.message || (data as any)?.error || "falha ao disparar");
         }
-        toast({ title: `↩️ Devolvido e disparado: ${label}` });
+        toast({ title: `↩️ Devolvido e fluxo retomado: ${label}` });
       } catch (e: any) {
         toast({
           title: "Devolvido, mas falhou ao disparar passo",
