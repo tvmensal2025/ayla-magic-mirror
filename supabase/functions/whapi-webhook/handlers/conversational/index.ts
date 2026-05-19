@@ -419,22 +419,34 @@ async function sendStepMedia(
       for (const m of taken) {
         const idx = remaining.indexOf(m);
         if (idx >= 0) remaining.splice(idx, 1);
-        const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
-        sequence.push({ kind: k, media: m });
+        if ((m as any)._asText) {
+          sequence.push({ kind: "text", text: String((m as any)._transcript || ""), delayMs: Number(m.delay_before_ms || 0) });
+        } else {
+          const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
+          sequence.push({ kind: k, media: m });
+        }
       }
     }
     // Mídias com kind não listado vão para o fim (preserva send_order)
     for (const m of remaining) {
-      const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
-      sequence.push({ kind: k, media: m });
+      if ((m as any)._asText) {
+        sequence.push({ kind: "text", text: String((m as any)._transcript || ""), delayMs: Number(m.delay_before_ms || 0) });
+      } else {
+        const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
+        sequence.push({ kind: k, media: m });
+      }
     }
     // Se a ordem não menciona "text" mas existe texto, manda no fim
     if (textItem && !textInjected) sequence.push(textItem);
   } else {
     // Sem ordem configurada: mantém comportamento legado (mídias antes, texto depois).
     for (const m of medias) {
-      const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
-      sequence.push({ kind: k, media: m });
+      if ((m as any)._asText) {
+        sequence.push({ kind: "text", text: String((m as any)._transcript || ""), delayMs: Number(m.delay_before_ms || 0) });
+      } else {
+        const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
+        sequence.push({ kind: k, media: m });
+      }
     }
     if (textItem) sequence.push(textItem);
   }
