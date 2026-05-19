@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      ad_account_managers: {
+        Row: {
+          consultant_id: string
+          created_at: string
+          created_by: string | null
+          manager_user_id: string
+        }
+        Insert: {
+          consultant_id: string
+          created_at?: string
+          created_by?: string | null
+          manager_user_id: string
+        }
+        Update: {
+          consultant_id?: string
+          created_at?: string
+          created_by?: string | null
+          manager_user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ad_account_managers_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ad_account_managers_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ad_competitor_creatives: {
         Row: {
           active_days: number | null
@@ -3790,6 +3826,10 @@ export type Database = {
     Functions: {
       admin_unpause_global_bot: { Args: never; Returns: number }
       assign_flow_variant: { Args: { _consultant_id: string }; Returns: string }
+      can_view_consultant: {
+        Args: { _consultant: string; _user: string }
+        Returns: boolean
+      }
       cleanup_bot_test_data: { Args: { _run_id: string }; Returns: Json }
       cleanup_webhook_artifacts: { Args: never; Returns: undefined }
       clear_pending_inbound: {
@@ -3871,6 +3911,7 @@ export type Database = {
           uf: string
         }[]
       }
+      get_managed_consultant_ids: { Args: { _user: string }; Returns: string[] }
       get_platform_pnl: {
         Args: { _from?: string; _to?: string }
         Returns: {
