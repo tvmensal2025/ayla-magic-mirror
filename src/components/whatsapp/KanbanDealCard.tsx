@@ -14,7 +14,16 @@ interface KanbanDealCardProps {
   onDelete: (id: string) => void;
 }
 
-export function KanbanDealCard({ deal, onDragStart, onEdit, onDelete }: KanbanDealCardProps) {
+export function KanbanDealCard({ deal, stepInfo, onDragStart, onEdit, onDelete }: KanbanDealCardProps) {
+  const lastAdvanced = (deal as any).last_step_advanced_at || deal.updated_at || deal.created_at;
+  const hoursStuck = lastAdvanced ? (Date.now() - new Date(lastAdvanced).getTime()) / 36e5 : 0;
+  const stepTone = !stepInfo
+    ? "bg-muted/40 text-muted-foreground border-border/40"
+    : hoursStuck > 72
+      ? "bg-red-500/15 text-red-300 border-red-500/30"
+      : hoursStuck > 24
+        ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
+        : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
   return (
     <div
       draggable
