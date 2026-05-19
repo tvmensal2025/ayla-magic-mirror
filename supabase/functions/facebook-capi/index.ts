@@ -108,11 +108,11 @@ Deno.serve(async (req) => {
       customer_id: body.customer_id ?? null,
       event_name: body.event_name,
       event_id: eventId,
-      fb_response: fbRes,
+      fb_response: { ...(fbRes as object), _token_source: tokenSource, _pixel_id: pixelId },
       status: (fbRes as any).error ? "failed" : "sent",
     });
 
-    return new Response(JSON.stringify({ ok: true, event_id: eventId, fb: fbRes }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true, event_id: eventId, token_source: tokenSource, pixel_id: pixelId, fb: fbRes }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("[fb-capi]", err);
     return new Response(JSON.stringify({ error: (err as Error).message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
