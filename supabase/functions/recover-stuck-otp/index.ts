@@ -64,6 +64,8 @@ Deno.serve(async (req) => {
     .select("id, name, phone_whatsapp, consultant_id, status, conversation_step, updated_at, otp_received_at")
     .or("status.eq.awaiting_otp,conversation_step.eq.aguardando_otp")
     .lt("updated_at", cutoff)
+    .eq("bot_paused", false)
+    .is("assigned_human_id", null)
     .limit(100);
 
   if (error) {
