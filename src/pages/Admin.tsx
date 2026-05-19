@@ -40,11 +40,12 @@ const AdminContent = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "dados" | "links" | "preview" | "whatsapp" | "crm" | "clientes" | "historico" | "rede" | "central-anuncios">(() => {
+  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "links" | "whatsapp" | "crm" | "clientes" | "rede" | "central-anuncios">(() => {
     if (typeof window !== "undefined") {
       const tab = new URLSearchParams(window.location.search).get("tab");
       if (tab === "performance" || tab === "anuncios" || tab === "central-anuncios") return "central-anuncios";
-      if (tab === "agente") return "whatsapp";
+      if (tab === "agente" || tab === "historico") return "whatsapp";
+      if (tab === "preview") return "links";
     }
     return "dashboard";
   });
@@ -53,6 +54,7 @@ const AdminContent = () => {
   const [qrModal, setQrModal] = useState<{ url: string; label: string } | null>(null);
   const [panfletoOpen, setPanfletoOpen] = useState(false);
   const [aiChatOpen, setAiChatOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [periodDays, setPeriodDays] = useState(30);
 
   const { instanceName } = useWhatsApp(userId || "");
