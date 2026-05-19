@@ -723,6 +723,7 @@ export type Database = {
       ai_decisions: {
         Row: {
           ai_output: Json | null
+          confidence: number | null
           consultant_id: string
           created_at: string
           customer_id: string | null
@@ -734,11 +735,18 @@ export type Database = {
           model: string | null
           phase: string
           reasoning: string | null
+          reply_sent: string | null
+          source: string | null
+          step_after: string | null
+          step_before: string | null
+          suppressed: boolean
           tool_called: string
+          trace_id: string | null
           user_input: string | null
         }
         Insert: {
           ai_output?: Json | null
+          confidence?: number | null
           consultant_id: string
           created_at?: string
           customer_id?: string | null
@@ -750,11 +758,18 @@ export type Database = {
           model?: string | null
           phase: string
           reasoning?: string | null
+          reply_sent?: string | null
+          source?: string | null
+          step_after?: string | null
+          step_before?: string | null
+          suppressed?: boolean
           tool_called: string
+          trace_id?: string | null
           user_input?: string | null
         }
         Update: {
           ai_output?: Json | null
+          confidence?: number | null
           consultant_id?: string
           created_at?: string
           customer_id?: string | null
@@ -766,7 +781,13 @@ export type Database = {
           model?: string | null
           phase?: string
           reasoning?: string | null
+          reply_sent?: string | null
+          source?: string | null
+          step_after?: string | null
+          step_before?: string | null
+          suppressed?: boolean
           tool_called?: string
+          trace_id?: string | null
           user_input?: string | null
         }
         Relationships: [
