@@ -217,6 +217,18 @@ Deno.serve(async (req) => {
     const consultorId = consultantData?.igreen_id || "124170";
     console.log(`✅ Whapi super admin: ${nomeRepresentante} (iGreen ID: ${consultorId})`);
 
+    // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (como se desconectado) ──
+    // Antes de qualquer customer/notify/conversation: se o switch estiver OFF,
+    // simplesmente ignoramos a mensagem. Nada é criado, nada é notificado.
+    if (await isConsultantAIDisabled(supabase, superAdminConsultantId)) {
+      console.log(`🛑 [global-off-silent] IA desligada — ignorando inbound de ${phone}`);
+      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+
+
     // ─── 🔑 OTP INTERCEPT (antes do bot-flow) ─────────────────────────
     // Se o cliente está em awaiting_otp/portal_submitting e mandou um código
     // numérico, capturamos e notificamos o worker. Bypassa o fluxo conversacional.
