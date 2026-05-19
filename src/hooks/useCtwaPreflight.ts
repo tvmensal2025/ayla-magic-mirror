@@ -51,12 +51,15 @@ export function useCtwaPreflight(consultantId: string | null): CtwaPreflightStat
 
     // 1) Bot conectado (Evolution OU Whapi via super admin)
     try {
-      const { data: settings } = await supabase
-        .from("app_settings")
-        .select("key,value")
+      const { data: settingsRows } = await supabase
+        .from("settings")
+        .select("key, value")
         .in("key", ["superadmin_consultant_id"]);
       const isSuper =
-        (settings || []).find((s) => s.key === "superadmin_consultant_id")?.value === consultantId;
+        (settingsRows as Array<{ key: string; value: string }> | null)?.find(
+          (s) => s.key === "superadmin_consultant_id"
+        )?.value === consultantId;
+
 
       if (isSuper) {
         setBot({ status: "ok", label: "WhatsApp do bot conectado", detail: "Whapi (super admin)" });
