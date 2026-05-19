@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.49.4";
 import { isQuietHourBRT, logQuietSkip } from "../_shared/quiet-hours.ts";
+import { isConsultantAIDisabled, isPausedByPhone } from "../_shared/bot/paused.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
