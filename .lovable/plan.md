@@ -1,61 +1,43 @@
-## Problema (caso Marcelo, 18/05 23:52)
+# Devolver lead já entrando no fluxo (com áudio)
 
-Conversa real:
-```
-23:52:07  inbound  "Sou Marcelo"              (step passo_mp8yc0bp)
-23:52:19  inbound  "Amanhã eu mando os documentos"
-23:52:23  outbound "Marcelo, qual o valor médio da sua conta de luz?"
-23:52:30  outbound "Marcelo, qual o valor médio da sua conta de luz?"   ← duplicada
-```
+## Problema (caso Nilma)
 
-O lead mandou 2 mensagens com 12 s de diferença. Cada uma virou uma invocação do `whapi-webhook`. O lock por cliente serializou — mas a segunda invocação rodou logo após a primeira liberar e re-emitiu o MESMO prompt do passo `3e7fb4cd` ("valor da conta de luz"), mesmo o anti-rep de 10 min existindo em `dispatchStepFromFlow`.
+Hoje, quando você clica em **"Devolver para… → [Passo X do fluxo]"** no painel de conversas ao vivo, o código só:
 
-Causa raiz combinada:
-1. **Sem coalescing**: 2 inbounds próximos são processados como 2 turnos independentes. A 2ª invocação re-entra no resolver de step custom e, como o `step_type="message"` tem capture inline (`electricity_bill_value`), tenta capturar de "Amanhã eu mando os documentos" → extração falha → re-emite.
-2. **Anti-rep contornado**: a re-emissão acontece por um caminho que insere `conversations.conversation_step` com prefixo `flow:` enquanto a 1ª gravou sem prefixo. O `dispatchStepFromFlow` normaliza, mas o segundo envio veio do fluxo final de `reply`/`respondAndReentry`, que NÃO passa pela checagem de anti-rep.
-3. **`last_custom_prompt_at` só é gravado para `capture_*`/`confirm_phone`** (linha 2228 de `bot-flow.ts`). Step `message` com capture inline fica de fora — o guard legacy nunca aciona.
+1. Despausa o bot (`bot_paused = false`).
+2. Reposiciona `conversation_step` para o passo escolhido.
+3. Limpa `last_custom_prompt_at`.
 
-## Plano (escopo cirúrgico)
+Ele **não dispara nada na conversa**. O bot fica em silêncio até o lead mandar a próxima mensagem — e só aí re-emite o passo. Resultado: a Nilma "travou" porque ninguém mandou o áudio/pergunta de novo, e ela não tinha mais o que responder.
 
-### 1. Debounce de inbound em rajada (coalescing)
-`supabase/functions/whapi-webhook/index.ts` (perto do bloco de lock, linhas 584‑618):
-- Antes de adquirir o lock: se `customers.last_bot_interaction_at` (ou último outbound) < 4 s, **dormir 3 s** e re-buscar mensagens recebidas nesse intervalo via tabela `whatsapp_message_buffer`, concatenando os textos como um único turno.
-- Se já chegou inbound mais novo do que o que estamos processando, abandonar este e deixar o mais novo prosseguir (descarte idempotente — não envia nada).
+## Solução
 
-Resultado prático: duas mensagens do lead em 12 s viram **1 turno** ("Sou Marcelo. Amanhã eu mando os documentos").
+Quando o admin escolhe **um passo específico** do fluxo no menu "Devolver para…", o sistema deve:
 
-### 2. Anti-rep unificado em TODA emissão de step custom
-`supabase/functions/whapi-webhook/handlers/bot-flow.ts`:
-- Extrair a verificação de "já emiti esse step nos últimos 10 min" para um helper `wasStepRecentlyEmitted(stepKey)`.
-- Aplicar esse helper em **3 lugares** (não só em `dispatchStepFromFlow`):
-  a) Antes do `emittedCurrent` na linha 2042.
-  b) Dentro de `respondAndReentry` antes de re-anexar a pergunta final.
-  c) No `default:` do switch (linha ~2241) antes do redispatch idempotente.
-- Normalizar `flow:` prefix nos DOIS lados (já faz, mas garantir cobertura).
+1. Despausar o bot e setar o `conversation_step` (igual hoje).
+2. **Imediatamente** disparar o passo completo no WhatsApp na ordem correta (texto → áudio → imagem → vídeo), reusando a `manual-step-send` com `part: "all"`.
+3. Para "Continuar de onde parou" e "Passos clássicos" (legados): manter comportamento atual (só despausa, sem re-emitir) — não temos passo de fluxo definido pra disparar.
 
-### 3. `last_custom_prompt_at` para steps `message` com capture inline
-`supabase/functions/whapi-webhook/handlers/bot-flow.ts` linha 2228:
-- Mudar a condição para também marcar `last_custom_prompt_at` quando o step atual for `message` E tiver `captures[].enabled === true` E `dispatchedAny === true`.
-- Isso fecha a porta para o handler legacy de capture (que já checa esse campo) re-emitir.
+## Mudanças
 
-### 4. Contador de retry para captures inline falhos
-Quando o step é `message` com capture inline e a captura não conseguiu extrair valor da mensagem do lead:
-- Incrementar `custom_step_retries` (mesma coluna já usada).
-- 1ª falha: enviar mensagem CURTA de reformulação ("Me passa só o valor em R$, ex: 250") — **sem re-enviar áudio/vídeo/imagem do step**.
-- 2ª falha: pausar bot e disparar `notifyHandoff` (mesma lógica já existente, linhas 2104‑2138).
+### `src/components/admin/AIAgentTab/LiveConversationsPanel.tsx`
 
-### 5. Espelhar em `evolution-webhook`
-Aplicar exatamente as mudanças 2, 3, 4 em `supabase/functions/evolution-webhook/handlers/bot-flow.ts` (paridade já garantida hoje — não pode divergir).
+- Em `returnToStep`, depois do update bem-sucedido, se `stepValue` corresponde a um passo do `flowSteps` (UUID), invocar `supabase.functions.invoke("manual-step-send", { body: { consultantId, customerId, stepId, part: "all" } })`.
+- Toast novo: `"↩️ Devolvido e disparado: <título do passo>"`.
+- Se a invocação falhar, mostrar toast de erro mas manter o despause (não reverter).
+- "Continuar de onde parou" (`stepValue === null`) e os `LEGACY_STEPS` continuam sem auto-disparo.
 
-## Validação
+### Nada muda no backend
 
-1. Reproduzir o caso enviando 2 mensagens em < 5 s para o bot no step "valor da conta": **deve enviar o prompt apenas 1 vez**.
-2. Enviar resposta inválida ("amanhã eu mando"): deve responder com reformulação curta, **não** repetir o áudio/imagem do step.
-3. Enviar 2 respostas inválidas seguidas: bot pausa e notifica consultor.
-4. Conferir `conversations` do Marcelo (af00073b‑8ba1‑4bed‑9e22‑e010304f3230) em teste — sem 2 outbounds idênticos consecutivos.
+A `manual-step-send` já envia tudo na ordem (`media_order` do passo, default `audio → image → video → text → document`) e já registra cada item em `conversations`. O guard de anti-duplicação que adicionamos (60s por texto idêntico) continua protegendo de eventuais cliques duplos.
+
+## Detalhes técnicos
+
+- O `part: "all"` da `manual-step-send` já ordena por `media_order` do step. Se o admin quiser áudio antes de texto, basta configurar `media_order: ["audio","text",...]` no passo (já existe).
+- `manual-step-send` NÃO mexe em `conversation_step` nem em `bot_paused` — então a ordem (1) update do customer, (2) invoke da função, é segura.
+- Para Nilma especificamente, depois do deploy basta abrir o painel, escolher "Devolver para… → Passo 2 (qualificação)" e o áudio sai na hora.
 
 ## Fora de escopo
 
-- Não mexer no resolver de transitions/intents (já funciona).
-- Não mexer no fluxo de cadastro legacy (aguardando_conta/doc_auto).
-- Não mexer na UI de admin/fluxos.
+- Não tocar em `evolution-webhook`, `bot-flow.ts`, ou na lógica de auto-dispatch quando o lead responde — só mudo o gatilho manual no painel.
+- Não criar passo novo nem mudar `media_order` de passos existentes.
