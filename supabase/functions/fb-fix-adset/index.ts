@@ -81,7 +81,6 @@ Deno.serve(async (req) => {
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: new URLSearchParams({
               promoted_object: JSON.stringify(newPromoted),
-              tracking_specs: JSON.stringify([{ "action.type": ["offsite_conversion"], fb_pixel: [correctPixel] }]),
             }),
           });
           pixelOk = true;
