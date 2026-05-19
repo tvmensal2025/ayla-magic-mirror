@@ -90,12 +90,12 @@ Deno.serve(async (req) => {
         .eq("is_active", true)
         .eq("variant", variant)
         .maybeSingle();
-      if (!flow?.id) return json({ error: "no_active_flow" }, 404);
+      if (!flow?.id) return json({ error: "no_active_flow", message: "Nenhum fluxo ativo encontrado para essa variante." }, 404);
       stepQuery = stepQuery.eq("flow_id", flow.id).eq("step_key", body.stepKey);
-    } else return json({ error: "missing_step" }, 400);
+    } else return json({ error: "missing_step", message: "Passo do fluxo não informado." }, 400);
 
     const { data: step } = await stepQuery.maybeSingle();
-    if (!step) return json({ error: "step_not_found" }, 404);
+    if (!step) return json({ error: "step_not_found", message: "Passo selecionado não existe mais (foi removido ou desativado)." }, 404);
 
     const slotKey = (step as any).slot_key || (step as any).step_key;
 
