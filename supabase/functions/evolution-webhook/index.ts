@@ -611,7 +611,29 @@ Deno.serve(async (req) => {
         } catch (_) { /* noop */ }
       }
     }
+    let isDuplicate = false;
     if (finalReply) {
+      // 🛡️ Anti-duplicação universal: mesmo texto enviado nos últimos 60s → skip.
+      try {
+        const sinceIso = new Date(Date.now() - 60_000).toISOString();
+        const { data: lastOut } = await supabase
+          .from("conversations")
+          .select("message_text, created_at")
+          .eq("customer_id", customer.id)
+          .eq("message_direction", "outbound")
+          .gte("created_at", sinceIso)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (lastOut && String((lastOut as any).message_text || "").trim() === String(finalReply).trim()) {
+          const ageMs = Date.now() - new Date((lastOut as any).created_at).getTime();
+          console.warn(`🛡️ [anti-dup] skip — mesma msg enviada há ${Math.round(ageMs/1000)}s para customer=${customer.id}`);
+          isDuplicate = true;
+        }
+      } catch (_) { /* best-effort */ }
+    }
+
+    if (finalReply && !isDuplicate) {
       try {
         // Simular humano: presença "digitando…" + delay proporcional ao tamanho da resposta.
         // ~45ms por caractere, mín 1.5s, máx 6s. Não bloqueia se presença falhar.
@@ -636,13 +658,15 @@ Deno.serve(async (req) => {
     }
 
     // ─── 11) Log outbound ──────────────────────────────────────────────
-    await supabase.from("conversations").insert({
-      customer_id: customer.id,
-      message_direction: "outbound",
-      message_text: finalReply || "[botões enviados]",
-      message_type: "text",
-      conversation_step: updates.conversation_step || stepBefore,
-    });
+    if (!isDuplicate) {
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "outbound",
+        message_text: finalReply || "[botões enviados]",
+        message_type: "text",
+        conversation_step: updates.conversation_step || stepBefore,
+      });
+    }
 
     return new Response(JSON.stringify({ ok: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

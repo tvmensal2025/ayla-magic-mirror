@@ -784,18 +784,39 @@ Deno.serve(async (req) => {
       finalReply = "";
     }
     if (finalReply) {
-      try { await sender.sendText(remoteJid, finalReply); } catch (e: any) { console.error("Erro enviar:", e); }
-    }
+      // 🛡️ Anti-duplicação universal: bloqueia envio de texto idêntico ao último
+      // outbound feito ao mesmo cliente nos últimos 60s. Cobre TODAS as origens
+      // (dispatchStepFromFlow, respondAndReentry, replies finais, etc).
+      let isDuplicate = false;
+      try {
+        const sinceIso = new Date(Date.now() - 60_000).toISOString();
+        const { data: lastOut } = await supabase
+          .from("conversations")
+          .select("message_text, created_at")
+          .eq("customer_id", customer.id)
+          .eq("message_direction", "outbound")
+          .gte("created_at", sinceIso)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (lastOut && String((lastOut as any).message_text || "").trim() === String(finalReply).trim()) {
+          const ageMs = Date.now() - new Date((lastOut as any).created_at).getTime();
+          console.warn(`🛡️ [anti-dup] skip — mesma msg enviada há ${Math.round(ageMs/1000)}s para customer=${customer.id}`);
+          isDuplicate = true;
+        }
+      } catch (_) { /* anti-dup é best-effort */ }
 
-    // ─── Log outbound (apenas se houve resposta de texto enviada inline aqui) ─────
-    if (finalReply) {
-      await supabase.from("conversations").insert({
-        customer_id: customer.id,
-        message_direction: "outbound",
-        message_text: finalReply,
-        message_type: "text",
-        conversation_step: updates.conversation_step || stepBefore,
-      });
+      if (!isDuplicate) {
+        try { await sender.sendText(remoteJid, finalReply); } catch (e: any) { console.error("Erro enviar:", e); }
+        // ─── Log outbound (apenas se houve resposta de texto enviada inline aqui) ─────
+        await supabase.from("conversations").insert({
+          customer_id: customer.id,
+          message_direction: "outbound",
+          message_text: finalReply,
+          message_type: "text",
+          conversation_step: updates.conversation_step || stepBefore,
+        });
+      }
     }
 
     // 🔓 Libera o lock antes de retornar + limpa marker de fila pendente.

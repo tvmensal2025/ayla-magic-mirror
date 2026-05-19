@@ -2051,13 +2051,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             const _loadStepById = async (id: string) => {
               const { data } = await supabase
                 .from("bot_flow_steps")
-                .select("id, step_key, step_type, position, transitions, message_text")
+                .select("id, step_key, step_type, position, transitions, message_text, captures")
                 .eq("flow_id", flow.id).eq("id", id).eq("is_active", true).maybeSingle();
               return data ? {
                 id: String(data.id), step_key: String(data.step_key),
                 step_type: String(data.step_type), position: Number(data.position),
                 transitions: Array.isArray((data as any).transitions) ? (data as any).transitions : [],
                 message_text: String((data as any).message_text || ""),
+                captures: Array.isArray((data as any).captures) ? (data as any).captures : [],
               } : null;
             };
             const _resolveNextFromTransitions = async (txns: any[], msg: string) => {
@@ -2225,7 +2226,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               else if (ntype === "finalizar_cadastro") nextStepValue = "finalizando";
               console.log(`[custom-step-resolver] message→advance final=${current.step_key} type=${ntype} isCapture=${_isCapture}`);
               const _updates: any = { conversation_step: nextStepValue, __inline_sent: (emittedCurrent || dispatchedAny) || undefined };
-              if (_isCapture && (emittedCurrent || dispatchedAny)) {
+              // Marca timestamp também para steps "message" que tenham capture inline
+              // (ex: electricity_bill_value), além dos capture_* — fecha a porta para
+              // re-emissão na próxima rajada de inbound.
+              const _currentHasInlineCapture = Array.isArray((current as any)?.captures)
+                && (current as any).captures.some((c: any) => c?.enabled === true);
+              if ((_isCapture || _currentHasInlineCapture) && (emittedCurrent || dispatchedAny)) {
                 _updates.last_custom_prompt_at = new Date().toISOString();
               }
               return { reply: "", updates: _updates };
