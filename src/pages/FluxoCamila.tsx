@@ -271,7 +271,7 @@ export default function FluxoCamila() {
     setAbEnabled(v);
     const { error } = await supabase.from("consultants").update({ ab_test_enabled: v } as any).eq("id", userId);
     if (error) { toast.error(error.message); setAbEnabled(!v); return; }
-    toast.success(v ? "Teste A/B ligado — novos leads alternam A/B" : "Teste A/B desligado — todos novos leads vão para A");
+    toast.success(v ? "Teste A/B/C ligado — novos leads alternam A/B/C" : "Teste A/B/C desligado — todos novos leads vão para A");
   }
 
   async function cloneFlowB() {
@@ -287,6 +287,22 @@ export default function FluxoCamila() {
       toast.error(e?.message || "Erro ao clonar");
     } finally {
       setCloneBusy(false);
+    }
+  }
+
+  async function cloneFlowC() {
+    if (!userId) return;
+    if (hasFlowC && !confirm("Já existe Fluxo C. Recriar (apaga e copia do A novamente)?")) return;
+    setCloneCBusy(true);
+    try {
+      const { error } = await supabase.rpc("clone_bot_flow_as_c" as any, { _consultant_id: userId });
+      if (error) throw error;
+      toast.success("Fluxo C criado a partir do A. Adicione um vídeo no primeiro passo!");
+      await reload(userId, editingVariant);
+    } catch (e: any) {
+      toast.error(e?.message || "Erro ao clonar");
+    } finally {
+      setCloneCBusy(false);
     }
   }
 
