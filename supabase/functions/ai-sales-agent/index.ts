@@ -7,6 +7,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { geminiGenerate, type GeminiTool } from "../_shared/gemini.ts";
 import { shouldSkipShortCircuit } from "../_shared/bot/orchestrator-gate.ts";
+import { isCustomerPausedByHuman } from "../_shared/bot/paused.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
