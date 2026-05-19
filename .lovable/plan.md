@@ -1,133 +1,127 @@
+# Inteligência de Captação — SuperAdmin
 
-# Auditoria Completa — Estado Atual do Projeto
-
-## Veredito: **SIM, pode iniciar os trabalhos** ✅
-
-O sistema está estável e seguro nas camadas críticas. Existem 3 áreas de organização que valem ser tratadas em ticket separado (não bloqueantes).
+Objetivo: parar de perder cliente. Centralizar tudo que envolve **trazer lead → converter → fechar** numa única tela no SuperAdmin, com IA cruzando funil + criativos + concorrentes.
 
 ---
 
-## 1. Inventário do que existe
+## 1. Reorganização do /admin (consultor)
 
-| Camada | Quantidade | Estado |
-|---|---|---|
-| Páginas (rotas) | 16 | Organizadas em `src/pages/` |
-| Componentes | ~80 (admin, superadmin, whatsapp, licenciada, ui, support) | OK, separados por domínio |
-| Hooks | 27 | OK |
-| Edge functions | **72** | ⚠️ Algumas legacy (ver §3) |
-| Tabelas no banco | **66** | OK, com RLS |
-| Migrações | **291** | Histórico íntegro |
-| Buckets Storage | 5 públicos | 2 com listagem bloqueada (camada 4 ok) |
-| Docs `.md` na raiz | **68 arquivos** | ⚠️ Bagunça, ver §3 |
+A aba de Tráfego atual (Horários de Pico, Dispositivos, Origem, Comparativo diário) sai do dashboard do consultor — esses dados são gerenciais, não acionáveis para o consultor individual.
 
----
+- Mover esses 4 cards para o SuperAdmin → aba nova **"Captação"**.
+- No `/admin` do consultor, deixar só o que ele usa: leads, WhatsApp, CRM, materiais.
 
-## 2. O que está 100% e pronto para uso
+## 2. Nova aba no SuperAdmin: "Captação"
 
-| Área | Status |
-|---|---|
-| Toggle de IA (settings) | ✅ Sem erro de ON CONFLICT |
-| Fluxo Camila Step 1 (áudio 10s) | ✅ Dispara para novos leads |
-| Router multi-variant A/B/C | ✅ Webhook filtra por variant |
-| Anônimo executa funções administrativas | ✅ Zero (era 45) |
-| Listagem pública de PII (whatsapp-media, consultant-photos) | ✅ Bloqueada |
-| Linter Supabase | 55 issues (todos pré-existentes, nenhum novo) |
-| RLS em todas as tabelas | ✅ |
-| Webhook ativo | ✅ `whapi-webhook` (Whapi Cloud) |
+Estrutura em 3 blocos:
 
----
-
-## 3. Dívida técnica organizacional (não bloqueia trabalho)
-
-### 3.1 — Edge functions legacy (`evolution-*`)
-- `evolution-webhook` e `evolution-proxy` ainda existem mas **não recebem tráfego de produção**.
-- Ainda referenciadas por: `src/services/evolutionApi.ts`, `ai-agent-router`, `whapi-webhook/_helpers.ts`.
-- **Risco:** zero hoje. **Custo:** confusão futura.
-- **Quando limpar:** sprint dedicado de ~1h, depois de confirmar que `ai-agent-router` não roteia mais nada para Evolution.
-
-### 3.2 — 68 arquivos `.md` soltos na raiz
-Há documentos de sessões antigas, deploys já feitos, troubleshootings resolvidos:
-`CHANGELOG_EVOLUTION.md`, `RESUMO_SESSAO_COMPLETA.md`, `STATUS_FINAL.md`, `URGENTE_CONFIGURAR_AGORA.md`, `INICIO_AQUI_PORTAL_WORKER.md`, `SESSAO_ATUAL_RESUMO.md`, etc.
-
-A regra do projeto é **não criar arquivos de reminder/resumo** — manter apenas `DOCUMENTATION.md` e `README.md` vivos.
-
-**Proposta:** mover ~60 desses arquivos para `.archive/` (ou apagar). Sobra:
-- `README.md` — onboarding
-- `DOCUMENTATION.md` — schemas, fluxos, specs
-- `MAPA_FLUXO.md` ou `MAPA_VISUAL_PROJETO.md` — referência viva (escolher um)
-
-### 3.3 — 55 alertas de linter pré-existentes
-- 1 ERROR: SECURITY DEFINER View (precisa identificar qual view e trocar para SECURITY INVOKER).
-- ~10 INFO: RLS habilitado sem policy (tabelas internas que nunca são lidas via API — risco baixo).
-- ~44 WARN: funções SECURITY DEFINER chamáveis por authenticated (esperado, mas vale revisar caso a caso).
-
-Não bloqueia, mas é o próximo passo natural de hardening.
-
----
-
-## 4. Diagrama da arquitetura atual
-
-<lov-artifact url="/__l5e/documents/Arquitetura_iGreen.mmd" mime_type="text/vnd.mermaid"></lov-artifact>
+### Bloco A — KPIs do topo (cards)
 
 ```text
-        FRONTEND (React + Vite)
-        ┌───────────────────────────────────┐
-        │ LP públicas │ Admin │ SuperAdmin  │
-        │ WhatsApp+CRM │ Editor de Fluxos   │
-        └───────────────┬───────────────────┘
-                        │
-        ┌───────────────▼───────────────────────────┐
-        │       EDGE FUNCTIONS (72 ativas)          │
-        │  whapi-webhook  ◀── ATIVO (Whapi Cloud)   │
-        │  whapi-proxy                              │
-        │  ai-sales-agent + ai-agent-router         │
-        │  facebook-* (20 funcs CAPI/Ads)           │
-        │  bot-* (watchdog, e2e, audit, recovery)   │
-        │  sync-igreen-customers (cron 07h BRT)     │
-        │  evolution-* ····► legacy / espelho       │
-        └───────────────┬───────────────────────────┘
-                        │
-        ┌───────────────▼───────────────────────────┐
-        │   SUPABASE DB (66 tabelas + RLS)          │
-        │ customers (flow_variant A/B/C)            │
-        │ bot_flows + bot_flow_steps (multi-variant)│
-        │ conversations + ai_decisions              │
-        │ crm_deals + stages                        │
-        │ settings (key UNIQUE ✅)                  │
-        │ consultant_wallet + wallet_transactions   │
-        └────────────────────────┬──────────────────┘
-                                 │
-                ┌────────────────┴────────────────┐
-                ▼                                 ▼
-        ┌──────────────┐                  ┌───────────────┐
-        │  MinIO       │                  │ Supabase      │
-        │ vídeos/LP    │                  │ Buckets (5)   │
-        │ estáticos    │                  │ 2 com list 🔒 │
-        └──────────────┘                  └───────────────┘
+┌─────────────────┬─────────────────┬─────────────────┬─────────────────┐
+│ Gasto Total Ads │ Leads Gerados   │ CPL Real        │ Valor Carteira  │
+│ R$ 12.450 (Meta)│ 287 (page_views │ R$ 43,37        │ R$ 1.2M         │
+│ últimos 30d     │ → customers)    │ gasto/leads     │ (deals open+won)│
+├─────────────────┼─────────────────┼─────────────────┼─────────────────┤
+│ Taxa Conversão  │ Ticket Médio    │ ROAS            │ Leads Perdidos  │
+│ LP → Lead: 8.2% │ R$ 4.180        │ 3.4x            │ 42 (sem resposta│
+│ Lead → Cliente  │ por venda fechada│ retorno/gasto  │ +7d ou parado)  │
+└─────────────────┴─────────────────┴─────────────────┴─────────────────┘
+```
 
-SEGURANÇA APLICADA:
-✅ anon EXECUTE em funções = 0 (era 45)
-✅ whatsapp-media listagem bloqueada
-✅ consultant-photos listagem bloqueada
-✅ settings.key com UNIQUE constraint
+Origem dos dados:
+
+- **Facebook Ads API** (já temos `useFacebookConnection` + `facebookAds.ts`): gasto, impressões, cliques, CPC por consultor.
+- **Interno** (Supabase): `page_views`, `customers`, `deals`, `customer_deals` para leads, conversão, carteira.
+- **CPL Real** = gasto Meta / leads efetivamente criados (não cliques).
+- **Valor Carteira** = soma de `deals.value` por status (aberto vs fechado).
+
+### Bloco B — Os 4 gráficos que vieram do /admin
+
+Horários de Pico, Dispositivos, Origem do Tráfego, Comparativo diário — agora globais (todos consultores) com filtro por consultor.
+
+### Bloco C — Inteligência de Captação (IA)
+
+Painel único que junta o que já existe disperso (`InsightsPanel`, `CompetitorsPanel`, `LearnedPatternsPanel`, `ad_competitor_creatives`) + análise nova de funil:
+
+```text
+┌───────────────────────────────────────────────────────────────────────┐
+│  🧠 IA — Diagnóstico de Captação (atualizado há 2h)                   │
+├───────────────────────────────────────────────────────────────────────┤
+│  📉 ONDE VOCÊ ESTÁ PERDENDO:                                          │
+│  • 38% dos leads param no estágio "aguardando_documentos" >5 dias     │
+│  • Variante de fluxo B (sem áudio) converte 22% menos que A           │
+│  • Anúncios com headline "economia" CPL R$ 67 vs "desconto" R$ 31     │
+│                                                                       │
+│  ✅ O QUE ESTÁ FUNCIONANDO:                                            │
+│  • Criativos com pessoa real + valor de conta = CTR 3.1x média        │
+│  • Leads que recebem áudio nos primeiros 5min fecham 2.4x mais        │
+│                                                                       │
+│  🎯 AÇÕES RECOMENDADAS:                                                │
+│  [Pausar variante B] [Replicar criativo X] [Reaquecer 42 leads frios] │
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+### Bloco D — Inteligência de Concorrentes (já existe, reposicionado)
+
+`ad_competitor_creatives` aparece aqui como inspiração visual para super gerar novos criativos baseados nos vencedores da concorrência.
+
+---
+
+## 3. Nova edge function: `captacao-intel`
+
+Cron diário 08:00 BRT. Cruza:
+
+- `ad_creative_insights` (já existe) — padrões vencedores próprios
+- `ad_competitor_creatives` (já existe) — vencedores concorrentes
+- `page_views` + `customers` + `deals` + `messages` — funil interno
+- Facebook Ads spend (via `facebookAds.ts`)
+
+Saída: tabela nova `capture_diagnostics` (jsonb com bottlenecks, winners, actions, kpis).
+
+Modelo: oficial do google, `google/gemini-3-flash-preview`.
+
+---
+
+## 4. Mudanças técnicas
+
+```text
+DB (migration):
+  + capture_diagnostics (tenant_id, kpis jsonb, bottlenecks jsonb,
+                         actions jsonb, computed_at)
+  + ad_spend_daily (consultant_id, date, spend_cents, impressions,
+                    clicks, leads — cache do Facebook)
+
+Edge Functions:
+  + captacao-intel       (novo cron — diagnóstico unificado)
+  + facebook-spend-sync  (novo cron — puxa gasto Meta diário)
+
+Frontend:
+  - src/components/admin/DashboardTab.tsx
+      → remover seção de tráfego (Horários, Dispositivos, Origem, Comparativo)
+  + src/pages/SuperAdmin.tsx
+      → adicionar aba "Captação"
+  + src/components/superadmin/CaptacaoTab/
+      ├── KpisRow.tsx             (8 cards do bloco A)
+      ├── TrafficCharts.tsx       (4 gráficos migrados)
+      ├── IntelDiagnostic.tsx     (bloco C — lê capture_diagnostics)
+      └── CompetitorInspiration.tsx (reaproveita CompetitorsPanel)
 ```
 
 ---
 
-## 5. Plano de organização (opcional, recomendado)
+## 5. Pré-requisito (antes de implementar)
 
-Quando quiser arrumar a casa antes de começar features novas, sugiro **um único PR** com:
-
-1. **Cleanup docs**: mover 65 `.md` antigos para `.archive/docs-legacy/`, manter só README + DOCUMENTATION + 1 mapa visual.
-2. **Remover `evolution-*`**: refatorar `evolutionApi.ts`, deletar 2 edge functions, limpar `config.toml`.
-3. **Fix 1 ERROR do linter**: identificar a View `SECURITY DEFINER` e trocar para `SECURITY INVOKER`.
-
-Tempo estimado: 1h–1h30. Sem risco operacional.
+CADA CONSULTOR VAI TER SEU NOME E SUA CAMAPNHA DEVIDO TER O TELEFONE DELE O NOME DELE MAS O RESTANTE DAS PAGINAS PIXEL VAI SER UMA UNICA, TODOS OS DADOS QUE VAI APARECER PARA ELE SAO DAS CAMAPNHAS DELE
 
 ---
 
-## Recomendação final
+## Entregáveis
 
-**Pode começar os trabalhos novos agora.** O código está separado por domínio (admin, superadmin, whatsapp, licenciada), os hooks isolam lógica do React, as edge functions estão modularizadas, e os bloqueios críticos foram resolvidos. Os 3 pontos acima são qualidade de vida, não urgência.
+1. Migration: 2 tabelas novas.
+2. 2 edge functions novas (cron).
+3. Remoção da seção de tráfego do `/admin`.
+4. Nova aba "Captação" no SuperAdmin com 4 blocos.
+5. IA gerando diagnóstico diário acionável (não só "insight", mas com botões de ação).
 
-Quer que eu execute o **Plano de organização (§5)** agora, ou prefere já partir para uma feature nova?
+Tempo estimado: implementação em 1 sessão (DB + functions + UI base), refinos visuais em segunda passada.
