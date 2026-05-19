@@ -299,6 +299,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         onSendMedia={async (mediaUrl, caption, mediaType) => {
           const phone = await getResolvedPhone();
           if (!phone) return;
+          autoTakeoverByPhone(phone, "humano_assumiu_midia").catch(() => {});
           try {
             // Route documents through sendDocument for proper fileName handling
             const category = mediaType as "image" | "video" | "document";
