@@ -47,6 +47,8 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
   const [exporting, setExporting] = useState(false);
   const [resettingPerf, setResettingPerf] = useState(false);
   const [sharedAccountCount, setSharedAccountCount] = useState(0);
+  const [adAccountId, setAdAccountId] = useState<string>(userId);
+  useEffect(() => { setAdAccountId(userId); }, [userId]);
 
   useEffect(() => {
     const stored = localStorage.getItem("sync_cooldown_until");
