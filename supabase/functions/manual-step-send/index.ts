@@ -43,24 +43,36 @@ Deno.serve(async (req) => {
 
     const body = (await req.json()) as Body;
     if (!body?.consultantId || !body?.customerId || !body?.part) {
-      return json({ error: "missing_fields" }, 400);
+      return json({ error: "missing_fields", message: "Faltam dados obrigatórios (consultor, cliente ou parte)." }, 400);
     }
     // Allow if same consultant OR has super_admin role
     if (userId !== body.consultantId) {
       const { data: isAdmin } = await supabase.rpc("is_super_admin", { _user_id: userId });
-      if (!isAdmin) return json({ error: "forbidden" }, 403);
+      if (!isAdmin) return json({ error: "forbidden", message: "Sem permissão." }, 403);
     }
 
     // Resolve customer + phone
     const { data: customer } = await supabase
       .from("customers")
-      .select("id, name, phone_whatsapp, consultant_id, electricity_bill_value")
+      .select("id, name, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant")
       .eq("id", body.customerId)
       .maybeSingle();
-    if (!customer) return json({ error: "customer_not_found" }, 404);
+    if (!customer) return json({ error: "customer_not_found", message: "Lead não encontrado." }, 404);
 
-    const phoneDigits = String(customer.phone_whatsapp || "").replace(/\D/g, "");
-    if (!phoneDigits) return json({ error: "customer_no_phone" }, 400);
+    const rawPhone = String(customer.phone_whatsapp || "");
+    if (rawPhone.startsWith("sem_celular_")) {
+      return json({
+        error: "lead_sem_whatsapp",
+        message: "Esse lead foi importado via Excel sem celular válido — não dá pra enviar pelo WhatsApp.",
+      }, 400);
+    }
+    const phoneDigits = rawPhone.replace(/\D/g, "");
+    if (!phoneDigits || phoneDigits.length < 10) {
+      return json({
+        error: "customer_no_phone",
+        message: "Lead sem número de WhatsApp válido.",
+      }, 400);
+    }
     const remoteJid = `${phoneDigits}@s.whatsapp.net`;
 
     // Resolve step
