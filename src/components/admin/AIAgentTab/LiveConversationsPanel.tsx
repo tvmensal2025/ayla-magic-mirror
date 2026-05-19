@@ -49,13 +49,20 @@ type FlowStep = {
 };
 
 const LEGACY_STEPS: { value: string; label: string }[] = [
-  { value: "aguardando_valor_conta", label: "Aguardando valor da conta" },
-  { value: "aguardando_conta", label: "Aguardando foto da conta" },
-  { value: "aguardando_doc_auto", label: "Aguardando documento" },
-  { value: "confirmando_dados_conta", label: "Confirmar dados da conta" },
-  { value: "ask_email", label: "Pedir e-mail" },
-  { value: "ask_phone_confirm", label: "Confirmar telefone" },
-  { value: "finalizando", label: "Finalizando cadastro" },
+  // Início do funil
+  { value: "welcome", label: "👋 Boas-vindas" },
+  { value: "qualificacao", label: "🎥 Como funciona (vídeo explicativo + valor)" },
+  { value: "checkin_pos_video", label: "💬 Check-in pós-vídeo" },
+  { value: "pitch_conexao_club", label: "🎁 Pitch Conexão Club" },
+  { value: "duvidas_pos_club", label: "❓ Tirar dúvidas finais" },
+  // Cadastro
+  { value: "aguardando_valor_conta", label: "💰 Aguardando valor da conta" },
+  { value: "aguardando_conta", label: "📄 Aguardando foto da conta" },
+  { value: "aguardando_doc_auto", label: "🪪 Aguardando documento" },
+  { value: "confirmando_dados_conta", label: "✅ Confirmar dados da conta" },
+  { value: "ask_email", label: "✉️ Pedir e-mail" },
+  { value: "ask_phone_confirm", label: "📞 Confirmar telefone" },
+  { value: "finalizando", label: "🏁 Finalizando cadastro" },
 ];
 
 export function LiveConversationsPanel({ userId }: { userId: string }) {
