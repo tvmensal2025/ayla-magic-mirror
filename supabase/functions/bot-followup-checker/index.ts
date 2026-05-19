@@ -30,6 +30,14 @@ const TERMINAL_STEPS = new Set([
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  if (isQuietHourBRT()) {
+    logQuietSkip("bot-followup-checker");
+    return new Response(JSON.stringify({ skipped: "quiet_hours" }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+
   try {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
