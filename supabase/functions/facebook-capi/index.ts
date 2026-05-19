@@ -46,13 +46,25 @@ Deno.serve(async (req) => {
 
     const admin = adminClient();
     const { data: conn } = await admin.from("facebook_connections").select("pixel_id,access_token_encrypted").eq("consultant_id", body.consultant_id).maybeSingle();
-    if (!conn?.pixel_id && !body.offline) {
-      return new Response(JSON.stringify({ skipped: true, reason: "no_pixel" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+    // Fallback global (token CAPI direto do Pixel igreen-app-oficial) quando o consultor não tem OAuth conectado
+    const GLOBAL_TOKEN = Deno.env.get("FACEBOOK_CAPI_ACCESS_TOKEN") ?? "";
+    const GLOBAL_PIXEL = Deno.env.get("FACEBOOK_CAPI_PIXEL_ID") ?? "";
+
+    let token = "";
+    let pixelId = conn?.pixel_id ?? "";
+    let tokenSource: "oauth" | "global" = "oauth";
+
+    if (conn?.access_token_encrypted && conn?.pixel_id) {
+      token = await decryptToken(conn.access_token_encrypted);
+    } else if (GLOBAL_TOKEN && (GLOBAL_PIXEL || body.offline)) {
+      token = GLOBAL_TOKEN;
+      pixelId = pixelId || GLOBAL_PIXEL;
+      tokenSource = "global";
+    } else {
+      return new Response(JSON.stringify({ skipped: true, reason: conn?.pixel_id ? "no_token" : "no_pixel" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-    if (!conn?.access_token_encrypted) {
-      return new Response(JSON.stringify({ skipped: true, reason: "no_token" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    const token = await decryptToken(conn.access_token_encrypted);
+
     const eventId = body.event_id || (body.customer_id ? `${body.event_name}:${body.customer_id}` : crypto.randomUUID());
 
     const userData: Record<string, unknown> = {};
@@ -83,7 +95,7 @@ Deno.serve(async (req) => {
     // Offline conversion vai pro Offline Event Set (precisa do ID); fallback pro pixel se não tiver set.
     const targetId = body.offline && body.offline_event_set_id
       ? body.offline_event_set_id
-      : conn.pixel_id;
+      : pixelId;
 
     const fbRes = await fbFetch(`${FB_GRAPH}/${targetId}/events?access_token=${token}`, {
       method: "POST",
@@ -96,11 +108,11 @@ Deno.serve(async (req) => {
       customer_id: body.customer_id ?? null,
       event_name: body.event_name,
       event_id: eventId,
-      fb_response: fbRes,
+      fb_response: { ...(fbRes as object), _token_source: tokenSource, _pixel_id: pixelId },
       status: (fbRes as any).error ? "failed" : "sent",
     });
 
-    return new Response(JSON.stringify({ ok: true, event_id: eventId, fb: fbRes }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true, event_id: eventId, token_source: tokenSource, pixel_id: pixelId, fb: fbRes }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("[fb-capi]", err);
     return new Response(JSON.stringify({ error: (err as Error).message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
