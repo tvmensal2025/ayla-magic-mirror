@@ -123,13 +123,18 @@ Deno.serve(async (req) => {
 
     const consultantId = customer.consultant_id;
 
-    // 3) Carregar config do agente (privada do consultor → fallback global)
+    // 3) Carregar config do agente. PRIORIDADE: config explícita do consultor.
+    // Se o consultor desligou (enabled=false), respeitamos — não caímos no global.
     const { data: cfgPrivate } = await supabase
       .from("ai_agent_config").select("*").eq("consultant_id", consultantId).maybeSingle();
     const { data: cfgGlobal } = await supabase
       .from("ai_agent_config").select("*").is("consultant_id", null).maybeSingle();
     const config = cfgPrivate || cfgGlobal;
 
+    // Se existe config explícita do consultor com enabled=false → SAIR.
+    if (cfgPrivate && (cfgPrivate as any).enabled === false) {
+      return new Response(JSON.stringify({ ok: true, skipped: "consultant_disabled" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     if (!config?.enabled) {
       return new Response(JSON.stringify({ ok: true, skipped: "agent_disabled" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
