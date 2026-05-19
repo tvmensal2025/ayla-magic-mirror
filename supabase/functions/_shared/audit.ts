@@ -19,22 +19,29 @@ export async function checkAndMarkProcessed(
   if (!messageId) return false;
 
   try {
-    const { error } = await supabase
+    // upsert + ignoreDuplicates: gera `ON CONFLICT DO NOTHING`,
+    // não levanta exceção 23505 (que poluía o Postgres log) e nos diz
+    // se a linha foi de fato inserida (via .select() retornando 0 ou 1 row).
+    const { data, error } = await supabase
       .from("webhook_message_dedup")
-      .insert({ message_id: messageId, instance_name: instanceName });
+      .upsert(
+        { message_id: messageId, instance_name: instanceName },
+        { onConflict: "message_id", ignoreDuplicates: true },
+      )
+      .select("message_id");
 
     if (error) {
-      // 23505 = unique_violation → duplicado
-      if (error.code === "23505") return true;
-      console.warn(`[dedup] erro insert: ${error.code} ${error.message}`);
-      return false; // em caso de erro, processa (fail-open)
+      console.warn(`[dedup] erro upsert: ${error.code} ${error.message}`);
+      return false; // fail-open
     }
-    return false;
+    // data vazio → conflito (duplicado); data com 1 row → primeira vez
+    return Array.isArray(data) && data.length === 0;
   } catch (e: any) {
     console.warn(`[dedup] exception: ${e?.message}`);
     return false;
   }
 }
+
 
 // ─── Bot step transitions (analytics) ────────────────────────────────
 export async function logStepTransition(

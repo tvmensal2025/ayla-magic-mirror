@@ -3417,24 +3417,6 @@ export type Database = {
         }
         Relationships: []
       }
-      webhook_message_dedupe: {
-        Row: {
-          consultant_id: string | null
-          message_id: string
-          processed_at: string
-        }
-        Insert: {
-          consultant_id?: string | null
-          message_id: string
-          processed_at?: string
-        }
-        Update: {
-          consultant_id?: string | null
-          message_id?: string
-          processed_at?: string
-        }
-        Relationships: []
-      }
       whatsapp_instances: {
         Row: {
           connected_phone: string | null
