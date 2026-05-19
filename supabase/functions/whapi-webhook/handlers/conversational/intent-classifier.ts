@@ -151,25 +151,55 @@ export async function classifyIntent(
   text: string,
   currentStep: string,
   geminiApiKey: string,
+  ctx?: { customerId?: string | null; consultantId?: string | null; traceId?: string | null },
 ): Promise<ClassifyResult> {
+  const t0 = Date.now();
+  let result: ClassifyResult;
+
   const fast = regexClassify(text);
-  if (fast) return { intent: fast, confidence: 0.95, source: "regex" };
-  if (!text.trim()) return { intent: "outro", confidence: 0, source: "fallback" };
-
-  // Sprint A4: log de visibilidade — confirma que OPENAI_API_KEY chega no runtime
-  const hasOpenAI = !!Deno.env.get("OPENAI_API_KEY");
-  console.log(`[classifier] route step=${currentStep} hasOpenAI=${hasOpenAI} hasGemini=${!!geminiApiKey} textLen=${text.length}`);
-
-  // Prefer OpenAI when configured (better PT-BR slang understanding).
-  if (hasOpenAI) {
-    const r = await classifyOpenAI(text, currentStep);
-    if (r) return r;
+  if (fast) {
+    result = { intent: fast, confidence: 0.95, source: "regex" };
+  } else if (!text.trim()) {
+    result = { intent: "outro", confidence: 0, source: "fallback" };
+  } else {
+    const hasOpenAI = !!Deno.env.get("OPENAI_API_KEY");
+    console.log(`[classifier] route step=${currentStep} hasOpenAI=${hasOpenAI} hasGemini=${!!geminiApiKey} textLen=${text.length}`);
+    let r: ClassifyResult | null = null;
+    if (hasOpenAI) r = await classifyOpenAI(text, currentStep);
+    if (!r && geminiApiKey) r = await classifyGemini(text, currentStep, geminiApiKey);
+    result = r ?? { intent: "outro", confidence: 0, source: "fallback" };
   }
 
-  // Fallback to Gemini.
-  if (geminiApiKey) return classifyGemini(text, currentStep, geminiApiKey);
+  // Sprint 1: aplicar thresholds de confiança
+  try {
+    const { handoff, execute } = await getConfidenceThresholds();
+    result.action = result.confidence >= execute
+      ? "execute"
+      : result.confidence >= handoff
+        ? "repeat"
+        : "handoff";
+  } catch {
+    result.action = "execute"; // fail-open
+  }
 
-  return { intent: "outro", confidence: 0, source: "fallback" };
+  // Fire-and-forget structured log
+  logAiDecision({
+    consultantId: ctx?.consultantId ?? null,
+    customerId: ctx?.customerId ?? null,
+    phase: "intent_classify",
+    toolCalled: "classifyIntent",
+    model: result.source === "openai" ? "gpt-5-mini" : result.source === "llm" ? "gemini-2.0-flash" : null,
+    userInput: text,
+    intentDetected: result.intent,
+    confidence: result.confidence,
+    stepBefore: currentStep,
+    source: result.source,
+    latencyMs: Date.now() - t0,
+    traceId: ctx?.traceId ?? null,
+    aiOutput: { action: result.action },
+  });
+
+  return result;
 }
 
 // Exported for tests
