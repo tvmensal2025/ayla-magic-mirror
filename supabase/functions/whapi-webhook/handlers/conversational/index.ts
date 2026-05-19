@@ -1403,16 +1403,24 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     }
 
     // Se o passo `message` não tem texto E não enviou nada inline (sem mídia válida),
-    // não devemos cascatear silenciosamente — isso faz o lead "perder" passos.
-    // Persistimos o lead nele e paramos; a próxima inbound dispara repeat e emite mídia anexada.
+    // duas situações são possíveis:
+    //   (a) passo é puro marcador / mídia já entregue em sessão anterior — devemos
+    //       seguir cascateando para o próximo passo (default goto), senão o lead
+    //       fica preso recebendo a muleta "Tô aqui 👀…" a cada inbound.
+    //   (b) passo realmente espera resposta — para se houver capture ou pergunta.
+    // O guard `cursorCascades` mais abaixo já cuida do caso (b).
     const firstIsSilentEmpty = !cadastroStep
       && !replyText
       && !inlineSent
       && !String(s.message_text || "").trim();
     if (firstIsSilentEmpty) {
-      console.log(`[cascade-stop] pos=${s.position} step=${s.step_key} motivo=step-vazio-sem-midia`);
+      console.log(`[cascade-stop-check] pos=${s.position} step=${s.step_key} motivo=step-vazio-sem-midia (avaliando cascata)`);
     }
-    let cursor: DbStep | null = (cadastroStep || firstIsSilentEmpty) ? null : s;
+    // ANTES: cursor = (cadastroStep || firstIsSilentEmpty) ? null : s;
+    // AGORA: só cancela cascata em cadastroStep. Se o passo é silent-empty mas
+    // tem default goto, deixamos `cursorCascades` decidir (que continua honrando
+    // capture/pergunta).
+    let cursor: DbStep | null = cadastroStep ? null : s;
     // Helper para achar próximo step. ORDEM DE PRIORIDADE:
     //   1) transitions[default].goto_step_id — configuração explícita do consultor
     //   2) fallback.goto_step_id — somente se não houver transition default
