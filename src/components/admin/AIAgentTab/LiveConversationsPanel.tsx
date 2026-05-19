@@ -28,6 +28,8 @@ import { ptBR } from "date-fns/locale";
 import { resetLeadConversation } from "@/services/resetConversation";
 import { ManualStepDialog } from "./ManualStepDialog";
 
+type Variant = "A" | "B" | "C";
+
 type Row = {
   id: string;
   name: string | null;
@@ -38,6 +40,7 @@ type Row = {
   assigned_human_id: string | null;
   last_bot_reply_at: string | null;
   updated_at: string;
+  flow_variant: Variant | null;
 };
 
 type FlowStep = {
@@ -48,23 +51,17 @@ type FlowStep = {
   position: number;
 };
 
-const LEGACY_STEPS: { value: string; label: string }[] = [
-  // Passos conversacionais agora vivem no fluxo do consultor (seção "Pular para passo do fluxo").
-  // Aqui ficam só os estados de cadastro/máquina que não têm equivalente direto no admin.
-  { value: "aguardando_valor_conta", label: "💰 Aguardando valor da conta" },
-  { value: "aguardando_conta", label: "📄 Aguardando foto da conta" },
-  { value: "aguardando_doc_auto", label: "🪪 Aguardando documento" },
-  { value: "confirmando_dados_conta", label: "✅ Confirmar dados da conta" },
-  { value: "ask_email", label: "✉️ Pedir e-mail" },
-  { value: "ask_phone_confirm", label: "📞 Confirmar telefone" },
-  { value: "finalizando", label: "🏁 Finalizando cadastro" },
-];
+type FlowBundle = { name: string | null; steps: FlowStep[] };
 
 export function LiveConversationsPanel({ userId }: { userId: string }) {
   const { toast } = useToast();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  const [flowSteps, setFlowSteps] = useState<FlowStep[]>([]);
+  const [flowsByVariant, setFlowsByVariant] = useState<Record<Variant, FlowBundle>>({
+    A: { name: null, steps: [] },
+    B: { name: null, steps: [] },
+    C: { name: null, steps: [] },
+  });
   const [confirmReset, setConfirmReset] = useState<Row | null>(null);
   const [manualStepFor, setManualStepFor] = useState<Row | null>(null);
 
@@ -72,7 +69,7 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
     setLoading(true);
     const { data } = await supabase
       .from("customers")
-      .select("id, name, phone_whatsapp, conversation_step, bot_paused, bot_paused_reason, assigned_human_id, last_bot_reply_at, updated_at")
+      .select("id, name, phone_whatsapp, conversation_step, bot_paused, bot_paused_reason, assigned_human_id, last_bot_reply_at, updated_at, flow_variant")
       .eq("consultant_id", userId)
       .order("updated_at", { ascending: false })
       .limit(80);
@@ -81,20 +78,34 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
   }
 
   async function loadFlowSteps() {
-    const { data: flow } = await supabase
+    const { data: flows } = await supabase
       .from("bot_flows")
-      .select("id")
+      .select("id, name, variant")
       .eq("consultant_id", userId)
-      .eq("is_active", true)
-      .maybeSingle();
-    if (!flow?.id) { setFlowSteps([]); return; }
-    const { data: steps } = await supabase
-      .from("bot_flow_steps")
-      .select("id, step_key, step_type, title, position")
-      .eq("flow_id", flow.id)
-      .eq("is_active", true)
-      .order("position", { ascending: true });
-    setFlowSteps((steps as any) || []);
+      .eq("is_active", true);
+
+    const next: Record<Variant, FlowBundle> = {
+      A: { name: null, steps: [] },
+      B: { name: null, steps: [] },
+      C: { name: null, steps: [] },
+    };
+
+    if (flows?.length) {
+      await Promise.all(
+        flows.map(async (f: any) => {
+          const variant = (f.variant || "A") as Variant;
+          const { data: steps } = await supabase
+            .from("bot_flow_steps")
+            .select("id, step_key, step_type, title, position")
+            .eq("flow_id", f.id)
+            .eq("is_active", true)
+            .order("position", { ascending: true });
+          next[variant] = { name: f.name || null, steps: (steps as any) || [] };
+        })
+      );
+    }
+
+    setFlowsByVariant(next);
   }
 
   useEffect(() => { load(); loadFlowSteps(); }, [userId]);
@@ -121,6 +132,14 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
     }
   }
 
+  function stepsForRow(row: Row): { variant: Variant; bundle: FlowBundle } {
+    const variant: Variant = (row.flow_variant as Variant) || "A";
+    const bundle = flowsByVariant[variant]?.steps.length
+      ? flowsByVariant[variant]
+      : flowsByVariant.A;
+    return { variant, bundle };
+  }
+
   async function returnToStep(row: Row, stepValue: string | null, label: string) {
     const update: any = {
       bot_paused: false,
@@ -137,9 +156,7 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
       return;
     }
 
-    // Se devolveu para um passo específico do fluxo (UUID), dispara o passo já
-    const isFlowStep = !!stepValue && flowSteps.some((s) => s.id === stepValue);
-    if (isFlowStep) {
+    if (stepValue) {
       try {
         const { data, error: invErr } = await supabase.functions.invoke("manual-step-send", {
           body: { consultantId: userId, customerId: row.id, stepId: stepValue, part: "all", continueFlow: true },
@@ -173,55 +190,57 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
   const active = rows.filter((r) => !r.bot_paused);
   const human = rows.filter((r) => r.bot_paused);
 
-  const renderReturnMenu = (r: Row) => (
-    <div className="flex gap-2">
-      <Button size="sm" variant="secondary" onClick={() => setManualStepFor(r)} className="gap-1.5">
-        <Send className="w-4 h-4" /> Enviar passo
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="default" className="gap-1.5">
-            <Play className="w-4 h-4" /> Devolver para… <ChevronDown className="w-3.5 h-3.5 opacity-70" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-72 max-h-[420px] overflow-y-auto">
-          <DropdownMenuItem onClick={() => returnToStep(r, null, "Continuar de onde parou")}>
-            <Play className="w-4 h-4 mr-2 text-primary" /> Continuar de onde parou
-          </DropdownMenuItem>
-          {flowSteps.length > 0 && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
-                Pular para passo do fluxo
-              </DropdownMenuLabel>
-              {flowSteps.map((s, i) => (
+  const renderReturnMenu = (r: Row) => {
+    const { variant, bundle } = stepsForRow(r);
+    const steps = bundle.steps;
+    return (
+      <div className="flex gap-2">
+        <Button size="sm" variant="secondary" onClick={() => setManualStepFor(r)} className="gap-1.5">
+          <Send className="w-4 h-4" /> Enviar passo
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="default" className="gap-1.5">
+              <Play className="w-4 h-4" /> Devolver para… <ChevronDown className="w-3.5 h-3.5 opacity-70" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-72 max-h-[420px] overflow-y-auto">
+            <DropdownMenuLabel className="text-xs">
+              <Badge variant="outline" className="mr-1.5">Variante {variant}</Badge>
+              <span className="text-muted-foreground">{bundle.name || "Fluxo do consultor"}</span>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => returnToStep(r, null, "Continuar de onde parou")}>
+              <Play className="w-4 h-4 mr-2 text-primary" /> Continuar de onde parou
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
+              Passos do fluxo
+            </DropdownMenuLabel>
+            {steps.length === 0 ? (
+              <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+                Nenhum passo configurado para este fluxo.
+              </DropdownMenuItem>
+            ) : (
+              steps.map((s, i) => (
                 <DropdownMenuItem key={s.id} onClick={() => returnToStep(r, s.id, s.title || s.step_key || `Passo ${i + 1}`)}>
                   <span className="text-xs font-mono text-muted-foreground mr-2 w-6">{String(i + 1).padStart(2, "0")}</span>
                   <span className="truncate">{s.title || s.step_key || `Passo ${i + 1}`}</span>
                 </DropdownMenuItem>
-              ))}
-            </>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-xs uppercase tracking-wide text-muted-foreground">
-            Passos clássicos
-          </DropdownMenuLabel>
-          {LEGACY_STEPS.map((s) => (
-            <DropdownMenuItem key={s.value} onClick={() => returnToStep(r, s.value, s.label)}>
-              <span className="truncate">{s.label}</span>
+              ))
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => setConfirmReset(r)}
+              className="text-rose-500 focus:text-rose-500"
+            >
+              <RotateCcw className="w-4 h-4 mr-2" /> Reiniciar conversa do zero
             </DropdownMenuItem>
-          ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => setConfirmReset(r)}
-            className="text-rose-500 focus:text-rose-500"
-          >
-            <RotateCcw className="w-4 h-4 mr-2" /> Reiniciar conversa do zero
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  );
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -286,6 +305,7 @@ function Section({ title, rows, action }: { title: string; rows: Row[]; action: 
               <p className="text-xs text-muted-foreground">{r.phone_whatsapp}</p>
             </div>
             <Badge variant="secondary" className="text-xs">{r.conversation_step || "—"}</Badge>
+            {r.flow_variant && <Badge variant="outline" className="text-xs">Var {r.flow_variant}</Badge>}
             {r.bot_paused_reason && <Badge variant="outline" className="text-xs">{r.bot_paused_reason}</Badge>}
             <span className="text-xs text-muted-foreground">
               {r.last_bot_reply_at ? formatDistanceToNow(new Date(r.last_bot_reply_at), { addSuffix: true, locale: ptBR }) : "—"}
