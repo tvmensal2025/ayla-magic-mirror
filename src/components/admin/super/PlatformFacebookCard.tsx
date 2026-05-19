@@ -498,6 +498,71 @@ export function PlatformFacebookCard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={diagOpen} onOpenChange={setDiagOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Search className="w-4 h-4 text-primary" /> Diagnóstico de Pixels dos anúncios
+            </DialogTitle>
+          </DialogHeader>
+          {diagLoading ? (
+            <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+          ) : diagData ? (
+            <div className="space-y-3">
+              <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-sm space-y-1">
+                <p><strong>Pixel correto:</strong> {diagData.correct_pixel_name} (<code className="text-xs">{diagData.correct_pixel_id}</code>)</p>
+                <p>{diagData.total_adsets} adset(s) ativo(s) · <span className={diagData.wrong_count > 0 ? "text-warning font-medium" : "text-primary"}>{diagData.wrong_count} com pixel errado/ausente</span></p>
+              </div>
+              {diagData.wrong_count > 0 && (
+                <Button onClick={migrateAllWrong} disabled={migratingAll} className="w-full gap-2">
+                  {migratingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}
+                  Migrar TODOS para o pixel correto ({diagData.wrong_count})
+                </Button>
+              )}
+              <div className="space-y-2">
+                {(diagData.adsets || []).map((a: any, i: number) => (
+                  <div key={a.adset_id || i} className={`rounded-lg border p-3 text-sm ${a.is_correct ? "border-primary/20 bg-primary/5" : "border-warning/30 bg-warning/5"}`}>
+                    {a.error ? (
+                      <p className="text-destructive text-xs">⚠ {a.campaign_name}: {a.error}</p>
+                    ) : (
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {a.is_correct ? <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" /> : <AlertCircle className="w-4 h-4 text-warning flex-shrink-0" />}
+                            <span className="font-medium truncate">{a.adset_name}</span>
+                            <Badge variant="outline" className="text-xs">{a.effective_status}</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1 truncate">Campanha: {a.campaign_name}</p>
+                          <p className="text-xs mt-1">
+                            Pixel: {a.has_pixel ? (
+                              <><span className={a.is_correct ? "text-primary" : "text-warning"}>{a.current_pixel_name}</span> <code className="text-muted-foreground">({a.current_pixel_id})</code></>
+                            ) : (
+                              <span className="text-destructive">Sem pixel</span>
+                            )}
+                          </p>
+                        </div>
+                        {!a.is_correct && (
+                          <Button size="sm" variant="outline" disabled={migratingId === a.adset_id || migratingAll} onClick={() => migrateOne(a.adset_id)} className="gap-1.5 flex-shrink-0">
+                            {migratingId === a.adset_id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowRightLeft className="w-3.5 h-3.5" />}
+                            Migrar
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="ghost" onClick={loadDiagnose} disabled={diagLoading} className="gap-1.5">
+              <RefreshCw className="w-3.5 h-3.5" /> Recarregar
+            </Button>
+            <Button onClick={() => setDiagOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
