@@ -256,10 +256,34 @@ export default function FluxoCamila() {
       const uid = data.user?.id ?? null;
       setUserId(uid);
       if (!uid) { navigate("/auth"); return; }
-      await reload(uid);
+      await reload(uid, editingVariant);
       setLoading(false);
     })();
-  }, [navigate, reload]);
+  }, [navigate, reload, editingVariant]);
+
+  async function toggleAbTest(v: boolean) {
+    if (!userId) return;
+    setAbEnabled(v);
+    const { error } = await supabase.from("consultants").update({ ab_test_enabled: v } as any).eq("id", userId);
+    if (error) { toast.error(error.message); setAbEnabled(!v); return; }
+    toast.success(v ? "Teste A/B ligado — novos leads alternam A/B" : "Teste A/B desligado — todos novos leads vão para A");
+  }
+
+  async function cloneFlowB() {
+    if (!userId) return;
+    if (hasFlowB && !confirm("Já existe Fluxo B. Recriar (apaga e copia do A novamente)?")) return;
+    setCloneBusy(true);
+    try {
+      const { error } = await supabase.rpc("clone_bot_flow_as_b" as any, { _consultant_id: userId });
+      if (error) throw error;
+      toast.success("Fluxo B criado a partir do A (sem áudio).");
+      await reload(userId, editingVariant);
+    } catch (e: any) {
+      toast.error(e?.message || "Erro ao clonar");
+    } finally {
+      setCloneBusy(false);
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Mutadores otimistas
