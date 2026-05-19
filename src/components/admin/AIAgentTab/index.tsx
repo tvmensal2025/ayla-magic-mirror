@@ -36,31 +36,89 @@ export function AIAgentTab({ userId }: { userId: string }) {
     })();
   }, [userId]);
 
+  async function saveConfig(patch: { enabled?: boolean; persona_name?: string }) {
+    const { data: existing } = await supabase
+      .from("ai_agent_config")
+      .select("id")
+      .eq("consultant_id", userId)
+      .maybeSingle();
+    if (existing?.id) {
+      const { error } = await supabase
+        .from("ai_agent_config")
+        .update(patch)
+        .eq("id", existing.id);
+      return error;
+    }
+    const { error } = await supabase
+      .from("ai_agent_config")
+      .insert({
+        consultant_id: userId,
+        enabled: patch.enabled ?? true,
+        persona_name: patch.persona_name ?? personaName,
+      });
+    return error;
+  }
+
   async function toggleEnabled(v: boolean) {
     setSavingEnabled(true);
     setEnabled(v);
-    const { error } = await supabase
-      .from("ai_agent_config")
-      .upsert(
-        { consultant_id: userId, enabled: v, persona_name: personaName },
-        { onConflict: "consultant_id" },
-      );
-    setSavingEnabled(false);
+    const error = await saveConfig({ enabled: v, persona_name: personaName });
     if (error) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
       setEnabled(!v);
-    } else {
-      toast({ title: v ? "🤖 IA ativada" : "⏸️ IA pausada para seus leads" });
+      setSavingEnabled(false);
+      return;
+    }
+
+    // Propaga a decisão: ao desligar, pausa todas as conversas ativas; ao religar, libera as pausadas globalmente.
+    try {
+      if (!v) {
+        const { error: pErr, count } = await supabase
+          .from("customers")
+          .update(
+            {
+              bot_paused: true,
+              bot_paused_reason: "manual_global_pause",
+              bot_paused_at: new Date().toISOString(),
+              bot_paused_until: null,
+              assigned_human_id: userId,
+              updated_at: new Date().toISOString(),
+            },
+            { count: "exact" },
+          )
+          .eq("consultant_id", userId)
+          .or("bot_paused.is.false,bot_paused.is.null");
+        if (pErr) throw pErr;
+        toast({ title: "⏸️ IA pausada para seus leads", description: `${count ?? 0} conversa(s) silenciadas.` });
+      } else {
+        const { error: rErr, count } = await supabase
+          .from("customers")
+          .update(
+            {
+              bot_paused: false,
+              bot_paused_reason: null,
+              bot_paused_at: null,
+              bot_paused_until: null,
+              assigned_human_id: null,
+              updated_at: new Date().toISOString(),
+            },
+            { count: "exact" },
+          )
+          .eq("consultant_id", userId)
+          .eq("bot_paused", true)
+          .eq("bot_paused_reason", "manual_global_pause");
+        if (rErr) throw rErr;
+        toast({ title: "🤖 IA ativada", description: `${count ?? 0} conversa(s) religadas.` });
+      }
+    } catch (e: any) {
+      toast({ title: "Config salva, mas falhou ao propagar", description: e?.message, variant: "destructive" });
+    } finally {
+      setSavingEnabled(false);
     }
   }
 
   async function savePersonaName() {
-    const { error } = await supabase
-      .from("ai_agent_config")
-      .upsert(
-        { consultant_id: userId, enabled: enabled ?? true, persona_name: personaName },
-        { onConflict: "consultant_id" },
-      );
+    const error = await saveConfig({ enabled: enabled ?? true, persona_name: personaName });
     if (error) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } else {
