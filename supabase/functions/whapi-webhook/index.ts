@@ -55,11 +55,44 @@ Deno.serve(async (req) => {
     // ─── Parsear mensagem Whapi ────────────────────────────────────────
     const parsed = parseWhapiMessage(body);
     if (!parsed) {
-      console.log("⏭️ Mensagem ignorada (from_me, grupo, ou vazia)");
+      console.log("⏭️ Mensagem ignorada (from_me via API, grupo, ou vazia)");
       return new Response(JSON.stringify({ ok: true, msg: "ignored" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // ─── Outbound humano (consultor digitou no WhatsApp Business/app) ─
+    if ((parsed as any).outboundHuman) {
+      const outChatId: string = (parsed as any).chatId || "";
+      const outSource: string = (parsed as any).source || "";
+      const outPhone = normalizePhone(outChatId.replace("@s.whatsapp.net", ""));
+      console.log(`👤 Outbound humano detectado (source=${outSource}) → pausando bot para ${outPhone}`);
+      try {
+        const { data: cust } = await supabase
+          .from("customers")
+          .select("id, bot_paused")
+          .eq("phone_digits", outPhone)
+          .limit(1)
+          .maybeSingle();
+        if (cust && !cust.bot_paused) {
+          await supabase
+            .from("customers")
+            .update({
+              bot_paused: true,
+              bot_paused_reason: "humano_assumiu_whatsapp",
+              bot_paused_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", cust.id);
+        }
+      } catch (e) {
+        console.error("⚠️ Falha ao pausar bot via outbound humano:", e);
+      }
+      return new Response(JSON.stringify({ ok: true, msg: "outbound_human_takeover" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
 
     const {
       remoteJid, buttonId, hasImage, hasDocument, hasAudio, isButton,

@@ -1,31 +1,41 @@
-## Confirmação
-Vou usar `GEMINI_API_KEY` direto do Supabase (já configurada) chamando a API oficial do Google: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`.
+## Objetivo
 
-## Parte 1 — Continuar fluxo após "Devolver"
+Hoje o auto-takeover (pausar bot + marcar `assigned_human_id`) só acontece quando o consultor envia mensagem pelo painel (`useMessages.sendMessage`). Quando ele responde direto no WhatsApp Business / Whapi app, o webhook descarta a mensagem (`from_me=true` → `parseWhapiMessage` retorna `null`) e o bot continua ativo. Precisamos detectar esses outbounds humanos e pausar o bot automaticamente.
 
-`manual-step-send` já reposiciona e dispara o próximo passo, mas para depois disso. Vou estender `buildContinuationPatch` para encadear passos consecutivos do tipo `message` (sem `capture_*`, sem `transitions` aguardando resposta), com delay de ~3s entre cada, até encontrar um passo que exige input do cliente.
+## Como o Whapi marca a origem
 
-Arquivo: `supabase/functions/manual-step-send/index.ts`
+Mensagens com `from_me: true` chegam no webhook tanto quando:
+- Nós enviamos via API (sender = bot / painel) — NÃO deve pausar
+- O consultor digita no celular/web do WhatsApp — DEVE pausar
 
-## Parte 2 — Botão "✨ Gerar texto (IA)" por passo
+O Whapi inclui o campo `source` no payload (`"api" | "mobile" | "web" | "desktop"`). Vamos usar isso como discriminador. Fallback adicional: comparar `msg.id` com IDs recentes enviados pelo bot (já temos `whatsapp_messages` com `external_id` salvo nos envios).
 
-UI em `src/pages/FluxoCamila.tsx` no `StepCard`, ao lado do label "Mensagem de texto":
-- Botão `✨ Gerar texto (IA)` com loading.
-- Chama edge function nova, preenche o `Textarea` e dispara `onPatch({ message_text })`.
+## Mudanças
 
-Edge function nova: `supabase/functions/ai-generate-step-text/index.ts`
-- Input: `{ consultantId, stepId, variant }`
-- Carrega: passo atual (título, texto, transcript de áudio se A/B, presença de vídeo se C), 2 passos anteriores e o próximo (contexto).
-- Chama Google Gemini oficial (`gemini-2.5-flash`) com `GEMINI_API_KEY`.
-- Prompt por variante:
-  - **A**: texto curto que complementa o áudio com CTA de fechamento.
-  - **B**: texto completo substituindo o áudio + CTA forte.
-  - **C**: texto curto apoiando o vídeo, conduzindo ao próximo passo / fechamento.
-- Mantém variáveis `{{nome}}`, `{{valor_conta}}`, `{{representante}}`.
-- Tom iGreen Energy, consultivo, ≤3 linhas.
-- Trata 429/erro com mensagem clara.
+### 1. `supabase/functions/_shared/whapi-api.ts`
+- `parseWhapiMessage`: em vez de retornar `null` quando `from_me=true`, retornar um objeto leve `{ outboundHuman: true, chatId, source, messageId }` quando `source !== "api"`. Quando `source === "api"`, continuar ignorando.
 
-## Arquivos
-- `supabase/functions/ai-generate-step-text/index.ts` (novo)
-- `supabase/functions/manual-step-send/index.ts` (encadear passos)
-- `src/pages/FluxoCamila.tsx` (botão no `StepCard`)
+### 2. `supabase/functions/whapi-webhook/index.ts`
+- Logo após `parseWhapiMessage`, se o retorno indicar `outboundHuman`:
+  1. Normalizar telefone do `chatId`
+  2. `UPDATE customers SET bot_paused=true, bot_paused_reason='humano_assumiu_whatsapp', bot_paused_at=now(), updated_at=now() WHERE phone_digits = ... AND (bot_paused = false OR bot_paused IS NULL)`
+  3. Não setar `assigned_human_id` (não temos user_id do consultor a partir do app — apenas pausar; consultor pode "Devolver para o passo" no painel)
+  4. Retornar `{ ok: true, msg: "outbound_human_takeover" }` sem rodar fluxo
+- Mensagens com `source === "api"` continuam ignoradas como hoje.
+
+### 3. UI (painel de conversa) — opcional, só leitura
+- Já mostramos badge "Humano assumiu" quando `bot_paused=true`. Sem mudanças necessárias; o motivo `humano_assumiu_whatsapp` aparece igual.
+
+### 4. Memória
+- Atualizar `mem://whatsapp/human-takeover-silence` para registrar o novo gatilho via webhook (outbound humano no WhatsApp Business pausa o bot).
+
+## Arquivos tocados
+
+- `supabase/functions/_shared/whapi-api.ts` (parse aceita outbound humano)
+- `supabase/functions/whapi-webhook/index.ts` (handler de takeover antes do fluxo)
+- `mem://whatsapp/human-takeover-silence`
+
+## Não faremos
+
+- Não vamos tentar identificar qual consultor digitou (Whapi não envia user). Só pausar.
+- Não desfaz takeover automaticamente — só via botão "Devolver para o passo" no painel.

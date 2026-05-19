@@ -357,12 +357,26 @@ export function parseWhapiMessage(body: any) {
 
   const msg = messages[0];
 
-  // Ignorar mensagens enviadas por nós
-  if (msg.from_me) return null;
-
   // Ignorar grupos
   const chatId = msg.chat_id || "";
   if (chatId.includes("@g.us") || chatId.includes("@newsletter") || chatId.includes("@broadcast")) return null;
+
+  // Mensagem enviada por nós: se foi via API (bot/painel), ignorar.
+  // Se foi digitada no app/web/desktop do WhatsApp pelo consultor, sinalizar
+  // takeover humano para o webhook pausar o bot.
+  if (msg.from_me) {
+    const source = String(msg.source || "").toLowerCase();
+    if (source === "api" || source === "") {
+      // API ou desconhecido (assumir API para não pausar erroneamente)
+      return null;
+    }
+    return {
+      outboundHuman: true,
+      chatId,
+      source,
+      messageId: msg.id || "",
+    } as any;
+  }
 
   const remoteJid = chatId || `${msg.from}@s.whatsapp.net`;
 
