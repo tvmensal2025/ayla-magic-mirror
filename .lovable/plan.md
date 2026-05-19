@@ -1,142 +1,72 @@
-## Auditoria — Evolution (consultores) vs. Whapi (super admin) + FB Ads
+## Diagnóstico
 
-### TL;DR
+### 1. Erro ao "Devolver para o passo"
+A UI (`LiveConversationsPanel.tsx`) chama `manual-step-send` com `continueFlow: true`. A função retornou **HTTP 400** (confirmado nos edge logs às 18:34:56). As causas possíveis dentro do código são `missing_fields`, `missing_step`, ou `customer_no_phone`. Como o `stepId` vem do dropdown (sempre presente), e `consultantId`/`customerId`/`part` também, a hipótese mais provável é `customer_no_phone` em leads importados via Excel cujo `phone_whatsapp` é `sem_celular_xxxxx` (74 registros existem hoje). Hoje a função simplesmente devolve `400 { error: "customer_no_phone" }` e a UI mostra `toast` genérico de erro.
 
-- **Evolution NÃO está 100% pronto pra outros consultores.** Funcionalmente a engine de fluxo roda, mas **2 pontos travam ou degradam a experiência hoje**: (1) o fluxo ainda chama `sendButtons` em 2 lugares (telefone / endereço) — no Evolution isso cai pra fallback de texto numerado (não quebra, mas não é o que você pediu); (2) **nenhum consultor está com instância conectada** no banco (`whatsapp_instances` só tem 2 registros, ambos `unknown`/`needs_reconnect`).
-- **Conectar WhatsApp Business pelo Facebook ≠ conectar Evolution.** São fluxos diferentes. Hoje, pra rodar **anúncio CTWA + bot Evolution**, o consultor precisa **das duas coisas**, e o sistema **não amarra uma à outra**.
+### 2. Erro ao "Desativar IA / Assumir controle"
+`setPaused()` faz `update direto via RLS na tabela `customers`. As colunas existem (`bot_paused`, `bot_paused_reason`, `bot_paused_at`, `assigned_human_id`). O erro real ainda não está nos logs visíveis — precisa instrumentação leve para capturar (mensagem + code do PostgREST) antes de afirmar a causa raiz. Suspeita: gatilho/constraint disparado em `assigned_human_id` ou conflito com a policy de update quando o registro pertence a outro consultor (super admin visualizando leads alheios).
 
----
+### 3. IA continua mandando msg depois que o humano assume (regra principal)
+Auditei TODOS os senders automáticos. Estado atual:
 
-## 1. Engine do bot — paridade Whapi vs Evolution
+| Função | Respeita `bot_paused=true`? |
+|---|---|
+| `whapi-webhook` (inbound em tempo real) | ✅ Sim — bloqueia em `index.ts` linha 418 |
+| `ai-followup-cron` | ✅ Sim — `.eq("bot_paused", false)` |
+| `bot-stuck-recovery` (resgate) | ✅ Sim — `.eq("bot_paused", false)` |
+| `bot-followup-checker` (lembretes) | ❌ **Não** — filtra só `bot_paused_until IS NULL` |
+| `send-scheduled-messages` | ❌ **Não** — nem consulta `customers` |
+| `recover-stuck-otp` | ❌ **Não** — nem consulta `bot_paused` |
+| `ai-closer-cron` | ✅ Deprecated/no-op |
 
-
-| Item                         | Whapi                                 | Evolution                                                | Status                 |
-| ---------------------------- | ------------------------------------- | -------------------------------------------------------- | ---------------------- |
-| Webhook orchestrator         | `whapi-webhook/index.ts` (856 linhas) | `evolution-webhook/index.ts` (681 linhas)                | OK                     |
-| Handler de fluxo             | `handlers/bot-flow.ts` 4292 linhas    | `handlers/bot-flow.ts` 4226 linhas                       | ~98% paridade          |
-| Conversational flow          | ✅                                     | ✅                                                        | OK                     |
-| OTP intercept                | ✅                                     | ✅                                                        | OK                     |
-| CRM sync, notify lead, audit | ✅                                     | ✅                                                        | OK                     |
-| Dedup, rate-limit            | ✅                                     | ✅                                                        | OK                     |
-| Botões nativos               | ✅ (`/messages/interactive`)           | ⚠️ tenta `/message/sendButtons` e cai pra texto numerado | Você pediu "sem botão" |
-
-
-**Onde o código ainda manda botão no Evolution** (`evolution-webhook/handlers/bot-flow.ts`):
-
-- linha 836 — wrapper `sendOptions` que delega pra `sendButtons`
-- linha 4204 — confirmação de telefone (`ask_phone_confirm`)
-- linha 4210 — pergunta de complemento de endereço (`ask_complement`)
-
-No Evolution o `sendButtons` (`_shared/evolution-api.ts:113-148`) tenta a API e, falhando, faz fallback pra texto numerado. **Cliente recebe, mas é fluxo "1. Sim / 2. Outro número" — gambiarra.**
-
-### O que vamos fazer (próxima execução)
-
-1. Criar flag interna `WHATSAPP_PROVIDER = "whapi" | "evolution"` no shared, derivada do `instance` no momento do envio.
-2. No `evolution-webhook/handlers/bot-flow.ts`:
-  - substituir os 3 pontos acima por `sendText` direto com prompt em linguagem natural ("Esse número que você está me mandando mensagem agora é o mesmo onde você quer receber o cadastro? Pode responder *sim* ou me mandar o outro número.")
-  - manter `sendButtons` no arquivo (não remover) — só não chamar.
-3. No `whapi-webhook/handlers/bot-flow.ts`: **mantém botão idêntico**.
-4. Capturar entrada como texto livre nos passos `ask_phone_confirm` / `ask_complement` — já existe parser, só ampliar regex pra aceitar "sim/é meu/pode usar/troca pra…".
+Resultado: quando o consultor clica "Assumir", o webhook para, mas os lembretes (`bot-followup-checker`), mensagens agendadas (`send-scheduled-messages`) e recovery de OTP (`recover-stuck-otp`) **continuam** disparando "Oi, ainda está aí?" e outros textos pela IA.
 
 ---
 
-## 2. Conexão WhatsApp do consultor
+## Plano
 
-Hoje:
+### A) Regra de ouro: humano assumiu → IA silenciosa
+Criar helper único `isCustomerPausedByHuman(customer)` em `_shared/bot/paused.ts` que retorna `true` se `bot_paused === true` **OU** `assigned_human_id IS NOT NULL` **OU** `bot_paused_until > now()`. Usar em:
 
-- Frontend (`useWhatsApp.ts` + `whatsappStateChecks.ts` + `useWhatsAppInstanceDb.ts`) cria instância **Evolution** automática `igreen-<8charsConsultantId>`, registra webhook `/functions/v1/evolution-webhook`, pede QR.
-- `whatsapp_instances` no banco: **2 registros, ambos não conectados**. → Hoje só o super admin (Whapi) está realmente operando.
+1. **`bot-followup-checker/index.ts`** — adicionar `.eq("bot_paused", false)` nas 2 queries (linhas 69 e 105).
+2. **`send-scheduled-messages/index.ts`** — antes de enviar cada `scheduled_messages`, fazer lookup do customer pelo `remote_jid`+`consultant_id` (via `instance_name`) e pular (status = `skipped_human_takeover`) se pausado. Atualizar `status='skipped'` com `error_message='bot_paused'`.
+3. **`recover-stuck-otp/index.ts`** — adicionar filtro `.eq("bot_paused", false)` na query de candidatos.
+4. **`ai-followup-cron`** e **`bot-stuck-recovery`** — endurecer o filtro existente para também checar `bot_paused_until IS NULL OR bot_paused_until < now()` (hoje só checa o boolean).
+5. **`whapi-webhook/index.ts`** linha 418 — já bloqueia, manter; adicionar log estruturado dizendo qual cron tentou e foi bloqueado para auditoria.
 
-### Pré-condições pro Evolution rodar pra um consultor novo
+### B) Erro ao devolver passo
+1. Em `manual-step-send/index.ts`:
+   - Detectar `phone_whatsapp` começando com `sem_celular_` → retornar `400 { error: "lead_sem_whatsapp", message: "Esse lead foi importado via Excel sem celular válido." }`.
+   - Trocar todas as respostas de erro para incluir `message` em PT-BR.
+2. Em `LiveConversationsPanel.tsx` (`returnToStep`):
+   - Mostrar `data.message || data.error` no toast em vez do genérico `e?.message`.
+   - Esconder/desabilitar o botão "Devolver para…" e "Enviar passo" para leads cujo `phone_whatsapp` começa com `sem_celular_`, com tooltip "Lead sem WhatsApp — importado via Excel".
 
-1. `EVOLUTION_API_URL` + `EVOLUTION_API_KEY` configurados como secrets (✅ existem — referenciados em `evolution-webhook/index.ts:36-37` e `evolution-proxy/index.ts:312-313`).
-2. Servidor Evolution alvo aceitando criar instância + retornando QR. **Não validado nesta auditoria — recomendado rodar smoke test via `code--exec curl` no `EVOLUTION_API_URL`.**
-3. Consultor escanear o QR → `CONNECTION_UPDATE` no webhook grava `connected_phone`.
+### C) Erro ao desativar IA
+1. Em `setPaused()`: trocar `error.message` por `${error.message} (code=${error.code} details=${error.details})` no toast, e logar o objeto completo no console. Já permite identificar a causa no próximo clique.
+2. Adicionar fallback: se o update direto falhar, chamar nova edge `customer-takeover` que roda com `service_role`, valida que o usuário é dono ou super admin, e faz o update bypassando RLS. Cobre qualquer cenário de policy que esteja barrando.
+3. Garantir que `bot_paused_until` é **limpo** quando o humano assume (senão um valor antigo no futuro mantém o cron `bot-followup-checker` confuso).
 
-### Gaps identificados
-
-
-| #   | Gap                                                                                                                                     | Severidade |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| G1  | Sem health-check exibido pro consultor após o "conectado" — não dá pra distinguir "tá conectado mas servidor Evolution caiu"            | Média      |
-| G2  | `connected_phone` não é sincronizado pra `consultant_ad_settings.whatsapp_destination_number` quando vem por QR (só pelo form de Dados) | Alta       |
-| G3  | Nada bloqueia o consultor de tentar publicar anúncio sem ter conectado WhatsApp / Facebook                                              | Alta       |
-
-
----
-
-## 3. Conectar **WhatsApp Business no Facebook** (CTWA)
-
-**Esse é o ponto mais confuso e onde você pode perder o consultor.** Existem 3 coisas diferentes que o sistema chama de "WhatsApp":
-
-1. **WhatsApp do bot (Evolution)** — número que recebe lead, roda o fluxo, manda áudio, faz cadastro.
-  - Conexão: QR Code via Evolution API.
-  - Onde aparece: `whatsapp_instances`.
-2. **WhatsApp Business "comum"** (app verde do celular) — não tem API, não conecta no FB pra rodar ad CTWA oficial.
-3. **WhatsApp Business API / WABA** — número registrado na Meta Business Suite, **vinculado à Página do Facebook**, com pixel + CAPI. **Esse é o número que vai em `whatsapp_destination_number` e que o anúncio CTWA vai usar** (`facebook-create-campaign/index.ts:285-360` exige).
-
-### O que está implementado hoje
-
-- `useConsultantForm.ts:111` — quando o consultor preenche `whatsapp_principal` no form, faz upsert em `consultant_ad_settings.whatsapp_destination_number`. ✅
-- `facebook-create-campaign/index.ts:285` — bloqueia criação de campanha sem `whatsapp_destination_number`. ✅
-- `useFacebookConnection.ts` — lê a conexão OAuth da Meta com pixel/page/account/IG. ✅
-
-### O que ainda NÃO está coberto
-
-
-| #   | Item                                                                                                                                                                                                                       | Risco |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| F1  | Sistema não valida se o número que o consultor digitou está **realmente registrado como WABA na Página dele**. Se ele digitar o número do WhatsApp comum, o `facebook-create-campaign` vai dar erro só na hora de publicar | Alto  |
-| F2  | Não há fluxo guiado "conecte sua Página → conecte seu WABA → autorize pixel". Hoje o consultor precisa saber o que fazer no Meta Business Suite                                                                            | Alto  |
-| F3  | Mesmo consultor pode acabar com **número do bot ≠ número do anúncio** (bot QR em um chip, WABA registrada em outro) e ninguém avisa                                                                                        | Médio |
-| F4  | `facebook-oauth-callback` salva pixel/page/ad_account, mas **não detecta automaticamente o WABA da Página** via `/{page_id}/whatsapp_business_account`                                                                     | Médio |
-
-
-### Plano de fix (próxima execução)
-
-1. **Edge function nova `facebook-detect-waba**`: dado `page_id` + token, chama `GET /{page_id}?fields=connected_whatsapp_business_account` na Graph e devolve número. Auto-preenche `whatsapp_destination_number` se vazio e marca `consultant_ad_settings.waba_verified=true`.
-2. **Card de pré-checagem** no `/admin/anuncios` (componente `HealthSummaryCard.tsx` já existe — estender):
-  - ✅/❌ WhatsApp do bot conectado (Evolution)
-  - ✅/❌ Facebook conectado (OAuth válido + token não expirado)
-  - ✅/❌ Pixel configurado
-  - ✅/❌ WABA registrado na Página + bate com `whatsapp_destination_number`
-  - ✅/❌ Onboarding completo (já existe `OnboardingGate.tsx`)
-3. **Bloquear o botão "Publicar anúncio"** enquanto os 4 itens acima não estiverem verdes. Mensagem clara: "Antes de anunciar, conecte seu WhatsApp Business à sua Página do Facebook — [passo a passo]".
-4. **Sincronizar QR conectado → `whatsapp_destination_number**`: no `evolution-webhook/handlers/connection.ts`, quando `CONNECTION_UPDATE` setar `connected_phone`, fazer `upsert` em `consultant_ad_settings.whatsapp_destination_number` SE o consultor ainda não tiver WABA configurado (resolve G2 e F3 para o caso comum).
+### D) UX
+- Badge "🤝 Humano no controle" no card do lead pausado já existe; manter e adicionar tooltip explicando que **nenhuma automação** será disparada enquanto estiver assim.
+- No menu "Devolver para…" adicionar item destacado "🤖 Reativar IA (sem mudar passo)" como atalho para o caso de só querer destravar sem reescrever conversation_step.
 
 ---
 
-## 4. Resposta direta às suas perguntas
+## Arquivos tocados
 
-> **"O sistema da Evolution com o fluxo sem botão (porque botão é só Whapi), para outros consultores está 100%?"**
+- `supabase/functions/_shared/bot/paused.ts` (novo)
+- `supabase/functions/bot-followup-checker/index.ts`
+- `supabase/functions/send-scheduled-messages/index.ts`
+- `supabase/functions/recover-stuck-otp/index.ts`
+- `supabase/functions/ai-followup-cron/index.ts`
+- `supabase/functions/bot-stuck-recovery/index.ts`
+- `supabase/functions/manual-step-send/index.ts`
+- `supabase/functions/customer-takeover/index.ts` (novo)
+- `src/components/admin/AIAgentTab/LiveConversationsPanel.tsx`
+- Memória: atualizar `mem://whatsapp/sending-logic` ou criar `mem://whatsapp/human-takeover-silence` documentando a regra de ouro.
 
-Não. Hoje:
-
-- Engine roda, mas **3 chamadas de `sendButtons` ainda estão ativas** no fluxo Evolution (telefone + endereço). Caem pra texto numerado quando o Evolution não suporta — funciona mas não é o "sem botão" que você quer.
-- **Nenhum consultor está com instância Evolution conectada** no banco no momento.
-- Fix é cirúrgico: remover as 3 chamadas e substituir por `sendText` em linguagem natural + ampliar o parser de resposta.
-
-> **"Se ele conectar, ele vai poder fazer tudo conectando o WhatsApp Business dele no Facebook?"**
-
-Não automaticamente. Hoje conectar o Facebook (OAuth) **não vincula sozinho** o WhatsApp Business do consultor à Página. Ele precisa:
-
-1. Conectar Evolution (QR) → bot funciona.
-2. Conectar Facebook (OAuth) → pixel, page, ad_account ficam disponíveis.
-3. **Manualmente** ir no Meta Business Suite e amarrar o número WABA dele à Página, e
-4. **Manualmente** digitar esse número no form de Dados (que sincroniza pra `whatsapp_destination_number`).
-
-Se ele pular o passo 3, a campanha CTWA dele vai falhar na publicação (`WHATSAPP_BUSINESS_REQUIRED`).
-
----
-
-## 5. Próximas execuções recomendadas (em ordem)
-
-1. **[Bot Evolution sem botão]** Remover `sendButtons` dos 3 pontos de `evolution-webhook/handlers/bot-flow.ts`, manter Whapi intacto.
-2. **[Sync número]** No `evolution-webhook/handlers/connection.ts`, quando QR conectar, fazer upsert do `connected_phone` em `consultant_ad_settings.whatsapp_destination_number`.
-3. **[Pré-flight CTWA]** Estender `HealthSummaryCard` com os 4 checks + bloqueio do botão "Publicar".
-4. **[WABA auto-detect]** Nova edge `facebook-detect-waba` + integração no `facebook-oauth-callback`.
-5. **[Doc consultor]** Tooltip / wizard de 4 passos no `/admin` explicando "conectar bot ≠ conectar Página ≠ conectar WABA".
-
-Quer que eu já comece pelo item 1 e faca o 112345 todos
-
-&nbsp;
+## O que NÃO está no escopo
+- Não toco no UI de Kanban / SalesFunnelCard (só leitura do `bot_paused`).
+- Não mexo na lógica de qual passo é "terminal" — manter `TERMINAL_STEPS` como está.
+- Não altero estrutura da tabela `customers` (colunas já existem).
