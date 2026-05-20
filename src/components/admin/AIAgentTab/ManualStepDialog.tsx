@@ -145,9 +145,10 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
         <DialogHeader>
           <DialogTitle>Enviar passo do fluxo</DialogTitle>
           <DialogDescription>
-            Para <strong>{customerName || customerId}</strong>. O bot continua pausado.
+            Para <strong>{customerName || customerId}</strong>. ✓ O envio manual ignora a pausa do bot — funciona sempre.
           </DialogDescription>
         </DialogHeader>
+
 
         {!selectedStep ? (
           <div className="space-y-2">
