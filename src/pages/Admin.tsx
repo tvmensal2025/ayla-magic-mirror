@@ -315,6 +315,10 @@ const AdminContent = () => {
             <CrmTabs consultantId={userId} instanceName={instanceName} />
           )}
 
+          {userId && activeTab === "captacao" && (
+            <CaptacaoPanel consultantId={userId} onOpenChat={(phone) => { setPendingChatPhone(phone); setActiveTab("whatsapp"); }} />
+          )}
+
           {userId && activeTab === "clientes" && (
             <CustomerManager
               customers={customers as never[]}
