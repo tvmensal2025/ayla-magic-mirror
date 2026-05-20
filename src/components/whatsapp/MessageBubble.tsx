@@ -157,10 +157,11 @@ function ImageViewer({ message, onLoadMedia, onLoaded }: { message: ChatMessage;
   );
 }
 
-function VideoPlayer({ message, onLoadMedia }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null> }) {
+function VideoPlayer({ message, onLoadMedia, onLoaded }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null>; onLoaded?: (url: string) => void }) {
   const [videoSrc, setVideoSrc] = useState<string | null>(
     isAccessibleUrl(message.mediaUrl) ? message.mediaUrl! : null
   );
+  useEffect(() => { if (videoSrc) onLoaded?.(videoSrc); }, [videoSrc]);
   const [loading, setLoading] = useState(false);
 
   const handleLoad = useCallback(async () => {
