@@ -3,9 +3,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Pause, Play, Loader2, MapPin, TrendingUp, Users, MessageCircle, DollarSign, Heart, AlertTriangle, RefreshCw } from "lucide-react";
+import { Pause, Play, Loader2, MapPin, TrendingUp, Users, MessageCircle, DollarSign, Heart, AlertTriangle, RefreshCw, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { CampaignHealthCheck } from "./CampaignHealthCheck";
+import { useUserRole } from "@/hooks/useUserRole";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Campaign {
   id: string; name: string; status: string; cities: any[];
@@ -68,7 +73,15 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
   const [waNumber, setWaNumber] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reactivating, setReactivating] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Campaign | null>(null);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const { isSuperAdmin } = useUserRole(authUserId);
   const { toast } = useToast();
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setAuthUserId(data.user?.id ?? null));
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -132,6 +145,28 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
     } finally { setReactivating(null); }
   }
 
+  async function handleDelete(c: Campaign) {
+    setDeleting(c.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("facebook-delete-campaign", {
+        body: { campaign_id: c.id },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      setItems((prev) => prev.filter((x) => x.id !== c.id));
+      const metaWarn = (data as any)?.meta_error;
+      toast({
+        title: "Campanha apagada",
+        description: metaWarn ? `Removida do sistema. Aviso Meta: ${metaWarn}` : "Removida do Meta e do sistema.",
+      });
+    } catch (e: any) {
+      toast({ title: "Falha ao apagar", description: e?.message || "Erro desconhecido", variant: "destructive" });
+    } finally {
+      setDeleting(null);
+      setConfirmDelete(null);
+    }
+  }
+
   if (loading) return <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
   if (items.length === 0) return <div className="text-center py-10 text-muted-foreground text-sm">Nenhuma campanha ainda. Clique em "Nova campanha" pra começar.</div>;
 
@@ -174,6 +209,18 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
                   );
                 })()}
               </div>
+              {isSuperAdmin && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8 text-destructive hover:bg-destructive/10 shrink-0"
+                  onClick={() => setConfirmDelete(c)}
+                  disabled={deleting === c.id}
+                  title="Apagar campanha (SuperAdmin)"
+                >
+                  {deleting === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                </Button>
+              )}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
               <Stat icon={<TrendingUp className="w-3.5 h-3.5" />} label="Impressões" value={m.impressions.toLocaleString("pt-BR")} />
@@ -186,6 +233,27 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
           </Card>
         );
       })}
+      <AlertDialog open={!!confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apagar campanha?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmDelete?.name}
+              <br />
+              Isso vai remover a campanha do Meta (Facebook Ads) e do sistema. Ação irreversível.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => confirmDelete && handleDelete(confirmDelete)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Apagar definitivamente
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

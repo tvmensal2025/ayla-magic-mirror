@@ -307,13 +307,14 @@ Deno.serve(async (req) => {
 
     // 2) AdSet — destination WhatsApp
     // Targeting "leve" pra reduzir CPL:
-    // - cidades sem radius (default = só município, sem entorno)
+    // - cidades SEM radius (apenas o município escolhido, sem cidades vizinhas)
     // - SEM interests fixos: deixa o algoritmo achar o público (Advantage+ Audience)
     // - Placements automáticos só FB + IG (messenger não combina com destination=WHATSAPP)
     const targeting: Record<string, unknown> = {
       geo_locations: {
-        // radius 25 km amplia o entorno da cidade — +público qualificado, -CPM.
-        cities: body.cities.map((c) => ({ key: c.key, radius: 25, distance_unit: "kilometer" })),
+        // Apenas a cidade escolhida (sem radius/distance_unit) — Meta interpreta
+        // como exclusivamente o município, sem expandir para o entorno.
+        cities: body.cities.map((c) => ({ key: c.key })),
         location_types: ["home", "recent"],
       },
       age_min: ageMin,

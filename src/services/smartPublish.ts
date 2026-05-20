@@ -169,8 +169,8 @@ export async function smartPublish(opts: {
   }
 
   // 4) Publicar
-  log("publish", "Publicando campanha...");
-  const cityLabel = chosen.length === 1 ? chosen[0].name : `${chosen.length} cidades`;
+  const cityLabel = chosen.length === 1 ? chosen[0].name : `${chosen.length} cidades (${chosen.map(c => c.name).join(", ")})`;
+  log("publish", `Publicando em ${cityLabel} — ${preset.nome}...`);
   await createCampaign({
     template_id: template.id,
     name: `${template.title} — ${preset.nome} (${cityLabel})`,
