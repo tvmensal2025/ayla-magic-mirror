@@ -128,8 +128,26 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect }: Props) {
           })}
         </ul>
       </div>
-      <div className="p-2 border-t border-border">
-        <Button size="sm" variant="outline" className="w-full text-xs" onClick={() => void load()}>Atualizar</Button>
+      <div className="p-2 border-t border-border space-y-1.5">
+        <Button size="sm" variant="default" className="w-full text-xs gap-1.5" onClick={async () => {
+          const phone = window.prompt("Telefone do lead (com DDD) para entrar em captação:");
+          if (!phone) return;
+          const digits = phone.replace(/\D/g, "");
+          if (digits.length < 10) { alert("Telefone inválido"); return; }
+          const { data: existing } = await supabase.from("customers").select("id").eq("consultant_id", consultantId).ilike("phone_whatsapp", `%${digits}%`).maybeSingle();
+          if (existing?.id) {
+            await supabase.from("customers").update({ capture_mode: "manual", capture_started_at: new Date().toISOString() }).eq("id", existing.id);
+            onSelect(existing.id);
+          } else {
+            const { data: created } = await supabase.from("customers").insert({
+              consultant_id: consultantId, phone_whatsapp: digits, capture_mode: "manual",
+              capture_started_at: new Date().toISOString(), customer_origin: "whatsapp_lead",
+            }).select("id").maybeSingle();
+            if (created?.id) onSelect(created.id);
+          }
+          void load();
+        }}><UserPlus className="w-3.5 h-3.5" /> Adicionar lead</Button>
+        <Button size="sm" variant="ghost" className="w-full text-xs" onClick={() => void load()}>Atualizar</Button>
       </div>
     </aside>
   );
