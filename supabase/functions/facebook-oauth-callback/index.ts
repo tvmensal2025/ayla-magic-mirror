@@ -134,6 +134,12 @@ Deno.serve(async (req) => {
         return redirect(redirectOrigin, { fb: "err", msg: `Falha ao salvar conta da plataforma: ${upErr.message}` });
       }
       console.log("[fb-cb] platform connection saved", { fb_user_id: me.id, ad_account: acc?.id, page: page?.id });
+      // Limpa SESSION_INVALIDATED de TODAS as campanhas — agora o token da plataforma está novo.
+      try {
+        await admin.from("facebook_campaigns")
+          .update({ rejection_reason: null })
+          .like("rejection_reason", "SESSION_INVALIDATED%");
+      } catch (e) { console.warn("[fb-cb] clear rejection_reason failed", e); }
       return redirect(redirectOrigin, { fb: "ok", tab: "plataforma-fb" });
     }
 
