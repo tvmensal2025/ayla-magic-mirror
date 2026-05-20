@@ -98,8 +98,8 @@ Deno.serve(async (req) => {
       return jsonRes({
         ok: true,
         connected: false,
-        hint: "Sua Página ainda não tem um WhatsApp Business API (WABA) vinculado. Acesse Meta Business Suite → WhatsApp → Configurações da Conta e vincule à Página antes de anunciar.",
-        page_id: conn.page_id,
+        hint: "A Página da plataforma ainda não tem um WhatsApp Business API (WABA) vinculado.",
+        page_id: pageId,
       });
     }
 
