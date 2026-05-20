@@ -45,9 +45,31 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
     if (!open) { setSelectedStep(null); setParts([]); setPartIdx(0); return; }
     (async () => {
       setLoading(true);
-      const { data: flow } = await supabase
+
+      // Descobre a variante A/B/C do cliente (consultor pode ter múltiplos
+      // bot_flows ativos — um por variante). Sem isso, .maybeSingle() quebra
+      // com "multiple rows" e o dialog fica vazio.
+      const { data: cust } = await supabase
+        .from("customers").select("flow_variant")
+        .eq("id", customerId).maybeSingle();
+      const variant = (cust as { flow_variant?: string } | null)?.flow_variant || "A";
+
+      // 1) tenta fluxo da variante do cliente
+      let { data: flow } = await supabase
         .from("bot_flows").select("id")
-        .eq("consultant_id", consultantId).eq("is_active", true).maybeSingle();
+        .eq("consultant_id", consultantId).eq("is_active", true)
+        .eq("variant", variant)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+
+      // 2) fallback: qualquer fluxo ativo
+      if (!flow?.id) {
+        const { data: anyFlow } = await supabase
+          .from("bot_flows").select("id")
+          .eq("consultant_id", consultantId).eq("is_active", true)
+          .order("created_at", { ascending: false }).limit(1).maybeSingle();
+        flow = anyFlow;
+      }
+
       if (!flow?.id) { setSteps([]); setLoading(false); return; }
       const { data } = await supabase
         .from("bot_flow_steps")
@@ -62,7 +84,8 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
         if (pre) loadStepParts(pre);
       }
     })();
-  }, [open, consultantId, initialStepId]);
+  }, [open, consultantId, customerId, initialStepId]);
+
 
   async function loadStepParts(step: Step) {
     setSelectedStep(step);
