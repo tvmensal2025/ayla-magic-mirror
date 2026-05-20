@@ -3,8 +3,7 @@
 // Pode ser invocado:
 //   - via cron horário (sem body) → varre todas
 //   - via cliente com { campaign_id } → tenta UMA específica (botão "tentar reativar")
-import { adminClient, authConsultant, corsHeaders, fbFetch } from "../_shared/fb-graph.ts";
-import { decryptToken } from "../_shared/fb-crypto.ts";
+import { adminClient, authConsultant, corsHeaders, fbFetch, loadCampaignConnection } from "../_shared/fb-graph.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
