@@ -4,19 +4,25 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Loader2, Send, Mic, ImageIcon, Video, FileText } from "lucide-react";
 
+interface StepLike {
+  id: string;
+  title: string | null;
+  step_key: string | null;
+  message_text: string | null;
+  media_order: unknown;
+  variant: string;
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   consultantId: string;
   customerId: string;
-  step: {
-    id: string;
-    title: string | null;
-    step_key: string | null;
-    message_text: string | null;
-    media_order: unknown;
-    variant: string;
-  } | null;
+  step: StepLike | null;
+  /** Optional: all available variants for this step (A/B/C). If provided, chips appear in header to switch. */
+  variants?: Record<string, StepLike>;
+  /** Called when user changes the selected variant via chips. */
+  onVariantChange?: (variant: string) => void;
   onSend: () => void;
   sending?: boolean;
 }
@@ -31,7 +37,13 @@ interface MediaItem {
   send_order?: number | null;
 }
 
-export function CaptureStepPreview({ open, onOpenChange, consultantId, customerId, step, onSend, sending }: Props) {
+const VARIANT_HINT: Record<string, string> = {
+  A: "com áudio",
+  B: "só texto",
+  C: "com vídeo",
+};
+
+export function CaptureStepPreview({ open, onOpenChange, consultantId, customerId, step, variants, onVariantChange, onSend, sending }: Props) {
   const [medias, setMedias] = useState<MediaItem[]>([]);
   const [renderedText, setRenderedText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -41,7 +53,6 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
     let mounted = true;
     setLoading(true);
     (async () => {
-      // 1. Customer vars
       const { data: cust } = await supabase
         .from("customers")
         .select("name, electricity_bill_value")
@@ -59,7 +70,6 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
       const apply = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
       const txt = step.message_text ? apply(String(step.message_text)) : "";
 
-      // 2. Medias for this slot
       const slotKey = step.step_key;
       let rows: MediaItem[] = [];
       if (slotKey) {
@@ -74,7 +84,6 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
         rows = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
       }
 
-      // Filtro por variante
       if (step.variant === "B") {
         rows = rows.flatMap((m) => {
           if (String(m.kind).toLowerCase() !== "audio") return [m];
@@ -105,17 +114,39 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
     });
   })();
 
+  const variantKeys = variants ? Object.keys(variants).sort() : [];
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto p-0">
-        <DialogHeader className="p-4 pb-2 border-b border-border">
+        <DialogHeader className="p-4 pb-2 border-b border-border space-y-2">
           <DialogTitle className="text-sm flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold">
+            <span className="px-2 py-0.5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold shrink-0">
               Variante {step.variant}
             </span>
             <span className="truncate">{step.title || step.step_key}</span>
           </DialogTitle>
           <p className="text-[11px] text-muted-foreground">Prévia exata do que o cliente vai receber</p>
+          {variantKeys.length > 1 && onVariantChange && (
+            <div className="flex items-center gap-1.5 pt-1">
+              <span className="text-[10px] text-muted-foreground">Variante:</span>
+              {variantKeys.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => onVariantChange(v)}
+                  className={`px-2.5 h-7 rounded-full text-[11px] font-bold border transition-colors ${
+                    v === step.variant
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-card text-foreground border-border hover:border-primary/50"
+                  }`}
+                  title={VARIANT_HINT[v] || ""}
+                >
+                  {v} <span className="opacity-70 font-normal">{VARIANT_HINT[v] || ""}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </DialogHeader>
 
         <div className="p-4 space-y-3 bg-muted/20">
