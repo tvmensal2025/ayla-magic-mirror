@@ -10,7 +10,7 @@ import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
 import { fireRandomCelebration, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy, ChevronDown, ChevronUp } from "lucide-react";
+import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy, ChevronDown, ChevronUp, Maximize2, Minimize2 } from "lucide-react";
 
 interface Props {
   open: boolean;
