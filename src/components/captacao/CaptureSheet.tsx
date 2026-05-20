@@ -28,9 +28,11 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<"passos" | "ficha">("passos");
   const [submitting, setSubmitting] = useState(false);
+  const [minimized, setMinimized] = useState(false);
   const lastCountRef = useRef(0);
 
-  useEffect(() => { setSentSteps(new Set()); }, [customerId]);
+  useEffect(() => { setSentSteps(new Set()); setMinimized(false); }, [customerId]);
+  useEffect(() => { if (!open) setMinimized(false); }, [open]);
 
   // Garante modo manual ao abrir
   useEffect(() => {
