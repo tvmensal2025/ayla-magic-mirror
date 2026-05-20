@@ -188,9 +188,11 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
             <div className="min-w-0">
               <p className="text-[11px] text-muted-foreground">Enviar passo do fluxo para</p>
               <p className="text-sm font-semibold truncate">{customerName || customerId}</p>
+              <p className="text-[10px] text-primary mt-0.5">✓ Envio manual funciona mesmo com bot pausado</p>
             </div>
             {steps.length > 0 && <Badge variant="secondary" className="text-[10px] shrink-0">{steps.length} passos</Badge>}
           </div>
+
 
           {seq && (
             <div className="px-3 py-2 bg-primary/5 border-b border-border flex items-center gap-2">
