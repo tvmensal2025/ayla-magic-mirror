@@ -43,12 +43,13 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent }
       if (!flows?.[0]) { if (mounted) setSteps([]); return; }
       const { data } = await supabase
         .from("bot_flow_steps")
-        .select("id, title, step_key, position, message_text, audio_url, image_url, video_url")
+        .select("id, title, step_key, position, message_text, media_order")
         .eq("flow_id", flows[0].id)
         .eq("is_active", true)
         .order("position", { ascending: true })
         .limit(10);
       if (mounted) setSteps((data as StepRow[]) || []);
+
     })();
     return () => { mounted = false; };
   }, [consultantId]);
