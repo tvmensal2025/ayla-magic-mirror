@@ -22,10 +22,9 @@ interface StepRow {
   step_key: string | null;
   position: number;
   message_text: string | null;
-  audio_url?: string | null;
-  image_url?: string | null;
-  video_url?: string | null;
+  media_order: unknown;
 }
+
 
 export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent }: Props) {
   const { toast } = useToast();
