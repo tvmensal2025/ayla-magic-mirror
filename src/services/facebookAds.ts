@@ -84,19 +84,24 @@ export async function syncAudiences(): Promise<SyncAudiencesResult> {
 }
 
 export interface CityHit { key: string; name: string; region?: string; region_id?: number; type?: string; country_code?: string }
-export async function searchCities(q: string): Promise<CityHit[]> {
+export interface CitySearchResult { cities: CityHit[]; needsReconnect?: boolean }
+export async function searchCities(q: string): Promise<CitySearchResult> {
   const { data, error } = await supabase.functions.invoke("facebook-search-cities", { body: { q } });
   if (error) throw error;
-  return (data?.cities || []) as CityHit[];
+  return { cities: (data?.cities || []) as CityHit[], needsReconnect: !!data?.needs_reconnect };
 }
 
 // Resolve várias cidades de uma vez (cache no banco).
 export interface UnresolvedCity { name: string; uf: string; reason: string }
-export interface BulkCityResult { cities: CityHit[]; unresolved: UnresolvedCity[] }
+export interface BulkCityResult { cities: CityHit[]; unresolved: UnresolvedCity[]; needsReconnect?: boolean }
 export async function searchCitiesBulk(items: { name: string; uf: string }[]): Promise<BulkCityResult> {
   const { data, error } = await supabase.functions.invoke("facebook-search-cities", { body: { bulk: items } });
   if (error) throw error;
-  return { cities: (data?.cities || []) as CityHit[], unresolved: (data?.unresolved || []) as UnresolvedCity[] };
+  return {
+    cities: (data?.cities || []) as CityHit[],
+    unresolved: (data?.unresolved || []) as UnresolvedCity[],
+    needsReconnect: !!data?.needs_reconnect,
+  };
 }
 
 export interface CopyPack { headlines: string[]; primary_texts: string[]; description: string }
