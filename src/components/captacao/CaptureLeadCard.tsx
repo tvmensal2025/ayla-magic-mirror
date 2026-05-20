@@ -129,10 +129,9 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: P
 
 
       <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-        {CAPTURE_FIELDS.map(f => {
+        {CAPTURE_FIELDS.filter((f) => f.key !== "document_front_url").map(f => {
           const v = (customer as any)[f.key];
           const filled = v !== null && v !== undefined && String(v).trim() !== "" && (f.key !== "electricity_bill_value" || Number(v) > 0);
-          const isDoc = f.key === "document_front_url";
           const isEditingThis = editing === f.key;
           const sugg = suggestionByField.get(f.key);
 
@@ -150,7 +149,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: P
                   {filled ? <Check className="w-3.5 h-3.5 text-primary shrink-0" /> : <div className="w-3.5 h-3.5 rounded-full border-2 border-muted-foreground/30 shrink-0" />}
                   <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{f.label}</span>
                 </div>
-                {!isEditingThis && !isDoc && (
+                {!isEditingThis && (
                   <button onClick={() => startEdit(f.key)} className="opacity-0 group-hover:opacity-100 transition-opacity">
                     <Edit2 className="w-3 h-3 text-muted-foreground hover:text-primary" />
                   </button>
@@ -167,24 +166,6 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: P
                   />
                   <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => void saveEdit()}><Check className="w-3.5 h-3.5" /></Button>
                   <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditing(null)}><X className="w-3.5 h-3.5" /></Button>
-                </div>
-              ) : isDoc ? (
-                <div className="mt-1 flex gap-1.5">
-                  {customer.document_front_url ? (
-                    <a href={customer.document_front_url} target="_blank" rel="noreferrer" className="block w-14 h-14 rounded border border-border overflow-hidden bg-secondary hover:ring-2 hover:ring-primary">
-                      <img src={customer.document_front_url} className="w-full h-full object-cover" alt="frente" />
-                    </a>
-                  ) : <div className="w-14 h-14 rounded border border-dashed border-border flex items-center justify-center"><FileImage className="w-4 h-4 text-muted-foreground/50" /></div>}
-                  {customer.document_back_url && (
-                    <a href={customer.document_back_url} target="_blank" rel="noreferrer" className="block w-14 h-14 rounded border border-border overflow-hidden bg-secondary hover:ring-2 hover:ring-primary">
-                      <img src={customer.document_back_url} className="w-full h-full object-cover" alt="verso" />
-                    </a>
-                  )}
-                  {customer.electricity_bill_photo_url && (
-                    <a href={customer.electricity_bill_photo_url} target="_blank" rel="noreferrer" className="block w-14 h-14 rounded border border-border overflow-hidden bg-secondary hover:ring-2 hover:ring-primary" title="Conta de luz">
-                      <img src={customer.electricity_bill_photo_url} className="w-full h-full object-cover" alt="conta" />
-                    </a>
-                  )}
                 </div>
               ) : (
                 <p className="text-xs mt-0.5 break-words text-foreground/80 min-h-[1rem]">{filled ? String(v) : <span className="text-muted-foreground italic">vazio</span>}</p>
@@ -211,6 +192,12 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: P
           );
         })}
       </div>
+
+      <CaptureDocumentTiles
+        customerId={customerId}
+        customer={customer}
+        onUploaded={async (key, url) => { await updateField(key as any, url); }}
+      />
 
       {!embedded && (
         <div className="p-3 border-t border-border space-y-2">
