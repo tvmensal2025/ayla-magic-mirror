@@ -73,9 +73,18 @@ export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMed
   }, [text, sending, onSend, onSendMedia, onSendAudioUrl, file]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (exactShortcut && text.trim().startsWith("/")) {
+        handleTemplateSelect(exactShortcut);
+        // dispara envio na próxima tick (após state aplicado)
+        setTimeout(() => handleSend(), 50);
+        return;
+      }
+      handleSend();
+    }
     if (e.key === "Escape") setShowQuickReply(false);
-  }, [handleSend]);
+  }, [handleSend, exactShortcut, text]);
 
   const handleTemplateSelect = useCallback((t: MessageTemplate) => {
     setText(t.content);
