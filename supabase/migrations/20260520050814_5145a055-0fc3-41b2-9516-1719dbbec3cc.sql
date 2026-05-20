@@ -1,0 +1,1 @@
+UPDATE public.ai_media_library SET active = true WHERE id IN ('959a4998-7fe5-4685-a765-29aa99e362be','8071acf2-1588-4938-ad04-59e9a582e539');
