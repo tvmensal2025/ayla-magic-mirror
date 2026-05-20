@@ -82,23 +82,50 @@ Deno.serve(async (req) => {
 
     const pageId = platform.page_id as string;
 
-    // 1) Page → WABA vinculado
-    const pageRes = await fetch(
-      `${FB_GRAPH}/${pageId}?fields=connected_whatsapp_business_account,whatsapp_business_account&access_token=${token}`
-    );
-    const pageJson = await pageRes.json();
-    if (!pageRes.ok) {
-      console.warn("[detect-waba] page query failed", pageJson);
-      return jsonRes({ ok: false, error: pageJson?.error?.message || "page_query_failed" });
+    // 1) Descobre o WABA. O campo `connected_whatsapp_business_account` só
+    //    existe em algumas Páginas; pedi-lo junto faz a Graph rejeitar tudo
+    //    com erro (#100). Por isso tentamos cada caminho separadamente, e por
+    //    último caímos no fallback de Businesses do usuário.
+    let wabaId: string | null = null;
+
+    try {
+      const r = await fetch(`${FB_GRAPH}/${pageId}?fields=whatsapp_business_account&access_token=${token}`);
+      const j = await r.json();
+      if (r.ok && j?.whatsapp_business_account?.id) wabaId = j.whatsapp_business_account.id;
+    } catch (_) { /* ignore */ }
+
+    if (!wabaId) {
+      try {
+        const r = await fetch(`${FB_GRAPH}/${pageId}?fields=connected_whatsapp_business_account&access_token=${token}`);
+        const j = await r.json();
+        if (r.ok && j?.connected_whatsapp_business_account?.id) wabaId = j.connected_whatsapp_business_account.id;
+      } catch (_) { /* ignore */ }
     }
 
-    const waba = pageJson.connected_whatsapp_business_account || pageJson.whatsapp_business_account;
-    const wabaId = waba?.id;
+    if (!wabaId) {
+      try {
+        const bizRes = await fetch(`${FB_GRAPH}/me/businesses?fields=id,name&access_token=${token}`);
+        const bizJson = await bizRes.json();
+        const businesses: Array<{ id: string; name?: string }> = bizJson?.data || [];
+        for (const biz of businesses) {
+          for (const kind of ["owned_whatsapp_business_accounts", "client_whatsapp_business_accounts"]) {
+            const wr = await fetch(`${FB_GRAPH}/${biz.id}/${kind}?access_token=${token}`);
+            const wj = await wr.json();
+            const first = (wj?.data || [])[0];
+            if (first?.id) { wabaId = first.id; break; }
+          }
+          if (wabaId) break;
+        }
+      } catch (e) {
+        console.warn("[detect-waba] business fallback failed", e);
+      }
+    }
+
     if (!wabaId) {
       return jsonRes({
         ok: true,
         connected: false,
-        hint: "A Página da plataforma ainda não tem um WhatsApp Business API (WABA) vinculado.",
+        hint: "A Página da plataforma ainda não tem um WhatsApp Business API (WABA) vinculado. Abra o Meta Business Suite → Configurações do Negócio → Contas do WhatsApp e vincule à Página.",
         page_id: pageId,
       });
     }
