@@ -30,7 +30,7 @@ export function useCaptureSuggestions(customerId: string | null) {
   useEffect(() => {
     if (!customerId) return;
     const ch = supabase
-      .channel(`cfs-${customerId}`)
+      .channel(`cfs-${customerId}-${Math.random().toString(36).slice(2, 8)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "capture_field_suggestions", filter: `customer_id=eq.${customerId}` },
