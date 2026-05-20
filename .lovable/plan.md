@@ -1,51 +1,43 @@
 ## Problema
 
-A Captação no mobile abre em **fullscreen (`h-[100dvh]`)** e tampa o chat do WhatsApp. Só existe o botão "Minimizar" (vira barrinha) — não dá pra ver o chat e a captação ao mesmo tempo, e não tem botão de **expandir** pra alternar entre meia-tela e tela cheia.
-
-## Objetivo
-
-A sheet de Captação no mobile passa a ter **3 estados** controlados pelo consultor, todos adaptáveis a qualquer altura de celular (uso de `dvh` + `safe-area-inset`):
-
-1. **Meia-tela (padrão)** — ocupa ~60% da viewport, deixa o chat e o input do WhatsApp visíveis em cima. Header da Captação + lista de passos rolável + footer "FINALIZAR".
-2. **Tela cheia (expandida)** — ocupa `100dvh` (comportamento atual), pra quem quer focar só na captação.
-3. **Minimizada** — barrinha flutuante de 44px no rodapé (já existe).
+1. **Botão "Desconectar"** está visível na barra de status do WhatsApp (canto direito) — o consultor pode clicar sem querer e derrubar a conexão.
+2. **Sheet de Captação em meia-tela** ainda cobre boa parte da conversa do WhatsApp. O header é alto (avatar 36px + 3 botões + barra de progresso + 3 linhas de texto), sobra pouco espaço pra ver e escrever no chat.
 
 ## Mudanças
 
-### `src/components/captacao/CaptureSheet.tsx`
+### 1. Esconder "Desconectar" do consultor — `src/components/whatsapp/WhatsAppTab.tsx`
 
-- Adicionar estado `expanded: boolean` (default `false` = meia-tela).
-- Trocar `h-[100dvh]` por classe condicional:
-  - expanded → `h-[100dvh]`
-  - default → `h-[62dvh] min-h-[420px] max-h-[100dvh] rounded-t-2xl`
-- No header, ao lado do botão "Minimizar", adicionar botão **Expandir/Recolher** com ícone `Maximize2` / `Minimize2` (lucide-react), alternando `expanded`.
-- Garantir que o `SheetContent` use `side="bottom"` e que o overlay (`SheetOverlay`) **não bloqueie o chat**: usar `pointer-events-none` no overlay quando não-expanded, e deixar o conteúdo da sheet com `pointer-events-auto`. Isso permite tocar no chat por cima do overlay.
-- Padding-bottom já usa `env(safe-area-inset-bottom)` — manter. Adicionar `dvh` em todos os limites para se adaptar a celulares com barra dinâmica do navegador (iOS Safari, Chrome Android).
-- Resetar `expanded = false` ao trocar de cliente e ao fechar.
+Linhas 174-179: remover o `<button>` "Desconectar". Quando conectado, mantém só o pill verde "WhatsApp Conectado (instância)". Desconexão continua disponível dentro do `ConnectionPanel` (aba de configuração avançada), fora do fluxo diário.
 
-### `src/components/ui/sheet.tsx` (ajuste pontual)
+### 2. Visual mais leve da Sheet em meia-tela — `src/components/captacao/CaptureSheet.tsx`
 
-- Permitir prop opcional `overlayClassName` em `SheetContent` para que a Captação consiga deixar o overlay clicável-através (`pointer-events-none bg-transparent`) quando estiver em modo meia-tela. Sem isso o Radix bloqueia clicks no chat.
-  - Alternativa mais simples: dentro do `CaptureSheet` usar `<Dialog>` modal=false do Radix para meia-tela. Vou usar a primeira (overlayClassName) para manter a API consistente.
+**Altura menor por padrão (mobile):**
+- meia-tela: `h-[52dvh] min-h-[380px]` (era 62dvh/420px) → libera ~10% a mais de chat visível.
 
-### Botões no header
+**Header enxuto (quando NÃO expandido):**
+- Avatar 36→28px, ícone menor.
+- Esconder a linha "🎯 Próximo: ..." e "Passo X de 10" no modo meia-tela (mostrar só no expandido). Mantém a frase motivacional curta + barra de progresso.
+- Agrupar os 3 botões (⛶ / ⌄ / ✕) num único cluster compacto à direita, altura 8 (era 9).
+- Reduzir `pt-3 pb-2` → `pt-2 pb-1.5`.
 
-```
-[avatar] Nome do lead         [⛶ expandir] [⌄ minimizar] [✕ fechar]
-```
+**"Pegador" (grabber) no topo:**
+- Adicionar barrinha cinza centralizada (`w-10 h-1 rounded-full bg-muted`) acima do header pra indicar arrasto/sheet, padrão iOS/Android — fica mais elegante.
 
-Quando `expanded === true` o ícone vira `Minimize2` e o tooltip vira "Recolher".
+**Borda superior brilhante:**
+- Trocar `border-t border-border` por gradiente sutil verde (`shadow-[0_-8px_24px_-12px_hsl(var(--primary)/0.4)]`) pra dar profundidade sem peso visual.
 
-## Fora de escopo
+**Footer mais compacto em meia-tela:**
+- Botão FINALIZAR: `h-12 → h-11`, esconder a linha "X campos · Y passos" quando não-expandido (já tem no header).
 
-- Lógica de envio de passos, OCR, A/B/C — sem mudanças.
-- Layout da aba "Ficha" — segue como está, só herda a altura nova.
-- Desktop continua igual (sheet de fundo já usa `h-[100dvh]` e não atrapalha — manter `md:` no estado expandido por padrão? Não, vou manter o mesmo comportamento mobile/desktop, simplifica).
+### 3. Sem mudanças
+
+- Lógica de envio de passos, OCR, modo expandido (continua com header completo).
+- Desktop não muda.
 
 ## Validação
 
-1. Mobile 390x844: abrir Captação → sheet ocupa ~60% inferior, chat e input do WhatsApp visíveis em cima e clicáveis.
-2. Clicar no botão ⛶ → vira tela cheia. Clicar de novo → volta pra meia-tela.
-3. Clicar em ⌄ → vira barrinha de 44px no rodapé. Tocar nela → volta pro último estado (meia-tela).
-4. Testar em 320x568 (iPhone SE) e 360x800 (Android pequeno): sem corte do botão FINALIZAR, footer respeita safe-area.
-5. Trocar de cliente reseta o estado pra meia-tela.
+1. Mobile 390x844: botão "Desconectar" sumiu da barra do topo do WhatsApp.
+2. Sheet abre em ~52dvh, mostra ~3-4 mensagens do chat + input do WhatsApp acima.
+3. Pegador cinza visível no topo, header compacto, footer enxuto.
+4. Botão ⛶ expande pra tela cheia mostrando header completo (próximo campo, contagem de passos).
+5. Funciona em 320x568 e 360x800 sem cortar o "FINALIZAR".

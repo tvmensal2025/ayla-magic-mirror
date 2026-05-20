@@ -116,54 +116,65 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
         overlayClassName={expanded ? undefined : "bg-transparent pointer-events-none"}
         onInteractOutside={(e) => { if (!expanded) e.preventDefault(); }}
         onPointerDownOutside={(e) => { if (!expanded) e.preventDefault(); }}
-        className={`w-full p-0 flex flex-col gap-0 border-0 bg-background sm:max-w-none shadow-2xl shadow-black/60 ${
+        className={`w-full p-0 flex flex-col gap-0 border-0 bg-background sm:max-w-none shadow-[0_-12px_40px_-12px_hsl(var(--primary)/0.35)] ${
           expanded
             ? "h-[100dvh] rounded-none"
-            : "h-[62dvh] min-h-[420px] max-h-[100dvh] rounded-t-2xl border-t border-border"
+            : "h-[52dvh] min-h-[380px] max-h-[100dvh] rounded-t-2xl"
         }`}
       >
+        {/* Grabber */}
+        {!expanded && (
+          <div className="flex justify-center pt-1.5 pb-0.5 shrink-0">
+            <div className="w-10 h-1 rounded-full bg-muted-foreground/40" />
+          </div>
+        )}
+
         {/* Header */}
-        <header className="px-3 pt-3 pb-2 border-b border-border bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20">
-          <div className="flex items-center gap-1.5 mb-2">
-            <div className="w-9 h-9 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
-              <Gamepad2 className="w-4 h-4 text-primary" />
+        <header className={`px-3 border-b border-border/60 bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20 ${expanded ? "pt-3 pb-2" : "pt-1.5 pb-1.5"}`}>
+          <div className={`flex items-center gap-1.5 ${expanded ? "mb-2" : "mb-1.5"}`}>
+            <div className={`rounded-full bg-primary/15 flex items-center justify-center shrink-0 ${expanded ? "w-9 h-9" : "w-7 h-7"}`}>
+              <Gamepad2 className={`text-primary ${expanded ? "w-4 h-4" : "w-3.5 h-3.5"}`} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold truncate">{customerName || phoneNumber || "Lead"}</p>
-              <p className="text-[10px] text-muted-foreground truncate">{phoneNumber}</p>
+              <p className={`font-bold truncate ${expanded ? "text-sm" : "text-xs"}`}>{customerName || phoneNumber || "Lead"}</p>
+              {expanded && <p className="text-[10px] text-muted-foreground truncate">{phoneNumber}</p>}
             </div>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-9 w-9 shrink-0"
-              onClick={() => setExpanded((v) => !v)}
-              title={expanded ? "Recolher (ver chat)" : "Expandir tela cheia"}
-            >
-              {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-9 w-9 shrink-0"
-              onClick={() => setMinimized(true)}
-              title="Minimizar (liberar input do chat)"
-            >
-              <ChevronDown className="w-5 h-5" />
-            </Button>
-            <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={() => onOpenChange(false)} title="Fechar">
-              <X className="w-5 h-5" />
-            </Button>
+            <div className="flex items-center gap-0.5 shrink-0">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                onClick={() => setExpanded((v) => !v)}
+                title={expanded ? "Recolher (ver chat)" : "Expandir tela cheia"}
+              >
+                {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                onClick={() => setMinimized(true)}
+                title="Minimizar (liberar input do chat)"
+              >
+                <ChevronDown className="w-4 h-4" />
+              </Button>
+              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => onOpenChange(false)} title="Fechar">
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
           <CaptureProgressBar progress={progress} filled={filledCount} total={totalFields} />
-          <p className="text-[11px] text-center mt-1.5 font-semibold text-primary/90">{phrase}</p>
-          {nextMissing && !canSubmit && (
+          <p className={`text-[11px] text-center font-semibold text-primary/90 ${expanded ? "mt-1.5" : "mt-1"}`}>{phrase}</p>
+          {expanded && nextMissing && !canSubmit && (
             <p className="text-[11px] text-center mt-0.5 text-muted-foreground">
               🎯 Próximo: <span className="font-bold text-foreground">{nextMissing.label}</span>
             </p>
           )}
-          <p className="text-[10px] text-center mt-0.5 text-muted-foreground">
-            Passo {sentSteps.size} de 10 enviado
-          </p>
+          {expanded && (
+            <p className="text-[10px] text-center mt-0.5 text-muted-foreground">
+              Passo {sentSteps.size} de 10 enviado
+            </p>
+          )}
         </header>
 
         {/* Tabs */}
@@ -196,8 +207,8 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
 
         {/* Footer */}
         <footer
-          className="p-3 border-t border-border bg-card/80 backdrop-blur sticky bottom-0 z-20 space-y-2"
-          style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))" }}
+          className={`border-t border-border/60 bg-card/80 backdrop-blur sticky bottom-0 z-20 ${expanded ? "p-3 space-y-2" : "px-3 pt-2 pb-2 space-y-1.5"}`}
+          style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom, 0px))" }}
         >
           {customer?.conversation_step && ["finalizando", "portal_submitting", "aguardando_otp", "validando_otp"].includes(customer.conversation_step) && (
             <p className="text-[11px] text-center text-primary font-semibold animate-pulse">
@@ -206,7 +217,7 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
           )}
           <Button
             size="lg"
-            className={`w-full h-12 font-bold text-base gap-2 ${canSubmit ? "animate-pulse" : ""}`}
+            className={`w-full font-bold gap-2 ${expanded ? "h-12 text-base" : "h-11 text-sm"} ${canSubmit ? "animate-pulse" : ""}`}
             onClick={handleSubmit}
             disabled={submitting || !customer?.name || !customer?.cpf}
             title={!customer?.name || !customer?.cpf ? "Precisa de nome e CPF no mínimo" : "Enviar pro portal e disparar OTP"}
@@ -214,14 +225,16 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
             {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trophy className="w-5 h-5" />}
             {canSubmit ? "CADASTRAR TUDO" : `FINALIZAR (${filledCount}/${totalFields})`}
           </Button>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] text-muted-foreground">
-              {filledCount}/{totalFields} campos · {sentSteps.size}/10 passos
-            </span>
-            <Button variant="ghost" size="sm" className="text-[10px] text-muted-foreground h-6" onClick={disableCapture}>
-              Sair do modo
-            </Button>
-          </div>
+          {expanded && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] text-muted-foreground">
+                {filledCount}/{totalFields} campos · {sentSteps.size}/10 passos
+              </span>
+              <Button variant="ghost" size="sm" className="text-[10px] text-muted-foreground h-6" onClick={disableCapture}>
+                Sair do modo
+              </Button>
+            </div>
+          )}
         </footer>
       </SheetContent>
     </Sheet>

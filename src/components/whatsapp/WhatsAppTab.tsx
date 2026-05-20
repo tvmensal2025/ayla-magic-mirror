@@ -171,12 +171,6 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
                 <span className="text-[10px] text-muted-foreground">({instanceName})</span>
               )}
             </div>
-            <button
-              onClick={disconnect}
-              className="text-[10px] text-destructive hover:underline"
-            >
-              Desconectar
-            </button>
           </>
         ) : (
           <>
