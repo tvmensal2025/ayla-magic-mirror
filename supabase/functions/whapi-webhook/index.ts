@@ -541,6 +541,26 @@ Deno.serve(async (req) => {
       conversation_step: customer.conversation_step,
     }).select("id").maybeSingle();
 
+    // ─── Modo Captação (manual): dispara IA p/ sugerir campos em background ──
+    try {
+      if ((customer as any).capture_mode === "manual" && !hasAudio && !isFile && messageText) {
+        const fnUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/capture-extract`;
+        // fire-and-forget
+        fetch(fnUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+          },
+          body: JSON.stringify({ customer_id: customer.id, source_message_id: inboundLog?.id || null }),
+        }).catch((e) => console.warn("[capture-extract] dispatch fail:", (e as Error).message));
+      }
+    } catch (e) {
+      console.warn("[capture-extract] dispatch err:", (e as Error).message);
+    }
+
+
+
 
     // ─── Auto-tag lead source (Meta Ads) ─────────────────────────────────
     // 1) Sinal forte: payload Whapi com referral/context (CTWA do Meta)
