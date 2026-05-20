@@ -5,7 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { createWhapiSender } from "../_shared/whapi-api.ts";
-import { ensureAudioTranscript } from "../_shared/audio-transcript.ts";
+
 
 type Part = "text" | "audio" | "image" | "video" | "document" | "all";
 
