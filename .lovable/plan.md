@@ -1,33 +1,37 @@
-## Objetivo
-Trocar o favicon pelo logo verde "G+folha+lâmpada" enviado, com tamanho correto (com margem interna pra não ficar colado nas bordas), e garantir que o título no topo da aba continue **IGREEN-SUPORTE** — tanto pro consultor logado quanto pra qualquer visitante.
+## Problema
+No celular (≤390px) o /admin está apertado: o topo (logo + ícones + abas) corta "Central de Anúncios", e os cards do dashboard ficam ou estreitos demais ou com valores cortados ("R$ 50.4...").
 
-## O que vou fazer
+## O que vou ajustar (apenas mobile — desktop fica igual)
 
-1. **Processar o logo** (`Cópia_de_G_-_Verde.png`, vertical 808×1080)
-   - Copiar para `/tmp` e usar ImageMagick para:
-     - Gerar quadrado **512×512** com ~12% de padding e fundo transparente → `public/favicon.png` (substitui o atual)
-     - Gerar **180×180** → `public/apple-touch-icon.png` (iPhone/iPad)
-     - Gerar **32×32** e **16×16** → `public/favicon-32.png` e `public/favicon-16.png` (Chrome/Firefox tab)
+### 1. Topo do /admin
+- **Logo iGreen**: reduzir altura no mobile (de ~h-8 para h-6) pra dar respiro.
+- **Ícones da direita** (preview / monitor / sparkles / sino / engrenagem / logout): no mobile passam a ter `gap-1`, `size-8` e ícone `w-4 h-4`. Esconder os menos críticos (`monitor`, `sparkles`) abaixo de `sm:` — já existem em outros menus.
+- **Tabs (Dashboard, CRM, Clientes, Rede, WhatsApp, Central de Anúncios)**:
+  - Wrapper recebe `overflow-x-auto scrollbar-thin` com `snap-x`.
+  - Cada item: `shrink-0`, `px-2.5`, label `text-[11px]`, ícone `w-4 h-4`.
+  - Adicionar fade nas bordas (gradient mask) pra deixar claro que rola lateralmente.
 
-2. **Atualizar `index.html`**
-   - Adicionar as três tags de `<link rel="icon">` com `sizes` apropriados + `apple-touch-icon`
-   - Manter `<title>IGREEN-SUPORTE</title>` e `theme-color #22c55e` (verde combina com a logo)
-   - Limpar o comentário `<!-- TODO -->` antigo
+### 2. Toolbar (Filtrar licenciado / Sincronizar / Período / PDF / Resetar)
+- No mobile vira **2 linhas balanceadas**: linha 1 = filtros (select + sincronizar), linha 2 = ações (período + PDF + resetar).
+- Selects ganham `w-full` no mobile com `max-w-[180px]`, botões `flex-1` pra preencher a linha sem quebrar feio.
 
-3. **Manifest** (`public/manifest.json`)
-   - Atualizar os ícones do PWA para apontar para o novo favicon, mantendo "IGREEN-SUPORTE" como nome curto e longo.
+### 3. Cards de estatística (os 5 do topo)
+- Trocar grid pra `grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5` **OU** manter 2 colunas mas:
+  - Reduzir padding do `StatCard` no mobile (`p-3` em vez de `p-4`).
+  - Valor `text-xl sm:text-2xl` com `truncate` + `title={fullValue}` pra mostrar tooltip se cortar.
+  - Para valores monetários grandes, formatar com **abreviação** (`R$ 50,4 mil` em vez de `R$ 50.400`) quando ≥ 10.000, usando `Intl.NumberFormat("pt-BR", { notation: "compact" })`.
+  - Ícone menor no mobile (`w-4 h-4` em vez de `w-5 h-5`).
+- Vou recomendar **1 coluna no celular** (cards largos ficam mais legíveis e ninguém precisa apertar olho), 2 no `sm`, 3 no `md`, 5 no `lg`. É o padrão de dashboards mobile-first.
 
-## Arquivos afetados
-
+## Arquivos a editar
 ```text
-NOVO   public/favicon.png            (512×512, substitui)
-NOVO   public/apple-touch-icon.png   (180×180)
-NOVO   public/favicon-32.png
-NOVO   public/favicon-16.png
-EDIT   index.html                    (links de ícone + limpeza TODO)
-EDIT   public/manifest.json          (ícones e nome)
+src/components/admin/AdminHeader.tsx        (logo + ícones + tabs responsivo)
+src/components/admin/DashboardTab.tsx       (toolbar 2-linhas mobile + grid 1→2→3→5)
+src/components/admin/StatCard.tsx           (padding, font, truncate, compact format)
 ```
+(Vou abrir os 2 primeiros pra confirmar os class names exatos antes de editar.)
 
 ## Fora de escopo
-- Logo dentro da aplicação (header/sidebar) — mexer só se você pedir.
-- Geração de `.ico` multi-tamanho (PNGs já cobrem todos os navegadores modernos).
+- Mudar paleta, ícones ou copy.
+- Reordenar abas ou esconder funcionalidade — só layout responsivo.
+- Mexer em `CustomerCharts`, `TopConsumersCard`, `GeographyCard`, `RetentionCard` (a queixa foi "cards e topo"; se quiser depois eu ajusto esses também).
