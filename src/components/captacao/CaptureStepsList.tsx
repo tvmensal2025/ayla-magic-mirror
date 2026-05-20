@@ -10,8 +10,9 @@ interface Props {
   consultantId: string;
   customerId: string;
   sentSteps: Set<string>;
-  onSent: (stepId: string) => void;
+  onSent: (stepKey: string) => void;
   defaultVariant?: string | null;
+  currentStep?: string | null;
 }
 
 interface StepRow {
