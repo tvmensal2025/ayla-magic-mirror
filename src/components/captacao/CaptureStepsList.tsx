@@ -47,6 +47,12 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
   const [onlyPending, setOnlyPending] = useState(false);
   const [confirmStep, setConfirmStep] = useState<{ group: StepGroup; row: StepRow } | null>(null);
 
+  const changeVariant = (v: string) => {
+    if (!confirmStep) return;
+    const row = confirmStep.group.variants[v];
+    if (row) setConfirmStep({ group: confirmStep.group, row });
+  };
+
   useEffect(() => {
     let mounted = true;
     (async () => {
