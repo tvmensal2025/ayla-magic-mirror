@@ -69,7 +69,7 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
         conversation_step: "finalizando",
         capture_mode: "auto",
       }).eq("id", customer.id);
-      fireBigConfetti();
+      fireRandomCelebration();
       await bump();
       toast({ title: "🎉 Cadastro enviado!", description: "Portal Worker concluindo…", duration: 3500 });
       onOpenChange(false);
