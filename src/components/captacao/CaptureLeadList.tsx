@@ -1,0 +1,136 @@
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Search, UserPlus, Clock } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { CAPTURE_FIELDS } from "@/hooks/useCaptureSession";
+
+interface LeadRow {
+  id: string;
+  name: string | null;
+  phone_whatsapp: string | null;
+  capture_started_at: string | null;
+  created_at: string;
+  filled: number;
+}
+
+interface Props {
+  consultantId: string;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}
+
+export function CaptureLeadList({ consultantId, selectedId, onSelect }: Props) {
+  const [leads, setLeads] = useState<LeadRow[]>([]);
+  const [q, setQ] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    const cols = "id, name, phone_whatsapp, capture_started_at, created_at, " + CAPTURE_FIELDS.map(f => f.key).join(", ");
+    const { data } = await supabase
+      .from("customers")
+      .select(cols)
+      .eq("consultant_id", consultantId)
+      .eq("capture_mode", "manual")
+      .order("capture_started_at", { ascending: false, nullsFirst: false })
+      .limit(100);
+    const rows: LeadRow[] = (data || []).map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      phone_whatsapp: c.phone_whatsapp,
+      capture_started_at: c.capture_started_at,
+      created_at: c.created_at,
+      filled: CAPTURE_FIELDS.filter(f => {
+        const v = c[f.key];
+        if (v === null || v === undefined) return false;
+        if (typeof v === "string" && !v.trim()) return false;
+        if (f.key === "electricity_bill_value" && Number(v) <= 0) return false;
+        return true;
+      }).length,
+    }));
+    setLeads(rows);
+    setLoading(false);
+  };
+
+  useEffect(() => { void load(); }, [consultantId]);
+
+  // realtime para refresh leve
+  useEffect(() => {
+    const ch = supabase.channel(`capture-list-${consultantId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "customers", filter: `consultant_id=eq.${consultantId}` },
+        () => void load())
+      .subscribe();
+    return () => { void supabase.removeChannel(ch); };
+  }, [consultantId]);
+
+  const filtered = leads.filter(l => {
+    if (!q) return true;
+    const s = q.toLowerCase();
+    return (l.name || "").toLowerCase().includes(s) || (l.phone_whatsapp || "").includes(s);
+  });
+
+  const fmtTime = (iso: string | null) => {
+    if (!iso) return "";
+    const d = new Date(iso); const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+    if (mins < 1) return "agora";
+    if (mins < 60) return `${mins}m`;
+    if (mins < 1440) return `${Math.floor(mins / 60)}h`;
+    return `${Math.floor(mins / 1440)}d`;
+  };
+
+  return (
+    <aside className="w-72 shrink-0 flex flex-col border-r border-border bg-card/40 backdrop-blur-sm">
+      <div className="p-3 border-b border-border space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Em captação</h3>
+          <span className="text-xs text-muted-foreground tabular-nums">{leads.length}</span>
+        </div>
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nome/telefone" className="h-8 pl-8 text-xs" />
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {loading && <p className="p-6 text-center text-xs text-muted-foreground">Carregando...</p>}
+        {!loading && filtered.length === 0 && (
+          <div className="p-6 text-center space-y-2">
+            <UserPlus className="w-8 h-8 mx-auto text-muted-foreground/50" />
+            <p className="text-xs text-muted-foreground">Nenhum lead em captação.<br />Abra um lead pelo chat e clique em "Capturar dados".</p>
+          </div>
+        )}
+        <ul className="divide-y divide-border">
+          {filtered.map(l => {
+            const active = l.id === selectedId;
+            const pct = Math.round((l.filled / CAPTURE_FIELDS.length) * 100);
+            return (
+              <li key={l.id}>
+                <button
+                  onClick={() => onSelect(l.id)}
+                  className={`w-full text-left px-3 py-2.5 hover:bg-secondary/60 transition-colors ${active ? "bg-primary/10 border-l-2 border-primary" : ""}`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium truncate">{l.name || "Sem nome"}</span>
+                    <span className="text-[10px] text-muted-foreground flex items-center gap-0.5 shrink-0">
+                      <Clock className="w-3 h-3" />{fmtTime(l.capture_started_at || l.created_at)}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground truncate">{l.phone_whatsapp || "—"}</p>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <div className="flex-1 h-1 rounded-full bg-secondary overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-emerald-500 to-lime-400 transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-[10px] tabular-nums font-semibold text-primary">{l.filled}/{CAPTURE_FIELDS.length}</span>
+                  </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+      <div className="p-2 border-t border-border">
+        <Button size="sm" variant="outline" className="w-full text-xs" onClick={() => void load()}>Atualizar</Button>
+      </div>
+    </aside>
+  );
+}
