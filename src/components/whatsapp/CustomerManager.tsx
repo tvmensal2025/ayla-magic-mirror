@@ -326,7 +326,7 @@ export function CustomerManager({ customers, consultantId, onCustomersChange, in
               </SelectContent>
             </Select>
             <Select value={selectedCidade} onValueChange={setSelectedCidade}>
-              <SelectTrigger className="h-8 sm:h-9 rounded-xl bg-secondary/30 border-border/50 text-xs col-span-2 sm:col-span-1">
+              <SelectTrigger className="h-9 sm:h-9 rounded-xl bg-secondary/30 border-border/50 text-xs">
                 <div className="flex items-center gap-1.5 truncate">
                   <Smartphone className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                   <SelectValue placeholder="Cidade/UF" />
