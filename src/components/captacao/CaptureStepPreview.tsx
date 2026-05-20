@@ -47,6 +47,7 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
   const [medias, setMedias] = useState<MediaItem[]>([]);
   const [renderedText, setRenderedText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [skippedAudios, setSkippedAudios] = useState(0);
 
   useEffect(() => {
     if (!open || !step) return;
