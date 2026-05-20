@@ -152,10 +152,11 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent }
                   <p className="text-[11px] text-muted-foreground line-clamp-2 mb-1">{preview}</p>
                 )}
                 <div className="flex items-center gap-1.5 text-muted-foreground/70">
-                  {s.audio_url && <Mic className="w-3 h-3 text-emerald-500" />}
-                  {s.image_url && <ImageIcon className="w-3 h-3 text-amber-500" />}
-                  {s.video_url && <Video className="w-3 h-3 text-cyan-500" />}
+                  {Array.isArray(s.media_order) && (s.media_order as string[]).includes("audio") && <Mic className="w-3 h-3 text-emerald-500" />}
+                  {Array.isArray(s.media_order) && (s.media_order as string[]).includes("image") && <ImageIcon className="w-3 h-3 text-amber-500" />}
+                  {Array.isArray(s.media_order) && (s.media_order as string[]).includes("video") && <Video className="w-3 h-3 text-cyan-500" />}
                 </div>
+
               </button>
             </li>
           );
