@@ -287,31 +287,15 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
         })}
       </ul>
 
-      <AlertDialog open={!!confirmStep} onOpenChange={(o) => !o && setConfirmStep(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Enviar variante {confirmStep?.row.variant}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              <span className="block font-semibold mb-1">
-                {confirmStep?.group.title || confirmStep?.group.step_key}
-              </span>
-              {confirmStep?.row.message_text && (
-                <span className="block text-xs line-clamp-4 italic">
-                  "{confirmStep.row.message_text}"
-                </span>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => confirmStep && doSend(confirmStep.row)}>
-              <Send className="w-3.5 h-3.5 mr-1" /> Enviar agora
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <CaptureStepPreview
+        open={!!confirmStep}
+        onOpenChange={(o) => !o && setConfirmStep(null)}
+        consultantId={consultantId}
+        customerId={customerId}
+        step={confirmStep ? { ...confirmStep.row } : null}
+        sending={!!sending}
+        onSend={() => confirmStep && doSend(confirmStep.row)}
+      />
     </div>
   );
 }
