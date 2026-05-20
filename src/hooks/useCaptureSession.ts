@@ -72,7 +72,7 @@ export function useCaptureSession(customerId: string | null) {
   useEffect(() => {
     if (!customerId) return;
     const ch = supabase
-      .channel(`capture-${customerId}`)
+      .channel(`capture-${customerId}-${Math.random().toString(36).slice(2, 8)}`)
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "customers", filter: `id=eq.${customerId}` },
         (payload) => setCustomer((prev) => ({ ...(prev || {}), ...(payload.new as any) })))
       .subscribe();
