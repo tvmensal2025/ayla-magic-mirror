@@ -140,7 +140,7 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
     setSeq(null);
   }
 
-  if (!consultantId || !customerId) return null;
+  if (!consultantId) return null;
 
   return (
     <>
@@ -149,8 +149,8 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
           <Button
             variant="ghost" size="icon"
             className="h-8 w-8 shrink-0 text-muted-foreground hover:text-primary relative"
-            disabled={disabled || !!seq}
-            title="Enviar passo do fluxo"
+            disabled={disabled || !!seq || !customerId}
+            title={!customerId ? "Carregando cliente…" : "Enviar passo do fluxo"}
           >
             {seq ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <Zap className="h-4 w-4" />}
             {seq && (

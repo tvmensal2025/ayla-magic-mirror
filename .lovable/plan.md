@@ -1,51 +1,51 @@
-# Pré-visualizar antes de enviar (atalho do fluxo)
+# Atalhos ⚡ disponíveis para TODOS os clientes
 
-Hoje no botão ⚡ do composer você consegue disparar passos do fluxo, mas o texto/áudio/imagem/vídeo só é visto depois que cai no WhatsApp. Vou adicionar **preview real** antes de qualquer envio, em todos os 3 modos.
+## Diagnóstico
 
-## O que muda
+Hoje o `FlowQuickBar` em `MessageComposer` só aparece quando existe `customerId`:
 
-### 1. Modo "1 a 1" (ManualStepDialog) — preview inline em cada parte
-Hoje cada item mostra só um ícone + nome do arquivo + botão Enviar. Vou trocar por um card com **preview de verdade** da mídia:
+```ts
+// FlowQuickBar.tsx (linha 143)
+if (!consultantId || !customerId) return null;
+```
 
-- **Texto** → caixa cinza com o texto completo (scroll se grande), igual a um balão do WhatsApp.
-- **Áudio** → `<audio controls>` para ouvir antes (play/pause/scrub).
-- **Imagem** → miniatura clicável (abre lightbox/zoom em modal).
-- **Vídeo** → `<video controls>` 240px de largura, play inline.
-- **Documento (PDF)** → link "Abrir em nova aba" + nome do arquivo.
+E em `ChatView.tsx` o `customerId` só é preenchido se o telefone do chat já existir na tabela `customers` (linhas 134-147). Resultado: ao trocar para um contato WhatsApp que ainda não foi salvo como cliente, o botão ⚡ desaparece — exatamente o que o usuário relatou.
 
-Botão **Enviar** continua do lado, só que agora você ouviu/leu/viu antes de clicar.
+O backend `manual-step-send` **exige** `customerId` (linha 45), porque precisa gravar conversations, variant A/B/C, etc.
 
-### 2. Modo "Passo completo" (botão Send na lista do popover)
-Hoje: 1 clique = envia tudo direto. Vou mudar para:
-- 1 clique = abre **mini-modal de preview** mostrando, em ordem, todas as partes do passo (mesmos previews acima: áudio tocável, imagem, vídeo, texto).
-- 2 botões no rodapé: **Cancelar** e **Confirmar e enviar tudo**.
-- Memória opcional por sessão "não perguntar de novo neste passo" (checkbox), pra não atrapalhar quem já confirmou.
+## Solução
 
-### 3. Modo "Daqui em diante" (FastForward)
-Hoje: AlertDialog só com texto "vou enviar N passos". Vou enriquecer:
-- Lista os passos que vão ser enviados (numerados, com título).
-- Cada passo expansível (accordion) → abre os previews das partes daquele passo.
-- Botões: **Cancelar** / **Enviar sequência**.
+Deixar o ⚡ sempre visível enquanto houver um chat aberto. Quando o usuário disparar um passo, garantir um cliente — criando automaticamente se ainda não existir.
 
-## Onde mexer (técnico)
+### 1. Auto-criar cliente quando o chat é aberto (ChatView)
 
-- **`src/components/admin/AIAgentTab/ManualStepDialog.tsx`**
-  - Substituir o conteúdo do `<Card>` de cada `part` por um componente `PartPreview` que renderiza por `kind` (text/audio/image/video/document) usando `part.media?.url` ou `part.text`.
-  - Imagem: thumb 80×80 + clique abre Dialog com imagem full.
-  - Áudio/vídeo: tags HTML5 nativas com `controls preload="metadata"`.
+No `useEffect` que faz lookup do customer (linhas 134-147):
+- Buscar por `phone_whatsapp` **escopado ao `consultant_id`** (multi-tenant correto).
+- Se não encontrar, fazer `insert` mínimo:
+  ```ts
+  { consultant_id, phone_whatsapp: phone, name: chat.pushName || phone,
+    customer_origin: 'whatsapp_lead', conversation_step: 'novo_lead' }
+  ```
+  Pegar o `id` retornado e setar em `customerId`.
+- Aplicar memória [Customer Origin Separation] usando `customer_origin: 'whatsapp_lead'` para não poluir a aba "Clientes iGreen".
 
-- **`src/components/whatsapp/FlowQuickBar.tsx`**
-  - Novo state `previewStep: Step | null`.
-  - Trocar `onClick={() => sendFull(s)}` por `onClick={() => setPreviewStep(s)}`.
-  - Novo `<Dialog>` `StepPreviewDialog` que carrega `ai_media_library` igual ao `loadStepParts` do ManualStepDialog, renderiza os previews e tem botão "Confirmar e enviar tudo" → chama `sendFull(s)`.
-  - Reaproveitar o mesmo `PartPreview` extraído como componente compartilhado (`src/components/whatsapp/StepPartPreview.tsx`) para não duplicar.
-  - Trocar o `AlertDialog` do "Daqui em diante" por um Dialog maior com lista de passos + accordion (`@/components/ui/accordion`) usando o mesmo `PartPreview`.
+Assim, qualquer chat aberto passa a ter `customerId` válido e o ⚡ aparece — sem mudar o backend.
 
-- **Novo arquivo: `src/components/whatsapp/StepPartPreview.tsx`** — componente puro que recebe `{ kind, text?, url?, fileName? }` e renderiza o preview correto. Usado pelos 3 fluxos.
+### 2. Guarda contra race (FlowQuickBar)
 
-## Fora de escopo
-- Editar texto/mídia antes de enviar (continua só preview).
-- Mudar a ordem das partes na hora do envio.
-- Reordenar passos.
+Manter o gate `if (!consultantId) return null;` mas remover `!customerId`. Enquanto o auto-create está em andamento (≈300 ms), desabilitar o botão com `disabled={!customerId}` no `PopoverTrigger`, mostrando tooltip "Carregando cliente…". Isso evita disparo sem ID.
 
-Quer que eu inclua também um botão "Tocar tudo em sequência" no preview do passo completo (toca áudios/vídeos em ordem antes de mandar)? Posso adicionar se for útil.
+### 3. Sem mudanças no backend
+
+`manual-step-send` continua igual. Os hooks de captação (`useCaptureSession`), CRM e a aba "Adicionar Cliente" já funcionam com a row criada.
+
+## Arquivos a editar
+
+- `src/components/whatsapp/ChatView.tsx` — auto-create de customer no lookup (linhas 134-147), com filtro por `consultant_id`.
+- `src/components/whatsapp/FlowQuickBar.tsx` — trocar `if (!consultantId || !customerId) return null;` por `if (!consultantId) return null;` e desabilitar o trigger enquanto `!customerId`.
+
+## Fora do escopo
+
+- Mudar regra de origem dos leads (continua entrando como `whatsapp_lead`).
+- Mexer em `manual-step-send` ou no fluxo automático do bot.
+- Renomear/mover o botão ⚡.
