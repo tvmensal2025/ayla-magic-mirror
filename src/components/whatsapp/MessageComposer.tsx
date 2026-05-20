@@ -116,7 +116,7 @@ export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMed
 
   return (
     <div className="relative border-t border-border bg-card p-2">
-      {showQuickReply && <QuickReplyMenu templates={templates} search={quickSearch} onSelect={handleTemplateSelect} onClose={() => setShowQuickReply(false)} />}
+      {showQuickReply && <QuickReplyMenu templates={templates} search={quickSearch} onSelect={handleTemplateSelect} onClose={() => setShowQuickReply(false)} onExactShortcut={setExactShortcut} />}
 
       {file.pendingImageUrl && (
         <div className="flex items-center gap-2 mb-2 px-1 py-1.5 rounded-lg bg-secondary/30 border border-border/30">
