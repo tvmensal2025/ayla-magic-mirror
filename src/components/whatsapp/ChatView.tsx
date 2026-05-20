@@ -10,8 +10,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import type { MessageTemplate } from "@/types/whatsapp";
 import type { ChatItem } from "@/hooks/useChats";
-import { Loader2, MessageSquareText, UserPlus, UserCheck, KanbanSquare, RotateCcw } from "lucide-react";
+import { Loader2, MessageSquareText, UserPlus, UserCheck, KanbanSquare, RotateCcw, Gamepad2 } from "lucide-react";
 import { resetLeadConversation } from "@/services/resetConversation";
+import { CaptureSheet } from "@/components/captacao/CaptureSheet";
+import { useCaptureSession } from "@/hooks/useCaptureSession";
+
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
