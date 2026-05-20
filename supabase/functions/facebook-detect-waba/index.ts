@@ -57,29 +57,34 @@ Deno.serve(async (req) => {
     const userId = claims.user?.id;
     if (!userId) return jsonRes({ ok: false, error: "invalid_token" });
 
-    const { data: conn } = await supabase
-      .from("facebook_connections")
+    // Usa SEMPRE a conta Facebook da plataforma (compartilhada). O token do
+    // consultor pode estar inválido/inexistente — não é mais usado aqui.
+    const { data: platform } = await supabase
+      .from("platform_facebook_account")
       .select("page_id, access_token_encrypted")
-      .eq("consultant_id", userId)
+      .eq("id", true)
       .maybeSingle();
 
-    if (!conn?.page_id) return jsonRes({ ok: false, error: "no_page_connected", hint: "Conecte sua Página do Facebook antes de detectar o WABA." });
-    if (!conn.access_token_encrypted) return jsonRes({ ok: false, error: "no_token", hint: "Reconecte sua conta do Facebook." });
+    if (!platform?.page_id) {
+      return jsonRes({ ok: false, error: "no_platform_page", hint: "Conta Facebook da plataforma não configurada." });
+    }
+    if (!platform.access_token_encrypted) {
+      return jsonRes({ ok: false, error: "no_platform_token", hint: "Token da conta plataforma ausente — peça ao admin para reconectar." });
+    }
 
     let token: string;
     try {
-      token = await decryptToken(conn.access_token_encrypted);
+      token = await decryptToken(platform.access_token_encrypted);
     } catch (e) {
       console.error("[detect-waba] decrypt failed", e);
       return jsonRes({ ok: false, error: "token_decrypt_failed" });
     }
 
+    const pageId = platform.page_id as string;
+
     // 1) Page → WABA vinculado
-    // Tentamos dois fields porque a Graph aceita ambos em versões diferentes:
-    //   connected_whatsapp_business_account (oficial)
-    //   whatsapp_business_account (alias antigo)
     const pageRes = await fetch(
-      `${FB_GRAPH}/${conn.page_id}?fields=connected_whatsapp_business_account,whatsapp_business_account&access_token=${token}`
+      `${FB_GRAPH}/${pageId}?fields=connected_whatsapp_business_account,whatsapp_business_account&access_token=${token}`
     );
     const pageJson = await pageRes.json();
     if (!pageRes.ok) {
@@ -93,8 +98,8 @@ Deno.serve(async (req) => {
       return jsonRes({
         ok: true,
         connected: false,
-        hint: "Sua Página ainda não tem um WhatsApp Business API (WABA) vinculado. Acesse Meta Business Suite → WhatsApp → Configurações da Conta e vincule à Página antes de anunciar.",
-        page_id: conn.page_id,
+        hint: "A Página da plataforma ainda não tem um WhatsApp Business API (WABA) vinculado.",
+        page_id: pageId,
       });
     }
 
@@ -137,7 +142,7 @@ Deno.serve(async (req) => {
       ok: true,
       connected: true,
       waba_id: wabaId,
-      page_id: conn.page_id,
+      page_id: pageId,
       numbers,
       current_number: currentDigits || null,
       matches: matches || autoFilled,

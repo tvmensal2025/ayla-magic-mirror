@@ -88,58 +88,30 @@ export function useCtwaPreflight(consultantId: string | null): CtwaPreflightStat
       setBot({ status: "fail", label: "Erro ao verificar bot" });
     }
 
-    // 2) Facebook conectado + token válido
-    let fbConn: any = null;
+    // 2) Facebook + Pixel — consulta o status consolidado da CONTA PLATAFORMA
+    //    (platform_facebook_account). Não usamos mais facebook_connections do
+    //    consultor — o pixel é travado e o token é compartilhado.
+    let platformPageOk = false;
     try {
-      const { data } = await supabase
-        .from("facebook_connections")
-        .select("status,token_expires_at,page_id,pixel_id")
-        .eq("consultant_id", consultantId)
-        .maybeSingle();
-      fbConn = data;
-      if (!fbConn) {
-        setFacebook({
-          status: "fail",
-          label: "Facebook NÃO conectado",
-          hint: "Conecte sua conta do Facebook (com sua Página e Conta de Anúncios).",
-        });
-        setPixel({ status: "fail", label: "Pixel ausente", hint: "Conecte o Facebook primeiro." });
+      const { data, error } = await supabase.functions.invoke("ctwa-status");
+      if (error || !data?.ok) {
+        setFacebook({ status: "fail", label: "Erro ao verificar Facebook", hint: (data as any)?.error || error?.message });
+        setPixel({ status: "fail", label: "Erro ao verificar Pixel" });
       } else {
-        const expired = fbConn.token_expires_at && new Date(fbConn.token_expires_at) < new Date();
-        if (expired || fbConn.status !== "active") {
-          setFacebook({
-            status: "fail",
-            label: "Token do Facebook expirado",
-            hint: "Reconecte sua conta para renovar o acesso.",
-          });
-        } else if (!fbConn.page_id) {
-          setFacebook({
-            status: "warn",
-            label: "Facebook conectado, sem Página",
-            hint: "Selecione a Página oficial no painel do Facebook.",
-          });
-        } else {
-          setFacebook({ status: "ok", label: "Facebook conectado", detail: `Página ${fbConn.page_id}` });
-        }
-
-        if (fbConn.pixel_id) {
-          setPixel({ status: "ok", label: "Pixel configurado", detail: fbConn.pixel_id });
-        } else {
-          setPixel({
-            status: "warn",
-            label: "Pixel ausente",
-            hint: "Sem pixel a otimização CPL fica pior. Crie um pixel no Gerenciador do Facebook.",
-          });
-        }
+        setFacebook(data.facebook);
+        setPixel(data.pixel);
+        platformPageOk = data.facebook?.status === "ok";
       }
     } catch (e) {
-      console.warn("[ctwa-preflight] facebook check failed", e);
+      console.warn("[ctwa-preflight] ctwa-status failed", e);
       setFacebook({ status: "fail", label: "Erro ao verificar Facebook" });
       setPixel({ status: "fail", label: "Erro ao verificar Pixel" });
     }
 
+
+
     // 3) WABA via edge function (só faz sentido se Facebook OK)
-    if (fbConn?.page_id) {
+    if (platformPageOk) {
       try {
         const { data, error } = await supabase.functions.invoke("facebook-detect-waba");
         if (error || !data?.ok) {
