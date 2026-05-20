@@ -147,26 +147,29 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
 
         {/* Footer */}
         <footer className="p-3 border-t border-border bg-card/80 backdrop-blur sticky bottom-0 z-20 space-y-2">
-          {canSubmit ? (
-            <Button
-              size="lg"
-              className="w-full h-12 font-bold text-base gap-2 animate-pulse"
-              onClick={handleSubmit}
-              disabled={submitting}
-            >
-              {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trophy className="w-5 h-5" />}
-              CADASTRAR TUDO
-            </Button>
-          ) : (
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs text-muted-foreground">
-                {filledCount}/{totalFields} campos · {sentSteps.size} passos enviados
-              </span>
-              <Button variant="ghost" size="sm" className="text-[11px] text-muted-foreground h-7" onClick={disableCapture}>
-                Sair do modo
-              </Button>
-            </div>
+          {customer?.conversation_step && ["finalizando", "portal_submitting", "aguardando_otp", "validando_otp"].includes(customer.conversation_step) && (
+            <p className="text-[11px] text-center text-primary font-semibold animate-pulse">
+              🚀 Portal: {customer.conversation_step.replace("_", " ")}…
+            </p>
           )}
+          <Button
+            size="lg"
+            className={`w-full h-12 font-bold text-base gap-2 ${canSubmit ? "animate-pulse" : ""}`}
+            onClick={handleSubmit}
+            disabled={submitting || !customer?.name || !customer?.cpf}
+            title={!customer?.name || !customer?.cpf ? "Precisa de nome e CPF no mínimo" : "Enviar pro portal e disparar OTP"}
+          >
+            {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trophy className="w-5 h-5" />}
+            {canSubmit ? "CADASTRAR TUDO" : `FINALIZAR (${filledCount}/${totalFields})`}
+          </Button>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-muted-foreground">
+              {filledCount}/{totalFields} campos · {sentSteps.size}/10 passos
+            </span>
+            <Button variant="ghost" size="sm" className="text-[10px] text-muted-foreground h-6" onClick={disableCapture}>
+              Sair do modo
+            </Button>
+          </div>
         </footer>
       </SheetContent>
     </Sheet>
