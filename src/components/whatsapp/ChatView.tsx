@@ -53,21 +53,21 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const [captureOpen, setCaptureOpen] = useState(false);
   const { customer: captureCustomer, filledCount, totalFields } = useCaptureSession(customerId);
   const captureOn = captureCustomer?.capture_mode === "manual";
+  const captureActive = captureOpen || captureOn;
 
-  const toggleCapture = useCallback(async () => {
+  const toggleCapture = useCallback(() => {
     if (!customerId) {
       toast({ title: "Adicione o cliente antes", description: "Clique em 'Adicionar Cliente' para ativar a captação.", variant: "destructive" });
       return;
     }
-    if (captureOn) {
-      // already on → just open
-      setCaptureOpen(true);
-      return;
+    // 1 clique = abre o painel imediatamente
+    setCaptureOpen(true);
+    // Ativa modo manual em paralelo (sem bloquear UI)
+    if (!captureOn) {
+      void supabase.from("customers")
+        .update({ capture_mode: "manual", capture_started_at: new Date().toISOString() })
+        .eq("id", customerId);
     }
-    await supabase.from("customers")
-      .update({ capture_mode: "manual", capture_started_at: new Date().toISOString() })
-      .eq("id", customerId);
-    toast({ title: "🎮 Modo Captação ativado", description: "Toque de novo no botão para abrir o painel." });
   }, [customerId, captureOn, toast]);
 
 
@@ -223,17 +223,17 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         {isCustomer && customerId && (
           <Button
             size="sm"
-            variant={captureOn ? "default" : "outline"}
+            variant={captureActive ? "default" : "outline"}
             className={`h-7 text-[10px] gap-1 ${
-              captureOn
+              captureActive
                 ? "bg-primary text-primary-foreground animate-pulse shadow-md shadow-primary/30"
                 : "border-primary/40 text-primary hover:bg-primary/10"
             }`}
             onClick={toggleCapture}
-            title={captureOn ? "Toque pra abrir o painel" : "Ligar Modo Captação (game)"}
+            title="Abrir painel de captação (game)"
           >
             <Gamepad2 className="h-3.5 w-3.5" />
-            {captureOn ? `${filledCount}/${totalFields}` : "Captação"}
+            Captação {filledCount > 0 ? `${filledCount}/${totalFields}` : ""}
           </Button>
         )}
 
