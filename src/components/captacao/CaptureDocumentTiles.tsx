@@ -44,7 +44,7 @@ export function CaptureDocumentTiles({ customerId, customer, onUploaded }: Props
       if (upErr) throw upErr;
       const { data: pub } = supabase.storage.from("whatsapp-media").getPublicUrl(path);
       await onUploaded(key, pub.publicUrl);
-      fireMiniConfetti();
+      fireRandomCelebration();
       toast({ title: "📎 Documento anexado", duration: 1500 });
     } catch (e: any) {
       toast({ title: "Erro no upload", description: e?.message || String(e), variant: "destructive" });
