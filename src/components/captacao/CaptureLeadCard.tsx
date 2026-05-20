@@ -1,12 +1,14 @@
 import { useEffect, useState, useRef } from "react";
 import { CAPTURE_FIELDS, CaptureFieldKey, useCaptureSession } from "@/hooks/useCaptureSession";
+import { useCaptureSuggestions } from "@/hooks/useCaptureSuggestions";
 import { CaptureProgressBar } from "./CaptureProgressBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Check, Edit2, FileImage, Loader2, Sparkles, Trophy, X } from "lucide-react";
+import { Check, Edit2, FileImage, Loader2, Sparkles, Trophy, X, Bot } from "lucide-react";
 import { fireMiniConfetti, fireBigConfetti, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+
 
 interface Props {
   customerId: string;
