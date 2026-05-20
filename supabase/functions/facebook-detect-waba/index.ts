@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
       ok: true,
       connected: true,
       waba_id: wabaId,
-      page_id: conn.page_id,
+      page_id: pageId,
       numbers,
       current_number: currentDigits || null,
       matches: matches || autoFilled,
