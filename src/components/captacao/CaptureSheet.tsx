@@ -1,0 +1,158 @@
+import { useState, useEffect, useRef } from "react";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { CaptureStepsList } from "./CaptureStepsList";
+import { CaptureLeadCard } from "./CaptureLeadCard";
+import { CaptureProgressBar } from "./CaptureProgressBar";
+import { useCaptureSession } from "@/hooks/useCaptureSession";
+import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
+import { fireBigConfetti, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
+import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy } from "lucide-react";
+
+interface Props {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  consultantId: string;
+  customerId: string;
+  customerName?: string | null;
+  phoneNumber?: string | null;
+}
+
+export function CaptureSheet({ open, onOpenChange, consultantId, customerId, customerName, phoneNumber }: Props) {
+  const { customer, filledCount, totalFields, progress } = useCaptureSession(customerId);
+  const { bump } = useCaptureScoreboard(consultantId);
+  const { toast } = useToast();
+  const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
+  const [tab, setTab] = useState<"passos" | "ficha">("passos");
+  const [submitting, setSubmitting] = useState(false);
+  const lastCountRef = useRef(0);
+
+  useEffect(() => { setSentSteps(new Set()); }, [customerId]);
+
+  useEffect(() => {
+    if (!customer) return;
+    if (filledCount > lastCountRef.current) {
+      const phrase = MOTIVATIONAL_PHRASES[filledCount];
+      if (phrase) toast({ title: phrase, duration: 1800 });
+    }
+    lastCountRef.current = filledCount;
+  }, [filledCount, customer, toast]);
+
+  const canSubmit = filledCount === totalFields;
+  const phrase = MOTIVATIONAL_PHRASES[filledCount] || `Faltam ${totalFields - filledCount} dados 💪`;
+
+  const handleSubmit = async () => {
+    if (!customer || !canSubmit) return;
+    setSubmitting(true);
+    try {
+      await supabase.from("customers").update({
+        conversation_step: "finalizando",
+        capture_mode: "auto",
+      }).eq("id", customer.id);
+      fireBigConfetti();
+      await bump();
+      toast({ title: "🎉 Cadastro enviado!", description: "Portal Worker concluindo…", duration: 3500 });
+      onOpenChange(false);
+    } catch (e: any) {
+      toast({ title: "Erro", description: e?.message || String(e), variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const disableCapture = async () => {
+    await supabase.from("customers").update({ capture_mode: "auto" }).eq("id", customerId);
+    toast({ title: "Modo Captação desligado" });
+    onOpenChange(false);
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="bottom"
+        className="h-[100dvh] w-full p-0 flex flex-col gap-0 rounded-none border-0 bg-background sm:max-w-none"
+      >
+        {/* Header */}
+        <header className="px-3 pt-3 pb-2 border-b border-border bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-9 h-9 rounded-full bg-primary/15 flex items-center justify-center">
+              <Gamepad2 className="w-4 h-4 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold truncate">{customerName || phoneNumber || "Lead"}</p>
+              <p className="text-[10px] text-muted-foreground truncate">{phoneNumber}</p>
+            </div>
+            <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={() => onOpenChange(false)} title="Voltar ao chat">
+              <X className="w-5 h-5" />
+            </Button>
+          </div>
+          <CaptureProgressBar progress={progress} filled={filledCount} total={totalFields} />
+          <p className="text-[11px] text-center mt-1.5 font-semibold text-primary/90">{phrase}</p>
+        </header>
+
+        {/* Tabs */}
+        <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="flex-1 flex flex-col overflow-hidden">
+          <TabsList className="mx-3 mt-2 grid grid-cols-2 h-10">
+            <TabsTrigger value="passos" className="gap-1.5 text-xs">
+              <ListChecks className="w-3.5 h-3.5" /> Passos
+              <span className="ml-1 text-[10px] bg-primary/15 px-1.5 py-0.5 rounded-full font-bold">{sentSteps.size}</span>
+            </TabsTrigger>
+            <TabsTrigger value="ficha" className="gap-1.5 text-xs">
+              <IdCard className="w-3.5 h-3.5" /> Ficha
+              <span className="ml-1 text-[10px] bg-primary/15 px-1.5 py-0.5 rounded-full font-bold">{filledCount}/{totalFields}</span>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="passos" className="flex-1 overflow-y-auto p-3 mt-2 mb-0 data-[state=inactive]:hidden">
+            <CaptureStepsList
+              consultantId={consultantId}
+              customerId={customerId}
+              sentSteps={sentSteps}
+              onSent={(id) => setSentSteps((s) => new Set(s).add(id))}
+            />
+          </TabsContent>
+
+          <TabsContent value="ficha" className="flex-1 overflow-hidden p-0 mt-2 mb-0 data-[state=inactive]:hidden">
+            <FichaWrap customerId={customerId} />
+          </TabsContent>
+        </Tabs>
+
+        {/* Footer */}
+        <footer className="p-3 border-t border-border bg-card/80 backdrop-blur sticky bottom-0 z-20 space-y-2">
+          {canSubmit ? (
+            <Button
+              size="lg"
+              className="w-full h-12 font-bold text-base gap-2 animate-pulse"
+              onClick={handleSubmit}
+              disabled={submitting}
+            >
+              {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trophy className="w-5 h-5" />}
+              CADASTRAR TUDO
+            </Button>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">
+                {filledCount}/{totalFields} campos · {sentSteps.size} passos enviados
+              </span>
+              <Button variant="ghost" size="sm" className="text-[11px] text-muted-foreground h-7" onClick={disableCapture}>
+                Sair do modo
+              </Button>
+            </div>
+          )}
+        </footer>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+/** Reuses CaptureLeadCard but unconstrained width (no aside w-80) */
+function FichaWrap({ customerId }: { customerId: string }) {
+  return (
+    <div className="h-full w-full overflow-hidden [&_aside]:!w-full [&_aside]:!border-l-0 [&_aside]:!border-0">
+      <CaptureLeadCard customerId={customerId} />
+    </div>
+  );
+}
