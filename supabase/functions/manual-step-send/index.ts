@@ -392,13 +392,7 @@ async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string,
   const rawRows = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
   const items: Array<{ kind: string; text?: string; media?: any }> = [];
   for (const m of rawRows) {
-    if (variant === "B" && String(m.kind).toLowerCase() === "audio") {
-      const transcript = await ensureAudioTranscript(supabase, m);
-      if (transcript && transcript.trim()) {
-        items.push({ kind: "text", text: transcript.trim() });
-      }
-      continue;
-    }
+    if (variant === "B" && String(m.kind).toLowerCase() === "audio") continue; // áudios são ignorados na variante B
     items.push({ kind: String(m.kind || "document").toLowerCase(), media: m });
   }
   const text = step.message_text ? applyVars(String(step.message_text)) : "";
