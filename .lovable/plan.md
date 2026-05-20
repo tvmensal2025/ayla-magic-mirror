@@ -1,62 +1,39 @@
 ## Problema
 
-Em 390x844 com a sheet em meia-tela (~52dvh), só cabem ~2 cards de passo na lista. Cada card hoje tem 5 linhas (título, preview 2 linhas, ícones de mídia, botões A/B/C com label+hint), ocupando ~120px. Resultado: muito scroll, difícil de ver tudo, e ainda assim os botões precisam continuar fáceis de apertar (alvo ≥40px).
+O botão de envio (h-10 + "Eye + letra") ficou desproporcional ao card compacto. Em telinha pequena (390x650), domina visualmente cada linha.
 
-## Mudanças (apenas `src/components/captacao/CaptureStepsList.tsx`)
+## Mudanças (`src/components/captacao/CaptureStepsList.tsx`)
 
-### 1. Card em linha única (modo compacto)
+### Card de passo (linha única, mais enxuta)
 
-Cada `<li>` vira uma linha horizontal de altura fixa ~52px:
+- **Botão**: trocar de `h-10 px-3` com ícone+letra por um botão-ícone circular `h-9 w-9 rounded-full` só com `Send` (sem letra, sem `Eye`). Alvo de toque continua 36px (aceitável; iOS recomenda 44, mas a área hit ainda é confortável num card de 44px de altura). Para garantir alvo confortável sem peso visual, uso `relative` + `before:absolute before:inset-[-6px]` (área invisível extra de 6px no toque) — visual 36px, hit-area efetiva 48px.
+- **Variante**: badge `A`/`B`/`C` pequena (`text-[9px]`) no canto inferior direito do número `#N`, em vez de no botão. Quem quer trocar variante abre a prévia.
+- **Linha de meta**: remover o texto "X variantes / variante A" (redundante com o badge). Manter só os ícones de mídia (mic/img/vídeo) com `w-3 h-3`.
+- **Padding do card**: `py-1.5 pl-2 pr-1.5` → `py-2 pl-2.5 pr-2`. Bordas `rounded-lg` mantidas.
+- **Tipografia**: título `text-xs` → `text-[13px]` (mais legível, ainda compacto). Removida a segunda linha de meta quando só tem ícones — fica em linha única com o título.
+
+### Layout final por card (~46px altura)
 
 ```
-[#N] Título do passo …          🎤🖼️       [Enviar A ▾]
+[●#N·A]  Apresentação inicial 🎤🖼️           [⤴]
 ```
 
-- `#N` + título truncado à esquerda (1 linha, `text-sm`).
-- Ícones de mídia (mic/image/video) no meio, menores (`w-3 h-3`).
-- **Um único botão primário à direita** disparando a variante padrão (`defaultV`), altura `h-10 px-3` → alvo de toque confortável.
-- O botão mostra `Send` + letra da variante (A/B/C). Se já enviado, vira `outline` com `Check`.
+- bolinha número+variante à esquerda (28px)
+- título + ícones de mídia inline no meio (1 linha truncada)
+- botão circular `Send` 36px à direita (com hit-area 48px invisível)
 
-### 2. A/B/C dentro do preview, não no card
+### Estado "enviado"
 
-Remove a fileira de 3 botões A/B/C do card. O clique no botão principal abre o `CaptureStepPreview` (já existe), onde o consultor:
-- vê o conteúdo,
-- escolhe variante (A/B/C) via tabs/chips dentro do preview,
-- confirma envio.
-
-Vantagem: card fica enxuto, e a escolha de variante ganha mais espaço/contexto. Isso exige acrescentar um seletor de variante no `CaptureStepPreview` (chips A/B/C no header do modal) — mantém a lógica `doSend(row)` já existente, só troca qual `row` vai.
-
-### 3. Remover preview de texto do card
-
-A linha `<p className="line-clamp-2">{g.preview}</p>` sai. O preview completo já aparece no modal `CaptureStepPreview`. Libera ~32px por card.
-
-### 4. Indicador "enviado" sutil
-
-Em vez do badge "✓ enviado" no canto, quando `anySent` o card inteiro ganha `bg-primary/5` + uma bolinha `✓` no `#N` (`bg-primary text-primary-foreground rounded-full`). Mantém feedback visual sem ocupar linha extra.
-
-### 5. Barra de busca colapsável
-
-A busca + "Só pendentes" hoje ocupam ~52px fixos no topo. Vira um ícone `Search` à direita do título da aba "Passos" (no header da sheet) — quando clicado, expande inline. Em meia-tela, ganha 1 card a mais visível.
-
-Como o ícone fica no header da sheet (fora do `CaptureStepsList`), uma alternativa mais simples: manter a barra mas reduzir altura `h-9 → h-8` e fundir busca + toggle "Só pendentes" num único `Input` com chip à direita.
-
-**Decisão**: usar a versão simples (barra `h-8`, mais densa) para escopo menor.
-
-## Resultado esperado
-
-- Card de passo: ~52px de altura (era ~120px).
-- Em 52dvh com header (~120px) + tabs (~40px) + footer (~80px), sobra ~280px para a lista → cabem **~5 passos** sem scroll (era 2).
-- Botão de envio continua `h-10` (≥40px) — fácil de apertar.
-- Variantes A/B/C continuam acessíveis via modal de confirmação.
-
-## Validação
-
-1. Mobile 390x844, sheet meia-tela: ver 4-5 passos sem rolar.
-2. Tocar no botão "Enviar A": abre preview com chips A/B/C, permite trocar variante, confirma envio.
-3. Passos enviados ficam com `#N` em bolinha verde e fundo `primary/5`.
-4. Em 320x568 (telinhas mínimas), botão ainda cabe e tem ≥40px de alvo.
-5. Modo expandido continua funcionando (mesmo layout, só mais altura disponível).
+- Bolinha vira verde sólida com `Check` (já está).
+- Botão circular vira `variant="outline"` com `Check` (em vez de `Send`).
 
 ## Fora de escopo
 
-- Lógica de envio (`manual-step-send`), OCR, modo expandido, desktop, ficha, footer da sheet.
+Header, footer, modal de prévia, tabs, lógica.
+
+## Validação
+
+1. 390x650: cabem 5-6 passos sem rolar.
+2. Botão visualmente discreto mas com hit-area ≥44px (testar tocando nas bordas).
+3. Badge da variante visível ao lado do número.
+4. Sem botões/textos cortados em 320px.

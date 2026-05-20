@@ -222,51 +222,55 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
           return (
             <li key={g.step_key}>
               <div
-                className={`rounded-lg border flex items-center gap-2 pl-2 pr-1.5 py-1.5 transition-all ${
+                className={`rounded-lg border flex items-center gap-2 pl-2 pr-2 py-1.5 transition-all ${
                   anySent
                     ? "border-primary/30 bg-primary/5"
                     : "border-border bg-card hover:border-primary/50"
                 }`}
               >
-                <span
-                  className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold tabular-nums ${
-                    anySent
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {anySent ? <Check className="w-3 h-3" /> : num}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold truncate leading-tight">
+                <div className="relative shrink-0">
+                  <span
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold tabular-nums ${
+                      anySent
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {anySent ? <Check className="w-3.5 h-3.5" /> : num}
+                  </span>
+                  <span className="absolute -bottom-0.5 -right-1 text-[8px] font-bold bg-background border border-border rounded-sm px-0.5 leading-none py-px text-foreground/80">
+                    {defaultRow?.variant || defaultV}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                  <p className="text-[13px] font-semibold truncate leading-tight">
                     {g.title || g.step_key || `Passo ${num}`}
                   </p>
-                  <div className="flex items-center gap-1 text-muted-foreground/70 mt-0.5">
-                    {media.includes("audio") && <Mic className="w-2.5 h-2.5 text-emerald-500" />}
-                    {media.includes("image") && <ImageIcon className="w-2.5 h-2.5 text-amber-500" />}
-                    {media.includes("video") && <Video className="w-2.5 h-2.5 text-cyan-500" />}
-                    <span className="text-[9px] uppercase tracking-wide opacity-70">
-                      {variantKeys.length > 1 ? `${variantKeys.length} variantes` : `variante ${variantKeys[0]}`}
-                    </span>
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    {media.includes("audio") && <Mic className="w-3 h-3 text-emerald-500" />}
+                    {media.includes("image") && <ImageIcon className="w-3 h-3 text-amber-500" />}
+                    {media.includes("video") && <Video className="w-3 h-3 text-cyan-500" />}
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant={anySent ? "outline" : "default"}
+                <button
+                  type="button"
                   disabled={isSending || !defaultRow}
                   onClick={() => defaultRow && setConfirmStep({ group: g, row: defaultRow })}
-                  className="h-10 px-3 text-[11px] gap-1 shrink-0"
                   title="Ver prévia e enviar"
+                  className={`relative shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors disabled:opacity-50 before:absolute before:inset-[-6px] before:content-[''] ${
+                    anySent
+                      ? "border border-primary/40 text-primary hover:bg-primary/10"
+                      : "bg-primary text-primary-foreground hover:bg-primary/90"
+                  }`}
                 >
                   {isSending ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : anySent ? (
+                    <Check className="w-4 h-4" />
                   ) : (
-                    <>
-                      <Eye className="w-3.5 h-3.5" />
-                      <span className="font-bold">{defaultRow?.variant || defaultV}</span>
-                    </>
+                    <Send className="w-4 h-4" />
                   )}
-                </Button>
+                </button>
               </div>
             </li>
           );
