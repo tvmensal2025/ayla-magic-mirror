@@ -87,14 +87,9 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
 
       let skipped = 0;
       if (step.variant === "B") {
-        rows = rows.flatMap((m) => {
-          if (String(m.kind).toLowerCase() !== "audio") return [m];
-          if (m.transcript && m.transcript.trim()) {
-            return [{ ...m, kind: "text", url: "", label: "transcrição do áudio" } as any];
-          }
-          skipped += 1;
-          return [];
-        });
+        const before = rows.length;
+        rows = rows.filter((m) => String(m.kind).toLowerCase() !== "audio");
+        skipped = before - rows.length;
       }
 
       if (!mounted) return;
