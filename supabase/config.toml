@@ -78,4 +78,9 @@ verify_jwt = false
 [functions.ad-creative-qa]
 verify_jwt = false
 
+[functions.capture-extract]
+verify_jwt = false
+
+
+
 

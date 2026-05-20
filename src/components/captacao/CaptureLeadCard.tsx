@@ -1,12 +1,14 @@
 import { useEffect, useState, useRef } from "react";
 import { CAPTURE_FIELDS, CaptureFieldKey, useCaptureSession } from "@/hooks/useCaptureSession";
+import { useCaptureSuggestions } from "@/hooks/useCaptureSuggestions";
 import { CaptureProgressBar } from "./CaptureProgressBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Check, Edit2, FileImage, Loader2, Sparkles, Trophy, X } from "lucide-react";
+import { Check, Edit2, FileImage, Loader2, Sparkles, Trophy, X, Bot } from "lucide-react";
 import { fireMiniConfetti, fireBigConfetti, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+
 
 interface Props {
   customerId: string;
@@ -15,11 +17,30 @@ interface Props {
 
 export function CaptureLeadCard({ customerId, onSubmitted }: Props) {
   const { customer, loading, filledCount, totalFields, progress, updateField } = useCaptureSession(customerId);
+  const { suggestions, resolve } = useCaptureSuggestions(customerId);
   const { toast } = useToast();
   const lastCountRef = useRef<number>(0);
   const [editing, setEditing] = useState<CaptureFieldKey | null>(null);
   const [editValue, setEditValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const suggestionByField = new Map(suggestions.map((s) => [s.field_name, s]));
+
+  const acceptSuggestion = async (key: CaptureFieldKey) => {
+    const s = suggestionByField.get(key);
+    if (!s) return;
+    try {
+      let value: any = s.suggested_value;
+      if (key === "electricity_bill_value") value = Number(String(value).replace(",", ".")) || null;
+      await updateField(key, value);
+      await resolve(s.id, "accepted");
+      fireMiniConfetti();
+      toast({ title: `🤖 IA capturou ${key}!`, duration: 1800 });
+    } catch (e: any) {
+      toast({ title: "Erro", description: e?.message || String(e), variant: "destructive" });
+    }
+  };
+
 
   useEffect(() => {
     if (loading || !customer) { lastCountRef.current = filledCount; return; }
@@ -104,14 +125,17 @@ export function CaptureLeadCard({ customerId, onSubmitted }: Props) {
           const filled = v !== null && v !== undefined && String(v).trim() !== "" && (f.key !== "electricity_bill_value" || Number(v) > 0);
           const isDoc = f.key === "document_front_url";
           const isEditingThis = editing === f.key;
+          const sugg = suggestionByField.get(f.key);
 
           return (
             <div
               key={f.key}
               className={`group rounded-md border p-2 transition-all ${
+                sugg ? "border-amber-400/60 bg-amber-400/5 ring-1 ring-amber-400/30 animate-pulse" :
                 filled ? "border-primary/30 bg-primary/5" : "border-border bg-background hover:border-primary/30"
               }`}
             >
+
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 min-w-0">
                   {filled ? <Check className="w-3.5 h-3.5 text-primary shrink-0" /> : <div className="w-3.5 h-3.5 rounded-full border-2 border-muted-foreground/30 shrink-0" />}
@@ -156,7 +180,25 @@ export function CaptureLeadCard({ customerId, onSubmitted }: Props) {
               ) : (
                 <p className="text-xs mt-0.5 break-words text-foreground/80 min-h-[1rem]">{filled ? String(v) : <span className="text-muted-foreground italic">vazio</span>}</p>
               )}
+              {sugg && !isEditingThis && (
+                <div className="mt-1.5 flex items-center gap-1 rounded bg-amber-400/10 border border-amber-400/40 p-1">
+                  <Bot className="w-3 h-3 text-amber-500 shrink-0" />
+                  <span className="text-[11px] flex-1 truncate text-amber-700 dark:text-amber-300">
+                    IA: <strong>{sugg.suggested_value}</strong>
+                  </span>
+                  <Button size="icon" variant="ghost" className="h-6 w-6 text-emerald-500 hover:text-emerald-600" onClick={() => void acceptSuggestion(f.key)} title="Aceitar">
+                    <Check className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => { setEditing(f.key); setEditValue(sugg.suggested_value); void resolve(sugg.id, "edited"); }} title="Editar">
+                    <Edit2 className="w-3 h-3" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground" onClick={() => void resolve(sugg.id, "dismissed")} title="Descartar">
+                    <X className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              )}
             </div>
+
           );
         })}
       </div>

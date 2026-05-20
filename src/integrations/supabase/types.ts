@@ -1737,6 +1737,53 @@ export type Database = {
         }
         Relationships: []
       }
+      capture_field_suggestions: {
+        Row: {
+          confidence: number
+          consultant_id: string
+          created_at: string
+          customer_id: string
+          field_name: string
+          id: string
+          resolved_at: string | null
+          source_message_id: string | null
+          status: string
+          suggested_value: string
+        }
+        Insert: {
+          confidence?: number
+          consultant_id: string
+          created_at?: string
+          customer_id: string
+          field_name: string
+          id?: string
+          resolved_at?: string | null
+          source_message_id?: string | null
+          status?: string
+          suggested_value: string
+        }
+        Update: {
+          confidence?: number
+          consultant_id?: string
+          created_at?: string
+          customer_id?: string
+          field_name?: string
+          id?: string
+          resolved_at?: string | null
+          source_message_id?: string | null
+          status?: string
+          suggested_value?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capture_field_suggestions_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       capture_scoreboard: {
         Row: {
           avg_minutes: number

@@ -1,116 +1,73 @@
+# Fase 4 — Captura automática com IA
 
-## Objetivo
+Objetivo: enquanto o consultor conversa no Modo Captação, a IA lê cada nova mensagem do lead e sugere preenchimento dos 10 campos críticos. O consultor confirma com 1 clique (modo Híbrido).
 
-Criar um "Modo Captação" gamificado: o consultor conversa via WhatsApp usando os 10 passos como templates clicáveis, vê os dados do cliente sendo preenchidos em tempo real numa lateral estilo "ficha de personagem", e ao chegar 10/10 aperta um botão que dispara o cadastro completo (mesmo caminho do Portal Worker que o fluxo automático usa).
-
-## Onde fica
-
-- Nova aba **"Captação"** dentro do CRM (`WhatsAppTab` → ao lado de Chats / Kanban / Envio em massa).
-- Layout 3 colunas:
-  - **Esquerda (280px):** lista de leads "em captação" (customers com `capture_mode='manual'`), com mini-barra 0/10 e tempo desde o início.
-  - **Centro (flex):** chat enxuto do lead selecionado + abaixo um **grid 2x5 dos 10 passos** (cards clicáveis).
-  - **Direita (360px):** "Ficha do Lead" — campos preenchidos animados + barra XP + miniaturas dos documentos.
-
-## Os 10 passos como templates
-
-Cada passo do fluxo padrão do consultor (já existem em `bot_flow_steps`) vira um **card de ação**:
+## Fluxo
 
 ```text
-┌─────────────────────────┐
-│ 1. Boas-vindas    ✓     │  ← já enviado
-│ 🎤 áudio + 💬 texto      │
-└─────────────────────────┘
+Lead envia msg  →  trigger DB  →  edge capture-extract (Gemini Flash)
+                                        ↓
+                          retorna { campo: valor, confidence }
+                                        ↓
+              insert em capture_field_suggestions (realtime)
+                                        ↓
+              CaptureLeadCard pisca campo + botões ✓ / ✏
+                                        ↓
+        ✓ aceitar  →  update customers.<campo>  +  +1 XP  +  confete leve
+        ✏ editar   →  abre input inline, salva manual (+1 XP)
+        ✗ ignorar  →  marca suggestion como dismissed
 ```
 
-Comportamento (modo **Híbrido** confirmado):
-- **Clique curto:** envia direto (texto + mídia + delays do step) pelo `manual-step-send` que já existe.
-- **Clique longo / menu "..."**: abre o composer pré-preenchido com `message_text` para edição.
-- Cada card mostra status: `pendente` / `enviado ✓` / `respondido 💬`.
-- Reordenável manualmente caso o consultor pule (não bloqueia).
+## Mudanças
 
-## Captura híbrida dos dados
+### Banco (1 migração)
 
-A "Ficha do Lead" mostra os campos do `customers` que importam pro cadastro:
-`name, cpf, rg, data_nascimento, phone_landline, email, cep, address_number, address_complement, electricity_bill_value, document_front_url, document_back_url, electricity_bill_photo_url`.
+- Tabela `capture_field_suggestions`:
+  - `customer_id`, `consultant_id`, `field_name`, `suggested_value`, `confidence` (0–1), `source_message_id`, `status` (`pending`/`accepted`/`edited`/`dismissed`), timestamps
+  - RLS: dono ou manager via `can_view_consultant`
+  - Realtime habilitado
+- Sem alterações em `customers`.
 
-Para cada resposta nova do cliente:
-1. Edge `capture-extract` (Gemini Flash) lê a última msg + contexto e devolve `{ campo, valor, confiança }`.
-2. Campo pisca verde na ficha com badge **"IA sugere → ✓ aceitar / ✏ editar"**.
-3. Consultor confirma com 1 clique. OCR de conta e documento continuam usando o pipeline existente (`whapi-webhook` já popula automaticamente).
-4. Campos preenchidos manualmente são editáveis inline (input pequeno + Enter salva).
+### Edge function `capture-extract` (nova)
 
-Cada campo confirmado conta **+1 XP** (10 campos críticos = 100%).
+- Trigger: chamada pelo `whapi-webhook` quando `customers.capture_mode = 'manual'` E a mensagem é **inbound** do lead.
+- Carrega últimas 6 mensagens + valores atuais dos 10 campos.
+- Gemini 2.5 Flash (Lovable AI Gateway) com Output schema Zod:
+  ```ts
+  { name?, cpf?, rg?, email?, phone_landline?, cep?,
+    address_number?, address_complement?,
+    electricity_bill_value?, confidence: Record<field, number> }
+  ```
+- Só insere sugestão se: campo está vazio em `customers` E `confidence ≥ 0.7` E ainda não há `pending` para o mesmo campo.
+- Erros 429/402 do gateway: log silencioso, não trava o webhook.
 
-## Gamificação (4 estilos confirmados)
+### Webhook (`whapi-webhook`)
 
-**Barra XP + confete**
-- Barra horizontal verde no topo da ficha (`0/10 → 10/10`).
-- A cada passo confirmado: animação `scale-in` + partículas (`canvas-confetti`).
-- Em 10/10: confete grande + som suave (`audio` opcional, configurável).
-
-**Frases motivacionais**
-- Toast curto a cada milestone:
-  - 1/10: "Boa! Primeiro dado capturado 🔥"
-  - 3/10: "Tá fluindo, segue o jogo!"
-  - 5/10: "Metade! Foco que tá saindo 💪"
-  - 8/10: "Faltam só 2, não solta agora!"
-  - 10/10: "CADASTRO COMPLETO ⚡ Aperta o botão!"
-- Frases ficam num array configurável; modo "silencioso" no topo da aba.
-
-**Placar diário/semanal**
-- Card fixo no canto sup. direito da aba: `Hoje: 3 ✅ • Semana: 12 ✅ • Streak: 4 dias`.
-- Tabela `capture_scoreboard` (consultant_id, date, registros, tempo_medio_min, streak).
-- View ranking entre consultores do mesmo gerente (reaproveita `can_view_consultant`).
-
-**Badges/conquistas**
-- Tabela `capture_achievements` (consultant_id, badge_key, earned_at).
-- Badges iniciais: `primeiro_do_dia`, `5_seguidos`, `relampago` (<10min), `noturno` (após 20h), `combo_3` (3 cadastros no mesmo dia), `mvp_semana`.
-- Notificação tipo "achievement unlocked" com glow verde + ícone.
-
-## Botão "CADASTRAR TUDO"
-
-- Aparece habilitado só quando `getNextMissingStep(c) === 'ask_finalizar'` (reaproveita helper de `conversation-helpers.ts`).
-- Clique → seta `conversation_step='finalizando'` e chama edge `submit-lead-manual` que:
-  1. Valida campos (mesmo conjunto de validações do helper).
-  2. Dispara `portal-worker` (mesma rota do fluxo automático).
-  3. Em sucesso: anima a ficha "completando" → confete grande → registra na `capture_scoreboard` → checa badges.
-
-## Mudanças técnicas resumidas
-
-### Banco (migrations)
-- `customers`: adicionar coluna `capture_mode text default 'auto'` (`auto` | `manual`) e `capture_started_at timestamptz`.
-- Nova `capture_scoreboard` (consultant_id, date, registrations, avg_minutes, streak).
-- Nova `capture_achievements` (consultant_id, badge_key, earned_at, metadata).
-- Nova `capture_field_events` (consultant_id, customer_id, field, source `ai`|`manual`|`ocr`, confirmed_at) — usado para XP e analytics.
-- RLS: owner-only via `consultant_id = auth.uid()`, gestores via `can_view_consultant`.
-
-### Edge functions novas
-- `capture-extract` — Gemini Flash: input = últimas N mensagens + ficha atual; output = sugestões por campo.
-- `submit-lead-manual` — espelho de `submit-lead` do bot, mas disparado pelo botão.
-- `capture-award-badges` — chamada após cada cadastro para checar badges.
+- Após persistir mensagem inbound, dispara `capture-extract` em background (sem await bloqueante) apenas se `capture_mode = 'manual'`.
+- Zero impacto em leads em fluxo automático.
 
 ### Frontend
-- `src/pages/CaptacaoPage.tsx` (rota `/admin/captacao`) + aba dentro do CRM.
-- Componentes:
-  - `CaptureLeadList.tsx` (esquerda)
-  - `CaptureChatMini.tsx` (centro topo)
-  - `CaptureStepsGrid.tsx` (centro inferior) — 10 cards com status
-  - `CaptureLeadCard.tsx` (direita) — ficha + barra XP
-  - `CaptureProgressBar.tsx`, `CaptureScoreboard.tsx`, `CaptureBadgeToast.tsx`
-- Hook `useCaptureSession(customerId)` — orquestra sugestões IA, salvamento, XP.
-- Lib `confetti` (já leve, ~2KB) + `framer-motion` (verificar se existe; senão usar animações Tailwind já presentes em `tailwind.config.ts`).
 
-## O que **não** muda
+- `useCaptureSession`: subscrever realtime de `capture_field_suggestions` do `customer_id` ativo.
+- `CaptureLeadCard`: 
+  - Badge "IA sugere: <valor>" sobre o campo com botões ✓ / ✏ / ✗
+  - Animação `framer-motion` (flash dourado) quando sugestão chega
+  - ✓ → update customer, marca `accepted`, dispara `bumpXP()` + mini-confete
+  - ✏ → abre input pré-preenchido, salva e marca `edited`
+  - ✗ → marca `dismissed`
+- `captureGame.ts`: adicionar frase "🤖 IA capturou <campo>!" no toast.
 
-- Webhook `whapi-webhook`, fluxos automáticos, OCR, portal-worker — tudo continua igual.
-- Templates atuais (`bot_flow_steps`) são lidos como estão; nenhuma renomeação adicional.
-- Bot pausa automaticamente quando `capture_mode='manual'` via helper `bot/paused.ts` existente (basta setar `bot_paused=true` ao entrar no modo).
+## O que NÃO muda
 
-## Entrega em fases
+- Fluxo automático, OCR, portal-worker, submit-lead, scoreboard, badges (fase 3).
+- Consultor pode continuar digitando manualmente — sugestão é opcional.
 
-1. **Migração** + criar aba/rota vazia + setar `capture_mode='manual'` ao abrir um lead na aba.
-2. **Ficha lateral** lendo `customers` em realtime + edição inline.
-3. **Grid dos 10 passos** reaproveitando `manual-step-send`.
-4. **Captura IA** (`capture-extract`) + sugestões + XP/confete.
-5. **Botão CADASTRAR TUDO** (`submit-lead-manual`).
-6. **Placar + badges** (scoreboard, conquistas, frases motivacionais).
+## Entregáveis
+
+1. Migração `capture_field_suggestions` + RLS + realtime
+2. Edge `supabase/functions/capture-extract/index.ts`
+3. Patch em `whapi-webhook` (dispatch background)
+4. Atualização de `useCaptureSession.ts` + `CaptureLeadCard.tsx`
+5. Frases novas em `captureGame.ts`
+
+Posso prosseguir?
