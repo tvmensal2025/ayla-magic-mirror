@@ -88,6 +88,25 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
     onOpenChange(false);
   };
 
+  // Barra minimizada — flutua no rodapé sem bloquear o input do chat
+  if (open && minimized) {
+    return (
+      <button
+        type="button"
+        onClick={() => setMinimized(false)}
+        className="fixed bottom-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 h-11 rounded-full bg-primary text-primary-foreground shadow-2xl shadow-primary/40 border border-primary/60 backdrop-blur animate-in slide-in-from-bottom-2"
+        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+      >
+        <Gamepad2 className="w-4 h-4" />
+        <span className="text-xs font-bold">
+          Captação {filledCount}/{totalFields}
+        </span>
+        <span className="text-[10px] opacity-80">· {sentSteps.size}/10 passos</span>
+        <ChevronUp className="w-4 h-4" />
+      </button>
+    );
+  }
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -104,7 +123,16 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
               <p className="text-sm font-bold truncate">{customerName || phoneNumber || "Lead"}</p>
               <p className="text-[10px] text-muted-foreground truncate">{phoneNumber}</p>
             </div>
-            <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={() => onOpenChange(false)} title="Voltar ao chat">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-9 w-9 shrink-0"
+              onClick={() => setMinimized(true)}
+              title="Minimizar (liberar input do chat)"
+            >
+              <ChevronDown className="w-5 h-5" />
+            </Button>
+            <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={() => onOpenChange(false)} title="Fechar">
               <X className="w-5 h-5" />
             </Button>
           </div>
