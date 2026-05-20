@@ -160,6 +160,12 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
             </div>
           )}
 
+          {!loading && skippedAudios > 0 && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+              ⚠️ {skippedAudios} áudio{skippedAudios > 1 ? "s" : ""} sem transcrição — não {skippedAudios > 1 ? "serão enviados" : "será enviado"} na variante B. Gere a transcrição em <span className="font-semibold">/admin/fluxos</span>.
+            </div>
+          )}
+
           {!loading && orderedMedias.length === 0 && !renderedText && (
             <p className="text-xs text-muted-foreground italic text-center py-6">
               Nenhuma mídia ou texto configurado para essa variante.
