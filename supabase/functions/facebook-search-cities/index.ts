@@ -4,7 +4,7 @@
 //   { bulk: [{ name, uf }, ...] }                  -> resolve várias cidades de uma vez
 //                                                     consultando cache `fb_city_cache` primeiro
 //                                                     e gravando o que faltar.
-import { adminClient, authConsultant, corsHeaders, fbFetch, loadCampaignConnection, loadConnection } from "../_shared/fb-graph.ts";
+import { adminClient, authConsultant, corsHeaders, fbFetch, FbAuthError, loadCampaignConnection, loadConnection } from "../_shared/fb-graph.ts";
 
 interface BulkItem { name: string; uf: string }
 
@@ -58,6 +58,7 @@ Deno.serve(async (req) => {
       const toInsert: any[] = [];
       const unresolved: { name: string; uf: string; reason: string }[] = [];
       const toInvalidate: { name: string; uf: string }[] = [];
+      let needsReconnect = false;
       for (const it of items) {
         const cKey = `${it.name}|${it.uf}`;
         const hit = cacheMap.get(cKey);
@@ -70,6 +71,11 @@ Deno.serve(async (req) => {
         if (hit) {
           // cache inválido — vamos refazer o lookup e sobrescrever
           toInvalidate.push({ name: it.name, uf: it.uf });
+        }
+        // Se o token já caiu uma vez, não adianta tentar o resto
+        if (needsReconnect) {
+          unresolved.push({ name: it.name, uf: it.uf, reason: "needs_reconnect" });
+          continue;
         }
         // 2) consulta o FB pra cidades faltantes
         try {
@@ -86,6 +92,12 @@ Deno.serve(async (req) => {
             console.warn("[fb-search-cities bulk] no UF match for", it.name, it.uf, "candidates:", list.map((h) => `${h.name}/${h.region}`).join(", "));
           }
         } catch (e) {
+          if (e instanceof FbAuthError) {
+            needsReconnect = true;
+            unresolved.push({ name: it.name, uf: it.uf, reason: "needs_reconnect" });
+            console.warn("[fb-search-cities bulk] token inválido — abortando lookups restantes");
+            continue;
+          }
           console.warn("[fb-search-cities bulk] fail", it.name, (e as Error).message);
           unresolved.push({ name: it.name, uf: it.uf, reason: (e as Error).message });
         }
@@ -100,14 +112,22 @@ Deno.serve(async (req) => {
       if (toInsert.length) {
         await admin.from("fb_city_cache").upsert(toInsert, { onConflict: "name,uf" });
       }
-      return new Response(JSON.stringify({ cities: results, unresolved, cached: items.length - toInsert.length - unresolved.length, fetched: toInsert.length }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ cities: results, unresolved, cached: items.length - toInsert.length - unresolved.length, fetched: toInsert.length, needs_reconnect: needsReconnect }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // ---------- AUTOCOMPLETE MODE ----------
     const q = body?.q;
     if (!q || q.length < 2) return new Response(JSON.stringify({ cities: [] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     const url = `/search?location_types=["city"]&type=adgeolocation&country_code=BR&q=${encodeURIComponent(q)}&limit=15&access_token=${conn.token}`;
-    const json = await fbFetch(url);
+    let json: any;
+    try {
+      json = await fbFetch(url);
+    } catch (e) {
+      if (e instanceof FbAuthError) {
+        return new Response(JSON.stringify({ cities: [], needs_reconnect: true, reason: e.message }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      throw e;
+    }
     const cities = (json.data || []).map((c: any) => ({
       key: c.key, name: c.name, region: c.region, region_id: c.region_id,
       type: c.type, country_code: c.country_code,
