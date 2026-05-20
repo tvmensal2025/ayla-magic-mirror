@@ -97,8 +97,16 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
     const withConsumption = filtered.filter((c: any) => Number(c.media_consumo) > 0);
     const avgKw = withConsumption.length > 0 ? totalKw / withConsumption.length : 0;
 
-    const withBill = filtered.filter((c: any) => Number(c.electricity_bill_value) > 0);
-    const totalBill = withBill.reduce((s: number, c: any) => s + Number(c.electricity_bill_value), 0);
+    // Estimativa: clientes iGreen não trazem electricity_bill_value, usamos media_consumo (kWh) × tarifa média (R$ 0,95)
+    const TARIFA_MEDIA = 0.95;
+    const billOf = (c: any) => {
+      const real = Number(c.electricity_bill_value) || 0;
+      if (real > 0) return real;
+      const kwh = Number(c.media_consumo) || 0;
+      return kwh * TARIFA_MEDIA;
+    };
+    const withBill = filtered.filter((c: any) => billOf(c) > 0);
+    const totalBill = withBill.reduce((s: number, c: any) => s + billOf(c), 0);
     const avgBill = withBill.length > 0 ? totalBill / withBill.length : 0;
     const economiaGerada = totalBill * 0.20;
 
@@ -268,8 +276,8 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
         <StatCard icon={<Users className="w-5 h-5" />} label="Total de Clientes" value={filteredMetrics?.totalCustomers ?? 0} color="primary" />
         <StatCard icon={<Zap className="w-5 h-5" />} label="Média kWh/cliente" value={`${(filteredMetrics?.avgKw ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 0 })} kW`} color="accent" subtitle={`Total: ${(filteredMetrics?.totalKw ?? 0).toLocaleString("pt-BR")} kW`} />
-        <StatCard icon={<DollarSign className="w-5 h-5" />} label="Ticket médio (conta)" value={(filteredMetrics?.avgBill ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })} color="primary" />
-        <StatCard icon={<PiggyBank className="w-5 h-5" />} label="Economia gerada" value={(filteredMetrics?.economiaGerada ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })} color="accent" subtitle="20% da soma das contas" />
+        <StatCard icon={<DollarSign className="w-5 h-5" />} label="Ticket médio (conta)" value={(filteredMetrics?.avgBill ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })} color="primary" subtitle="estimado pela tarifa média" />
+        <StatCard icon={<PiggyBank className="w-5 h-5" />} label="Economia gerada" value={(filteredMetrics?.economiaGerada ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })} color="accent" subtitle="20% sobre a conta estimada" />
         <StatCard icon={<TrendingUp className="w-5 h-5" />} label="Taxa de Conversão" value={`${(analytics?.conversionRate ?? 0).toFixed(1)}%`} color="primary" subtitle="Cliques / Visualizações" />
       </div>
 

@@ -110,7 +110,7 @@ export function useAnalytics(
       while (true) {
         const baseQ = supabase
           .from("customers")
-          .select("id, name, status, media_consumo, electricity_bill_value, created_at, updated_at, registered_by_name, registered_by_igreen_id, customer_origin, address_state, address_city, distribuidora, phone_whatsapp, consultant_id");
+          .select("id, name, status, media_consumo, electricity_bill_value, created_at, updated_at, registered_by_name, registered_by_igreen_id, customer_origin, address_state, address_city, distribuidora, phone_whatsapp, consultant_id, data_nascimento");
         const scoped = useTeam
           ? baseQ.in("consultant_id", teamIds!)
           : baseQ.eq("consultant_id", consultantId!);
