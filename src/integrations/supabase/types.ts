@@ -1626,6 +1626,30 @@ export type Database = {
         }
         Relationships: []
       }
+      capture_achievements: {
+        Row: {
+          badge_key: string
+          consultant_id: string
+          earned_at: string
+          id: string
+          metadata: Json
+        }
+        Insert: {
+          badge_key: string
+          consultant_id: string
+          earned_at?: string
+          id?: string
+          metadata?: Json
+        }
+        Update: {
+          badge_key?: string
+          consultant_id?: string
+          earned_at?: string
+          id?: string
+          metadata?: Json
+        }
+        Relationships: []
+      }
       capture_diagnostics: {
         Row: {
           actions: Json
@@ -1685,6 +1709,66 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      capture_field_events: {
+        Row: {
+          confirmed_at: string
+          consultant_id: string
+          customer_id: string
+          field: string
+          id: string
+          source: string
+        }
+        Insert: {
+          confirmed_at?: string
+          consultant_id: string
+          customer_id: string
+          field: string
+          id?: string
+          source?: string
+        }
+        Update: {
+          confirmed_at?: string
+          consultant_id?: string
+          customer_id?: string
+          field?: string
+          id?: string
+          source?: string
+        }
+        Relationships: []
+      }
+      capture_scoreboard: {
+        Row: {
+          avg_minutes: number
+          consultant_id: string
+          created_at: string
+          date: string
+          id: string
+          registrations: number
+          streak: number
+          updated_at: string
+        }
+        Insert: {
+          avg_minutes?: number
+          consultant_id: string
+          created_at?: string
+          date?: string
+          id?: string
+          registrations?: number
+          streak?: number
+          updated_at?: string
+        }
+        Update: {
+          avg_minutes?: number
+          consultant_id?: string
+          created_at?: string
+          date?: string
+          id?: string
+          registrations?: number
+          streak?: number
+          updated_at?: string
+        }
+        Relationships: []
       }
       consultant_ad_settings: {
         Row: {
@@ -2116,6 +2200,8 @@ export type Database = {
           bot_paused_reason: string | null
           bot_paused_until: string | null
           bot_processing_until: string | null
+          capture_mode: string
+          capture_started_at: string | null
           cashback: string | null
           cep: string | null
           chat_cleared_at: string | null
@@ -2238,6 +2324,8 @@ export type Database = {
           bot_paused_reason?: string | null
           bot_paused_until?: string | null
           bot_processing_until?: string | null
+          capture_mode?: string
+          capture_started_at?: string | null
           cashback?: string | null
           cep?: string | null
           chat_cleared_at?: string | null
@@ -2360,6 +2448,8 @@ export type Database = {
           bot_paused_reason?: string | null
           bot_paused_until?: string | null
           bot_processing_until?: string | null
+          capture_mode?: string
+          capture_started_at?: string | null
           cashback?: string | null
           cep?: string | null
           chat_cleared_at?: string | null
