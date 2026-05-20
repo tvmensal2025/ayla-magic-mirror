@@ -2,7 +2,7 @@ import React, { useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, BarChart3, LinkIcon, Settings, MessageSquare, LayoutGrid, Users, Copy, Download, X, Sparkles, FolderDown, Network, Eye, EyeOff, Megaphone } from "lucide-react";
+import { LogOut, BarChart3, LinkIcon, Settings, MessageSquare, LayoutGrid, Users, Copy, Download, X, Sparkles, FolderDown, Network, Eye, EyeOff, Megaphone, Gamepad2 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { OnboardingGate } from "@/components/admin/OnboardingGate";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
@@ -24,6 +24,7 @@ const NotificationCenter = lazy(() => import("@/components/admin/NotificationCen
 const AIChatPanel = lazy(() => import("@/components/admin/AIChatPanel").then(m => ({ default: m.AIChatPanel })));
 const WhatsAppTab = lazy(() => import("@/components/whatsapp/WhatsAppTab").then(m => ({ default: m.WhatsAppTab })));
 const CrmTabs = lazy(() => import("@/components/whatsapp/CrmTabs").then(m => ({ default: m.CrmTabs })));
+const CaptacaoPanel = lazy(() => import("@/components/captacao/CaptacaoPanel").then(m => ({ default: m.CaptacaoPanel })));
 const CustomerManager = lazy(() => import("@/components/whatsapp/CustomerManager").then(m => ({ default: m.CustomerManager })));
 
 const MaterialsTab = lazy(() => import("@/components/admin/MaterialsTab").then(m => ({ default: m.MaterialsTab })));
@@ -40,7 +41,7 @@ const AdminContent = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "links" | "whatsapp" | "crm" | "clientes" | "rede" | "central-anuncios">(() => {
+  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "links" | "whatsapp" | "crm" | "captacao" | "clientes" | "rede" | "central-anuncios">(() => {
     if (typeof window !== "undefined") {
       const tab = new URLSearchParams(window.location.search).get("tab");
       if (tab === "performance" || tab === "anuncios" || tab === "central-anuncios") return "central-anuncios";
@@ -162,6 +163,7 @@ const AdminContent = () => {
   const tabs = [
     { id: "dashboard" as const, label: "Dashboard", icon: BarChart3 },
     { id: "crm" as const, label: "CRM", icon: LayoutGrid },
+    { id: "captacao" as const, label: "Captação", icon: Gamepad2 },
     { id: "clientes" as const, label: "Clientes", icon: Users },
     { id: "rede" as const, label: "Rede", icon: Network },
     { id: "whatsapp" as const, label: "WhatsApp", icon: MessageSquare },
@@ -311,6 +313,10 @@ const AdminContent = () => {
 
           {userId && activeTab === "crm" && (
             <CrmTabs consultantId={userId} instanceName={instanceName} />
+          )}
+
+          {userId && activeTab === "captacao" && (
+            <CaptacaoPanel consultantId={userId} onOpenChat={(phone) => { setPendingChatPhone(phone); setActiveTab("whatsapp"); }} />
           )}
 
           {userId && activeTab === "clientes" && (
