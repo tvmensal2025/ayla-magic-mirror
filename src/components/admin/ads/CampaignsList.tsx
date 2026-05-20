@@ -3,10 +3,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Pause, Play, Loader2, MapPin, TrendingUp, Users, MessageCircle, DollarSign, Heart, AlertTriangle, RefreshCw, Trash2 } from "lucide-react";
+import { Pause, Play, Loader2, MapPin, TrendingUp, Users, MessageCircle, DollarSign, Heart, AlertTriangle, RefreshCw, Trash2, Facebook } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { CampaignHealthCheck } from "./CampaignHealthCheck";
 import { useUserRole } from "@/hooks/useUserRole";
+import { startFacebookOAuth } from "@/services/facebookAds";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -43,14 +44,24 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 // Mapeia mensagem crua do Meta pra explicação + sugestão amigável.
-function explainRejection(raw: string | null | undefined): { title: string; suggestion: string } | null {
+// kind="session" sinaliza pro UI esconder "Tentar reativar" e mostrar "Reconectar Facebook".
+function explainRejection(raw: string | null | undefined): { title: string; suggestion: string; kind?: "session" | "other" } | null {
   if (!raw) return null;
   const r = raw.toLowerCase();
+  if (
+    r.includes("session_invalidated") ||
+    r.includes("session has been invalidated") ||
+    r.includes("session for security reasons") ||
+    r.includes("subcode=460") || r.includes("subcode\":460") ||
+    (r.includes("code=190")) || (r.includes("code\":190"))
+  ) {
+    return { kind: "session", title: "Conexão com Facebook expirou", suggestion: "O Facebook invalidou a sessão (provavelmente por troca de senha ou segurança). Clique em \"Reconectar Facebook\" abaixo e republique a campanha — \"Tentar reativar\" não resolve esse caso." };
+  }
   if (r.includes("2446885") || r.includes("conta pessoal") || r.includes("whatsapp business")) {
     return { title: "Página sem WhatsApp Business", suggestion: "Vá no Meta Business Suite → Configurações → WhatsApp e vincule um número Business à Página. Depois reabra 'Selecionar assets' e republique." };
   }
   if (r.includes("token") && (r.includes("expired") || r.includes("expirou") || r.includes("invalid"))) {
-    return { title: "Token do Facebook expirou", suggestion: "Reconecte sua conta Facebook no card de conexão e republique a campanha." };
+    return { kind: "session", title: "Token do Facebook expirou", suggestion: "Reconecte sua conta Facebook clicando no botão abaixo e republique a campanha." };
   }
   if (r.includes("ad_account") || r.includes("disabled") || r.includes("desativada")) {
     return { title: "Conta de anúncios desativada", suggestion: "Acesse business.facebook.com → Conta de Anúncios e resolva o aviso (geralmente cartão recusado ou política violada)." };
@@ -195,11 +206,28 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
                 </div>
                 {c.rejection_reason && (() => {
                   const exp = explainRejection(c.rejection_reason);
+                  const isSession = exp?.kind === "session";
                   return (
                     <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs space-y-1.5">
                       <div className="font-bold text-destructive flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" />{exp?.title || "Erro"}</div>
                       <div className="text-muted-foreground">{exp?.suggestion}</div>
-                      {(c.status === "pending_review" || c.status === "paused") && (
+                      {isSession ? (
+                        <Button
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              const res = await startFacebookOAuth("connect");
+                              window.location.href = res.url;
+                            } catch (e: any) {
+                              toast({ title: "Falha ao iniciar reconexão", description: e?.message || "Erro", variant: "destructive" });
+                            }
+                          }}
+                          className="h-7 text-xs gap-1 bg-[#1877F2] hover:bg-[#1877F2]/90 text-white"
+                        >
+                          <Facebook className="w-3 h-3" />
+                          Reconectar Facebook
+                        </Button>
+                      ) : (c.status === "pending_review" || c.status === "paused") && (
                         <Button size="sm" variant="outline" onClick={() => tryReactivate(c)} disabled={reactivating === c.id} className="h-7 text-xs gap-1">
                           {reactivating === c.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                           Tentar reativar
