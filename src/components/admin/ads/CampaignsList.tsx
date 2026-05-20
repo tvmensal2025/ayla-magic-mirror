@@ -157,6 +157,30 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
     } finally { setReactivating(null); }
   }
 
+  async function handleToggle(c: Campaign) {
+    const action = c.status === "active" ? "pause" : "activate";
+    setToggling(c.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("facebook-toggle-campaign", {
+        body: { campaign_id: c.id, action },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      const newStatus = (data as any)?.status || (action === "pause" ? "paused" : "active");
+      const metaWarn = (data as any)?.meta_error;
+      setItems((prev) => prev.map((x) => x.id === c.id ? { ...x, status: newStatus, rejection_reason: action === "activate" && !metaWarn ? null : x.rejection_reason } : x));
+      toast({
+        title: action === "pause" ? "Campanha pausada" : "Campanha ativada",
+        description: metaWarn ? `Status local atualizado. Aviso Meta: ${metaWarn}` : "Sincronizado com o Meta.",
+        variant: metaWarn ? "destructive" : "default",
+      });
+    } catch (e: any) {
+      toast({ title: "Falha ao alterar status", description: e?.message || "Erro", variant: "destructive" });
+    } finally {
+      setToggling(null);
+    }
+  }
+
   async function handleDelete(c: Campaign) {
     setDeleting(c.id);
     try {
