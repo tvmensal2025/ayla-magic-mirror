@@ -31,6 +31,8 @@ export function QuickReplyMenu({ templates, search, onSelect, onClose, onExactSh
       return aS - bS;
     });
 
+  useEffect(() => { onExactShortcut?.(exactShortcut || null); }, [exactShortcut, onExactShortcut]);
+
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
