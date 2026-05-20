@@ -1,63 +1,100 @@
+# Plano: Dashboard do Consultor + Modo Líder
 
-# Correção dos Fluxos A/B do Rafael Ferreira
+## 1. Hierarquia de Líder (banco)
 
-## Reanálise (correção da análise anterior)
+Hoje `consultants.referred_by` já existe mas está vazio. Vou:
 
-Reli direto do banco. **Boa notícia:** as "transitions órfãs" relatadas antes **não existem** — todos os `goto_step_id` em ambos os fluxos apontam para steps reais. Os P2 da análise anterior estão descartados.
+- Criar função SQL `get_team_consultant_ids(_leader uuid)` que retorna o próprio id + todos descendentes via CTE recursiva sobre `referred_by`.
+- Criar política RLS adicional em `customers` permitindo que o líder leia clientes da equipe (usando `has_role` ou a função acima).
+- Cadastrar **Rafael Dias** como consultor "líder" (via UI normal de cadastro) — depois você liga manualmente cada filho preenchendo `referred_by = id_do_rafael_dias` na aba de gestão (já existe `ManagedConsultants`).
 
-**Notícia ruim:** o Fluxo B tem 1 bug grave de roteamento que pula o passo "Como funciona" inteiro:
+## 2. Novos cards no DashboardTab (`src/components/admin/DashboardTab.tsx`)
+
+Trocar a grid atual de 3 cards por **5 cards** em 2 linhas:
 
 ```text
-B-pos6 "Pede permissão" --(default/afirmação)--> pos8 "Convite"   ❌ pula pos7
-B-pos7 "Como funciona"  --(nunca alcançado)----> pos9 (órfão de fato)
-B-pos8 "Convite"        com slot_key = fazenda_solar              ❌ mídia errada
+[Total Clientes] [Média kWh/cliente] [Média R$/cliente]
+[Economia gerada (R$ × 20%)] [Taxa de conversão]
 ```
 
-Resultado prático no B hoje: lead recebe "5. Pede permissão" → "7. Convite" mostrando o vídeo do fazenda_solar (que era pra ser do "Como funciona"), e nunca vê o passo 6. Os outros 8 passos (1,2,3,4,5,8,9,10) chegam corretos.
+- `media_kwh` = somatório `media_consumo` / clientes com consumo > 0 (já calculado).
+- `media_rs` = média de `electricity_bill_value` dos clientes com valor.
+- `economia` = soma(`electricity_bill_value` × 0.20).
 
-## Issues confirmados
+## 3. Novo componente `TopConsumersCard`
 
-| # | Fluxo | Problema | Impacto |
-|---|-------|----------|---------|
-| B1 | B | `pos6.transitions[*].goto_step_id` aponta pra pos8 em vez de pos7 | passo 6 nunca é executado |
-| B2 | B | pos7 `slot_key=NULL` | mesmo se reativado, não envia mídia |
-| B3 | B | pos8 `slot_key=fazenda_solar` (deveria ser NULL) | convite aparece com vídeo da fazenda |
-| A1 | A | pos5 "Explica desconto" `slot=como_funciona`, pos7 "Como funciona" `slot=fazenda_solar` | títulos vs slot trocados, **mas funciona em produção há tempos** |
+Lista os 10 clientes com maior `media_consumo`:
 
-## Plano
-
-### 1. Corrigir Fluxo B (crítico — migração de DATA via insert tool)
-
-```sql
--- B1: pos6 deve avançar para pos7 (id e0f1de51-36c5-4669-9ffd-95c1423e5008)
-UPDATE bot_flow_steps
-SET transitions = '[
-  {"goto_step_id":"e0f1de51-36c5-4669-9ffd-95c1423e5008","trigger_intent":"afirmacao","trigger_phrases":["ok","okay","pode","sim","claro","manda","beleza"]},
-  {"goto_step_id":"e0f1de51-36c5-4669-9ffd-95c1423e5008","trigger_intent":"default","trigger_phrases":[]}
-]'::jsonb
-WHERE id = '94e01f57-b841-455f-8777-6bb6d3a94674';
-
--- B2 + B3: trocar slot_key entre pos7 e pos8
-UPDATE bot_flow_steps SET slot_key = 'fazenda_solar' WHERE id = 'e0f1de51-36c5-4669-9ffd-95c1423e5008';
-UPDATE bot_flow_steps SET slot_key = NULL            WHERE id = '674d90a5-38b4-4931-a8a3-eac8e743ce7a';
+```text
+#1  Maria Silva       1.450 kW   R$ 980/mês
+#2  João Pereira      1.220 kW   R$ 845/mês
+...
 ```
 
-### 2. Fluxo A — **NÃO MEXER**
+Inclui badge de status (Aprovado/Pendente) e link para abrir o cliente no CRM.
 
-Os slot_keys de A estão "trocados" semanticamente, mas a mídia atual está vinculada a esses slots e o fluxo roda OK em produção. Mexer = risco alto de quebrar quem já está no meio do funil. Mantém como está.
+## 4. Novo componente `GeographyCard`
 
-### 3. Validação pós-fix
+Dois mini-gráficos lado a lado:
+- Top 5 distribuidoras (barra horizontal) — usa `customers.distribuidora`.
+- Top 5 UFs — derivado do telefone (DDD via `dddToUf.ts` que já existe) ou de `customers.uf` se houver.
 
-- Re-consulta os 11 steps de B e confirma chain: pos2→3→4→5→6→7→8→9→10→11.
-- Confere `ai_media_library` para garantir que existe mídia ativa pro consultor nos slots `fazenda_solar` (será usado em B-pos7 agora) e que nenhum slot novo ficou órfão.
-- A/B test pode continuar ligado: clientes existentes têm `flow_variant=NULL` (tratado como A) e só novos leads entram no B corrigido.
+## 5. Novo componente `RetentionCard`
 
-### 4. Sobre "disparar pro lead do passado"
+- **Aniversariantes da semana** — usa `customers.birth_date` (se não existir, adicionar coluna opcional via migration).
+- **Inativos / risco churn** — clientes com último inbound > 30 dias e status ≠ aprovado.
 
-Confirmado pela análise anterior: 877 dos 926 clientes estão `bot_paused=true` (silêncio total via `_shared/bot/paused.ts`). `set_customer_flow_variant` só roda em INSERT. Ligar/desligar A/B não dispara cron retroativo. **Seguro.**
+## 6. Toggle "Meus clientes / Equipe" + nova aba "Equipe"
 
-## O que NÃO faz parte deste plano
+Na toolbar do DashboardTab, adicionar `ToggleGroup`:
+- **Meus clientes** (default) — comportamento atual.
+- **Equipe** — só aparece se `useTeamConsultantIds(userId).length > 1`. Quando ativo, todas as queries (`useAnalytics`, top consumidores, geografia, retenção) recebem array de ids em vez de um único.
 
-- Renomear `slot_key` do Fluxo A
-- Tocar em mídias do `ai_media_library`
-- Mexer em código (apenas dados via UPDATE em 3 linhas)
+Nova aba **`/admin/equipe`** com ranking dos consultores indicados (reaproveita `useLeadsByConsultant` que já existe e expande):
+
+```text
+#  Consultor          Clientes  Aprovados  kW médio  R$ médio  Conv%  Leads 30d
+1  Ana Costa          124       89          892       720       18%    34
+2  Bruno Lima         98        61          734       650       14%    22
+...
+```
+
+- Coluna "Conv%" = aprovados / total.
+- Botão "Ver dashboard" abre a visão individual daquele consultor (somente leitura).
+
+## 7. Hook novo `useTeamConsultantIds(leaderId)`
+
+```ts
+queryKey: ["team-ids", leaderId]
+// RPC get_team_consultant_ids → string[]
+```
+
+Usado pelo toggle + pela aba Equipe.
+
+## 8. Detalhes técnicos
+
+- Aproveitar `useAnalytics` existente — estender para aceitar `consultantIds?: string[]` opcional em vez de só `userId`.
+- Cards usam mesma estilização do `StatCard` (sem cores custom — design tokens).
+- Aba "Equipe" só renderiza se o usuário é líder (tem ≥1 filho em `referred_by`).
+- Sem mexer em fluxo WhatsApp, bot ou edge functions.
+
+## 9. Arquivos afetados
+
+```text
+NOVO  supabase/migrations/*_team_hierarchy.sql      (função RPC + RLS)
+NOVO  src/hooks/useTeamConsultantIds.ts
+NOVO  src/hooks/useTopConsumers.ts
+NOVO  src/components/admin/TopConsumersCard.tsx
+NOVO  src/components/admin/GeographyCard.tsx
+NOVO  src/components/admin/RetentionCard.tsx
+NOVO  src/components/admin/TeamRankingTab.tsx
+EDIT  src/components/admin/DashboardTab.tsx        (5 cards + toggle + novos componentes)
+EDIT  src/hooks/useAnalytics.ts                    (aceitar array de ids)
+EDIT  src/pages/Admin.tsx                          (nova tab "Equipe" condicional)
+```
+
+## 10. Fora do escopo (decidir depois)
+
+- Edição visual da hierarquia (drag & drop) — por enquanto líder edita `referred_by` manualmente.
+- Comissão calculada — só métricas; nada financeiro de pagamento.
+- Cadastro do Rafael Dias em si — você faz pelo fluxo normal de novo consultor.
