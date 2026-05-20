@@ -5,7 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { CaptureStepsList } from "./CaptureStepsList";
 import { CaptureLeadCard } from "./CaptureLeadCard";
 import { CaptureProgressBar } from "./CaptureProgressBar";
-import { useCaptureSession } from "@/hooks/useCaptureSession";
+import { useCaptureSession, CAPTURE_FIELDS } from "@/hooks/useCaptureSession";
 import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
 import { fireBigConfetti, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
 import { useToast } from "@/hooks/use-toast";
@@ -32,6 +32,16 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
 
   useEffect(() => { setSentSteps(new Set()); }, [customerId]);
 
+  // Garante modo manual ao abrir
+  useEffect(() => {
+    if (!open || !customer) return;
+    if (customer.capture_mode !== "manual") {
+      void supabase.from("customers")
+        .update({ capture_mode: "manual", capture_started_at: new Date().toISOString() })
+        .eq("id", customer.id);
+    }
+  }, [open, customer]);
+
   useEffect(() => {
     if (!customer) return;
     if (filledCount > lastCountRef.current) {
@@ -43,6 +53,13 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
 
   const canSubmit = filledCount === totalFields;
   const phrase = MOTIVATIONAL_PHRASES[filledCount] || `Faltam ${totalFields - filledCount} dados 💪`;
+  const nextMissing = CAPTURE_FIELDS.find((f) => {
+    const v = (customer as any)?.[f.key];
+    if (v === null || v === undefined) return true;
+    if (typeof v === "string" && !v.trim()) return true;
+    if (f.key === "electricity_bill_value" && Number(v) <= 0) return true;
+    return false;
+  });
 
   const handleSubmit = async () => {
     if (!customer || !canSubmit) return;
