@@ -43,14 +43,24 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 // Mapeia mensagem crua do Meta pra explicação + sugestão amigável.
-function explainRejection(raw: string | null | undefined): { title: string; suggestion: string } | null {
+// kind="session" sinaliza pro UI esconder "Tentar reativar" e mostrar "Reconectar Facebook".
+function explainRejection(raw: string | null | undefined): { title: string; suggestion: string; kind?: "session" | "other" } | null {
   if (!raw) return null;
   const r = raw.toLowerCase();
+  if (
+    r.includes("session_invalidated") ||
+    r.includes("session has been invalidated") ||
+    r.includes("session for security reasons") ||
+    r.includes("subcode=460") || r.includes("subcode\":460") ||
+    (r.includes("code=190")) || (r.includes("code\":190"))
+  ) {
+    return { kind: "session", title: "Conexão com Facebook expirou", suggestion: "O Facebook invalidou a sessão (provavelmente por troca de senha ou segurança). Clique em \"Reconectar Facebook\" abaixo e republique a campanha — \"Tentar reativar\" não resolve esse caso." };
+  }
   if (r.includes("2446885") || r.includes("conta pessoal") || r.includes("whatsapp business")) {
     return { title: "Página sem WhatsApp Business", suggestion: "Vá no Meta Business Suite → Configurações → WhatsApp e vincule um número Business à Página. Depois reabra 'Selecionar assets' e republique." };
   }
   if (r.includes("token") && (r.includes("expired") || r.includes("expirou") || r.includes("invalid"))) {
-    return { title: "Token do Facebook expirou", suggestion: "Reconecte sua conta Facebook no card de conexão e republique a campanha." };
+    return { kind: "session", title: "Token do Facebook expirou", suggestion: "Reconecte sua conta Facebook clicando no botão abaixo e republique a campanha." };
   }
   if (r.includes("ad_account") || r.includes("disabled") || r.includes("desativada")) {
     return { title: "Conta de anúncios desativada", suggestion: "Acesse business.facebook.com → Conta de Anúncios e resolva o aviso (geralmente cartão recusado ou política violada)." };
