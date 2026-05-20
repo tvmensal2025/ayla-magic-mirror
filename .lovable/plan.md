@@ -1,56 +1,63 @@
-# Análise dos Fluxos A e B (Rafael Ferreiras)
 
-## Status atual
+# Correção dos Fluxos A/B do Rafael Ferreira
 
-**Consultor:** Rafael Ferreiras — `ab_test_enabled = false` ⚠️ (precisa ligar pra rodar A/B amanhã)
+## Reanálise (correção da análise anterior)
 
-**Fluxo A** (com áudio): 10 passos, textos OK. Pronto.
+Reli direto do banco. **Boa notícia:** as "transitions órfãs" relatadas antes **não existem** — todos os `goto_step_id` em ambos os fluxos apontam para steps reais. Os P2 da análise anterior estão descartados.
 
-**Fluxo B** (sem áudio): problemas encontrados:
+**Notícia ruim:** o Fluxo B tem 1 bug grave de roteamento que pula o passo "Como funciona" inteiro:
 
+```text
+B-pos6 "Pede permissão" --(default/afirmação)--> pos8 "Convite"   ❌ pula pos7
+B-pos7 "Como funciona"  --(nunca alcançado)----> pos9 (órfão de fato)
+B-pos8 "Convite"        com slot_key = fazenda_solar              ❌ mídia errada
+```
 
-| Pos | Título                          | Texto atual no B                                                               | Problema                      |
-| --- | ------------------------------- | ------------------------------------------------------------------------------ | ----------------------------- |
-| 3   | 2. Boas-vindas                  | "Eu vou estar explicando abaixo, mas hoje já somos mais de 700.000 pessoas..." | OK (substitui o áudio do A) ✅ |
-| 5   | 4. Explica o desconto           | igual A                                                                        | OK ✅                          |
-| 6   | 5. Pede permissão para explicar | **vazio**                                                                      | Falta texto                   |
-| 7   | 6. Como funciona (áudio+vídeo)  | "Deu para entender como funciona agora? Vamos fazer seu cadastro?"             | **Texto trocado** com pos 8   |
-| 8   | 7. Convite para o cadastro      | "É simples — vou te mandar um áudio e um vídeo curtos…"                        | **Texto trocado** com pos 7   |
+Resultado prático no B hoje: lead recebe "5. Pede permissão" → "7. Convite" mostrando o vídeo do fazenda_solar (que era pra ser do "Como funciona"), e nunca vê o passo 6. Os outros 8 passos (1,2,3,4,5,8,9,10) chegam corretos.
 
+## Issues confirmados
 
-Resumindo: no Fluxo B os passos 7 e 8 estão com os textos invertidos, e o passo 6 está sem texto. Como o B descarta áudios, esses passos hoje mandam mensagens fora de ordem (ou nada).
+| # | Fluxo | Problema | Impacto |
+|---|-------|----------|---------|
+| B1 | B | `pos6.transitions[*].goto_step_id` aponta pra pos8 em vez de pos7 | passo 6 nunca é executado |
+| B2 | B | pos7 `slot_key=NULL` | mesmo se reativado, não envia mídia |
+| B3 | B | pos8 `slot_key=fazenda_solar` (deveria ser NULL) | convite aparece com vídeo da fazenda |
+| A1 | A | pos5 "Explica desconto" `slot=como_funciona`, pos7 "Como funciona" `slot=fazenda_solar` | títulos vs slot trocados, **mas funciona em produção há tempos** |
 
-## O que vou fazer
+## Plano
 
-1. **Trocar/corrigir textos do Fluxo B** (apenas `message_text`, sem mexer em mídias/ordem):
-  - **Passo 6 "Pede permissão para explicar"**: preencher com versão em texto equivalente ao áudio do A, ex.:
-    > "{{nome}}, posso te explicar rapidinho como funciona? Prometo ser direto. 💚"
-  - **Passo 7 "Como funciona (áudio + vídeo)"**: substituir pelo texto explicativo que está hoje no passo 8 do B + complemento descritivo (já que no B não vai áudio), ex.:
-    > "Olha como funciona na prática: a iGreen tem uma fazenda solar gigante que gera energia limpa e injeta direto na rede da sua distribuidora. Você continua recebendo a mesma conta de luz, só que com **até 20% de desconto** todo mês. Sem obra, sem instalação, sem mudar nada na sua casa."
-  - **Passo 8 "Convite para o cadastro"**: colocar o convite que está hoje no passo 7 do B:
-    > "Deu pra entender como funciona, {{nome}}? 😊
-    > Vamos fazer seu cadastro? É rapidinho, só preciso de 2 coisas: foto da sua conta de luz e um documento com foto."
-2. **Ligar A/B test do Rafael**: `UPDATE consultants SET ab_test_enabled = true WHERE name = 'Rafael Ferreiras'` para o round-robin começar a alternar entre A e B nos próximos leads dos anúncios.
-3. **Confirmar com você os textos exatos antes de salvar** — você revisa os 3 textos sugeridos acima (passos 6, 7, 8) e ajusta se quiser tom diferente.
+### 1. Corrigir Fluxo B (crítico — migração de DATA via insert tool)
 
-## Pontos do fluxo já 100% (sem ação)
+```sql
+-- B1: pos6 deve avançar para pos7 (id e0f1de51-36c5-4669-9ffd-95c1423e5008)
+UPDATE bot_flow_steps
+SET transitions = '[
+  {"goto_step_id":"e0f1de51-36c5-4669-9ffd-95c1423e5008","trigger_intent":"afirmacao","trigger_phrases":["ok","okay","pode","sim","claro","manda","beleza"]},
+  {"goto_step_id":"e0f1de51-36c5-4669-9ffd-95c1423e5008","trigger_intent":"default","trigger_phrases":[]}
+]'::jsonb
+WHERE id = '94e01f57-b841-455f-8777-6bb6d3a94674';
 
-- Captures (conta, documento, finalizar) — compartilhados, OK em A e B.
-- Pergunta valor da conta e explicação do desconto — idênticos, OK.
-- Boas-vindas do B substituindo o áudio do A — OK.
-- Dispatchers já descartam áudios automaticamente no B (memória `ab-test-audio-vs-text`).
-- CAPI + Pixel + wallet — já confirmados nas mensagens anteriores.
+-- B2 + B3: trocar slot_key entre pos7 e pos8
+UPDATE bot_flow_steps SET slot_key = 'fazenda_solar' WHERE id = 'e0f1de51-36c5-4669-9ffd-95c1423e5008';
+UPDATE bot_flow_steps SET slot_key = NULL            WHERE id = '674d90a5-38b4-4931-a8a3-eac8e743ce7a';
+```
 
-## Detalhe técnico
+### 2. Fluxo A — **NÃO MEXER**
 
-- Tabela: `bot_flow_steps`, filtrar por `flow_id = '477f8968-1344-4252-b822-8912fdbdb538'` (Fluxo B do Rafael).
-- 3 `UPDATE` em `message_text` (passos position 6, 7, 8) + 1 `UPDATE` em `consultants.ab_test_enabled`.
-- Migração via tool de migration do Supabase.
-- Sem mudanças em código/edge function.
+Os slot_keys de A estão "trocados" semanticamente, mas a mídia atual está vinculada a esses slots e o fluxo roda OK em produção. Mexer = risco alto de quebrar quem já está no meio do funil. Mantém como está.
 
-## Pergunta antes de implementar
+### 3. Validação pós-fix
 
-quero texto do fluxo b mas quero que seja perfeito, quero que tenha o escrito.  
-  
-Todo o fluxo tem que funcionar do 1 ao 10.   
-  
+- Re-consulta os 11 steps de B e confirma chain: pos2→3→4→5→6→7→8→9→10→11.
+- Confere `ai_media_library` para garantir que existe mídia ativa pro consultor nos slots `fazenda_solar` (será usado em B-pos7 agora) e que nenhum slot novo ficou órfão.
+- A/B test pode continuar ligado: clientes existentes têm `flow_variant=NULL` (tratado como A) e só novos leads entram no B corrigido.
+
+### 4. Sobre "disparar pro lead do passado"
+
+Confirmado pela análise anterior: 877 dos 926 clientes estão `bot_paused=true` (silêncio total via `_shared/bot/paused.ts`). `set_customer_flow_variant` só roda em INSERT. Ligar/desligar A/B não dispara cron retroativo. **Seguro.**
+
+## O que NÃO faz parte deste plano
+
+- Renomear `slot_key` do Fluxo A
+- Tocar em mídias do `ai_media_library`
+- Mexer em código (apenas dados via UPDATE em 3 linhas)
