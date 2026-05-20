@@ -10,11 +10,9 @@ export function CaptureProgressBar({ progress, filled, total }: Props) {
         <span className="font-bold text-primary tabular-nums">{filled}/{total}</span>
       </div>
       <div className="relative h-3 rounded-full bg-secondary overflow-hidden border border-border">
-        <motion.div
-          className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-500 via-green-500 to-lime-400"
-          initial={false}
-          animate={{ width: `${progress}%` }}
-          transition={{ type: "spring", stiffness: 120, damping: 18 }}
+        <div
+          className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-500 via-green-500 to-lime-400 transition-all duration-500 ease-out"
+          style={{ width: `${progress}%` }}
         />
         {progress === 100 && (
           <div className="absolute inset-0 animate-pulse bg-white/20 mix-blend-overlay" />
