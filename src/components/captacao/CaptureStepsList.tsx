@@ -40,7 +40,7 @@ const VARIANT_META: Record<string, { label: string; hint: string }> = {
   C: { label: "C", hint: "com vídeo" },
 };
 
-export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, defaultVariant }: Props) {
+export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, defaultVariant, currentStep }: Props) {
   const { toast } = useToast();
   const [sending, setSending] = useState<string | null>(null);
   const [groups, setGroups] = useState<StepGroup[]>([]);
