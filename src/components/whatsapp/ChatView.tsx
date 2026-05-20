@@ -315,7 +315,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
           </div>
         )}
         {messages.map((msg, index) => (
-          <MessageBubble key={`${msg.id}-${index}`} message={msg} onLoadMedia={loadMedia} />
+          <MessageBubble key={`${msg.id}-${index}`} message={msg} onLoadMedia={loadMedia} consultantId={consultantId} />
         ))}
       </div>
 

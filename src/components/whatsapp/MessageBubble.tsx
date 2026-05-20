@@ -1,12 +1,18 @@
 import { useState, useCallback, useEffect } from "react";
-import { Check, CheckCheck, Clock, FileText, Image, Mic, Video, Play, Download, Loader2 } from "lucide-react";
+import { Check, CheckCheck, Clock, FileText, Image, Mic, Video, Play, Download, Loader2, MoreVertical, Bookmark, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { SaveMessageAsTemplateDialog } from "./SaveMessageAsTemplateDialog";
+import { toast } from "sonner";
 import type { ChatMessage } from "@/hooks/useMessages";
 
 interface MessageBubbleProps {
   message: ChatMessage;
   onLoadMedia?: (messageId: string) => Promise<string | null>;
+  consultantId?: string;
+  onTemplateSaved?: () => void;
 }
+
 
 function formatTime(ts: number): string {
   if (!ts) return "";
@@ -32,11 +38,13 @@ function isAccessibleUrl(url?: string): boolean {
   return false;
 }
 
-function AudioPlayer({ message, onLoadMedia }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null> }) {
+function AudioPlayer({ message, onLoadMedia, onLoaded }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null>; onLoaded?: (url: string) => void }) {
   const [audioSrc, setAudioSrc] = useState<string | null>(
     isAccessibleUrl(message.mediaUrl) ? message.mediaUrl! : null
   );
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => { if (audioSrc) onLoaded?.(audioSrc); }, [audioSrc]);
 
   const handleLoad = useCallback(async () => {
     if (audioSrc || !onLoadMedia) return;
@@ -79,10 +87,12 @@ function AudioPlayer({ message, onLoadMedia }: { message: ChatMessage; onLoadMed
   );
 }
 
-function ImageViewer({ message, onLoadMedia }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null> }) {
+
+function ImageViewer({ message, onLoadMedia, onLoaded }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null>; onLoaded?: (url: string) => void }) {
   const [imgSrc, setImgSrc] = useState<string | null>(
     isAccessibleUrl(message.mediaUrl) ? message.mediaUrl! : null
   );
+  useEffect(() => { if (imgSrc) onLoaded?.(imgSrc); }, [imgSrc]);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [loadAttempted, setLoadAttempted] = useState(false);
@@ -147,10 +157,11 @@ function ImageViewer({ message, onLoadMedia }: { message: ChatMessage; onLoadMed
   );
 }
 
-function VideoPlayer({ message, onLoadMedia }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null> }) {
+function VideoPlayer({ message, onLoadMedia, onLoaded }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null>; onLoaded?: (url: string) => void }) {
   const [videoSrc, setVideoSrc] = useState<string | null>(
     isAccessibleUrl(message.mediaUrl) ? message.mediaUrl! : null
   );
+  useEffect(() => { if (videoSrc) onLoaded?.(videoSrc); }, [videoSrc]);
   const [loading, setLoading] = useState(false);
 
   const handleLoad = useCallback(async () => {
@@ -292,23 +303,58 @@ function LinkifiedText({ text }: { text: string }) {
   );
 }
 
-export function MessageBubble({ message, onLoadMedia }: MessageBubbleProps) {
+export function MessageBubble({ message, onLoadMedia, consultantId, onTemplateSaved }: MessageBubbleProps) {
   const { fromMe, text, timestamp, status, mediaType } = message;
-  const hasMedia = !!mediaType;
   const showText = text && mediaType !== "audio" && mediaType !== "sticker";
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogFocus, setDialogFocus] = useState<"name" | "shortcut">("name");
+
+  const canSaveAsTemplate = !!consultantId && (mediaType === "audio" || mediaType === "video" || mediaType === "image");
+  const canCopy = !!text;
 
   return (
-    <div className={`flex ${fromMe ? "justify-end" : "justify-start"} mb-1`}>
+    <div className={`group flex ${fromMe ? "justify-end" : "justify-start"} mb-1`}>
       <div
-        className={`max-w-[75%] rounded-lg px-3 py-1.5 ${
+        className={`relative max-w-[75%] rounded-lg px-3 py-1.5 ${
           fromMe
             ? "bg-primary/20 text-foreground rounded-br-none"
             : "bg-secondary text-foreground rounded-bl-none"
         }`}
       >
-        {mediaType === "image" && <ImageViewer message={message} onLoadMedia={onLoadMedia} />}
-        {mediaType === "video" && <VideoPlayer message={message} onLoadMedia={onLoadMedia} />}
-        {mediaType === "audio" && <AudioPlayer message={message} onLoadMedia={onLoadMedia} />}
+        {(canSaveAsTemplate || canCopy) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="absolute -top-1 -right-1 h-6 w-6 rounded-full bg-background/90 border border-border/60 shadow opacity-0 group-hover:opacity-100 focus:opacity-100 data-[state=open]:opacity-100 flex items-center justify-center transition-opacity"
+                aria-label="Mais opções"
+              >
+                <MoreVertical className="w-3.5 h-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {canSaveAsTemplate && (
+                <>
+                  <DropdownMenuItem onClick={() => { setDialogFocus("name"); setDialogOpen(true); }}>
+                    <Bookmark className="w-4 h-4 mr-2" /> Salvar como template
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setDialogFocus("shortcut"); setDialogOpen(true); }}>
+                    <Bookmark className="w-4 h-4 mr-2" /> Salvar com atalho rápido
+                  </DropdownMenuItem>
+                </>
+              )}
+              {canCopy && (
+                <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(text || ""); toast.success("Texto copiado"); }}>
+                  <Copy className="w-4 h-4 mr-2" /> Copiar texto
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {mediaType === "image" && <ImageViewer message={message} onLoadMedia={onLoadMedia} onLoaded={setLoadedUrl} />}
+        {mediaType === "video" && <VideoPlayer message={message} onLoadMedia={onLoadMedia} onLoaded={setLoadedUrl} />}
+        {mediaType === "audio" && <AudioPlayer message={message} onLoadMedia={onLoadMedia} onLoaded={setLoadedUrl} />}
         {mediaType === "document" && <DocumentViewer message={message} onLoadMedia={onLoadMedia} />}
         {mediaType === "sticker" && <StickerViewer message={message} onLoadMedia={onLoadMedia} />}
 
@@ -319,6 +365,19 @@ export function MessageBubble({ message, onLoadMedia }: MessageBubbleProps) {
           {fromMe && <StatusIcon status={status} />}
         </div>
       </div>
+
+      {canSaveAsTemplate && consultantId && (
+        <SaveMessageAsTemplateDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          message={message}
+          consultantId={consultantId}
+          loadedMediaUrl={loadedUrl}
+          focus={dialogFocus}
+          onSaved={onTemplateSaved}
+        />
+      )}
     </div>
   );
 }
+

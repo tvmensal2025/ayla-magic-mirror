@@ -30,6 +30,7 @@ export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMed
   const [sending, setSending] = useState(false);
   const [showQuickReply, setShowQuickReply] = useState(false);
   const [quickSearch, setQuickSearch] = useState("");
+  const [exactShortcut, setExactShortcut] = useState<MessageTemplate | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const audio = useAudioRecorder(onSendAudio);
@@ -72,9 +73,18 @@ export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMed
   }, [text, sending, onSend, onSendMedia, onSendAudioUrl, file]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (exactShortcut && text.trim().startsWith("/")) {
+        handleTemplateSelect(exactShortcut);
+        // dispara envio na próxima tick (após state aplicado)
+        setTimeout(() => handleSend(), 50);
+        return;
+      }
+      handleSend();
+    }
     if (e.key === "Escape") setShowQuickReply(false);
-  }, [handleSend]);
+  }, [handleSend, exactShortcut, text]);
 
   const handleTemplateSelect = useCallback((t: MessageTemplate) => {
     setText(t.content);
@@ -106,7 +116,7 @@ export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMed
 
   return (
     <div className="relative border-t border-border bg-card p-2">
-      {showQuickReply && <QuickReplyMenu templates={templates} search={quickSearch} onSelect={handleTemplateSelect} onClose={() => setShowQuickReply(false)} />}
+      {showQuickReply && <QuickReplyMenu templates={templates} search={quickSearch} onSelect={handleTemplateSelect} onClose={() => setShowQuickReply(false)} onExactShortcut={setExactShortcut} />}
 
       {file.pendingImageUrl && (
         <div className="flex items-center gap-2 mb-2 px-1 py-1.5 rounded-lg bg-secondary/30 border border-border/30">

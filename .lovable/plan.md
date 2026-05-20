@@ -1,54 +1,56 @@
-## Diagnóstico
+## Objetivo
 
-O erro do card é da Meta, não nosso:
+Em qualquer mensagem do chat WhatsApp (áudio, vídeo, imagem — recebida ou enviada), aparece um menu de 3 pontinhos. Clicando, abre um pequeno diálogo para salvar a mídia como **template** com **nome** e **atalho** (ex: `/oi`, `/conta`). Depois é só digitar o atalho no composer e a mídia + texto vão embora.
 
-```
-Error validating access token: The session has been invalidated because
-the user changed their password or Facebook has changed the session for
-security reasons. | subcode=460 | code=190
-```
+## Mudanças
 
-Significa: o **token do Facebook do consultor** (Rafael Ferreiras) **foi invalidado pelo próprio Facebook** — provavelmente porque ele trocou a senha, encerrou sessões, ou a Meta expirou a sessão por segurança. Não há nada que o healthcheck possa fazer: clicar em "Tentar reativar" vai falhar de novo até o token ser renovado via OAuth.
+### 1. Banco — `message_templates`
 
-Confirmação nos logs:
-- `facebook-campaign-healthcheck` → `OAuthException code=190 subcode=460` (token revogado).
-- A campanha "CPFL Paulista" do Rafael está **pausada** por esse motivo, não por saldo nem por política.
+- Adicionar coluna `shortcut text` (ex: `/oi`).
+- Índice único parcial `(consultant_id, lower(shortcut)) where shortcut is not null` pra evitar atalho duplicado por consultor.
+- Sem mudar RLS (já está OK).
 
-## Por que `explainRejection` não pegou esse caso amigavelmente
+### 2. Edge function nova: `save-message-as-template`
 
-Em `CampaignsList.tsx` (`explainRejection`), o branch de token só dispara se a string contiver `"token"` + (`"expired" | "expirou" | "invalid"`). A mensagem real da Meta diz `"session has been invalidated"` — não bate em nenhum branch específico, cai no genérico "Erro ao publicar no Meta" + raw text. Por isso o cartão vermelho mostra o texto cru e o botão "Tentar reativar" que nunca vai funcionar.
+- Recebe `{ message_id, name, shortcut, caption }`.
+- Busca a `messages` no DB pra pegar `media_url` (URL da Whapi/Evolution, que expira).
+- Baixa a mídia, faz upload no **MinIO** (bucket `igreen` / pasta `templates/{consultant}/{uuid}.{ext}`) — mesma estratégia do `compress-worker`/`adImageLibrary`. Áudio mantém `.ogg/.mp3`, vídeo `.mp4`, imagem `.jpg/.png`.
+- Insere em `message_templates` com `media_type`, `media_url` (URL permanente do MinIO), `image_url` (caso vídeo/imagem), `content` (caption se houver) e `shortcut`.
+- Retorna o template criado.
 
-## Plano
+### 3. UI — `MessageBubble.tsx`
 
-### 1. `src/components/admin/ads/CampaignsList.tsx` — melhorar diagnóstico
+- Adicionar botão 3-pontos (`MoreVertical`) no hover/sempre visível em mobile, dentro do bubble (canto sup. direito).
+- `DropdownMenu` com:
+  - **Salvar como template** (abre diálogo)
+  - **Salvar e criar atalho** (mesmo diálogo, foco no campo atalho)
+  - **Copiar texto** (se tiver caption)
+- Só aparece pra mensagens com `media_type in ('audio','video','image')` ou texto.
 
-Em `explainRejection`, adicionar branch específico **antes** do branch genérico de token:
+### 4. UI — `SaveMessageAsTemplateDialog.tsx` (novo)
 
-- Detectar `subcode=460`, `session has been invalidated`, `session for security reasons`, `code=190` → retornar:
-  - **title**: "Conexão com Facebook expirou"
-  - **suggestion**: "O Facebook invalidou a sessão (provavelmente por troca de senha ou segurança). Reconecte sua conta Facebook no card de conexão acima e republique a campanha. O botão 'Tentar reativar' não resolve esse caso."
+- Campos: **Nome** (obrigatório), **Atalho** (opcional, prefixo `/` automático, valida regex `^\/[a-z0-9_-]{2,20}$`, mostra erro se já existe), **Legenda** (preenchido com caption atual, editável).
+- Mostra preview da mídia.
+- Botão "Salvar" → chama edge `save-message-as-template` → toast de sucesso → atualiza `useTemplates`.
 
-Quando o motivo for token/sessão inválida, **esconder o botão "Tentar reativar"** (que não funciona) e mostrar um botão **"Reconectar Facebook"** que faz scroll/foco no card de conexão FB (componente `FacebookConnectionCard` ou similar) — ou simplesmente abre `https://www.facebook.com/settings` em nova aba, mas o ideal é scrollar para o card existente.
+### 5. UI — `MessageComposer.tsx`
 
-### 2. `supabase/functions/facebook-campaign-healthcheck/index.ts` — gravar motivo legível
+- Quando o usuário digita `/`, abre popover com lista de atalhos do consultor (filtrada por prefixo).
+- Setas ↑↓ + Enter selecionam; ao confirmar:
+  - Substitui o texto pelo `content` do template (com placeholders aplicados via `applyTemplate`).
+  - Anexa a mídia (`media_url` + `media_type`) ao envio, igual ao fluxo de templates já existente no `TemplateManager`/`BulkSend`.
+- Atalho exato (`/oi` + Espaço/Enter) envia direto sem precisar selecionar.
 
-Quando o fetch retornar `code=190` / `subcode=460`, atualizar `facebook_campaigns.rejection_reason` com uma string padronizada tipo:
+### 6. UI — `TemplateManager.tsx`
 
-```
-SESSION_INVALIDATED: Token do Facebook foi invalidado (senha alterada ou
-sessão encerrada por segurança). Reconecte a conta no painel.
-```
-
-Assim o front mostra mensagem amigável mesmo sem precisar parsear o texto cru da Meta toda vez.
-
-### 3. Sinalizar globalmente no card de conexão Facebook
-
-No componente que renderiza a conexão FB do consultor (provavelmente `FacebookConnectionCard` em `src/components/admin/ads/`), se houver pelo menos uma campanha com `rejection_reason` contendo `SESSION_INVALIDATED` ou `code=190`, mostrar badge vermelho "Token expirado — reconectar" com CTA destacado.
+- Adicionar coluna/campo **Atalho** na listagem e no form de edição. Permite editar/remover o atalho de templates antigos.
 
 ## Fora de escopo
-- Renovar token automaticamente (não dá — exige re-OAuth do usuário).
-- Mexer em saldo/carteira (já está R$ 240,89, OK).
-- Alterar lógica de criação de campanha.
 
-## Pergunta
-Posso seguir com (1) + (2) + (3), ou prefere só (1) (UI clara) por enquanto?
+- Categorias/pastas de templates.
+- Compartilhar atalho entre consultores (cada um tem o próprio).
+- Edição de áudio/vídeo (apenas salvar como está).
+
+## Pergunta antes de implementar
+
+Confirma: **MinIO** é o destino certo pro media dos templates (mesma estratégia dos vídeos do `/admin/fluxos`) minio  sim

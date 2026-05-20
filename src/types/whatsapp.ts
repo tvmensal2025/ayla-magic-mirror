@@ -17,6 +17,7 @@ export interface MessageTemplate {
   image_url: string | null;
   created_at: string;
   origin_template_id?: string | null;
+  shortcut?: string | null;
 }
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected";

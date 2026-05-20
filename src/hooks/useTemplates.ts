@@ -104,6 +104,13 @@ export function useTemplates(consultantId: string) {
     fetchTemplates();
   }, [fetchTemplates]);
 
+  // Permite refresh disparado por componentes filhos (ex: SaveMessageAsTemplateDialog)
+  useEffect(() => {
+    const handler = () => { fetchTemplates(); };
+    window.addEventListener("templates:refresh", handler);
+    return () => window.removeEventListener("templates:refresh", handler);
+  }, [fetchTemplates]);
+
   return {
     templates,
     isLoading,
