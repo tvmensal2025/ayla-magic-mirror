@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+
 
 interface Props { progress: number; filled: number; total: number; }
 
