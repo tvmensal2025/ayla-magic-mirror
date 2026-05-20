@@ -177,7 +177,10 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
         </Tabs>
 
         {/* Footer */}
-        <footer className="p-3 border-t border-border bg-card/80 backdrop-blur sticky bottom-0 z-20 space-y-2">
+        <footer
+          className="p-3 border-t border-border bg-card/80 backdrop-blur sticky bottom-0 z-20 space-y-2"
+          style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))" }}
+        >
           {customer?.conversation_step && ["finalizando", "portal_submitting", "aguardando_otp", "validando_otp"].includes(customer.conversation_step) && (
             <p className="text-[11px] text-center text-primary font-semibold animate-pulse">
               🚀 Portal: {customer.conversation_step.replace("_", " ")}…
