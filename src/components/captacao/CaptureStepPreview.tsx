@@ -187,9 +187,6 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
                 {kind === "video" && m.url && (
                   <video src={m.url} controls className="w-full rounded-md max-h-64 bg-black/30" preload="metadata" />
                 )}
-                {kind === "text" && (m as any).transcript && (
-                  <p className="text-xs whitespace-pre-wrap text-foreground/90 italic">"{(m as any).transcript}"</p>
-                )}
               </div>
             );
           })}
