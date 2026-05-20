@@ -150,11 +150,7 @@ Deno.serve(async (req) => {
     type Item = { kind: string; text?: string; media?: any };
     const allItems: Item[] = [];
     medias.forEach((m) => {
-      if ((m as any)._asText) {
-        allItems.push({ kind: "text", text: String((m as any)._transcript || "") });
-      } else {
-        allItems.push({ kind: String(m.kind || "document").toLowerCase(), media: m });
-      }
+      allItems.push({ kind: String(m.kind || "document").toLowerCase(), media: m });
     });
     if (renderedText.trim()) allItems.push({ kind: "text", text: renderedText });
 
