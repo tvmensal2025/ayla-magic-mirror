@@ -1,73 +1,84 @@
-# Fase 4 — Captura automática com IA
+# Captação dentro do chat (mobile-first)
 
-Objetivo: enquanto o consultor conversa no Modo Captação, a IA lê cada nova mensagem do lead e sugere preenchimento dos 10 campos críticos. O consultor confirma com 1 clique (modo Híbrido).
+Hoje a Captação vive numa aba separada (`/admin` → Captação) com 3 colunas (lista + passos + ficha). No celular fica apertado, e o consultor precisa pular entre WhatsApp e Captação. Vamos colidir os dois.
 
-## Fluxo
+## O que muda
 
-```text
-Lead envia msg  →  trigger DB  →  edge capture-extract (Gemini Flash)
-                                        ↓
-                          retorna { campo: valor, confidence }
-                                        ↓
-              insert em capture_field_suggestions (realtime)
-                                        ↓
-              CaptureLeadCard pisca campo + botões ✓ / ✏
-                                        ↓
-        ✓ aceitar  →  update customers.<campo>  +  +1 XP  +  confete leve
-        ✏ editar   →  abre input inline, salva manual (+1 XP)
-        ✗ ignorar  →  marca suggestion como dismissed
-```
+### 1. Botão único no header do chat
 
-## Mudanças
+- Em `ChatView.tsx`, adicionar botão **🎮 Captação** ao lado de Cliente/CRM/Zerar.
+- Estados:
+  - **Desligada** (default): botão neutro "Captação".
+  - **Ligada**: botão verde-pulsante mostrando `**{filled}/10**` (ex.: `🎮 4/10`).
+- Clique:
+  - Liga: faz `update customers set capture_mode='manual', capture_started_at=now()` e abre a tela de Captação.
+  - Re-clique enquanto ligada: só reabre a tela (não desliga). Para desligar há um link "sair do modo captação" dentro da tela.
 
-### Banco (1 migração)
+### 2. Tela Captação como fullscreen no mobile
 
-- Tabela `capture_field_suggestions`:
-  - `customer_id`, `consultant_id`, `field_name`, `suggested_value`, `confidence` (0–1), `source_message_id`, `status` (`pending`/`accepted`/`edited`/`dismissed`), timestamps
-  - RLS: dono ou manager via `can_view_consultant`
-  - Realtime habilitado
-- Sem alterações em `customers`.
+- Componente novo `CaptureSheet.tsx` (usa `Sheet` shadcn com `side="bottom"`, `h-[100dvh]`).
+- Header fixo:
+  - Avatar + nome + telefone (mesmo do chat)
+  - **Barra XP grande** (`CaptureProgressBar`) + contador `4/10`
+  - Botão fechar (volta pro chat)
+- Conteúdo em **2 abas mobile** (sem coluna lateral):
+  - **Passos** (default): grid 2 colunas (ou lista vertical) com os 10 templates — ver §3
+  - **Ficha**: lista vertical full-width dos 10 campos + sugestões da IA + uploads dos documentos
+- Footer fixo:
+  - Quando `filled < 10`: chip motivacional ("Faltam 6 dados 💪")
+  - Quando `filled === 10`: botão gigante **CADASTRAR TUDO 🏆** (confete + envia ao portal)
 
-### Edge function `capture-extract` (nova)
+### 3. Templates / Mensagem rápida — redesenho mobile
 
-- Trigger: chamada pelo `whapi-webhook` quando `customers.capture_mode = 'manual'` E a mensagem é **inbound** do lead.
-- Carrega últimas 6 mensagens + valores atuais dos 10 campos.
-- Gemini 2.5 Flash (Lovable AI Gateway) com Output schema Zod:
-  ```ts
-  { name?, cpf?, rg?, email?, phone_landline?, cep?,
-    address_number?, address_complement?,
-    electricity_bill_value?, confidence: Record<field, number> }
+Hoje é uma grid 2×5 de cards densos com 4 ícones de mídia e 2 botões pequenos. Em 514px o toque é ruim. Proposta:
+
+- **Lista vertical de "linhas-passo"**, cada linha grandona (~64px de altura):
   ```
-- Só insere sugestão se: campo está vazio em `customers` E `confidence ≥ 0.7` E ainda não há `pending` para o mesmo campo.
-- Erros 429/402 do gateway: log silencioso, não trava o webhook.
+  ┌──────────────────────────────────────────────┐
+  │ ① Saudação                       ✓ enviado  │
+  │ "Olá! Sou a Ayla…"  🎵🖼️         [Enviar →] │
+  └──────────────────────────────────────────────┘
+  ```
+  - **Tap rápido** no card inteiro = envia (1-clique, modo híbrido — já implementado).
+  - **Tap longo** (ou ícone ✏ pequeno no canto) = abre composer pré-preenchido pra editar antes.
+  - Badge de mídia (🎵/🖼️/🎬) só aparece quando o passo tem aquele tipo configurado, sem ícone vazio.
+  - Passo enviado fica esmaecido + ✓ verde, sobe pro topo do histórico de "enviados hoje".
+- **Linha pinada no topo**: campo de busca/filtro `/` (digite pra achar template) + chip "Só não enviados".
+- **Templates avulsos** (não vindos do fluxo, ex.: `message_templates` que o consultor tem): aba secundária dentro de "Passos" → "Meus rápidos".
 
-### Webhook (`whapi-webhook`)
+### 4. Captação ocupa o chat inteiro (sem perder mensagens)
 
-- Após persistir mensagem inbound, dispara `capture-extract` em background (sem await bloqueante) apenas se `capture_mode = 'manual'`.
-- Zero impacto em leads em fluxo automático.
+- A `Sheet` cobre tela toda, mas o **WhatsApp continua rodando atrás** — quando o lead responde, o card da ficha pulsa (sugestão IA aparece) e o chip de XP sobe automaticamente.
+- Botão flutuante no canto sup. dir. da Sheet: **💬 ver chat** → minimiza pra 40% da altura (split horizontal: chat em cima, captação embaixo), pra ler/responder o que o lead mandou sem fechar.
 
-### Frontend
+### 5. Aba "Captação" do `/admin` continua existindo
 
-- `useCaptureSession`: subscrever realtime de `capture_field_suggestions` do `customer_id` ativo.
-- `CaptureLeadCard`: 
-  - Badge "IA sugere: <valor>" sobre o campo com botões ✓ / ✏ / ✗
-  - Animação `framer-motion` (flash dourado) quando sugestão chega
-  - ✓ → update customer, marca `accepted`, dispara `bumpXP()` + mini-confete
-  - ✏ → abre input pré-preenchido, salva e marca `edited`
-  - ✗ → marca `dismissed`
-- `captureGame.ts`: adicionar frase "🤖 IA capturou <campo>!" no toast.
+- Vira **modo desktop** (3 colunas como hoje, bom pra atendentes em PC).
+- No mobile, o link "Captação" do menu admin abre direto a lista de leads em captação e ao tocar num lead, leva pro chat já com a Sheet aberta.
 
-## O que NÃO muda
+### 6. Fullscreen do chat no mobile (independente da captação)
 
-- Fluxo automático, OCR, portal-worker, submit-lead, scoreboard, badges (fase 3).
-- Consultor pode continuar digitando manualmente — sugestão é opcional.
+- `Admin.tsx` (ou wrapper do WhatsApp): quando viewport < 768px **e** uma conversa está aberta, esconder a top-nav de abas (`Dashboard / CRM / Captação / ...`) e o header verde do iGreen → chat usa `h-[100dvh]`.
+- Botão "voltar" no header do chat retorna a top-nav.
 
-## Entregáveis
+## Arquivos
 
-1. Migração `capture_field_suggestions` + RLS + realtime
-2. Edge `supabase/functions/capture-extract/index.ts`
-3. Patch em `whapi-webhook` (dispatch background)
-4. Atualização de `useCaptureSession.ts` + `CaptureLeadCard.tsx`
-5. Frases novas em `captureGame.ts`
+Novos:
 
-Posso prosseguir?
+- `src/components/captacao/CaptureSheet.tsx` (drawer mobile com 2 tabs + XP + ficha + CADASTRAR)
+- `src/components/captacao/CaptureStepsList.tsx` (substitui o uso da grid no mobile — lista grandona)
+
+Editados:
+
+- `src/components/whatsapp/ChatView.tsx` → botão 🎮 Captação + abrir/ativar Sheet
+- `src/components/captacao/CaptacaoPanel.tsx` → no mobile, redireciona pro chat do lead com Sheet aberta
+- `src/pages/Admin.tsx` (ou layout) → esconder top-nav quando chat aberto em mobile
+- `src/components/captacao/CaptureStepsGrid.tsx` → mantido pra desktop
+
+Sem mudança de banco. Sem mudança em edge functions. Tudo é UI.
+
+## Perguntas pra você
+
+1. Quando ligar a Captação (botão 🎮), você quer que a Sheet abra **automaticamente** ou só fique com o contador no botão e abra só no segundo clique? Segundo clique
+2. **Tap rápido = enviar direto** ou prefere sempre confirmar com um modalzinho ("Enviar passo Saudação?") pra evitar erro de toque? Sim
+3. Quer manter a aba "Captação" no menu do `/admin` ou remover, já que tudo passa a viver dentro do chat? Remover 
