@@ -87,7 +87,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: P
         conversation_step: "finalizando",
         capture_mode: "auto",
       }).eq("id", customer.id);
-      fireBigConfetti();
+      fireRandomCelebration();
       toast({
         title: "🎉 Cadastro enviado!",
         description: "O Portal Worker vai concluir o envio em alguns segundos.",
