@@ -26,7 +26,14 @@ interface DashboardTabProps {
 }
 
 export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodChange }: DashboardTabProps) {
-  const { data: analytics } = useAnalytics(userId, periodDays);
+  const [scope, setScope] = useState<"me" | "team">("me");
+  const { data: teamIds = [] } = useTeamConsultantIds(userId);
+  const isLeader = teamIds.length > 1;
+  const { data: analytics } = useAnalytics(
+    userId,
+    periodDays,
+    scope === "team" && isLeader ? teamIds : null,
+  );
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [syncingDashboard, setSyncingDashboard] = useState(false);
