@@ -374,6 +374,19 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
           onAdded={handleCustomerAdded}
         />
       )}
+
+      {/* Capture Sheet (mobile-first, fullscreen) */}
+      {customerId && (
+        <CaptureSheet
+          open={captureOpen}
+          onOpenChange={setCaptureOpen}
+          consultantId={consultantId}
+          customerId={customerId}
+          customerName={chat?.name}
+          phoneNumber={phoneNumber}
+        />
+      )}
     </div>
+
   );
 }
