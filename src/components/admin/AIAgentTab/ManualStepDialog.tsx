@@ -168,22 +168,22 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
                 <div className="space-y-2">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Enviar 1 a 1</p>
                   {parts.map((p, i) => {
-                    const Icon = KIND_ICON[p.kind] || FileText;
                     const isNext = i === partIdx;
                     const wasSent = i < partIdx;
                     return (
-                      <Card key={i} className={`p-3 flex items-center gap-3 ${wasSent ? "opacity-50" : ""}`}>
-                        <Icon className="w-4 h-4 text-primary shrink-0" />
+                      <Card key={i} className={`p-3 flex items-start gap-3 ${wasSent ? "opacity-50" : ""}`}>
                         <div className="flex-1 min-w-0">
-                          <Badge variant="secondary" className="text-[10px] mr-2">{p.kind}</Badge>
-                          <span className="text-xs text-muted-foreground truncate">
-                            {p.kind === "text" ? p.text?.slice(0, 80) : p.media?.url?.split("/").pop()?.slice(0, 50)}
-                          </span>
+                          <StepPartPreview
+                            kind={p.kind as PartKind}
+                            text={p.text}
+                            url={p.media?.url}
+                          />
                         </div>
                         <Button
                           size="sm"
                           variant={isNext ? "default" : "outline"}
                           disabled={sending}
+                          className="shrink-0"
                           onClick={async () => {
                             await sendPart(p, `${p.kind} (${i + 1}/${parts.length})`);
                             setPartIdx(i + 1);
