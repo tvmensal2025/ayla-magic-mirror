@@ -432,7 +432,7 @@ const AdminContent = () => {
         </Suspense>
       )}
 
-      <SupportChatButton />
+      
     </div>
   );
 };
