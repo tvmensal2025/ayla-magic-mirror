@@ -180,7 +180,25 @@ export function CaptureLeadCard({ customerId, onSubmitted }: Props) {
               ) : (
                 <p className="text-xs mt-0.5 break-words text-foreground/80 min-h-[1rem]">{filled ? String(v) : <span className="text-muted-foreground italic">vazio</span>}</p>
               )}
+              {sugg && !isEditingThis && (
+                <div className="mt-1.5 flex items-center gap-1 rounded bg-amber-400/10 border border-amber-400/40 p-1">
+                  <Bot className="w-3 h-3 text-amber-500 shrink-0" />
+                  <span className="text-[11px] flex-1 truncate text-amber-700 dark:text-amber-300">
+                    IA: <strong>{sugg.suggested_value}</strong>
+                  </span>
+                  <Button size="icon" variant="ghost" className="h-6 w-6 text-emerald-500 hover:text-emerald-600" onClick={() => void acceptSuggestion(f.key)} title="Aceitar">
+                    <Check className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => { setEditing(f.key); setEditValue(sugg.suggested_value); void resolve(sugg.id, "edited"); }} title="Editar">
+                    <Edit2 className="w-3 h-3" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground" onClick={() => void resolve(sugg.id, "dismissed")} title="Descartar">
+                    <X className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              )}
             </div>
+
           );
         })}
       </div>
