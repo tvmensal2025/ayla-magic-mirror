@@ -351,7 +351,14 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => moveItem(m, 1)} title="Mover para baixo">
               <ArrowDown className="h-3.5 w-3.5" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removeMedia(m)}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => removeMedia(m)}
+              disabled={variant !== "A"}
+              title={variant !== "A" ? "Mídias são compartilhadas. Remova pela aba A." : "Remover mídia"}
+            >
               <Trash2 className="h-3.5 w-3.5 text-destructive" />
             </Button>
           </div>
