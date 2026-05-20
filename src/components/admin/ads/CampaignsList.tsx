@@ -209,6 +209,18 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
                   );
                 })()}
               </div>
+              {isSuperAdmin && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8 text-destructive hover:bg-destructive/10 shrink-0"
+                  onClick={() => setConfirmDelete(c)}
+                  disabled={deleting === c.id}
+                  title="Apagar campanha (SuperAdmin)"
+                >
+                  {deleting === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                </Button>
+              )}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
               <Stat icon={<TrendingUp className="w-3.5 h-3.5" />} label="Impressões" value={m.impressions.toLocaleString("pt-BR")} />
