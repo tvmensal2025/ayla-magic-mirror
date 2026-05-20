@@ -37,19 +37,29 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent }
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const { data: flows } = await supabase
-        .from("bot_flows").select("id")
-        .eq("consultant_id", consultantId).eq("is_active", true).limit(1);
-      if (!flows?.[0]) { if (mounted) setSteps([]); return; }
+      // 1. tenta fluxo ativo; 2. cai para o mais recente do consultor
+      let flowId: string | null = null;
+      const { data: active } = await supabase
+        .from("bot_flows").select("id, updated_at")
+        .eq("consultant_id", consultantId).eq("is_active", true)
+        .order("updated_at", { ascending: false }).limit(1);
+      flowId = active?.[0]?.id || null;
+      if (!flowId) {
+        const { data: any } = await supabase
+          .from("bot_flows").select("id, updated_at")
+          .eq("consultant_id", consultantId)
+          .order("updated_at", { ascending: false }).limit(1);
+        flowId = any?.[0]?.id || null;
+      }
+      if (!flowId) { if (mounted) setSteps([]); return; }
       const { data } = await supabase
         .from("bot_flow_steps")
         .select("id, title, step_key, position, message_text, media_order")
-        .eq("flow_id", flows[0].id)
+        .eq("flow_id", flowId)
         .eq("is_active", true)
         .order("position", { ascending: true })
         .limit(10);
       if (mounted) setSteps((data as StepRow[]) || []);
-
     })();
     return () => { mounted = false; };
   }, [consultantId]);
