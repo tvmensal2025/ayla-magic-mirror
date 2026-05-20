@@ -4,6 +4,7 @@ import { CaptureLeadList } from "@/components/captacao/CaptureLeadList";
 import { CaptureStepsGrid } from "@/components/captacao/CaptureStepsGrid";
 import { CaptureLeadCard } from "@/components/captacao/CaptureLeadCard";
 import { CaptureScoreboard } from "@/components/captacao/CaptureScoreboard";
+import { CaptureMissionsPanel, bumpMission } from "@/components/captacao/CaptureMissionsPanel";
 import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
 import { Button } from "@/components/ui/button";
 import { Gamepad2, ExternalLink, MessageCircle } from "lucide-react";
@@ -15,6 +16,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
   const [phone, setPhone] = useState<string | null>(null);
+  const [missionsVersion, setMissionsVersion] = useState(0);
   const { today, week, streak, bump } = useCaptureScoreboard(consultantId);
   const { toast } = useToast();
 
@@ -30,21 +32,26 @@ export function CaptacaoPanel({ consultantId, onOpenChat }: Props) {
 
   const handleSubmitted = async () => {
     await bump();
+    bumpMission(consultantId, "leads");
+    setMissionsVersion((v) => v + 1);
     toast({ title: "🏆 +1 cadastro no placar!", duration: 2000 });
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-220px)] min-h-[640px] rounded-xl border border-border overflow-hidden bg-background/60">
+    <div className="flex flex-col h-[calc(100vh-220px)] min-h-[640px] rounded-xl border border-border overflow-hidden bg-background/60 capture-ambient animate-bg-drift">
       {/* Header */}
-      <header className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/60">
+      <header className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/60 backdrop-blur-sm gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <Gamepad2 className="w-5 h-5 text-primary" />
           <div>
             <h2 className="text-sm font-bold">Modo Captação</h2>
-            <p className="text-[11px] text-muted-foreground">Capture dados do lead enquanto conversa — estilo game</p>
+            <p className="text-[11px] text-muted-foreground">Capture, ganhe XP, suba de nível — e bate o placar do dia 🏆</p>
           </div>
         </div>
-        <CaptureScoreboard today={today} week={week} streak={streak} />
+        <div className="flex items-center gap-3 flex-wrap">
+          <CaptureMissionsPanel consultantId={consultantId} streak={streak} bumpVersion={missionsVersion} />
+          <CaptureScoreboard today={today} week={week} streak={streak} />
+        </div>
       </header>
 
       <div className="flex-1 flex overflow-hidden">
@@ -53,7 +60,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat }: Props) {
         <main className="flex-1 flex flex-col overflow-hidden">
           {!selectedId ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
-              <Gamepad2 className="w-12 h-12 text-muted-foreground/40" />
+              <Gamepad2 className="w-12 h-12 text-muted-foreground/40 animate-float" />
               <h3 className="text-base font-semibold">Selecione um lead para começar</h3>
               <p className="text-sm text-muted-foreground max-w-md">
                 Para adicionar um lead à captação, vá para o chat do WhatsApp, abra o cliente e marque "Capturar manualmente".
@@ -84,15 +91,15 @@ export function CaptacaoPanel({ consultantId, onOpenChat }: Props) {
                   />
                 </div>
                 <div className="rounded-lg border border-dashed border-border bg-secondary/20 p-3 text-[11px] text-muted-foreground space-y-1">
-                  <p>💡 <span className="font-semibold">Como funciona:</span> envie os passos, conforme o cliente responde os campos vão sendo preenchidos automaticamente (OCR já está ativo para conta e documento).</p>
-                  <p>Você também pode editar manualmente qualquer campo na ficha à direita.</p>
+                  <p>💡 <span className="font-semibold">Como funciona:</span> envie os passos, conforme o cliente responde os campos vão sendo preenchidos automaticamente (OCR ativo). Capturas em sequência ativam <span className="font-bold text-primary">combos</span>!</p>
+                  <p>Edite manualmente qualquer campo na ficha à direita.</p>
                 </div>
               </div>
             </>
           )}
         </main>
 
-        {selectedId && <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} />}
+        {selectedId && <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />}
       </div>
     </div>
   );

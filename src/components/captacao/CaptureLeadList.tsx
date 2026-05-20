@@ -103,14 +103,21 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect }: Props) {
           {filtered.map(l => {
             const active = l.id === selectedId;
             const pct = Math.round((l.filled / CAPTURE_FIELDS.length) * 100);
+            const ready = l.filled >= CAPTURE_FIELDS.length;
+            const medal = l.filled >= 8 ? "💎" : l.filled >= 6 ? "🥇" : l.filled >= 4 ? "🥈" : l.filled >= 2 ? "🥉" : "🌱";
             return (
               <li key={l.id}>
                 <button
                   onClick={() => onSelect(l.id)}
-                  className={`w-full text-left px-3 py-2.5 hover:bg-secondary/60 transition-colors ${active ? "bg-primary/10 border-l-2 border-primary" : ""}`}
+                  className={`w-full text-left px-3 py-2.5 hover:bg-secondary/60 transition-colors ${
+                    active ? "bg-primary/10 border-l-2 border-primary" : ""
+                  } ${ready ? "ring-1 ring-amber-400/50 bg-amber-400/5" : ""}`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium truncate">{l.name || "Sem nome"}</span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-sm leading-none" title="Nível">{medal}</span>
+                      <span className="text-sm font-medium truncate">{l.name || "Sem nome"}</span>
+                    </div>
                     <span className="text-[10px] text-muted-foreground flex items-center gap-0.5 shrink-0">
                       <Clock className="w-3 h-3" />{fmtTime(l.capture_started_at || l.created_at)}
                     </span>
@@ -118,9 +125,9 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect }: Props) {
                   <p className="text-[11px] text-muted-foreground truncate">{l.phone_whatsapp || "—"}</p>
                   <div className="mt-1.5 flex items-center gap-2">
                     <div className="flex-1 h-1 rounded-full bg-secondary overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-emerald-500 to-lime-400 transition-all" style={{ width: `${pct}%` }} />
+                      <div className={`h-full transition-all ${ready ? "bg-gradient-to-r from-amber-400 to-yellow-300" : "bg-gradient-to-r from-emerald-500 to-lime-400"}`} style={{ width: `${pct}%` }} />
                     </div>
-                    <span className="text-[10px] tabular-nums font-semibold text-primary">{l.filled}/{CAPTURE_FIELDS.length}</span>
+                    <span className={`text-[10px] tabular-nums font-semibold ${ready ? "text-amber-500" : "text-primary"}`}>{l.filled}/{CAPTURE_FIELDS.length}</span>
                   </div>
                 </button>
               </li>

@@ -376,3 +376,20 @@ html {
 .privacy-mode .sensitive-data:hover {
   filter: blur(6px);
 }
+
+/* ═══════════════ Capture Game ═══════════════ */
+.animate-shimmer-gold {
+  background-size: 200% 200%;
+}
+.capture-ambient {
+  background-image:
+    radial-gradient(ellipse 60% 40% at 20% 0%, hsl(var(--primary)/0.08), transparent 60%),
+    radial-gradient(ellipse 50% 50% at 100% 100%, hsl(45 95% 55%/0.06), transparent 60%);
+  background-size: 200% 200%;
+}
+.capture-card-flip { transform-style: preserve-3d; perspective: 800px; }
+@media (prefers-reduced-motion: reduce) {
+  .animate-xp-rise, .animate-combo-pop, .animate-shimmer-gold,
+  .animate-card-flip, .animate-field-flash, .animate-bg-drift,
+  .animate-boss-pulse { animation: none !important; }
+}
