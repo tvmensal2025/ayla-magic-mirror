@@ -1,0 +1,1 @@
+update public.facebook_campaigns set rejection_reason = null where rejection_reason like 'SESSION_INVALIDATED%';
