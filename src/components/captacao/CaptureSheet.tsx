@@ -7,10 +7,10 @@ import { CaptureLeadCard } from "./CaptureLeadCard";
 import { CaptureProgressBar } from "./CaptureProgressBar";
 import { useCaptureSession, CAPTURE_FIELDS } from "@/hooks/useCaptureSession";
 import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
-import { fireBigConfetti, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
+import { fireRandomCelebration, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy } from "lucide-react";
+import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy, ChevronDown, ChevronUp } from "lucide-react";
 
 interface Props {
   open: boolean;
@@ -28,9 +28,11 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<"passos" | "ficha">("passos");
   const [submitting, setSubmitting] = useState(false);
+  const [minimized, setMinimized] = useState(false);
   const lastCountRef = useRef(0);
 
-  useEffect(() => { setSentSteps(new Set()); }, [customerId]);
+  useEffect(() => { setSentSteps(new Set()); setMinimized(false); }, [customerId]);
+  useEffect(() => { if (!open) setMinimized(false); }, [open]);
 
   // Garante modo manual ao abrir
   useEffect(() => {
@@ -69,7 +71,7 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
         conversation_step: "finalizando",
         capture_mode: "auto",
       }).eq("id", customer.id);
-      fireBigConfetti();
+      fireRandomCelebration();
       await bump();
       toast({ title: "🎉 Cadastro enviado!", description: "Portal Worker concluindo…", duration: 3500 });
       onOpenChange(false);
@@ -85,6 +87,25 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
     toast({ title: "Modo Captação desligado" });
     onOpenChange(false);
   };
+
+  // Barra minimizada — flutua no rodapé sem bloquear o input do chat
+  if (open && minimized) {
+    return (
+      <button
+        type="button"
+        onClick={() => setMinimized(false)}
+        className="fixed bottom-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 h-11 rounded-full bg-primary text-primary-foreground shadow-2xl shadow-primary/40 border border-primary/60 backdrop-blur animate-in slide-in-from-bottom-2"
+        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+      >
+        <Gamepad2 className="w-4 h-4" />
+        <span className="text-xs font-bold">
+          Captação {filledCount}/{totalFields}
+        </span>
+        <span className="text-[10px] opacity-80">· {sentSteps.size}/10 passos</span>
+        <ChevronUp className="w-4 h-4" />
+      </button>
+    );
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -102,7 +123,16 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
               <p className="text-sm font-bold truncate">{customerName || phoneNumber || "Lead"}</p>
               <p className="text-[10px] text-muted-foreground truncate">{phoneNumber}</p>
             </div>
-            <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={() => onOpenChange(false)} title="Voltar ao chat">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-9 w-9 shrink-0"
+              onClick={() => setMinimized(true)}
+              title="Minimizar (liberar input do chat)"
+            >
+              <ChevronDown className="w-5 h-5" />
+            </Button>
+            <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0" onClick={() => onOpenChange(false)} title="Fechar">
               <X className="w-5 h-5" />
             </Button>
           </div>
@@ -147,7 +177,10 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
         </Tabs>
 
         {/* Footer */}
-        <footer className="p-3 border-t border-border bg-card/80 backdrop-blur sticky bottom-0 z-20 space-y-2">
+        <footer
+          className="p-3 border-t border-border bg-card/80 backdrop-blur sticky bottom-0 z-20 space-y-2"
+          style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))" }}
+        >
           {customer?.conversation_step && ["finalizando", "portal_submitting", "aguardando_otp", "validando_otp"].includes(customer.conversation_step) && (
             <p className="text-[11px] text-center text-primary font-semibold animate-pulse">
               🚀 Portal: {customer.conversation_step.replace("_", " ")}…

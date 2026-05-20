@@ -5,7 +5,7 @@ import { CaptureProgressBar } from "./CaptureProgressBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Check, Edit2, FileImage, Loader2, Sparkles, Trophy, X, Bot } from "lucide-react";
-import { fireMiniConfetti, fireBigConfetti, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
+import { fireRandomCelebration, MOTIVATIONAL_PHRASES, pickRandomPhrase } from "@/lib/captureGame";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { CaptureDocumentTiles } from "./CaptureDocumentTiles";
@@ -38,7 +38,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: P
       if (key === "electricity_bill_value") value = Number(String(value).replace(",", ".")) || null;
       await updateField(key, value);
       await resolve(s.id, "accepted");
-      fireMiniConfetti();
+      fireRandomCelebration();
       toast({ title: `🤖 IA capturou ${key}!`, duration: 1800 });
     } catch (e: any) {
       toast({ title: "Erro", description: e?.message || String(e), variant: "destructive" });
@@ -50,10 +50,9 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: P
     if (loading || !customer) { lastCountRef.current = filledCount; return; }
     const prev = lastCountRef.current;
     if (filledCount > prev && prev >= 0) {
-      const phrase = MOTIVATIONAL_PHRASES[filledCount];
+      const phrase = MOTIVATIONAL_PHRASES[filledCount] || pickRandomPhrase();
       if (phrase) toast({ title: phrase, duration: 2200 });
-      if (filledCount === totalFields) fireBigConfetti();
-      else fireMiniConfetti();
+      fireRandomCelebration();
     }
     lastCountRef.current = filledCount;
   }, [filledCount, totalFields, loading, customer, toast]);
@@ -88,7 +87,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: P
         conversation_step: "finalizando",
         capture_mode: "auto",
       }).eq("id", customer.id);
-      fireBigConfetti();
+      fireRandomCelebration();
       toast({
         title: "🎉 Cadastro enviado!",
         description: "O Portal Worker vai concluir o envio em alguns segundos.",

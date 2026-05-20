@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Camera, Loader2, RefreshCw, FileImage } from "lucide-react";
-import { fireMiniConfetti } from "@/lib/captureGame";
+import { fireRandomCelebration } from "@/lib/captureGame";
 
 type DocKey = "document_front_url" | "document_back_url" | "electricity_bill_photo_url";
 
@@ -44,7 +44,7 @@ export function CaptureDocumentTiles({ customerId, customer, onUploaded }: Props
       if (upErr) throw upErr;
       const { data: pub } = supabase.storage.from("whatsapp-media").getPublicUrl(path);
       await onUploaded(key, pub.publicUrl);
-      fireMiniConfetti();
+      fireRandomCelebration();
       toast({ title: "📎 Documento anexado", duration: 1500 });
     } catch (e: any) {
       toast({ title: "Erro no upload", description: e?.message || String(e), variant: "destructive" });
