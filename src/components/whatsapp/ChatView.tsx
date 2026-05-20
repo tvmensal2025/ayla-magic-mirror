@@ -220,6 +220,23 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
             </SelectContent>
           </Select>
         )}
+        {isCustomer && customerId && (
+          <Button
+            size="sm"
+            variant={captureOn ? "default" : "outline"}
+            className={`h-7 text-[10px] gap-1 ${
+              captureOn
+                ? "bg-primary text-primary-foreground animate-pulse shadow-md shadow-primary/30"
+                : "border-primary/40 text-primary hover:bg-primary/10"
+            }`}
+            onClick={toggleCapture}
+            title={captureOn ? "Toque pra abrir o painel" : "Ligar Modo Captação (game)"}
+          >
+            <Gamepad2 className="h-3.5 w-3.5" />
+            {captureOn ? `${filledCount}/${totalFields}` : "Captação"}
+          </Button>
+        )}
+
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
