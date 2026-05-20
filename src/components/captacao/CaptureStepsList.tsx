@@ -190,103 +190,83 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
   const defaultV = (defaultVariant || "A").toUpperCase();
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 sticky top-0 z-10 bg-background/95 backdrop-blur py-2 -mx-1 px-1">
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5 sticky top-0 z-10 bg-background/95 backdrop-blur py-1.5 -mx-1 px-1">
         <div className="relative flex-1">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input
             placeholder="Buscar passo…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="h-9 pl-8 text-sm"
+            className="h-8 pl-7 text-xs"
           />
         </div>
         <Button
           size="sm"
           variant={onlyPending ? "default" : "outline"}
-          className="h-9 px-3 text-xs whitespace-nowrap"
+          className="h-8 px-2 text-[11px] whitespace-nowrap"
           onClick={() => setOnlyPending((v) => !v)}
         >
-          Só pendentes
+          Pendentes
         </Button>
       </div>
 
-      <ul className="space-y-2">
+      <ul className="space-y-1.5">
         {filtered.map((g) => {
           const num = groups.findIndex((x) => x.step_key === g.step_key) + 1;
           const variantKeys = Object.keys(g.variants).sort();
           const anySent = variantKeys.some((v) => sentSteps.has(g.variants[v].id));
-          const media = (() => {
-            const ref = g.variants[defaultV] || g.variants[variantKeys[0]];
-            const mo = Array.isArray(ref?.media_order) ? (ref.media_order as string[]) : [];
-            return mo;
-          })();
+          const defaultRow = g.variants[defaultV] || g.variants[variantKeys[0]];
+          const media = Array.isArray(defaultRow?.media_order) ? (defaultRow.media_order as string[]) : [];
+          const isSending = sending === defaultRow?.id;
           return (
             <li key={g.step_key}>
               <div
-                className={`rounded-xl border p-3 transition-all ${
+                className={`rounded-lg border flex items-center gap-2 pl-2 pr-1.5 py-1.5 transition-all ${
                   anySent
                     ? "border-primary/30 bg-primary/5"
                     : "border-border bg-card hover:border-primary/50"
                 }`}
               >
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-[11px] font-bold text-primary tabular-nums shrink-0">#{num}</span>
-                    <span className="text-sm font-semibold truncate">
-                      {g.title || g.step_key || `Passo ${num}`}
+                <span
+                  className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold tabular-nums ${
+                    anySent
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {anySent ? <Check className="w-3 h-3" /> : num}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold truncate leading-tight">
+                    {g.title || g.step_key || `Passo ${num}`}
+                  </p>
+                  <div className="flex items-center gap-1 text-muted-foreground/70 mt-0.5">
+                    {media.includes("audio") && <Mic className="w-2.5 h-2.5 text-emerald-500" />}
+                    {media.includes("image") && <ImageIcon className="w-2.5 h-2.5 text-amber-500" />}
+                    {media.includes("video") && <Video className="w-2.5 h-2.5 text-cyan-500" />}
+                    <span className="text-[9px] uppercase tracking-wide opacity-70">
+                      {variantKeys.length > 1 ? `${variantKeys.length} variantes` : `variante ${variantKeys[0]}`}
                     </span>
                   </div>
-                  {anySent && (
-                    <span className="flex items-center gap-1 text-[10px] text-primary font-semibold shrink-0">
-                      <Check className="w-3.5 h-3.5" /> enviado
-                    </span>
+                </div>
+                <Button
+                  size="sm"
+                  variant={anySent ? "outline" : "default"}
+                  disabled={isSending || !defaultRow}
+                  onClick={() => defaultRow && setConfirmStep({ group: g, row: defaultRow })}
+                  className="h-10 px-3 text-[11px] gap-1 shrink-0"
+                  title="Ver prévia e enviar"
+                >
+                  {isSending ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <>
+                      <Eye className="w-3.5 h-3.5" />
+                      <span className="font-bold">{defaultRow?.variant || defaultV}</span>
+                    </>
                   )}
-                </div>
-                {g.preview && (
-                  <p className="text-[11px] text-muted-foreground line-clamp-2 mb-2">{g.preview}</p>
-                )}
-                <div className="flex items-center gap-1.5 text-muted-foreground/70 mb-2">
-                  {media.includes("audio") && <Mic className="w-3 h-3 text-emerald-500" />}
-                  {media.includes("image") && <ImageIcon className="w-3 h-3 text-amber-500" />}
-                  {media.includes("video") && <Video className="w-3 h-3 text-cyan-500" />}
-                </div>
-
-                {/* Botões A / B / C */}
-                <div className="flex flex-wrap gap-1.5">
-                  {variantKeys.map((v) => {
-                    const row = g.variants[v];
-                    const isSending = sending === row.id;
-                    const sent = sentSteps.has(row.id);
-                    const isDefault = v === defaultV;
-                    const meta = VARIANT_META[v] || { label: v, hint: "" };
-                    return (
-                      <Button
-                        key={v}
-                        size="sm"
-                        variant={sent ? "outline" : isDefault ? "default" : "secondary"}
-                        disabled={isSending}
-                        onClick={() => setConfirmStep({ group: g, row })}
-                        className="h-8 px-2.5 text-[11px] gap-1"
-                      >
-                        {isSending ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : sent ? (
-                          <Check className="w-3 h-3" />
-                        ) : (
-                          <Send className="w-3 h-3" />
-                        )}
-                        <span className="font-bold">{meta.label}</span>
-                        <span className="opacity-70">{meta.hint}</span>
-                      </Button>
-                    );
-                  })}
-                  {variantKeys.length === 1 && (
-                    <span className="text-[10px] text-muted-foreground self-center">
-                      (só variante {variantKeys[0]} configurada)
-                    </span>
-                  )}
-                </div>
+                </Button>
               </div>
             </li>
           );
@@ -299,9 +279,12 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
         consultantId={consultantId}
         customerId={customerId}
         step={confirmStep ? { ...confirmStep.row } : null}
+        variants={confirmStep?.group.variants}
+        onVariantChange={changeVariant}
         sending={!!sending}
         onSend={() => confirmStep && doSend(confirmStep.row)}
       />
     </div>
   );
 }
+
