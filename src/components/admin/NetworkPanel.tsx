@@ -522,6 +522,11 @@ export function NetworkPanel({ consultantId }: NetworkPanelProps) {
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"tree" | "table">("tree");
   const [zoom, setZoom] = useState(0.85);
+  const [zoomTouched, setZoomTouched] = useState(false);
+  const [contentSize, setContentSize] = useState({ w: 0, h: 0 });
+  const treeScrollRef = useRef<HTMLDivElement>(null);
+  const treeInnerRef = useRef<HTMLDivElement>(null);
+  const didInitialCenterRef = useRef(false);
   const [selectedMember, setSelectedMember] = useState<NetworkMember | null>(null);
   const { toast } = useToast();
 
@@ -609,6 +614,48 @@ export function NetworkPanel({ consultantId }: NetworkPanelProps) {
     );
   }, [members, search]);
 
+  // Measure intrinsic tree size (independent of zoom) and auto-fit to container width.
+  useLayoutEffect(() => {
+    if (viewMode !== "tree") return;
+    const inner = treeInnerRef.current;
+    const container = treeScrollRef.current;
+    if (!inner || !container) return;
+
+    const measure = () => {
+      // Temporarily neutralize transform to read intrinsic size
+      const prev = inner.style.transform;
+      inner.style.transform = "none";
+      const w = inner.scrollWidth;
+      const h = inner.scrollHeight;
+      inner.style.transform = prev;
+      if (w && h) setContentSize(prev2 => (prev2.w === w && prev2.h === h ? prev2 : { w, h }));
+
+      if (!zoomTouched && w > 0) {
+        const cw = container.clientWidth - 16; // breathing room
+        const fit = Math.max(0.35, Math.min(1, cw / w));
+        setZoom(z => (Math.abs(z - fit) < 0.01 ? z : fit));
+      }
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [tree, viewMode, zoomTouched]);
+
+  // Center horizontally after layout if content overflows
+  useLayoutEffect(() => {
+    if (viewMode !== "tree") return;
+    const container = treeScrollRef.current;
+    if (!container || !contentSize.w) return;
+    if (didInitialCenterRef.current && zoomTouched) return;
+    const scaled = contentSize.w * zoom;
+    if (scaled > container.clientWidth) {
+      container.scrollLeft = (container.scrollWidth - container.clientWidth) / 2;
+    }
+    didInitialCenterRef.current = true;
+  }, [contentSize, zoom, viewMode, zoomTouched]);
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-3">
@@ -667,13 +714,13 @@ export function NetworkPanel({ consultantId }: NetworkPanelProps) {
 
             {viewMode === "tree" && (
               <div className="flex items-center rounded-xl bg-white/[0.04] border border-white/[0.08] p-0.5">
-                <button onClick={() => setZoom(z => Math.max(z - 0.15, 0.3))} className="px-2 py-1.5 text-muted-foreground hover:text-foreground rounded-lg transition-colors">
+                <button onClick={() => { setZoomTouched(true); setZoom(z => Math.max(z - 0.15, 0.3)); }} className="px-2 py-1.5 text-muted-foreground hover:text-foreground rounded-lg transition-colors">
                   <ZoomOut className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => setZoom(0.85)} className="px-2 py-1.5 text-[10px] text-muted-foreground hover:text-foreground font-mono rounded-lg transition-colors">
+                <button onClick={() => { setZoomTouched(false); didInitialCenterRef.current = false; }} className="px-2 py-1.5 text-[10px] text-muted-foreground hover:text-foreground font-mono rounded-lg transition-colors" title="Ajustar à tela">
                   {Math.round(zoom * 100)}%
                 </button>
-                <button onClick={() => setZoom(z => Math.min(z + 0.15, 1.5))} className="px-2 py-1.5 text-muted-foreground hover:text-foreground rounded-lg transition-colors">
+                <button onClick={() => { setZoomTouched(true); setZoom(z => Math.min(z + 0.15, 1.5)); }} className="px-2 py-1.5 text-muted-foreground hover:text-foreground rounded-lg transition-colors">
                   <ZoomIn className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -708,18 +755,33 @@ export function NetworkPanel({ consultantId }: NetworkPanelProps) {
             </Button>
           </div>
         ) : viewMode === "tree" ? (
-          <div className="overflow-auto relative" style={{ maxHeight: "72vh" }}>
+          <div ref={treeScrollRef} className="overflow-auto relative" style={{ maxHeight: "72vh" }}>
             {/* Background dots pattern */}
-            <div className="absolute inset-0 opacity-[0.03]" style={{
+            <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{
               backgroundImage: "radial-gradient(circle, currentColor 1px, transparent 1px)",
               backgroundSize: "24px 24px"
             }} />
-            
-            <div className="flex justify-center py-10 px-8 min-w-max relative z-10"
-              style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }}>
-              {tree.map(root => (
-                <OrgChartNode key={root.member.id} node={root} depth={0} onSelect={setSelectedMember} />
-              ))}
+
+            <div
+              className="mx-auto relative z-10"
+              style={{
+                width: contentSize.w ? contentSize.w * zoom : undefined,
+                height: contentSize.h ? contentSize.h * zoom + 80 : undefined,
+              }}
+            >
+              <div
+                ref={treeInnerRef}
+                className="flex py-10 px-8"
+                style={{
+                  transform: `scale(${zoom})`,
+                  transformOrigin: "top left",
+                  width: contentSize.w || "max-content",
+                }}
+              >
+                {tree.map(root => (
+                  <OrgChartNode key={root.member.id} node={root} depth={0} onSelect={setSelectedMember} />
+                ))}
+              </div>
             </div>
           </div>
         ) : (
