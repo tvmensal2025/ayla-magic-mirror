@@ -145,6 +145,28 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
     } finally { setReactivating(null); }
   }
 
+  async function handleDelete(c: Campaign) {
+    setDeleting(c.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("facebook-delete-campaign", {
+        body: { campaign_id: c.id },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      setItems((prev) => prev.filter((x) => x.id !== c.id));
+      const metaWarn = (data as any)?.meta_error;
+      toast({
+        title: "Campanha apagada",
+        description: metaWarn ? `Removida do sistema. Aviso Meta: ${metaWarn}` : "Removida do Meta e do sistema.",
+      });
+    } catch (e: any) {
+      toast({ title: "Falha ao apagar", description: e?.message || "Erro desconhecido", variant: "destructive" });
+    } finally {
+      setDeleting(null);
+      setConfirmDelete(null);
+    }
+  }
+
   if (loading) return <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
   if (items.length === 0) return <div className="text-center py-10 text-muted-foreground text-sm">Nenhuma campanha ainda. Clique em "Nova campanha" pra começar.</div>;
 
