@@ -5,7 +5,7 @@ import { CaptureProgressBar } from "./CaptureProgressBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Check, Edit2, FileImage, Loader2, Sparkles, Trophy, X, Bot } from "lucide-react";
-import { fireMiniConfetti, fireBigConfetti, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
+import { fireRandomCelebration, MOTIVATIONAL_PHRASES, pickRandomPhrase } from "@/lib/captureGame";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { CaptureDocumentTiles } from "./CaptureDocumentTiles";
