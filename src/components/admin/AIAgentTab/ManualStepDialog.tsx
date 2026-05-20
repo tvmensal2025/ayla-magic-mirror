@@ -26,11 +26,12 @@ interface Props {
   consultantId: string;
   customerId: string;
   customerName: string | null;
+  initialStepId?: string;
 }
 
 const KIND_ICON: Record<string, any> = { audio: Mic, image: ImageIcon, video: Video, document: FileText, text: FileText };
 
-export function ManualStepDialog({ open, onOpenChange, consultantId, customerId, customerName }: Props) {
+export function ManualStepDialog({ open, onOpenChange, consultantId, customerId, customerName, initialStepId }: Props) {
   const { toast } = useToast();
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(false);
@@ -52,10 +53,15 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
         .select("id, step_key, title, slot_key, message_text, position")
         .eq("flow_id", flow.id).eq("is_active", true)
         .order("position", { ascending: true });
-      setSteps((data as any) || []);
+      const list = ((data as any) || []) as Step[];
+      setSteps(list);
       setLoading(false);
+      if (initialStepId) {
+        const pre = list.find((s) => s.id === initialStepId);
+        if (pre) loadStepParts(pre);
+      }
     })();
-  }, [open, consultantId]);
+  }, [open, consultantId, initialStepId]);
 
   async function loadStepParts(step: Step) {
     setSelectedStep(step);

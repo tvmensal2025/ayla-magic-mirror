@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Send, Paperclip, Mic, MicOff, MessageSquareText, Loader2, Image, File, Video, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { QuickReplyMenu } from "./QuickReplyMenu";
+import { FlowQuickBar } from "./FlowQuickBar";
 import { AiSuggestReplies } from "./AiSuggestReplies";
 import { Progress } from "@/components/ui/progress";
 import type { MessageTemplate } from "@/types/whatsapp";
@@ -130,6 +131,7 @@ export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMed
 
       <div className="flex items-end gap-1.5">
         <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-primary" disabled={disabled} onClick={() => { setShowQuickReply(!showQuickReply); setQuickSearch(""); }} title="Respostas rápidas"><MessageSquareText className="h-4 w-4" /></Button>
+        <FlowQuickBar consultantId={consultantId} customerId={customerId} customerName={customerName} disabled={disabled} />
         <input ref={file.fileInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,audio/ogg,audio/mp4,audio/wav,.ogg,.mp3,.m4a,.wav,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={file.handleFileSelect} className="hidden" />
         <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-primary" disabled={disabled || file.isUploading} onClick={() => file.fileInputRef.current?.click()} title="Anexar arquivo"><Paperclip className="h-4 w-4" /></Button>
         <AiSuggestReplies customerId={customerId} disabled={disabled} onPick={(t) => { setText(t); textareaRef.current?.focus(); }} />
