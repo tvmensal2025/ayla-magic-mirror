@@ -82,7 +82,19 @@ async function reactivateOne(admin: any, campaignDbId: string, consultantId: str
     await admin.from("facebook_campaigns").update({ status: "active", rejection_reason: null }).eq("id", campaignDbId);
     return { activated: true };
   } catch (e) {
-    const reason = (e as Error).message;
+    const raw = (e as Error).message || "";
+    const lower = raw.toLowerCase();
+    let reason = raw;
+    if (
+      lower.includes("session has been invalidated") ||
+      lower.includes("session for security reasons") ||
+      lower.includes("subcode\":460") ||
+      lower.includes("error_subcode=460") ||
+      lower.includes("code\":190") ||
+      (lower.includes("oauth") && lower.includes("token"))
+    ) {
+      reason = "SESSION_INVALIDATED: O token do Facebook foi invalidado (senha alterada ou sessão encerrada por segurança). Reconecte a conta Facebook no painel. | " + raw;
+    }
     await admin.from("facebook_campaigns").update({ rejection_reason: reason }).eq("id", campaignDbId);
     return { activated: false, reason };
   }
