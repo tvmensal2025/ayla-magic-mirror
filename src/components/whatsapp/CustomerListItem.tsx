@@ -157,21 +157,21 @@ export function CustomerListItem({
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-foreground truncate sensitive-name">{c.name || "Sem nome"}</p>
-            <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 ${status.className}`}>{status.label}</Badge>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="text-sm font-semibold text-foreground truncate sensitive-name min-w-0 max-w-full">{c.name || "Sem nome"}</p>
+            <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 shrink-0 ${status.className}`}>{status.label}</Badge>
             {(c.tipo_produto === "telefonia") && (
-              <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-purple-500/15 text-purple-400 border-purple-500/20">
+              <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 shrink-0 bg-purple-500/15 text-purple-400 border-purple-500/20">
                 📱 Telecom
               </Badge>
             )}
-            {hasDevolutiva && (
-              <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-red-500/15 text-red-400 border-red-500/20">
+            {hasDevolutiva && status.label !== "Devolutiva" && (
+              <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 shrink-0 bg-red-500/15 text-red-400 border-red-500/20">
                 ⚠️ Devolutiva
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-2 mt-1 flex-wrap">
+          <div className="hidden sm:flex items-center gap-2 mt-1 flex-wrap">
             <span className="text-[10px] text-muted-foreground">CRM:</span>
             {reachedStageLabels.length > 0 ? (
               <span className="text-[10px] text-muted-foreground">{reachedStageLabels.join(" • ")}</span>
@@ -179,43 +179,44 @@ export function CustomerListItem({
               <span className="text-[10px] text-muted-foreground">Sem aviso enviado</span>
             )}
           </div>
-          <div className="flex items-center gap-3 mt-0.5">
-            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-              <Phone className="h-2.5 w-2.5" />
+          <div className="flex items-center gap-x-3 gap-y-0.5 mt-1 flex-wrap">
+            <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1 whitespace-nowrap">
+              <Phone className="h-2.5 w-2.5 shrink-0" />
               <span className="sensitive-phone">{formatPhoneDisplay(c.phone_whatsapp)}</span>
             </span>
             {c.distribuidora && (
-              <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                <Building2 className="h-2.5 w-2.5" />
-                {c.distribuidora}
+              <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1 whitespace-nowrap max-w-[140px] truncate">
+                <Building2 className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{c.distribuidora}</span>
               </span>
             )}
             {c.address_city && (
-              <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                <MapPin className="h-2.5 w-2.5" />
+              <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1 whitespace-nowrap">
+                <MapPin className="h-2.5 w-2.5 shrink-0" />
                 {c.address_city}{c.address_state ? `/${c.address_state}` : ""}
               </span>
             )}
             {c.registered_by_name && (
-              <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                <User className="h-2.5 w-2.5" />
-                {c.registered_by_name}
+              <span className="hidden sm:inline-flex text-[11px] text-muted-foreground items-center gap-1 whitespace-nowrap max-w-[140px] truncate">
+                <User className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{c.registered_by_name}</span>
               </span>
             )}
             {c.customer_referred_by_name && (
-              <span className="text-[11px] text-blue-400 flex items-center gap-1">
-                <Users className="h-2.5 w-2.5" />
-                Ind: <span className="sensitive-name">{c.customer_referred_by_name}</span>
+              <span className="hidden sm:inline-flex text-[11px] text-blue-400 items-center gap-1 whitespace-nowrap">
+                <Users className="h-2.5 w-2.5 shrink-0" />
+                Ind: <span className="sensitive-name truncate max-w-[100px]">{c.customer_referred_by_name}</span>
               </span>
             )}
             {c.cashback && (
-              <span className="text-[11px] text-emerald-400 flex items-center gap-1">
-                <CreditCard className="h-2.5 w-2.5" />
+              <span className="hidden sm:inline-flex text-[11px] text-emerald-400 items-center gap-1 whitespace-nowrap">
+                <CreditCard className="h-2.5 w-2.5 shrink-0" />
                 CB: {c.cashback}
               </span>
             )}
           </div>
         </div>
+
 
         <div className="flex items-center gap-3 shrink-0">
           {c.electricity_bill_value != null && c.electricity_bill_value > 0 && (

@@ -246,11 +246,11 @@ export function CustomerManager({ customers, consultantId, onCustomersChange, in
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <Button onClick={handleSyncIgreen} size="sm" variant="outline" className="gap-1.5 rounded-xl font-semibold h-8 sm:h-9 px-3 sm:px-4 text-xs sm:text-sm border-green-500/20 text-green-600 hover:bg-green-500/10" disabled={syncing || syncCooldown > 0}>
+          <div className="grid grid-cols-2 sm:flex sm:items-center sm:flex-wrap gap-2 w-full sm:w-auto">
+            <Button onClick={handleSyncIgreen} size="sm" variant="outline" className="gap-1.5 rounded-xl font-semibold h-9 px-3 text-xs sm:text-sm border-green-500/20 text-green-600 hover:bg-green-500/10 col-span-2 sm:col-span-1" disabled={syncing || syncCooldown > 0}>
               {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
               <span className="hidden sm:inline">{syncing ? "Sincronizando..." : syncCooldown > 0 ? `Aguarde ${syncCooldown}s` : "Sincronizar iGreen"}</span>
-              <span className="sm:hidden">{syncing ? "Sync..." : syncCooldown > 0 ? `${syncCooldown}s` : "Sync"}</span>
+              <span className="sm:hidden">{syncing ? "Sincronizando..." : syncCooldown > 0 ? `Aguarde ${syncCooldown}s` : "Sincronizar iGreen"}</span>
             </Button>
             <CustomerImportExport
               customers={customers}
@@ -258,8 +258,8 @@ export function CustomerManager({ customers, consultantId, onCustomersChange, in
               consultantId={consultantId}
               onCustomersChange={onCustomersChange}
             />
-            <Button onClick={() => setShowAddDialog(true)} size="sm" className="gap-1.5 rounded-xl font-semibold shadow-lg shadow-primary/15 h-8 sm:h-9 px-3 sm:px-4 text-xs sm:text-sm">
-              <UserPlus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Novo Cliente</span><span className="sm:hidden">Novo</span>
+            <Button onClick={() => setShowAddDialog(true)} size="sm" className="gap-1.5 rounded-xl font-semibold shadow-lg shadow-primary/15 h-9 px-3 text-xs sm:text-sm">
+              <UserPlus className="w-3.5 h-3.5" /> <span>Novo</span><span className="hidden sm:inline">&nbsp;Cliente</span>
             </Button>
           </div>
         </div>
@@ -272,30 +272,31 @@ export function CustomerManager({ customers, consultantId, onCustomersChange, in
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50" />
               <Input placeholder="Buscar nome, telefone, CPF, e-mail..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10 h-10 sm:h-11 rounded-xl bg-secondary/30 border-border/50 focus:border-primary/40 text-sm" />
             </div>
-            
-            {/* Tipo produto toggle - Mais espaçado e elegante */}
-            <div className="flex gap-2 bg-secondary/20 rounded-2xl p-1.5 border border-border/30">
+
+            {/* Tipo produto toggle */}
+            <div className="flex gap-1.5 bg-secondary/20 rounded-2xl p-1.5 border border-border/30">
               {([
-                ["all", "Todos", "📊"], 
-                ["energia", "Energia", "⚡"], 
+                ["all", "Todos", "📊"],
+                ["energia", "Energia", "⚡"],
                 ["telefonia", "Telecom", "📱"]
               ] as const).map(([val, label, icon]) => (
-                <button 
-                  key={val} 
-                  onClick={() => setSelectedTipo(val as any)} 
-                  className={`flex-1 flex items-center justify-center gap-2 text-sm font-semibold rounded-xl py-2.5 px-3 transition-all duration-200 ${
-                    selectedTipo === val 
-                      ? "bg-gradient-to-br from-primary to-primary/80 text-white shadow-lg shadow-primary/25 scale-105" 
+                <button
+                  key={val}
+                  onClick={() => setSelectedTipo(val as any)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 text-xs sm:text-sm font-semibold rounded-xl py-2 px-2 sm:px-3 transition-all duration-200 ${
+                    selectedTipo === val
+                      ? "bg-gradient-to-br from-primary to-primary/80 text-white shadow-lg shadow-primary/25"
                       : "text-muted-foreground hover:text-foreground hover:bg-secondary/40"
                   }`}
                 >
-                  <span className="text-base">{icon}</span>
-                  <span className="hidden sm:inline">{label}</span>
+                  <span className="text-sm sm:text-base">{icon}</span>
+                  <span>{label}</span>
                 </button>
               ))}
             </div>
           </div>
-          <div className="grid gap-2 grid-cols-2 sm:grid-cols-3">
+          <div className="grid gap-2 grid-cols-1 sm:grid-cols-3">
+
             <Select value={selectedLicenciado} onValueChange={setSelectedLicenciado}>
               <SelectTrigger className="h-8 sm:h-9 rounded-xl bg-secondary/30 border-border/50 text-xs">
                 <div className="flex items-center gap-1.5 truncate">
@@ -325,7 +326,7 @@ export function CustomerManager({ customers, consultantId, onCustomersChange, in
               </SelectContent>
             </Select>
             <Select value={selectedCidade} onValueChange={setSelectedCidade}>
-              <SelectTrigger className="h-8 sm:h-9 rounded-xl bg-secondary/30 border-border/50 text-xs col-span-2 sm:col-span-1">
+              <SelectTrigger className="h-9 sm:h-9 rounded-xl bg-secondary/30 border-border/50 text-xs">
                 <div className="flex items-center gap-1.5 truncate">
                   <Smartphone className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                   <SelectValue placeholder="Cidade/UF" />
