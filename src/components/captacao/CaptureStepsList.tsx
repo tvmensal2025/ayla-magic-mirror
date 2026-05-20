@@ -3,11 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Send, Loader2, Check, Mic, ImageIcon, Video, Search } from "lucide-react";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Send, Loader2, Check, Mic, ImageIcon, Video, Search, Eye } from "lucide-react";
+import { CaptureStepPreview } from "./CaptureStepPreview";
 
 interface Props {
   consultantId: string;
