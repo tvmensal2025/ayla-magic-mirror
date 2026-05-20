@@ -18,6 +18,14 @@ import { GeographyCard } from "./GeographyCard";
 import { RetentionCard } from "./RetentionCard";
 import { TeamRankingTab } from "./TeamRankingTab";
 
+// Formata moeda BRL de forma compacta em telas pequenas (R$ 50,4 mil / R$ 1,2 mi)
+function formatCompactBRL(value: number): string {
+  if (!value) return "R$ 0";
+  if (value >= 1_000_000) return `R$ ${(value / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mi`;
+  if (value >= 10_000) return `R$ ${(value / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil`;
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+}
+
 interface DashboardTabProps {
   userId: string;
   form: { igreen_portal_email: string; igreen_portal_password: string };
