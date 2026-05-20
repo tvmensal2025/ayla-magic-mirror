@@ -16,6 +16,7 @@ import { CustomerCharts } from "./CustomerCharts";
 import { TopConsumersCard } from "./TopConsumersCard";
 import { GeographyCard } from "./GeographyCard";
 import { RetentionCard } from "./RetentionCard";
+import { TeamRankingTab } from "./TeamRankingTab";
 
 interface DashboardTabProps {
   userId: string;
