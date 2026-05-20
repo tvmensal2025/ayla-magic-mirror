@@ -131,20 +131,49 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
     }
   }, [chat, consultantId, kanbanStages, toast]);
 
-  // Check if this contact is already a customer
+  // Check if this contact is already a customer; auto-create a minimal
+  // whatsapp_lead row so flow shortcuts (⚡) always have a customerId.
   useEffect(() => {
     if (!chat) { setIsCustomer(false); setCustomerId(null); return; }
     const phone = chat.remoteJid.split("@")[0];
-    supabase
-      .from("customers")
-      .select("id")
-      .eq("phone_whatsapp", phone)
-      .maybeSingle()
-      .then(({ data }) => {
-        setIsCustomer(!!data);
-        setCustomerId(data?.id || null);
-      });
-  }, [chat]);
+    let cancelled = false;
+    (async () => {
+      const { data: existing } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("consultant_id", consultantId)
+        .eq("phone_whatsapp", phone)
+        .maybeSingle();
+      if (cancelled) return;
+      if (existing?.id) {
+        setIsCustomer(true);
+        setCustomerId(existing.id);
+        return;
+      }
+      const fallbackName = (chat as { pushName?: string | null }).pushName || (chat as { name?: string | null }).name || phone;
+      const { data: created, error } = await supabase
+        .from("customers")
+        .insert({
+          consultant_id: consultantId,
+          phone_whatsapp: phone,
+          name: fallbackName,
+          customer_origin: "whatsapp_lead",
+          conversation_step: "novo_lead",
+        })
+        .select("id")
+        .maybeSingle();
+      if (cancelled) return;
+      if (created?.id) {
+        setIsCustomer(true);
+        setCustomerId(created.id);
+      } else if (error) {
+        logger.error("Falha ao auto-criar cliente para chat:", error);
+        setIsCustomer(false);
+        setCustomerId(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [chat, consultantId]);
 
   const handleCustomerAdded = useCallback((newCustomerId?: string) => {
     setIsCustomer(true);
