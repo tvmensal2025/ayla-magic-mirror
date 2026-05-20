@@ -85,6 +85,7 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
   const [loading, setLoading] = useState(true);
   const [reactivating, setReactivating] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Campaign | null>(null);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const { isSuperAdmin } = useUserRole(authUserId);
@@ -154,6 +155,30 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
     } catch (e: any) {
       toast({ title: "Falha ao tentar reativar", description: e?.message || "Erro desconhecido", variant: "destructive" });
     } finally { setReactivating(null); }
+  }
+
+  async function handleToggle(c: Campaign) {
+    const action = c.status === "active" ? "pause" : "activate";
+    setToggling(c.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("facebook-toggle-campaign", {
+        body: { campaign_id: c.id, action },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      const newStatus = (data as any)?.status || (action === "pause" ? "paused" : "active");
+      const metaWarn = (data as any)?.meta_error;
+      setItems((prev) => prev.map((x) => x.id === c.id ? { ...x, status: newStatus, rejection_reason: action === "activate" && !metaWarn ? null : x.rejection_reason } : x));
+      toast({
+        title: action === "pause" ? "Campanha pausada" : "Campanha ativada",
+        description: metaWarn ? `Status local atualizado. Aviso Meta: ${metaWarn}` : "Sincronizado com o Meta.",
+        variant: metaWarn ? "destructive" : "default",
+      });
+    } catch (e: any) {
+      toast({ title: "Falha ao alterar status", description: e?.message || "Erro", variant: "destructive" });
+    } finally {
+      setToggling(null);
+    }
   }
 
   async function handleDelete(c: Campaign) {
@@ -237,18 +262,34 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
                   );
                 })()}
               </div>
-              {isSuperAdmin && (
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 text-destructive hover:bg-destructive/10 shrink-0"
-                  onClick={() => setConfirmDelete(c)}
-                  disabled={deleting === c.id}
-                  title="Apagar campanha (SuperAdmin)"
-                >
-                  {deleting === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                </Button>
-              )}
+              <div className="flex items-center gap-1 shrink-0">
+                {(c.status === "active" || c.status === "paused") && c.fb_campaign_id && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8"
+                    onClick={() => handleToggle(c)}
+                    disabled={toggling === c.id}
+                    title={c.status === "active" ? "Pausar campanha" : "Ativar campanha"}
+                  >
+                    {toggling === c.id
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : c.status === "active" ? <Pause className="w-4 h-4 text-amber-400" /> : <Play className="w-4 h-4 text-emerald-400" />}
+                  </Button>
+                )}
+                {isSuperAdmin && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                    onClick={() => setConfirmDelete(c)}
+                    disabled={deleting === c.id}
+                    title="Apagar campanha (SuperAdmin)"
+                  >
+                    {deleting === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  </Button>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
               <Stat icon={<TrendingUp className="w-3.5 h-3.5" />} label="Impressões" value={m.impressions.toLocaleString("pt-BR")} />
