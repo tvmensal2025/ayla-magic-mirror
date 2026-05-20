@@ -2324,6 +2324,26 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // 📸 PRÉ-SWITCH: foto/PDF recebida enquanto ainda falta conta de luz →
+  // força "aguardando_conta" para que o OCR rode e os botões SIM/NÃO/EDITAR
+  // sejam enviados, mesmo se o consultor estiver no Modo Captação manual e
+  // o conversation_step não seja exatamente "aguardando_conta".
+  // ═══════════════════════════════════════════════════════════════════
+  if (isFile && !isButton) {
+    const _hasBillValue = Number((customer as any).electricity_bill_value || 0) >= 30;
+    const _ocrDone = !!(customer as any).ocr_done;
+    const _confirming = String(step || "").startsWith("confirmando_dados");
+    const _editingConta = String(step || "").startsWith("editing_conta");
+    const _docCapture = String(step || "").startsWith("aguardando_doc") || String(step || "").startsWith("editing_doc");
+    // Se ainda não temos valor da conta + OCR completo, e não estamos no meio
+    // de captura de documento (RG/CNH), tratar como conta de luz.
+    if (!_hasBillValue && !_ocrDone && !_confirming && !_editingConta && !_docCapture) {
+      console.log(`[bill-redirect] isFile=true step=${step} → forçando aguardando_conta para OCR + botões`);
+      step = "aguardando_conta";
+    }
+  }
+
   switch (step) {
     // ─── 1. BOAS-VINDAS ────────────────────
     case "welcome": {

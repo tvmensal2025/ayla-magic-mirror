@@ -137,6 +137,7 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
               customerId={customerId}
               sentSteps={sentSteps}
               onSent={(id) => setSentSteps((s) => new Set(s).add(id))}
+              defaultVariant={(customer as any)?.flow_variant || "A"}
             />
           </TabsContent>
 

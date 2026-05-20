@@ -1,56 +1,61 @@
-# Uploads de documentos + botão Finalizar no painel Captação
+## Objetivo
 
-Hoje a aba **Ficha** mostra os 10 campos cadastrais, mas só tem 1 slot de "Documento" (mistura CNH/Doc Frente, Verso e Conta de Luz num único bloco) e o botão `CADASTRAR TUDO` só aparece quando `filledCount === 10`. O usuário pediu:
+1. Quando o cliente enviar a **foto/PDF da conta de luz** (depois do consultor ter pedido), o backend deve rodar **OCR + enviar botões interativos via Whapi (✅ SIM / ❌ NÃO / ✏️ EDITAR)** — exatamente como já acontece para RG/CNH.
+2. A lista dos **10 passos no painel Captação** deve mostrar todas as variantes do fluxo (A áudio, B sem áudio, C vídeo) lado a lado para o consultor escolher qual versão enviar em cada passo.
 
-1. Slots separados para **CNH/Doc Frente**, **Doc Verso** e **Conta de Energia** com upload pelo celular.
-2. Botão **Finalizar** sempre acessível no rodapé do painel, que dispara o portal worker (OTP + link de cadastro).
+## Contexto técnico apurado
 
-## 1. Bloco "Documentos" na Ficha — 3 slots com upload
+- **OCR da conta + botões já existem** em `whapi-webhook/handlers/bot-flow.ts` (case `aguardando_conta` → `confirmando_dados_conta`, linhas ~2520-2665) usando `ocrContaEnergia` + `sendOptions([sim_conta, nao_conta, editar_conta])`.
+- **Problema atual**: o Modo Captação seta `capture_mode='manual'`. Quando o cliente responde com **mídia** (foto da conta), o `whapi-webhook` cai no fluxo normal **somente se `conversation_step === "aguardando_conta"`**. Se o consultor disparou o passo "Pergunta valor da conta" manualmente, o `conversation_step` continua em outro estado (ex.: `qualificacao`, `aguardando_valor_conta`) e o OCR não roda. Além disso, se o bot ficou pausado pelo handoff (`bot_paused=true`), o webhook ignora a mensagem antes mesmo do OCR.
+- **Variantes A/B/C**: tabela `bot_flows` tem coluna `variant`. Hoje o `CaptureStepsList` busca **apenas 1 fluxo** (active ou mais recente) e mostra só os passos dele.
 
-Arquivo: `src/components/captacao/CaptureLeadCard.tsx`
+## Mudanças
 
-- Remover o bloco atual de `isDoc` dentro do `.map(CAPTURE_FIELDS)`.
-- Substituir o item `document_front_url` da lista `CAPTURE_FIELDS` (`src/hooks/useCaptureSession.ts`) por **um único marco** de "Documentos" no contador XP — mas internamente avaliar como preenchido quando os 3 URLs existirem (`document_front_url`, `document_back_url`, `electricity_bill_photo_url`). Mantém 10/10 como meta para não quebrar XP.
-- Renderizar abaixo da lista de campos um bloco `<section>` "Documentos" com 3 tiles:
-  ```text
-  [RG-  CNH / Frente ]   [RG -  CNH / Verso ]   [ Conta de Energia ]
-  ```
-  Cada tile:
-  - Mostra preview da imagem se a URL existir, com botão "Trocar".
-  - Se vazia, mostra `<input type="file" accept="image/*,application/pdf" capture="environment">` estilizado como botão "📷 Enviar".
-  - Ao selecionar arquivo: upload via `supabase.storage.from('whatsapp-media').upload(...)`, depois `getPublicUrl`, depois `updateField('document_front_url' | 'document_back_url' | 'electricity_bill_photo_url', url)`.
-  - Dispara confetti pequeno por upload bem-sucedido.
-- O `electricity_bill_value` (R$) continua como campo numérico próprio.
+### 1) Backend — OCR automático da conta no Modo Captação
 
-## 2. Botão "Finalizar Cadastro (Portal)" sempre visível
+**Arquivo**: `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
 
-Arquivo: `src/components/captacao/CaptureSheet.tsx`
+- Adicionar **detecção precoce de imagem/PDF** quando `capture_mode === "manual"` (ou quando há intenção clara de conta) **antes** do switch de `conversation_step`:
+  - Se `isFile` (image/PDF) **e** ainda não há `electricity_bill_value` confirmado **e** ainda não há `ocr_done`, forçar `conversation_step = "aguardando_conta"` antes do dispatch.
+  - Caso já exista `document_front_url` mas não `bill_holder_name`, tratar como conta também (não é doc novamente).
+- **Heurística simples** para diferenciar conta vs doc na primeira foto enviada após o passo "Pede conta":
+  - Se o último passo manual enviado pelo consultor (consultar `conversations.message_text` últimas N saídas) contém "conta de luz" / "fatura" → tratar como conta.
+  - Senão, perguntar com botões: `📄 É a conta de luz?` / `🪪 É RG/CNH?` antes de processar.
 
-- No rodapé do `Sheet`, mostrar **duas** ações:
-  1. **Finalizar (botão primário grande)** — sempre habilitado quando: `name && cpf && (document_front_url || electricity_bill_photo_url)` (mínimo para portal aceitar). Cor `bg-primary`, ícone `Trophy`/`Send`.
-  2. **Sair do modo** (link discreto).
-- Ao clicar Finalizar:
-  - Confirma com `AlertDialog`: "Vou enviar pro portal e disparar o OTP. Confirma?" listando o que está faltando se houver (`filledCount/10`).
-  - `update customers set conversation_step='finalizando', capture_mode='auto'`.
-  - O webhook do whapi já intercepta `finalizando` (linha 4054 de `bot-flow.ts`) e dispara o portal worker → OTP → link de cadastro para o cliente. Não precisa criar nada novo no backend.
-  - `fireBigConfetti()` + toast: "🚀 Portal acionado. Em segundos chega o OTP e o link no WhatsApp do cliente."
-- Mostrar progresso em tempo real assistindo `customer.conversation_step` (`finalizando` → `portal_submitting` → `aguardando_otp` → `validando_otp`) com um chip de status acima do botão.
+**Arquivo**: `supabase/functions/whapi-webhook/index.ts`
 
-## 3. Manter o estado "game" ELE DA PARA DESATIVVAR OU DEIXAR ATIVADO
+- No bloco `isCustomerPausedByHuman`, abrir **exceção controlada para mídia em modo captação**: se `capture_mode === "manual"` **e** `isFile`, **não** silenciar — deixar o `bot-flow.ts` processar o OCR e enviar os botões. Continuar silenciando texto (handoff humano segue valendo p/ texto).
 
-- Header do `CaptureSheet` continua igual (XP, frase motivacional, próximo dado).
-- Contador "Passo X de 10 enviado" segue do `sentSteps.size`.
-- O contador `filledCount` passa a considerar o **bloco Documentos completo** = 1 ponto (já era 1 ponto via `document_front_url`).
+### 2) Frontend — Seleção de variante A/B/C por passo
+
+**Arquivo**: `src/components/captacao/CaptureStepsList.tsx`
+
+- Trocar a query para buscar **todos os `bot_flows` ativos do consultor** agrupados por `variant`.
+- Agrupar `bot_flow_steps` por `step_key` (chave canônica do passo, ex.: `pergunta_valor_conta`) — uma linha por passo, com sub-botões `[A áudio] [B texto] [C vídeo]` à direita, refletindo apenas as variantes disponíveis.
+- Cada sub-botão chama `manual-step-send` passando o `stepId` específico daquela variante.
+- Indicador de variante padrão (a do `customer.flow_variant`) destacada.
+- `sentSteps` continua por `stepId` (já contempla seleção diferente).
+
+**Arquivo**: `src/components/captacao/CaptureSheet.tsx`
+
+- Contador "Passo X de 10 enviado" passa a contar por `step_key` enviado (qualquer variante conta como 1).
+
+### 3) Documento da conta no painel Ficha
+
+**Arquivo**: `src/components/captacao/CaptureDocumentTiles.tsx`
+
+- Após upload da tile "Conta de Energia", disparar `supabase.functions.invoke("capture-extract-bill", { bill_url })` (nova edge fina) **ou** marcar `conversation_step='aguardando_conta'` + simular inbound no webhook para reaproveitar o OCR existente.
+- Preferência: criar **edge function `capture-extract-bill`** que chama `ocrContaEnergia` direto e devolve os campos para preencher na tela + dispara os botões via Whapi para o cliente confirmar.
 
 ## Fora de escopo
 
-- Sem mudanças em edge functions, RLS ou portal-worker.
-- Sem mudanças no fluxo do WhatsApp / bot.
-- Não removemos suggestions de IA — o slot de Documentos só não tem sugestão IA.
+- Reescrever o fluxo automático A/B/C de variante (`router-multi-variant-fix` continua intocado).
+- Mudar portal-worker / OTP.
+- Alterar `manual-step-send` (já aceita `stepId` arbitrário).
 
 ## Validação
 
-1. Abrir Captação no chat → tab **Ficha** → ver 3 tiles (Frente / Verso / Conta) com botão de câmera.
-2. Tirar foto da CNH frente → upload, preview aparece, XP sobe.
-3. Mesmo com 5/10 campos, tocar **Finalizar** → modal "vai pro portal?" → confirmar → status muda para `portal_submitting`.
-4. Cliente recebe OTP no WhatsApp e o link de cadastro.
+1. Consultor abre Captação → vê os 10 passos com chips `[A] [B] [C]` quando o consultor tiver as 3 variantes.
+2. Clica `[B]` no passo "Pergunta valor da conta" → cliente recebe versão sem áudio.
+3. Cliente manda foto da conta → backend roda OCR → cliente recebe mensagem com botões **✅ SIM / ❌ NÃO / ✏️ EDITAR**.
+4. Cliente clica **SIM** → `conversation_step` avança como já acontece no fluxo automático; dados aparecem preenchidos na Ficha.
