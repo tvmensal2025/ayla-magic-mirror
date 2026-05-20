@@ -20,20 +20,23 @@ export function StatCard({ icon, label, value, color, subtitle }: StatCardProps)
     : "group-hover:shadow-[0_0_30px_hsl(30,100%,50%,0.08)]";
 
   return (
-    <div className={`group relative rounded-2xl border border-border bg-card p-4 sm:p-5 flex items-center gap-3 sm:gap-4 
+    <div className={`group relative rounded-2xl border border-border bg-card p-3 sm:p-5 flex items-center gap-2.5 sm:gap-4 
       transition-all duration-300 hover:border-primary/20 overflow-hidden ${glowClass}`}>
       {/* Subtle gradient overlay */}
       <div className={`absolute inset-0 bg-gradient-to-br ${gradientClass} opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
-      
-      <div className={`relative w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 ${iconBg} transition-transform duration-300 group-hover:scale-110`}>
+
+      <div className={`relative w-9 h-9 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 ${iconBg} transition-transform duration-300 group-hover:scale-110 [&>svg]:w-4 [&>svg]:h-4 sm:[&>svg]:w-5 sm:[&>svg]:h-5`}>
         {icon}
       </div>
-      <div className="relative min-w-0">
-        <p className="text-xl sm:text-2xl font-bold font-heading text-foreground truncate tracking-tight">
+      <div className="relative min-w-0 flex-1">
+        <p
+          className="text-base sm:text-2xl font-bold font-heading text-foreground truncate tracking-tight"
+          title={typeof value === "number" ? value.toLocaleString("pt-BR") : String(value)}
+        >
           {typeof value === "number" ? value.toLocaleString("pt-BR") : value}
         </p>
-        <p className="text-[10px] sm:text-xs text-muted-foreground font-medium">{label}</p>
-        {subtitle && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{subtitle}</p>}
+        <p className="text-[10px] sm:text-xs text-muted-foreground font-medium leading-tight">{label}</p>
+        {subtitle && <p className="text-[9px] sm:text-[10px] text-muted-foreground/60 mt-0.5 leading-tight">{subtitle}</p>}
       </div>
     </div>
   );

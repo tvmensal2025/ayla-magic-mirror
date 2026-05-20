@@ -18,6 +18,14 @@ import { GeographyCard } from "./GeographyCard";
 import { RetentionCard } from "./RetentionCard";
 import { TeamRankingTab } from "./TeamRankingTab";
 
+// Formata moeda BRL de forma compacta em telas pequenas (R$ 50,4 mil / R$ 1,2 mi)
+function formatCompactBRL(value: number): string {
+  if (!value) return "R$ 0";
+  if (value >= 1_000_000) return `R$ ${(value / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mi`;
+  if (value >= 10_000) return `R$ ${(value / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil`;
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+}
+
 interface DashboardTabProps {
   userId: string;
   form: { igreen_portal_email: string; igreen_portal_password: string };
@@ -273,11 +281,11 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
       )}
 
       {/* CLIENTES iGREEN — 5 cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-4">
         <StatCard icon={<Users className="w-5 h-5" />} label="Total de Clientes" value={filteredMetrics?.totalCustomers ?? 0} color="primary" />
         <StatCard icon={<Zap className="w-5 h-5" />} label="Média kWh/cliente" value={`${(filteredMetrics?.avgKw ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 0 })} kW`} color="accent" subtitle={`Total: ${(filteredMetrics?.totalKw ?? 0).toLocaleString("pt-BR")} kW`} />
         <StatCard icon={<DollarSign className="w-5 h-5" />} label="Ticket médio (conta)" value={(filteredMetrics?.avgBill ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })} color="primary" subtitle="estimado pela tarifa média" />
-        <StatCard icon={<PiggyBank className="w-5 h-5" />} label="Economia gerada" value={(filteredMetrics?.economiaGerada ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })} color="accent" subtitle="20% sobre a conta estimada" />
+        <StatCard icon={<PiggyBank className="w-5 h-5" />} label="Economia gerada" value={formatCompactBRL(filteredMetrics?.economiaGerada ?? 0)} color="accent" subtitle="20% sobre a conta estimada" />
         <StatCard icon={<TrendingUp className="w-5 h-5" />} label="Taxa de Conversão" value={`${(analytics?.conversionRate ?? 0).toFixed(1)}%`} color="primary" subtitle="Cliques / Visualizações" />
       </div>
 
