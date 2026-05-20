@@ -157,7 +157,7 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
 
           {!loading && skippedAudios > 0 && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
-              ⚠️ {skippedAudios} áudio{skippedAudios > 1 ? "s" : ""} sem transcrição — não {skippedAudios > 1 ? "serão enviados" : "será enviado"} na variante B. Gere a transcrição em <span className="font-semibold">/admin/fluxos</span>.
+              ℹ️ Variante B (texto puro): {skippedAudios} áudio{skippedAudios > 1 ? "s" : ""} ignorado{skippedAudios > 1 ? "s" : ""}. Escreva a versão em texto no campo do passo em <span className="font-semibold">/admin/fluxos</span>.
             </div>
           )}
 
