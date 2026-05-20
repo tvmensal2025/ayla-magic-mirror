@@ -163,7 +163,6 @@ const AdminContent = () => {
   const tabs = [
     { id: "dashboard" as const, label: "Dashboard", icon: BarChart3 },
     { id: "crm" as const, label: "CRM", icon: LayoutGrid },
-    { id: "captacao" as const, label: "Captação", icon: Gamepad2 },
     { id: "clientes" as const, label: "Clientes", icon: Users },
     { id: "rede" as const, label: "Rede", icon: Network },
     { id: "whatsapp" as const, label: "WhatsApp", icon: MessageSquare },
@@ -171,6 +170,7 @@ const AdminContent = () => {
     { id: "links" as const, label: "Links", icon: LinkIcon },
     { id: "materiais" as const, label: "Materiais", icon: FolderDown },
   ];
+
 
   if (loading) {
     return (
