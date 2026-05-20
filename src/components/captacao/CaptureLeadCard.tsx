@@ -18,7 +18,7 @@ interface Props {
 }
 
 
-export function CaptureLeadCard({ customerId, onSubmitted }: Props) {
+export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: Props) {
   const { customer, loading, filledCount, totalFields, progress, updateField } = useCaptureSession(customerId);
   const { suggestions, resolve } = useCaptureSuggestions(customerId);
   const { toast } = useToast();
