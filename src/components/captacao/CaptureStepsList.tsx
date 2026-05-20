@@ -158,7 +158,7 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
     });
   }, [groups, query, onlyPending, sentSteps]);
 
-  const doSend = async (row: StepRow) => {
+  const doSend = async (row: StepRow, groupKey: string) => {
     setSending(row.id);
     try {
       const { data, error } = await supabase.functions.invoke("manual-step-send", {
@@ -166,7 +166,7 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
       });
       if (error) throw error;
       if ((data as any)?.error) throw new Error((data as any).message || (data as any).error);
-      onSent(row.id);
+      onSent(groupKey);
       toast({
         title: `Passo enviado ✓ (${row.variant})`,
         description: row.title || row.step_key || "",
