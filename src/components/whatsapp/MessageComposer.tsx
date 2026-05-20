@@ -30,6 +30,7 @@ export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMed
   const [sending, setSending] = useState(false);
   const [showQuickReply, setShowQuickReply] = useState(false);
   const [quickSearch, setQuickSearch] = useState("");
+  const [exactShortcut, setExactShortcut] = useState<MessageTemplate | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const audio = useAudioRecorder(onSendAudio);
