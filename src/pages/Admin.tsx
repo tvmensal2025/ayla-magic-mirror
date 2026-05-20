@@ -210,19 +210,19 @@ const AdminContent = () => {
               <p className="text-xs text-muted-foreground sensitive-name">{form.name || "Bem-vindo"}</p>
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5 sm:gap-1">
             <button
               onClick={togglePrivacy}
-              className={`relative p-2 rounded-xl transition-all duration-200 ${privacyMode ? 'text-primary bg-primary/15' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}`}
+              className={`relative p-1.5 sm:p-2 rounded-xl transition-all duration-200 ${privacyMode ? 'text-primary bg-primary/15' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}`}
               aria-label={privacyMode ? "Mostrar dados sensíveis" : "Ocultar dados sensíveis"}
               title={privacyMode ? "Modo privacidade ATIVO — clique para desativar" : "Ocultar dados sensíveis para gravação"}
             >
-              {privacyMode ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+              {privacyMode ? <EyeOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <Eye className="h-4 w-4 sm:h-5 sm:w-5" />}
             </button>
-            <ThemeToggle />
+            <div className="hidden sm:block"><ThemeToggle /></div>
             <button
               onClick={() => setAiChatOpen(true)}
-              className="relative p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-all duration-200"
+              className="hidden sm:inline-flex relative p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-all duration-200"
               aria-label="Assistente iGreen IA"
               title="Assistente iGreen IA"
             >
@@ -243,13 +243,13 @@ const AdminContent = () => {
             </Suspense>
             <button
               onClick={() => setSettingsOpen(true)}
-              className="relative p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-all duration-200"
+              className="relative p-1.5 sm:p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-secondary transition-all duration-200"
               aria-label="Configurações"
               title="Configurações"
             >
-              <Settings className="h-5 w-5" />
+              <Settings className="h-4 w-4 sm:h-5 sm:w-5" />
             </button>
-            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-foreground gap-2 rounded-xl">
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-foreground gap-2 rounded-xl px-2 sm:px-3">
               <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline">Sair</span>
             </Button>
