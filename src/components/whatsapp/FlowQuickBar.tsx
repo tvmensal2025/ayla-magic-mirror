@@ -59,10 +59,32 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
     let mounted = true;
     (async () => {
       setLoading(true);
-      const { data: flow } = await supabase
+
+      // Descobre a variante A/B/C do cliente (consultor pode ter múltiplos
+      // bot_flows ativos — um por variante). Sem o filtro por variant, o
+      // popover pode mostrar passos do fluxo errado, ou vazio.
+      let variant = "A";
+      if (customerId) {
+        const { data: cust } = await supabase
+          .from("customers").select("flow_variant")
+          .eq("id", customerId).maybeSingle();
+        variant = (cust as { flow_variant?: string } | null)?.flow_variant || "A";
+      }
+
+      let { data: flow } = await supabase
         .from("bot_flows").select("id")
         .eq("consultant_id", consultantId).eq("is_active", true)
+        .eq("variant", variant)
         .order("created_at", { ascending: false }).limit(1).maybeSingle();
+
+      if (!flow?.id) {
+        const { data: anyFlow } = await supabase
+          .from("bot_flows").select("id")
+          .eq("consultant_id", consultantId).eq("is_active", true)
+          .order("created_at", { ascending: false }).limit(1).maybeSingle();
+        flow = anyFlow;
+      }
+
       if (!flow?.id) { if (mounted) { setSteps([]); setLoading(false); } return; }
       const { data } = await supabase
         .from("bot_flow_steps")
@@ -72,7 +94,8 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
       if (mounted) { setSteps((data as Step[]) || []); setLoading(false); }
     })();
     return () => { mounted = false; };
-  }, [open, consultantId]);
+  }, [open, consultantId, customerId]);
+
 
   // Load preview parts when opening the single-step preview
   useEffect(() => {
@@ -165,9 +188,11 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
             <div className="min-w-0">
               <p className="text-[11px] text-muted-foreground">Enviar passo do fluxo para</p>
               <p className="text-sm font-semibold truncate">{customerName || customerId}</p>
+              <p className="text-[10px] text-primary mt-0.5">✓ Envio manual funciona mesmo com bot pausado</p>
             </div>
             {steps.length > 0 && <Badge variant="secondary" className="text-[10px] shrink-0">{steps.length} passos</Badge>}
           </div>
+
 
           {seq && (
             <div className="px-3 py-2 bg-primary/5 border-b border-border flex items-center gap-2">

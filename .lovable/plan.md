@@ -1,56 +1,41 @@
-## Objetivo
+## Diagnóstico
 
-Em qualquer mensagem do chat WhatsApp (áudio, vídeo, imagem — recebida ou enviada), aparece um menu de 3 pontinhos. Clicando, abre um pequeno diálogo para salvar a mídia como **template** com **nome** e **atalho** (ex: `/oi`, `/conta`). Depois é só digitar o atalho no composer e a mídia + texto vão embora.
+No screenshot, o dialog **"Enviar passo do fluxo"** mostra "Nenhum passo configurado", mesmo o consultor Rafael Ferreira (`0c2711ad-…`) tendo fluxo ativo. Confirmei no banco:
 
-## Mudanças
+- Esse consultor tem **2 `bot_flows` ativos** ao mesmo tempo (variant **A** e variant **B**, do teste A/B/C).
+- `ManualStepDialog.tsx` carrega o fluxo assim:
+  ```ts
+  supabase.from("bot_flows").select("id")
+    .eq("consultant_id", …).eq("is_active", true).maybeSingle()
+  ```
+  Sem filtrar por `variant` e sem `limit(1)` → `maybeSingle()` quebra (multiple rows) e retorna `flow=null` → lista vazia.
+- `FlowQuickBar.tsx` tem o mesmo bug parcial: usa `limit(1)` mas ignora `variant`, então pode listar o fluxo **errado** (passos da variante A enquanto o cliente está na B).
 
-### 1. Banco — `message_templates`
+A pausa do bot **não é o problema** — o backend `manual-step-send` já ignora o pause (e o usuário quer manter esse comportamento: "individual sempre funciona").
 
-- Adicionar coluna `shortcut text` (ex: `/oi`).
-- Índice único parcial `(consultant_id, lower(shortcut)) where shortcut is not null` pra evitar atalho duplicado por consultor.
-- Sem mudar RLS (já está OK).
+## Correção (somente frontend)
 
-### 2. Edge function nova: `save-message-as-template`
+### 1. `src/components/admin/AIAgentTab/ManualStepDialog.tsx`
+- Buscar `customers.flow_variant` (já carregado em outros pontos) ou ler do próprio `customer` se vier por prop.
+- Carregar bot_flow assim:
+  ```ts
+  .eq("consultant_id", consultantId).eq("is_active", true)
+  .eq("variant", customer.flow_variant ?? "A")
+  .order("created_at", { ascending: false }).limit(1).maybeSingle()
+  ```
+- Fallback: se nada vier com a variante do cliente, tentar **qualquer** variante ativa (`order().limit(1)`).
+- Mensagem de erro mais clara quando realmente não houver passos: distinguir "consultor sem fluxo ativo" de "fluxo ativo, mas sem passos".
 
-- Recebe `{ message_id, name, shortcut, caption }`.
-- Busca a `messages` no DB pra pegar `media_url` (URL da Whapi/Evolution, que expira).
-- Baixa a mídia, faz upload no **MinIO** (bucket `igreen` / pasta `templates/{consultant}/{uuid}.{ext}`) — mesma estratégia do `compress-worker`/`adImageLibrary`. Áudio mantém `.ogg/.mp3`, vídeo `.mp4`, imagem `.jpg/.png`.
-- Insere em `message_templates` com `media_type`, `media_url` (URL permanente do MinIO), `image_url` (caso vídeo/imagem), `content` (caption se houver) e `shortcut`.
-- Retorna o template criado.
+### 2. `src/components/whatsapp/FlowQuickBar.tsx`
+- Aceitar `flow_variant` (buscar da tabela `customers` quando `customerId` mudar, ou receber via prop).
+- Mesma lógica de query: filtrar por `variant`, fallback para qualquer ativa.
+- Garantir que a lista exibida corresponda ao fluxo que o cliente está realmente vivendo.
 
-### 3. UI — `MessageBubble.tsx`
-
-- Adicionar botão 3-pontos (`MoreVertical`) no hover/sempre visível em mobile, dentro do bubble (canto sup. direito).
-- `DropdownMenu` com:
-  - **Salvar como template** (abre diálogo)
-  - **Salvar e criar atalho** (mesmo diálogo, foco no campo atalho)
-  - **Copiar texto** (se tiver caption)
-- Só aparece pra mensagens com `media_type in ('audio','video','image')` ou texto.
-
-### 4. UI — `SaveMessageAsTemplateDialog.tsx` (novo)
-
-- Campos: **Nome** (obrigatório), **Atalho** (opcional, prefixo `/` automático, valida regex `^\/[a-z0-9_-]{2,20}$`, mostra erro se já existe), **Legenda** (preenchido com caption atual, editável).
-- Mostra preview da mídia.
-- Botão "Salvar" → chama edge `save-message-as-template` → toast de sucesso → atualiza `useTemplates`.
-
-### 5. UI — `MessageComposer.tsx`
-
-- Quando o usuário digita `/`, abre popover com lista de atalhos do consultor (filtrada por prefixo).
-- Setas ↑↓ + Enter selecionam; ao confirmar:
-  - Substitui o texto pelo `content` do template (com placeholders aplicados via `applyTemplate`).
-  - Anexa a mídia (`media_url` + `media_type`) ao envio, igual ao fluxo de templates já existente no `TemplateManager`/`BulkSend`.
-- Atalho exato (`/oi` + Espaço/Enter) envia direto sem precisar selecionar.
-
-### 6. UI — `TemplateManager.tsx`
-
-- Adicionar coluna/campo **Atalho** na listagem e no form de edição. Permite editar/remover o atalho de templates antigos.
+### 3. Reforço UX
+- Tornar explícito no header do popover/dialog que o envio funciona **mesmo com bot pausado** ("✓ Envio manual ignora a pausa do bot").
+- Não há mudança de backend — `manual-step-send` já bypassa pause e está deployado.
 
 ## Fora de escopo
-
-- Categorias/pastas de templates.
-- Compartilhar atalho entre consultores (cada um tem o próprio).
-- Edição de áudio/vídeo (apenas salvar como está).
-
-## Pergunta antes de implementar
-
-Confirma: **MinIO** é o destino certo pro media dos templates (mesma estratégia dos vídeos do `/admin/fluxos`) minio  sim
+- Mexer em `manual-step-send` (já funciona).
+- Mexer no comportamento global do bot pausado.
+- Alterar o motor de A/B/C.
