@@ -56,18 +56,19 @@ export function friendlyClickLabel(target: string): string {
   return CLICK_LABELS[target] || target.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export function useAnalytics(consultantId: string | null, periodDays: number = 30) {
+export function useAnalytics(
+  consultantId: string | null,
+  periodDays: number = 30,
+  teamIds?: string[] | null,
+) {
+  const idsKey = teamIds && teamIds.length > 1 ? [...teamIds].sort().join(",") : null;
   return useQuery({
-    queryKey: ["analytics", consultantId, periodDays],
+    queryKey: ["analytics", consultantId, periodDays, idsKey],
     enabled: !!consultantId,
     refetchOnMount: true,
-    // Keep data fresh in memory for 5 minutes — sync happens on demand,
-    // no need to refetch every 30s and risk wiping numbers on a transient error.
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
-    // Show previous data while a new fetch is in flight (no zero/empty flash).
     placeholderData: keepPreviousData,
-    // Survive transient network blips before falling back to error state.
     retry: 3,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
     queryFn: async () => {
@@ -75,21 +76,24 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
       sinceDate.setDate(sinceDate.getDate() - periodDays);
       const since = sinceDate.toISOString();
 
+      const useTeam = !!(teamIds && teamIds.length > 1);
+      const applyScope = <T extends { in: any; eq: any }>(q: T): T =>
+        useTeam ? q.in("consultant_id", teamIds!) : q.eq("consultant_id", consultantId!);
+
       const [viewsRes, eventsRes, dealsRes] = await Promise.all([
-        supabase
-          .from("page_views")
-          .select("page_type, created_at, device_type, utm_source")
-          .eq("consultant_id", consultantId!)
-          .gte("created_at", since),
-        supabase
-          .from("page_events")
-          .select("event_type, event_target, page_type, created_at, device_type, utm_source")
-          .eq("consultant_id", consultantId!)
-          .gte("created_at", since),
-        supabase
-          .from("crm_deals")
-          .select("customer_id")
-          .eq("consultant_id", consultantId!),
+        applyScope(
+          supabase
+            .from("page_views")
+            .select("page_type, created_at, device_type, utm_source") as any,
+        ).gte("created_at", since),
+        applyScope(
+          supabase
+            .from("page_events")
+            .select("event_type, event_target, page_type, created_at, device_type, utm_source") as any,
+        ).gte("created_at", since),
+        applyScope(
+          supabase.from("crm_deals").select("customer_id") as any,
+        ),
       ]);
 
       if (viewsRes.error) throw viewsRes.error;
@@ -104,11 +108,13 @@ export function useAnalytics(consultantId: string | null, periodDays: number = 3
       let page = 0;
       const pageSize = 1000;
       while (true) {
-        const { data, error } = await supabase
+        const baseQ = supabase
           .from("customers")
-          .select("id, name, status, media_consumo, electricity_bill_value, created_at, registered_by_name, registered_by_igreen_id, customer_origin")
-          .eq("consultant_id", consultantId!)
-          .range(page * pageSize, (page + 1) * pageSize - 1);
+          .select("id, name, status, media_consumo, electricity_bill_value, created_at, updated_at, registered_by_name, registered_by_igreen_id, customer_origin, address_state, address_city, distribuidora, phone_whatsapp, consultant_id");
+        const scoped = useTeam
+          ? baseQ.in("consultant_id", teamIds!)
+          : baseQ.eq("consultant_id", consultantId!);
+        const { data, error } = await scoped.range(page * pageSize, (page + 1) * pageSize - 1);
         if (error) throw error;
         if (data) allCustomers.push(...data);
         if (!data || data.length < pageSize) break;
