@@ -41,7 +41,7 @@ const AdminContent = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "links" | "whatsapp" | "crm" | "clientes" | "rede" | "central-anuncios">(() => {
+  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "links" | "whatsapp" | "crm" | "captacao" | "clientes" | "rede" | "central-anuncios">(() => {
     if (typeof window !== "undefined") {
       const tab = new URLSearchParams(window.location.search).get("tab");
       if (tab === "performance" || tab === "anuncios" || tab === "central-anuncios") return "central-anuncios";
