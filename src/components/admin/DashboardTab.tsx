@@ -96,6 +96,11 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
     const withConsumption = filtered.filter((c: any) => Number(c.media_consumo) > 0);
     const avgKw = withConsumption.length > 0 ? totalKw / withConsumption.length : 0;
 
+    const withBill = filtered.filter((c: any) => Number(c.electricity_bill_value) > 0);
+    const totalBill = withBill.reduce((s: number, c: any) => s + Number(c.electricity_bill_value), 0);
+    const avgBill = withBill.length > 0 ? totalBill / withBill.length : 0;
+    const economiaGerada = totalBill * 0.20;
+
     const statusMap = new Map<string, number>();
     for (const c of filtered) { const s = (c as any).status || "pending"; statusMap.set(s, (statusMap.get(s) || 0) + 1); }
     const statusLabels: Record<string, string> = { approved: "Aprovados", pending: "Pendentes", rejected: "Reprovados", lead: "Leads", devolutiva: "Devolutiva", awaiting_signature: "Falta Assinatura", data_complete: "Dados Completos", registered_igreen: "Cadastrado iGreen", contract_sent: "Contrato Enviado" };
@@ -122,7 +127,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
       }
     }
     const weeklyNewCustomers = Array.from(weekMap.entries()).map(([week, count]) => ({ week, count }));
-    return { totalCustomers, totalKw, avgKw, customersByStatus, weeklyNewCustomers };
+    return { totalCustomers, totalKw, avgKw, avgBill, economiaGerada, customersByStatus, weeklyNewCustomers, filteredCustomers: filtered };
   }, [analytics, selectedLicenciado, periodDays]);
 
   const runSync = async (email: string, password: string) => {
