@@ -50,6 +50,26 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const [kanbanStages, setKanbanStages] = useState<Tables<"kanban_stages">[]>([]);
   const [sendingToCrm, setSendingToCrm] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const { customer: captureCustomer, filledCount, totalFields } = useCaptureSession(customerId);
+  const captureOn = captureCustomer?.capture_mode === "manual";
+
+  const toggleCapture = useCallback(async () => {
+    if (!customerId) {
+      toast({ title: "Adicione o cliente antes", description: "Clique em 'Adicionar Cliente' para ativar a captação.", variant: "destructive" });
+      return;
+    }
+    if (captureOn) {
+      // already on → just open
+      setCaptureOpen(true);
+      return;
+    }
+    await supabase.from("customers")
+      .update({ capture_mode: "manual", capture_started_at: new Date().toISOString() })
+      .eq("id", customerId);
+    toast({ title: "🎮 Modo Captação ativado", description: "Toque de novo no botão para abrir o painel." });
+  }, [customerId, captureOn, toast]);
+
 
   const handleReset = useCallback(async () => {
     if (!chat) return;
