@@ -108,19 +108,24 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: P
   const canSubmit = filledCount === totalFields;
 
   return (
-    <aside className="w-80 shrink-0 flex flex-col border-l border-border bg-card/40 backdrop-blur-sm overflow-y-auto">
-      <div className="p-4 border-b border-border space-y-3">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-primary" />
-          <h3 className="text-sm font-semibold">Ficha do Lead</h3>
-        </div>
-        <CaptureProgressBar progress={progress} filled={filledCount} total={totalFields} />
-        {canSubmit && (
-          <div className="text-[11px] text-center text-emerald-500 font-semibold animate-pulse">
-            ⚡ Tudo pronto! Aperta CADASTRAR
+    <aside className={embedded
+      ? "w-full h-full flex flex-col bg-transparent overflow-y-auto"
+      : "w-80 shrink-0 flex flex-col border-l border-border bg-card/40 backdrop-blur-sm overflow-y-auto"}>
+      {!embedded && (
+        <div className="p-4 border-b border-border space-y-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-primary" />
+            <h3 className="text-sm font-semibold">Ficha do Lead</h3>
           </div>
-        )}
-      </div>
+          <CaptureProgressBar progress={progress} filled={filledCount} total={totalFields} />
+          {canSubmit && (
+            <div className="text-[11px] text-center text-emerald-500 font-semibold animate-pulse">
+              ⚡ Tudo pronto! Aperta CADASTRAR
+            </div>
+          )}
+        </div>
+      )}
+
 
       <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
         {CAPTURE_FIELDS.map(f => {
