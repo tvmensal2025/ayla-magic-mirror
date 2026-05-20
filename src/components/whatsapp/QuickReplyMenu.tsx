@@ -6,6 +6,7 @@ interface QuickReplyMenuProps {
   search: string;
   onSelect: (template: MessageTemplate) => void;
   onClose: () => void;
+  onExactShortcut?: (template: MessageTemplate | null) => void;
 }
 
 export function QuickReplyMenu({ templates, search, onSelect, onClose }: QuickReplyMenuProps) {
