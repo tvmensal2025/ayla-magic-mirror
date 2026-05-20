@@ -30,7 +30,7 @@ interface Props {
   initialStepId?: string;
 }
 
-const KIND_ICON: Record<string, any> = { audio: Mic, image: ImageIcon, video: Video, document: FileText, text: FileText };
+
 
 export function ManualStepDialog({ open, onOpenChange, consultantId, customerId, customerName, initialStepId }: Props) {
   const { toast } = useToast();
