@@ -79,8 +79,7 @@ function fireEmojiRain() {
         particleCount: 6,
         spread: 100,
         origin: { x: Math.random(), y: 0 },
-        // @ts-expect-error shape text é suportado no canvas-confetti
-        shapes: [confetti.shapeFromText({ text: emoji, scalar })],
+        shapes: [(confetti as any).shapeFromText({ text: emoji, scalar })],
         scalar,
         gravity: 1,
         ticks: 200,
