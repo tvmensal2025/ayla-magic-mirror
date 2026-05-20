@@ -88,10 +88,11 @@ function AudioPlayer({ message, onLoadMedia, onLoaded }: { message: ChatMessage;
 }
 
 
-function ImageViewer({ message, onLoadMedia }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null> }) {
+function ImageViewer({ message, onLoadMedia, onLoaded }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null>; onLoaded?: (url: string) => void }) {
   const [imgSrc, setImgSrc] = useState<string | null>(
     isAccessibleUrl(message.mediaUrl) ? message.mediaUrl! : null
   );
+  useEffect(() => { if (imgSrc) onLoaded?.(imgSrc); }, [imgSrc]);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [loadAttempted, setLoadAttempted] = useState(false);
