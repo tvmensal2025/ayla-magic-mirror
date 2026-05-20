@@ -1,52 +1,46 @@
-## Problema
+## Atalho de passos do fluxo no composer (manual 1-a-1, passo completo, ou daqui em diante)
 
-No `NetworkPanel.tsx` (modo "Rede"), o conteúdo nunca fica centralizado: começa cortado à esquerda e exige scroll horizontal manual, mesmo quando a árvore caberia na tela.
+Logo acima do textarea do `MessageComposer`, um botão "⚡ Fluxo" abre um popover compacto listando os passos do fluxo ativo do consultor. Para cada passo, o consultor escolhe **como** disparar — sempre para o cliente atualmente aberto.
 
-Causa raiz:
-1. O wrapper externo usa `overflow-auto` + filho com `min-w-max` (largura intrínseca da árvore não-escalada).
-2. O `transform: scale(${zoom})` é puramente visual — não reduz a largura usada no layout. Então o scroll horizontal sempre considera a largura cheia da árvore.
-3. Como o `flex justify-center` está dentro de um container com `min-w-max`, a centralização só funciona quando a viewport é maior que a árvore (raro). Em telas pequenas, o conteúdo "encosta" à esquerda.
-4. O zoom inicial é fixo (`0.85`), sem fit-to-width — então em mobile a árvore quase sempre estoura.
+## 3 modos de envio (por passo selecionado)
 
-## Plano (somente UI/apresentação, arquivo único)
+1. **Manual 1-a-1** — abre o `ManualStepDialog` já com o passo pré-selecionado (cards áudio/imagem/vídeo/texto, cada um com botão Enviar). Reaproveita o componente que já existe.
+2. **Passo completo (auto)** — dispara o passo inteiro sequencial (áudio → imagem → vídeo → texto) via `manual-step-send` com `part: "all"`. Um clique e pronto.
+3. **Daqui em diante (auto)** — dispara o passo escolhido **e todos os subsequentes** em sequência. Loop client-side: para cada passo da posição N até o fim, chama `manual-step-send` com `part: "all"` e espera o retorno antes de ir para o próximo. Toast de progresso ("Enviando 3/8…"), botão "Parar" cancela o loop.
 
-Arquivo: `src/components/admin/NetworkPanel.tsx`
+## Arquivos
 
-1. **Medir a largura intrínseca da árvore**
-   - Adicionar `treeInnerRef = useRef<HTMLDivElement>(null)` no conteúdo não-escalado.
-   - Adicionar `containerRef = useRef<HTMLDivElement>(null)` no wrapper `overflow-auto`.
-   - Em `useLayoutEffect`, medir `treeInnerRef.scrollWidth` e armazenar em estado (`contentWidth`, `contentHeight`).
+**Novo:** `src/components/whatsapp/FlowQuickBar.tsx`
+- Props: `consultantId`, `customerId`, `customerName`, `disabled?`.
+- Reusa `useFlowSteps(consultantId)` (já existe) para carregar `stepOptions` ordenados por `position`.
+- Botão "⚡ Fluxo" (ícone Zap, `h-8 w-8 ghost`) com badge da quantidade de passos. Tooltip "Enviar passo do fluxo".
+- Abre `Popover` (shadcn) com:
+  - Header curto: "Para **{customerName}**".
+  - Lista vertical scrollável (`max-h-72 overflow-y-auto`) dos passos. Cada linha:
+    - `#N • título do passo` (truncate).
+    - 3 ações lado a lado (icons + tooltip): `Send` (passo completo), `ListChecks` (1-a-1), `FastForward` (daqui em diante).
+  - Rodapé com link "Editar fluxo" → `/admin/fluxos`.
+- Estado interno: `sendingStepId`, `runningSequence: { fromIdx, currentIdx, total } | null`, `abortRef`.
+- Funções:
+  - `sendFull(stepId)` → invoca `manual-step-send` `{ stepId, part: "all" }`. Toast sucesso/erro.
+  - `openOneByOne(step)` → seta `dialogStep` e renderiza `<ManualStepDialog open ... />` controlado, abrindo já naquele passo (extender ManualStepDialog com prop opcional `initialStepId`).
+  - `runFromHere(fromIdx)` → loop `for (i = fromIdx; i < steps.length; i++)`, await cada `manual-step-send`. Aborta se `abortRef.current === true` ou erro. Mostra toast "▶️ 3/8 enviado". Ao final: toast "✅ Sequência concluída".
+- Confirmação leve (AlertDialog) para "Daqui em diante" mostrando "Vai enviar X passos para {nome}. Continuar?".
 
-2. **Fit-to-width inteligente no mount e quando membros mudam**
-   - Calcular `fitZoom = clamp(containerWidth / contentWidth, 0.4, 1)`.
-   - Se nunca o usuário tocou nos botões de zoom, usar `fitZoom`. Adicionar flag `zoomTouched` para preservar zoom manual após interação.
+**Editar:** `src/components/whatsapp/MessageComposer.tsx`
+- Renderizar `<FlowQuickBar consultantId={consultantId} customerId={customerId} customerName={customerName} disabled={disabled} />` ao lado do botão de respostas rápidas (`MessageSquareText`), antes do `Paperclip`. Só renderiza se `consultantId && customerId`.
 
-3. **Compensar layout do transform**
-   - Trocar a estrutura para:
-     ```
-     <div ref=container className="overflow-auto" style={{maxHeight:'72vh'}}>
-       <div className="mx-auto" style={{ width: contentWidth*zoom, height: contentHeight*zoom }}>
-         <div ref=treeInner style={{ transform:`scale(${zoom})`, transformOrigin:'top left', width: contentWidth }}>
-           {tree.map(...)}
-         </div>
-       </div>
-     </div>
-     ```
-   - Isso faz com que a área ocupada no DOM = tamanho real escalado, então `mx-auto` centraliza horizontalmente quando cabe, e o overflow só aparece quando realmente excede.
+**Editar:** `src/components/admin/AIAgentTab/ManualStepDialog.tsx`
+- Aceitar prop opcional `initialStepId?: string`. No `useEffect` de carga, se `initialStepId` estiver setado e existir nos `steps`, chamar `loadStepParts(step)` automaticamente para já abrir na visão de partes (modo 1-a-1).
 
-4. **Scroll inicial para o centro**
-   - Após render, se `contentWidth*zoom > containerWidth`, fazer `container.scrollLeft = (scrollWidth - clientWidth)/2` para abrir já no centro da árvore (raiz visível).
+## Comportamento e segurança
 
-5. **Resize observer**
-   - Usar `ResizeObserver` no container para recalcular `fitZoom` quando a janela/preview mudar de tamanho.
+- `manual-step-send` já respeita o estado pausado/handoff do bot e a ordem áudio→imagem→texto (memórias "Manual Step Capture Prompt" e "Human Takeover Silence") — nada muda no backend.
+- Loop "daqui em diante" é client-side e cancelável, evita criar nova edge function. Delay natural vem do próprio `manual-step-send` (espera retorno entre passos).
+- Sem inserir nada no textarea — disparo é direto, evita confusão com o que o consultor está digitando.
 
-6. **Sem mudanças**
-   - Botões +/− e badge de zoom continuam iguais (apenas marcam `zoomTouched=true`).
-   - Modo Tabela, dados, RLS, palette, modais — intocados.
+## Fora de escopo
 
-## Resultado esperado
-
-- Abre sempre com a árvore centralizada e visível.
-- Em mobile (390px) o zoom inicial encolhe automaticamente para caber a raiz na tela.
-- Em desktop, árvore pequena fica centralizada; árvore grande abre rolada no centro.
-- Zoom manual continua respeitando a escolha do usuário.
+- Edição de passos (continua em `/admin/fluxos`).
+- Disparo de variantes A/B/C distintas — usa o fluxo ativo padrão do consultor.
+- Agendamento (continua no `SchedulePanel`).
