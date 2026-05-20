@@ -1,16 +1,22 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { Eye as EyeIcon, EyeOff, Users, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Trash2 } from "lucide-react";
+import { Eye as EyeIcon, EyeOff, Users, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Trash2, DollarSign, PiggyBank, Crown } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAnalytics } from "@/hooks/useAnalytics";
+import { useTeamConsultantIds } from "@/hooks/useTeamConsultantIds";
 import { StatCard } from "./StatCard";
 import { CustomerCharts } from "./CustomerCharts";
+import { TopConsumersCard } from "./TopConsumersCard";
+import { GeographyCard } from "./GeographyCard";
+import { RetentionCard } from "./RetentionCard";
+import { TeamRankingTab } from "./TeamRankingTab";
 
 interface DashboardTabProps {
   userId: string;
@@ -21,7 +27,14 @@ interface DashboardTabProps {
 }
 
 export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodChange }: DashboardTabProps) {
-  const { data: analytics } = useAnalytics(userId, periodDays);
+  const [scope, setScope] = useState<"me" | "team">("me");
+  const { data: teamIds = [] } = useTeamConsultantIds(userId);
+  const isLeader = teamIds.length > 1;
+  const { data: analytics } = useAnalytics(
+    userId,
+    periodDays,
+    scope === "team" && isLeader ? teamIds : null,
+  );
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [syncingDashboard, setSyncingDashboard] = useState(false);
@@ -84,6 +97,11 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
     const withConsumption = filtered.filter((c: any) => Number(c.media_consumo) > 0);
     const avgKw = withConsumption.length > 0 ? totalKw / withConsumption.length : 0;
 
+    const withBill = filtered.filter((c: any) => Number(c.electricity_bill_value) > 0);
+    const totalBill = withBill.reduce((s: number, c: any) => s + Number(c.electricity_bill_value), 0);
+    const avgBill = withBill.length > 0 ? totalBill / withBill.length : 0;
+    const economiaGerada = totalBill * 0.20;
+
     const statusMap = new Map<string, number>();
     for (const c of filtered) { const s = (c as any).status || "pending"; statusMap.set(s, (statusMap.get(s) || 0) + 1); }
     const statusLabels: Record<string, string> = { approved: "Aprovados", pending: "Pendentes", rejected: "Reprovados", lead: "Leads", devolutiva: "Devolutiva", awaiting_signature: "Falta Assinatura", data_complete: "Dados Completos", registered_igreen: "Cadastrado iGreen", contract_sent: "Contrato Enviado" };
@@ -110,7 +128,7 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
       }
     }
     const weeklyNewCustomers = Array.from(weekMap.entries()).map(([week, count]) => ({ week, count }));
-    return { totalCustomers, totalKw, avgKw, customersByStatus, weeklyNewCustomers };
+    return { totalCustomers, totalKw, avgKw, avgBill, economiaGerada, customersByStatus, weeklyNewCustomers, filteredCustomers: filtered };
   }, [analytics, selectedLicenciado, periodDays]);
 
   const runSync = async (email: string, password: string) => {
@@ -235,14 +253,32 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
         </div>
       </div>
 
-      {/* CLIENTES iGREEN */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+      {/* Toggle Líder */}
+      {isLeader && (
+        <div className="flex items-center gap-2">
+          <Crown className="w-4 h-4 text-primary" />
+          <ToggleGroup type="single" value={scope} onValueChange={(v) => v && setScope(v as "me" | "team")} className="bg-card/40 border border-border/40 rounded-lg p-1">
+            <ToggleGroupItem value="me" className="h-7 px-3 text-xs">Meus clientes</ToggleGroupItem>
+            <ToggleGroupItem value="team" className="h-7 px-3 text-xs">Minha equipe ({teamIds.length})</ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+      )}
+
+      {/* CLIENTES iGREEN — 5 cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
         <StatCard icon={<Users className="w-5 h-5" />} label="Total de Clientes" value={filteredMetrics?.totalCustomers ?? 0} color="primary" />
-        <StatCard icon={<Zap className="w-5 h-5" />} label="Total kW (Consumo)" value={`${(filteredMetrics?.totalKw ?? 0).toLocaleString("pt-BR")} kW`} color="accent" subtitle={`Média: ${(filteredMetrics?.avgKw ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} kW`} />
+        <StatCard icon={<Zap className="w-5 h-5" />} label="Média kWh/cliente" value={`${(filteredMetrics?.avgKw ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 0 })} kW`} color="accent" subtitle={`Total: ${(filteredMetrics?.totalKw ?? 0).toLocaleString("pt-BR")} kW`} />
+        <StatCard icon={<DollarSign className="w-5 h-5" />} label="Ticket médio (conta)" value={(filteredMetrics?.avgBill ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })} color="primary" />
+        <StatCard icon={<PiggyBank className="w-5 h-5" />} label="Economia gerada" value={(filteredMetrics?.economiaGerada ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })} color="accent" subtitle="20% da soma das contas" />
         <StatCard icon={<TrendingUp className="w-5 h-5" />} label="Taxa de Conversão" value={`${(analytics?.conversionRate ?? 0).toFixed(1)}%`} color="primary" subtitle="Cliques / Visualizações" />
       </div>
 
       <CustomerCharts filteredMetrics={filteredMetrics} topLicenciados={analytics?.topLicenciados} />
+
+      <TopConsumersCard customers={filteredMetrics?.filteredCustomers} />
+      <GeographyCard customers={filteredMetrics?.filteredCustomers} />
+      <RetentionCard customers={filteredMetrics?.filteredCustomers} />
+
 
       {/* Credentials Dialog */}
       <Dialog open={showCredentialsDialog} onOpenChange={setShowCredentialsDialog}>
