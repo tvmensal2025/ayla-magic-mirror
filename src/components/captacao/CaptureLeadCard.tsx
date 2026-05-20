@@ -50,10 +50,9 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: P
     if (loading || !customer) { lastCountRef.current = filledCount; return; }
     const prev = lastCountRef.current;
     if (filledCount > prev && prev >= 0) {
-      const phrase = MOTIVATIONAL_PHRASES[filledCount];
+      const phrase = MOTIVATIONAL_PHRASES[filledCount] || pickRandomPhrase();
       if (phrase) toast({ title: phrase, duration: 2200 });
-      if (filledCount === totalFields) fireBigConfetti();
-      else fireMiniConfetti();
+      fireRandomCelebration();
     }
     lastCountRef.current = filledCount;
   }, [filledCount, totalFields, loading, customer, toast]);
