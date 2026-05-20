@@ -87,14 +87,9 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
 
       let skipped = 0;
       if (step.variant === "B") {
-        rows = rows.flatMap((m) => {
-          if (String(m.kind).toLowerCase() !== "audio") return [m];
-          if (m.transcript && m.transcript.trim()) {
-            return [{ ...m, kind: "text", url: "", label: "transcrição do áudio" } as any];
-          }
-          skipped += 1;
-          return [];
-        });
+        const before = rows.length;
+        rows = rows.filter((m) => String(m.kind).toLowerCase() !== "audio");
+        skipped = before - rows.length;
       }
 
       if (!mounted) return;
@@ -162,7 +157,7 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
 
           {!loading && skippedAudios > 0 && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
-              ⚠️ {skippedAudios} áudio{skippedAudios > 1 ? "s" : ""} sem transcrição — não {skippedAudios > 1 ? "serão enviados" : "será enviado"} na variante B. Gere a transcrição em <span className="font-semibold">/admin/fluxos</span>.
+              ℹ️ Variante B (texto puro): {skippedAudios} áudio{skippedAudios > 1 ? "s" : ""} ignorado{skippedAudios > 1 ? "s" : ""}. Escreva a versão em texto no campo do passo em <span className="font-semibold">/admin/fluxos</span>.
             </div>
           )}
 
@@ -191,9 +186,6 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
                 )}
                 {kind === "video" && m.url && (
                   <video src={m.url} controls className="w-full rounded-md max-h-64 bg-black/30" preload="metadata" />
-                )}
-                {kind === "text" && (m as any).transcript && (
-                  <p className="text-xs whitespace-pre-wrap text-foreground/90 italic">"{(m as any).transcript}"</p>
                 )}
               </div>
             );

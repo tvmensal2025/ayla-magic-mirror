@@ -5,7 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { createWhapiSender } from "../_shared/whapi-api.ts";
-import { ensureAudioTranscript } from "../_shared/audio-transcript.ts";
+
 
 type Part = "text" | "audio" | "image" | "video" | "document" | "all";
 
@@ -110,18 +110,11 @@ Deno.serve(async (req) => {
       .order("send_order", { ascending: true });
     let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
     if (variant === "B") {
-      const transformed: any[] = [];
-      for (const m of medias) {
-        if (String(m.kind).toLowerCase() !== "audio") { transformed.push(m); continue; }
-        const transcript = await ensureAudioTranscript(supabase, m);
-        if (transcript && transcript.trim()) {
-          transformed.push({ ...m, _asText: true, _transcript: transcript.trim() });
-          console.log(`[manual-step-send] variant=B: audio "${m.label || m.id}" → text (${transcript.length} chars)`);
-        } else {
-          console.warn(`[manual-step-send] variant=B: audio "${m.label || m.id}" sem transcript → pulado`);
-        }
+      const before = medias.length;
+      medias = medias.filter((m) => String(m.kind).toLowerCase() !== "audio");
+      if (before !== medias.length) {
+        console.log(`[manual-step-send] variant=B: removed ${before - medias.length} audio media(s)`);
       }
-      medias = transformed;
     }
 
 
@@ -157,11 +150,7 @@ Deno.serve(async (req) => {
     type Item = { kind: string; text?: string; media?: any };
     const allItems: Item[] = [];
     medias.forEach((m) => {
-      if ((m as any)._asText) {
-        allItems.push({ kind: "text", text: String((m as any)._transcript || "") });
-      } else {
-        allItems.push({ kind: String(m.kind || "document").toLowerCase(), media: m });
-      }
+      allItems.push({ kind: String(m.kind || "document").toLowerCase(), media: m });
     });
     if (renderedText.trim()) allItems.push({ kind: "text", text: renderedText });
 
@@ -403,13 +392,7 @@ async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string,
   const rawRows = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
   const items: Array<{ kind: string; text?: string; media?: any }> = [];
   for (const m of rawRows) {
-    if (variant === "B" && String(m.kind).toLowerCase() === "audio") {
-      const transcript = await ensureAudioTranscript(supabase, m);
-      if (transcript && transcript.trim()) {
-        items.push({ kind: "text", text: transcript.trim() });
-      }
-      continue;
-    }
+    if (variant === "B" && String(m.kind).toLowerCase() === "audio") continue; // áudios são ignorados na variante B
     items.push({ kind: String(m.kind || "document").toLowerCase(), media: m });
   }
   const text = step.message_text ? applyVars(String(step.message_text)) : "";
