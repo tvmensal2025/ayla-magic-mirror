@@ -374,7 +374,6 @@ Deno.serve(async (req) => {
       tracking_specs: JSON.stringify(trackingSpecs),
       targeting: JSON.stringify(targeting),
       status: "PAUSED",
-      start_time: new Date(Date.now() + 60_000).toISOString(),
       // frequency_control_specs só é aceito com optimization_goal=REACH (Meta).
       ...(optimizationGoal === "REACH"
         ? { frequency_control_specs: JSON.stringify([{ event: "IMPRESSIONS", interval_days: 7, max_frequency: 3 }]) }
@@ -382,9 +381,11 @@ Deno.serve(async (req) => {
       ...(adlabelsParam ? { adlabels: adlabelsParam } : {}),
       access_token: conn.token,
     };
-    if (body.duration_days && body.duration_days > 0) {
-      adsetParams.end_time = new Date(Date.now() + body.duration_days * 86400_000).toISOString();
-    }
+    // Janela do adset precisa ser ≥ 24 h (Meta subcode 1487793). Soma 1 h de buffer pra absorver clock skew.
+    const startAt = Date.now() + 60_000;
+    adsetParams.start_time = new Date(startAt).toISOString();
+    const days = Math.max(1, body.duration_days ?? 7);
+    adsetParams.end_time = new Date(startAt + days * 86400_000 + 3_600_000).toISOString();
     console.log("[fb-create] step=adset_create campaign=", campaignId);
     const adset = await fbFetch(`/${accId}/adsets`, {
       method: "POST",
