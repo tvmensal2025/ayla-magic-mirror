@@ -13,9 +13,12 @@ import { supabase } from "@/integrations/supabase/client";
 interface Props {
   customerId: string;
   onSubmitted?: () => void;
+  /** When true, hide internal header/footer (Sheet provides them). Card content fills width. */
+  embedded?: boolean;
 }
 
-export function CaptureLeadCard({ customerId, onSubmitted }: Props) {
+
+export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: Props) {
   const { customer, loading, filledCount, totalFields, progress, updateField } = useCaptureSession(customerId);
   const { suggestions, resolve } = useCaptureSuggestions(customerId);
   const { toast } = useToast();
@@ -105,19 +108,24 @@ export function CaptureLeadCard({ customerId, onSubmitted }: Props) {
   const canSubmit = filledCount === totalFields;
 
   return (
-    <aside className="w-80 shrink-0 flex flex-col border-l border-border bg-card/40 backdrop-blur-sm overflow-y-auto">
-      <div className="p-4 border-b border-border space-y-3">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-primary" />
-          <h3 className="text-sm font-semibold">Ficha do Lead</h3>
-        </div>
-        <CaptureProgressBar progress={progress} filled={filledCount} total={totalFields} />
-        {canSubmit && (
-          <div className="text-[11px] text-center text-emerald-500 font-semibold animate-pulse">
-            ⚡ Tudo pronto! Aperta CADASTRAR
+    <aside className={embedded
+      ? "w-full h-full flex flex-col bg-transparent overflow-y-auto"
+      : "w-80 shrink-0 flex flex-col border-l border-border bg-card/40 backdrop-blur-sm overflow-y-auto"}>
+      {!embedded && (
+        <div className="p-4 border-b border-border space-y-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-primary" />
+            <h3 className="text-sm font-semibold">Ficha do Lead</h3>
           </div>
-        )}
-      </div>
+          <CaptureProgressBar progress={progress} filled={filledCount} total={totalFields} />
+          {canSubmit && (
+            <div className="text-[11px] text-center text-emerald-500 font-semibold animate-pulse">
+              ⚡ Tudo pronto! Aperta CADASTRAR
+            </div>
+          )}
+        </div>
+      )}
+
 
       <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
         {CAPTURE_FIELDS.map(f => {
@@ -203,20 +211,23 @@ export function CaptureLeadCard({ customerId, onSubmitted }: Props) {
         })}
       </div>
 
-      <div className="p-3 border-t border-border space-y-2">
-        <Button
-          size="lg"
-          className="w-full gap-2 font-bold text-base"
-          disabled={!canSubmit || submitting}
-          onClick={() => void handleSubmit()}
-        >
-          {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trophy className="w-4 h-4" />}
-          CADASTRAR TUDO
-        </Button>
-        <p className="text-[10px] text-center text-muted-foreground">
-          {canSubmit ? "Pronto pra enviar ao portal." : `Faltam ${totalFields - filledCount} ${totalFields - filledCount === 1 ? "dado" : "dados"}.`}
-        </p>
-      </div>
+      {!embedded && (
+        <div className="p-3 border-t border-border space-y-2">
+          <Button
+            size="lg"
+            className="w-full gap-2 font-bold text-base"
+            disabled={!canSubmit || submitting}
+            onClick={() => void handleSubmit()}
+          >
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trophy className="w-4 h-4" />}
+            CADASTRAR TUDO
+          </Button>
+          <p className="text-[10px] text-center text-muted-foreground">
+            {canSubmit ? "Pronto pra enviar ao portal." : `Faltam ${totalFields - filledCount} ${totalFields - filledCount === 1 ? "dado" : "dados"}.`}
+          </p>
+        </div>
+      )}
     </aside>
   );
 }
+

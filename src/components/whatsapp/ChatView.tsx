@@ -10,8 +10,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import type { MessageTemplate } from "@/types/whatsapp";
 import type { ChatItem } from "@/hooks/useChats";
-import { Loader2, MessageSquareText, UserPlus, UserCheck, KanbanSquare, RotateCcw } from "lucide-react";
+import { Loader2, MessageSquareText, UserPlus, UserCheck, KanbanSquare, RotateCcw, Gamepad2 } from "lucide-react";
 import { resetLeadConversation } from "@/services/resetConversation";
+import { CaptureSheet } from "@/components/captacao/CaptureSheet";
+import { useCaptureSession } from "@/hooks/useCaptureSession";
+
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -47,6 +50,26 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const [kanbanStages, setKanbanStages] = useState<Tables<"kanban_stages">[]>([]);
   const [sendingToCrm, setSendingToCrm] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const { customer: captureCustomer, filledCount, totalFields } = useCaptureSession(customerId);
+  const captureOn = captureCustomer?.capture_mode === "manual";
+
+  const toggleCapture = useCallback(async () => {
+    if (!customerId) {
+      toast({ title: "Adicione o cliente antes", description: "Clique em 'Adicionar Cliente' para ativar a captação.", variant: "destructive" });
+      return;
+    }
+    if (captureOn) {
+      // already on → just open
+      setCaptureOpen(true);
+      return;
+    }
+    await supabase.from("customers")
+      .update({ capture_mode: "manual", capture_started_at: new Date().toISOString() })
+      .eq("id", customerId);
+    toast({ title: "🎮 Modo Captação ativado", description: "Toque de novo no botão para abrir o painel." });
+  }, [customerId, captureOn, toast]);
+
 
   const handleReset = useCallback(async () => {
     if (!chat) return;
@@ -197,6 +220,23 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
             </SelectContent>
           </Select>
         )}
+        {isCustomer && customerId && (
+          <Button
+            size="sm"
+            variant={captureOn ? "default" : "outline"}
+            className={`h-7 text-[10px] gap-1 ${
+              captureOn
+                ? "bg-primary text-primary-foreground animate-pulse shadow-md shadow-primary/30"
+                : "border-primary/40 text-primary hover:bg-primary/10"
+            }`}
+            onClick={toggleCapture}
+            title={captureOn ? "Toque pra abrir o painel" : "Ligar Modo Captação (game)"}
+          >
+            <Gamepad2 className="h-3.5 w-3.5" />
+            {captureOn ? `${filledCount}/${totalFields}` : "Captação"}
+          </Button>
+        )}
+
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
@@ -334,6 +374,19 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
           onAdded={handleCustomerAdded}
         />
       )}
+
+      {/* Capture Sheet (mobile-first, fullscreen) */}
+      {customerId && (
+        <CaptureSheet
+          open={captureOpen}
+          onOpenChange={setCaptureOpen}
+          consultantId={consultantId}
+          customerId={customerId}
+          customerName={chat?.name}
+          phoneNumber={phoneNumber}
+        />
+      )}
     </div>
+
   );
 }
