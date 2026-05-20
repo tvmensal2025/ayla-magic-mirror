@@ -10,7 +10,7 @@ import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
 import { fireRandomCelebration, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy, ChevronDown, ChevronUp } from "lucide-react";
+import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy, ChevronDown, ChevronUp, Maximize2, Minimize2 } from "lucide-react";
 
 interface Props {
   open: boolean;
@@ -29,10 +29,11 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
   const [tab, setTab] = useState<"passos" | "ficha">("passos");
   const [submitting, setSubmitting] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const lastCountRef = useRef(0);
 
-  useEffect(() => { setSentSteps(new Set()); setMinimized(false); }, [customerId]);
-  useEffect(() => { if (!open) setMinimized(false); }, [open]);
+  useEffect(() => { setSentSteps(new Set()); setMinimized(false); setExpanded(false); }, [customerId]);
+  useEffect(() => { if (!open) { setMinimized(false); setExpanded(false); } }, [open]);
 
   // Garante modo manual ao abrir
   useEffect(() => {
@@ -111,18 +112,35 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="h-[100dvh] w-full p-0 flex flex-col gap-0 rounded-none border-0 bg-background sm:max-w-none"
+        hideCloseButton
+        overlayClassName={expanded ? undefined : "bg-transparent pointer-events-none"}
+        onInteractOutside={(e) => { if (!expanded) e.preventDefault(); }}
+        onPointerDownOutside={(e) => { if (!expanded) e.preventDefault(); }}
+        className={`w-full p-0 flex flex-col gap-0 border-0 bg-background sm:max-w-none shadow-2xl shadow-black/60 ${
+          expanded
+            ? "h-[100dvh] rounded-none"
+            : "h-[62dvh] min-h-[420px] max-h-[100dvh] rounded-t-2xl border-t border-border"
+        }`}
       >
         {/* Header */}
         <header className="px-3 pt-3 pb-2 border-b border-border bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-9 h-9 rounded-full bg-primary/15 flex items-center justify-center">
+          <div className="flex items-center gap-1.5 mb-2">
+            <div className="w-9 h-9 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
               <Gamepad2 className="w-4 h-4 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold truncate">{customerName || phoneNumber || "Lead"}</p>
               <p className="text-[10px] text-muted-foreground truncate">{phoneNumber}</p>
             </div>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-9 w-9 shrink-0"
+              onClick={() => setExpanded((v) => !v)}
+              title={expanded ? "Recolher (ver chat)" : "Expandir tela cheia"}
+            >
+              {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </Button>
             <Button
               size="icon"
               variant="ghost"
