@@ -248,7 +248,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
             disabled={!canSubmit || submitting}
             onClick={() => void handleSubmit()}
           >
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trophy className={`w-4 h-4 ${canSubmit ? "animate-spin-slow" : ""}`} />}
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trophy className="w-4 h-4" />}
             {canSubmit ? "⚡ FINALIZAR CAPTURA · +100 XP" : "CADASTRAR TUDO"}
           </Button>
           <p className="text-[10px] text-center text-muted-foreground">
