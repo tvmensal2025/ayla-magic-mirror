@@ -24,7 +24,7 @@ const NotificationCenter = lazy(() => import("@/components/admin/NotificationCen
 const AIChatPanel = lazy(() => import("@/components/admin/AIChatPanel").then(m => ({ default: m.AIChatPanel })));
 const WhatsAppTab = lazy(() => import("@/components/whatsapp/WhatsAppTab").then(m => ({ default: m.WhatsAppTab })));
 const CrmTabs = lazy(() => import("@/components/whatsapp/CrmTabs").then(m => ({ default: m.CrmTabs })));
-const CaptacaoPanel = lazy(() => import("@/components/captacao/CaptacaoPanel").then(m => ({ default: m.CaptacaoPanel })));
+
 const CustomerManager = lazy(() => import("@/components/whatsapp/CustomerManager").then(m => ({ default: m.CustomerManager })));
 
 const MaterialsTab = lazy(() => import("@/components/admin/MaterialsTab").then(m => ({ default: m.MaterialsTab })));
@@ -41,7 +41,7 @@ const AdminContent = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "links" | "whatsapp" | "crm" | "captacao" | "clientes" | "rede" | "central-anuncios">(() => {
+  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "links" | "whatsapp" | "crm" | "clientes" | "rede" | "central-anuncios">(() => {
     if (typeof window !== "undefined") {
       const tab = new URLSearchParams(window.location.search).get("tab");
       if (tab === "performance" || tab === "anuncios" || tab === "central-anuncios") return "central-anuncios";
