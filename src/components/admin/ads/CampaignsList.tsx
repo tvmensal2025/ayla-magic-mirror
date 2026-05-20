@@ -262,18 +262,34 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
                   );
                 })()}
               </div>
-              {isSuperAdmin && (
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 text-destructive hover:bg-destructive/10 shrink-0"
-                  onClick={() => setConfirmDelete(c)}
-                  disabled={deleting === c.id}
-                  title="Apagar campanha (SuperAdmin)"
-                >
-                  {deleting === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                </Button>
-              )}
+              <div className="flex items-center gap-1 shrink-0">
+                {(c.status === "active" || c.status === "paused") && c.fb_campaign_id && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8"
+                    onClick={() => handleToggle(c)}
+                    disabled={toggling === c.id}
+                    title={c.status === "active" ? "Pausar campanha" : "Ativar campanha"}
+                  >
+                    {toggling === c.id
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : c.status === "active" ? <Pause className="w-4 h-4 text-amber-400" /> : <Play className="w-4 h-4 text-emerald-400" />}
+                  </Button>
+                )}
+                {isSuperAdmin && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                    onClick={() => setConfirmDelete(c)}
+                    disabled={deleting === c.id}
+                    title="Apagar campanha (SuperAdmin)"
+                  >
+                    {deleting === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  </Button>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
               <Stat icon={<TrendingUp className="w-3.5 h-3.5" />} label="Impressões" value={m.impressions.toLocaleString("pt-BR")} />
