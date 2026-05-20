@@ -1,6 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { useFlowSteps } from "@/hooks/useFlowSteps";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Send, Loader2, Check, MessageCircle, Mic, ImageIcon, Video, Edit3 } from "lucide-react";
@@ -14,13 +13,34 @@ interface Props {
   onEditTemplate?: (stepKey: string, text: string) => void;
 }
 
+interface StepRow { id: string; title: string | null; step_key: string | null; position: number; message_text: string | null; }
+
 export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, onEditTemplate }: Props) {
-  const { steps } = useFlowSteps(consultantId);
   const { toast } = useToast();
   const [sending, setSending] = useState<string | null>(null);
+  const [steps, setSteps] = useState<StepRow[]>([]);
 
-  // Pegamos os 10 primeiros passos do fluxo ativo
-  const display = (steps || []).slice(0, 10);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const { data: flows } = await supabase
+        .from("bot_flows").select("id")
+        .eq("consultant_id", consultantId).eq("is_active", true).limit(1);
+      if (!flows?.[0]) { if (mounted) setSteps([]); return; }
+      const { data } = await supabase
+        .from("bot_flow_steps")
+        .select("id, title, step_key, position, message_text")
+        .eq("flow_id", flows[0].id)
+        .eq("is_active", true)
+        .order("position", { ascending: true })
+        .limit(10);
+      if (mounted) setSteps((data as StepRow[]) || []);
+    })();
+    return () => { mounted = false; };
+  }, [consultantId]);
+
+  const display = steps;
+
 
   const sendStep = async (stepId: string, label: string) => {
     setSending(stepId);
