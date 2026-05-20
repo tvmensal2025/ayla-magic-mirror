@@ -85,6 +85,7 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
   const [loading, setLoading] = useState(true);
   const [reactivating, setReactivating] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Campaign | null>(null);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const { isSuperAdmin } = useUserRole(authUserId);
