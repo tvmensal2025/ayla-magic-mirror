@@ -13,7 +13,10 @@ import { supabase } from "@/integrations/supabase/client";
 interface Props {
   customerId: string;
   onSubmitted?: () => void;
+  /** When true, hide internal header/footer (Sheet provides them). Card content fills width. */
+  embedded?: boolean;
 }
+
 
 export function CaptureLeadCard({ customerId, onSubmitted }: Props) {
   const { customer, loading, filledCount, totalFields, progress, updateField } = useCaptureSession(customerId);
