@@ -111,7 +111,7 @@ export function useCtwaPreflight(consultantId: string | null): CtwaPreflightStat
 
 
     // 3) WABA via edge function (só faz sentido se Facebook OK)
-    if (fbConn?.page_id) {
+    if (platformPageOk) {
       try {
         const { data, error } = await supabase.functions.invoke("facebook-detect-waba");
         if (error || !data?.ok) {
