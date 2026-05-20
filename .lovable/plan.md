@@ -1,46 +1,51 @@
-## Atalho de passos do fluxo no composer (manual 1-a-1, passo completo, ou daqui em diante)
+# Pré-visualizar antes de enviar (atalho do fluxo)
 
-Logo acima do textarea do `MessageComposer`, um botão "⚡ Fluxo" abre um popover compacto listando os passos do fluxo ativo do consultor. Para cada passo, o consultor escolhe **como** disparar — sempre para o cliente atualmente aberto.
+Hoje no botão ⚡ do composer você consegue disparar passos do fluxo, mas o texto/áudio/imagem/vídeo só é visto depois que cai no WhatsApp. Vou adicionar **preview real** antes de qualquer envio, em todos os 3 modos.
 
-## 3 modos de envio (por passo selecionado)
+## O que muda
 
-1. **Manual 1-a-1** — abre o `ManualStepDialog` já com o passo pré-selecionado (cards áudio/imagem/vídeo/texto, cada um com botão Enviar). Reaproveita o componente que já existe.
-2. **Passo completo (auto)** — dispara o passo inteiro sequencial (áudio → imagem → vídeo → texto) via `manual-step-send` com `part: "all"`. Um clique e pronto.
-3. **Daqui em diante (auto)** — dispara o passo escolhido **e todos os subsequentes** em sequência. Loop client-side: para cada passo da posição N até o fim, chama `manual-step-send` com `part: "all"` e espera o retorno antes de ir para o próximo. Toast de progresso ("Enviando 3/8…"), botão "Parar" cancela o loop.
+### 1. Modo "1 a 1" (ManualStepDialog) — preview inline em cada parte
+Hoje cada item mostra só um ícone + nome do arquivo + botão Enviar. Vou trocar por um card com **preview de verdade** da mídia:
 
-## Arquivos
+- **Texto** → caixa cinza com o texto completo (scroll se grande), igual a um balão do WhatsApp.
+- **Áudio** → `<audio controls>` para ouvir antes (play/pause/scrub).
+- **Imagem** → miniatura clicável (abre lightbox/zoom em modal).
+- **Vídeo** → `<video controls>` 240px de largura, play inline.
+- **Documento (PDF)** → link "Abrir em nova aba" + nome do arquivo.
 
-**Novo:** `src/components/whatsapp/FlowQuickBar.tsx`
-- Props: `consultantId`, `customerId`, `customerName`, `disabled?`.
-- Reusa `useFlowSteps(consultantId)` (já existe) para carregar `stepOptions` ordenados por `position`.
-- Botão "⚡ Fluxo" (ícone Zap, `h-8 w-8 ghost`) com badge da quantidade de passos. Tooltip "Enviar passo do fluxo".
-- Abre `Popover` (shadcn) com:
-  - Header curto: "Para **{customerName}**".
-  - Lista vertical scrollável (`max-h-72 overflow-y-auto`) dos passos. Cada linha:
-    - `#N • título do passo` (truncate).
-    - 3 ações lado a lado (icons + tooltip): `Send` (passo completo), `ListChecks` (1-a-1), `FastForward` (daqui em diante).
-  - Rodapé com link "Editar fluxo" → `/admin/fluxos`.
-- Estado interno: `sendingStepId`, `runningSequence: { fromIdx, currentIdx, total } | null`, `abortRef`.
-- Funções:
-  - `sendFull(stepId)` → invoca `manual-step-send` `{ stepId, part: "all" }`. Toast sucesso/erro.
-  - `openOneByOne(step)` → seta `dialogStep` e renderiza `<ManualStepDialog open ... />` controlado, abrindo já naquele passo (extender ManualStepDialog com prop opcional `initialStepId`).
-  - `runFromHere(fromIdx)` → loop `for (i = fromIdx; i < steps.length; i++)`, await cada `manual-step-send`. Aborta se `abortRef.current === true` ou erro. Mostra toast "▶️ 3/8 enviado". Ao final: toast "✅ Sequência concluída".
-- Confirmação leve (AlertDialog) para "Daqui em diante" mostrando "Vai enviar X passos para {nome}. Continuar?".
+Botão **Enviar** continua do lado, só que agora você ouviu/leu/viu antes de clicar.
 
-**Editar:** `src/components/whatsapp/MessageComposer.tsx`
-- Renderizar `<FlowQuickBar consultantId={consultantId} customerId={customerId} customerName={customerName} disabled={disabled} />` ao lado do botão de respostas rápidas (`MessageSquareText`), antes do `Paperclip`. Só renderiza se `consultantId && customerId`.
+### 2. Modo "Passo completo" (botão Send na lista do popover)
+Hoje: 1 clique = envia tudo direto. Vou mudar para:
+- 1 clique = abre **mini-modal de preview** mostrando, em ordem, todas as partes do passo (mesmos previews acima: áudio tocável, imagem, vídeo, texto).
+- 2 botões no rodapé: **Cancelar** e **Confirmar e enviar tudo**.
+- Memória opcional por sessão "não perguntar de novo neste passo" (checkbox), pra não atrapalhar quem já confirmou.
 
-**Editar:** `src/components/admin/AIAgentTab/ManualStepDialog.tsx`
-- Aceitar prop opcional `initialStepId?: string`. No `useEffect` de carga, se `initialStepId` estiver setado e existir nos `steps`, chamar `loadStepParts(step)` automaticamente para já abrir na visão de partes (modo 1-a-1).
+### 3. Modo "Daqui em diante" (FastForward)
+Hoje: AlertDialog só com texto "vou enviar N passos". Vou enriquecer:
+- Lista os passos que vão ser enviados (numerados, com título).
+- Cada passo expansível (accordion) → abre os previews das partes daquele passo.
+- Botões: **Cancelar** / **Enviar sequência**.
 
-## Comportamento e segurança
+## Onde mexer (técnico)
 
-- `manual-step-send` já respeita o estado pausado/handoff do bot e a ordem áudio→imagem→texto (memórias "Manual Step Capture Prompt" e "Human Takeover Silence") — nada muda no backend.
-- Loop "daqui em diante" é client-side e cancelável, evita criar nova edge function. Delay natural vem do próprio `manual-step-send` (espera retorno entre passos).
-- Sem inserir nada no textarea — disparo é direto, evita confusão com o que o consultor está digitando.
+- **`src/components/admin/AIAgentTab/ManualStepDialog.tsx`**
+  - Substituir o conteúdo do `<Card>` de cada `part` por um componente `PartPreview` que renderiza por `kind` (text/audio/image/video/document) usando `part.media?.url` ou `part.text`.
+  - Imagem: thumb 80×80 + clique abre Dialog com imagem full.
+  - Áudio/vídeo: tags HTML5 nativas com `controls preload="metadata"`.
+
+- **`src/components/whatsapp/FlowQuickBar.tsx`**
+  - Novo state `previewStep: Step | null`.
+  - Trocar `onClick={() => sendFull(s)}` por `onClick={() => setPreviewStep(s)}`.
+  - Novo `<Dialog>` `StepPreviewDialog` que carrega `ai_media_library` igual ao `loadStepParts` do ManualStepDialog, renderiza os previews e tem botão "Confirmar e enviar tudo" → chama `sendFull(s)`.
+  - Reaproveitar o mesmo `PartPreview` extraído como componente compartilhado (`src/components/whatsapp/StepPartPreview.tsx`) para não duplicar.
+  - Trocar o `AlertDialog` do "Daqui em diante" por um Dialog maior com lista de passos + accordion (`@/components/ui/accordion`) usando o mesmo `PartPreview`.
+
+- **Novo arquivo: `src/components/whatsapp/StepPartPreview.tsx`** — componente puro que recebe `{ kind, text?, url?, fileName? }` e renderiza o preview correto. Usado pelos 3 fluxos.
 
 ## Fora de escopo
+- Editar texto/mídia antes de enviar (continua só preview).
+- Mudar a ordem das partes na hora do envio.
+- Reordenar passos.
 
-- Edição de passos (continua em `/admin/fluxos`).
-- Disparo de variantes A/B/C distintas — usa o fluxo ativo padrão do consultor.
-- Agendamento (continua no `SchedulePanel`).
+Quer que eu inclua também um botão "Tocar tudo em sequência" no preview do passo completo (toca áudios/vídeos em ordem antes de mandar)? Posso adicionar se for útil.
