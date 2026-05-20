@@ -713,18 +713,33 @@ export function NetworkPanel({ consultantId }: NetworkPanelProps) {
             </Button>
           </div>
         ) : viewMode === "tree" ? (
-          <div className="overflow-auto relative" style={{ maxHeight: "72vh" }}>
+          <div ref={treeScrollRef} className="overflow-auto relative" style={{ maxHeight: "72vh" }}>
             {/* Background dots pattern */}
-            <div className="absolute inset-0 opacity-[0.03]" style={{
+            <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{
               backgroundImage: "radial-gradient(circle, currentColor 1px, transparent 1px)",
               backgroundSize: "24px 24px"
             }} />
-            
-            <div className="flex justify-center py-10 px-8 min-w-max relative z-10"
-              style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }}>
-              {tree.map(root => (
-                <OrgChartNode key={root.member.id} node={root} depth={0} onSelect={setSelectedMember} />
-              ))}
+
+            <div
+              className="mx-auto relative z-10"
+              style={{
+                width: contentSize.w ? contentSize.w * zoom : undefined,
+                height: contentSize.h ? contentSize.h * zoom + 80 : undefined,
+              }}
+            >
+              <div
+                ref={treeInnerRef}
+                className="flex py-10 px-8"
+                style={{
+                  transform: `scale(${zoom})`,
+                  transformOrigin: "top left",
+                  width: contentSize.w || "max-content",
+                }}
+              >
+                {tree.map(root => (
+                  <OrgChartNode key={root.member.id} node={root} depth={0} onSelect={setSelectedMember} />
+                ))}
+              </div>
             </div>
           </div>
         ) : (
