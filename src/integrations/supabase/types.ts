@@ -3099,6 +3099,7 @@ export type Database = {
           media_url: string | null
           name: string
           origin_template_id: string | null
+          shortcut: string | null
         }
         Insert: {
           consultant_id: string
@@ -3110,6 +3111,7 @@ export type Database = {
           media_url?: string | null
           name: string
           origin_template_id?: string | null
+          shortcut?: string | null
         }
         Update: {
           consultant_id?: string
@@ -3121,6 +3123,7 @@ export type Database = {
           media_url?: string | null
           name?: string
           origin_template_id?: string | null
+          shortcut?: string | null
         }
         Relationships: [
           {
