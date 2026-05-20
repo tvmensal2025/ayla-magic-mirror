@@ -38,7 +38,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: P
       if (key === "electricity_bill_value") value = Number(String(value).replace(",", ".")) || null;
       await updateField(key, value);
       await resolve(s.id, "accepted");
-      fireMiniConfetti();
+      fireRandomCelebration();
       toast({ title: `🤖 IA capturou ${key}!`, duration: 1800 });
     } catch (e: any) {
       toast({ title: "Erro", description: e?.message || String(e), variant: "destructive" });
