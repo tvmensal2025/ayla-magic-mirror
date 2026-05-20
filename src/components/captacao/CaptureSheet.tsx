@@ -29,10 +29,11 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
   const [tab, setTab] = useState<"passos" | "ficha">("passos");
   const [submitting, setSubmitting] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const lastCountRef = useRef(0);
 
-  useEffect(() => { setSentSteps(new Set()); setMinimized(false); }, [customerId]);
-  useEffect(() => { if (!open) setMinimized(false); }, [open]);
+  useEffect(() => { setSentSteps(new Set()); setMinimized(false); setExpanded(false); }, [customerId]);
+  useEffect(() => { if (!open) { setMinimized(false); setExpanded(false); } }, [open]);
 
   // Garante modo manual ao abrir
   useEffect(() => {
