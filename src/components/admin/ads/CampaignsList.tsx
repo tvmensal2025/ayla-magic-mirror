@@ -73,7 +73,15 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
   const [waNumber, setWaNumber] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reactivating, setReactivating] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Campaign | null>(null);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const { isSuperAdmin } = useUserRole(authUserId);
   const { toast } = useToast();
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setAuthUserId(data.user?.id ?? null));
+  }, []);
 
   useEffect(() => {
     (async () => {
