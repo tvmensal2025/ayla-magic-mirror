@@ -213,18 +213,24 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
       </div>
 
       <ul className="space-y-1.5">
-        {filtered.map((g) => {
-          const num = groups.findIndex((x) => x.step_key === g.step_key) + 1;
+        {filtered.map((g, idx) => {
+          const num = idx + 1;
           const variantKeys = Object.keys(g.variants).sort();
-          const anySent = variantKeys.some((v) => sentSteps.has(g.variants[v].id));
+          const anySent = sentSteps.has(g.step_key);
           const defaultRow = g.variants[defaultV] || g.variants[variantKeys[0]];
           const media = Array.isArray(defaultRow?.media_order) ? (defaultRow.media_order as string[]) : [];
           const isSending = sending === defaultRow?.id;
+          const isCurrent = !!currentStep && (
+            currentStep === g.step_key ||
+            Object.values(g.variants).some((v) => v.id === currentStep)
+          );
           return (
             <li key={g.step_key}>
               <div
                 className={`rounded-lg border flex items-center gap-2 pl-2 pr-2 py-1.5 transition-all ${
-                  anySent
+                  isCurrent
+                    ? "border-amber-400/60 bg-amber-400/10 ring-1 ring-amber-400/40"
+                    : anySent
                     ? "border-primary/30 bg-primary/5"
                     : "border-border bg-card hover:border-primary/50"
                 }`}
@@ -234,6 +240,8 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
                     className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold tabular-nums ${
                       anySent
                         ? "bg-primary text-primary-foreground"
+                        : isCurrent
+                        ? "bg-amber-400 text-black"
                         : "bg-muted text-muted-foreground"
                     }`}
                   >
@@ -247,6 +255,11 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
                   <p className="text-[13px] font-semibold truncate leading-tight">
                     {g.title || g.step_key || `Passo ${num}`}
                   </p>
+                  {isCurrent && (
+                    <span className="text-[9px] font-bold uppercase tracking-wide px-1 py-px rounded bg-amber-400 text-black shrink-0">
+                      atual
+                    </span>
+                  )}
                   <div className="flex items-center gap-0.5 shrink-0">
                     {media.includes("audio") && <Mic className="w-3 h-3 text-emerald-500" />}
                     {media.includes("image") && <ImageIcon className="w-3 h-3 text-amber-500" />}
@@ -287,7 +300,7 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
         variants={confirmStep?.group.variants}
         onVariantChange={changeVariant}
         sending={!!sending}
-        onSend={() => confirmStep && doSend(confirmStep.row)}
+        onSend={() => confirmStep && doSend(confirmStep.row, confirmStep.group.step_key)}
       />
     </div>
   );
