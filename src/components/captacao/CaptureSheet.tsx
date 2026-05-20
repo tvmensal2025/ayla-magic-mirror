@@ -195,8 +195,19 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
               consultantId={consultantId}
               customerId={customerId}
               sentSteps={sentSteps}
-              onSent={(id) => setSentSteps((s) => new Set(s).add(id))}
+              onSent={async (key) => {
+                setSentSteps((s) => new Set(s).add(key));
+                // Pausa o bot no 1º envio manual (evita resposta dupla com o consultor)
+                if (sentSteps.size === 0 && customer?.id && !(customer as any).bot_paused) {
+                  await supabase.from("customers").update({
+                    bot_paused: true,
+                    bot_paused_reason: "manual_capture",
+                    bot_paused_at: new Date().toISOString(),
+                  }).eq("id", customer.id);
+                }
+              }}
               defaultVariant={(customer as any)?.flow_variant || "A"}
+              currentStep={(customer as any)?.conversation_step}
             />
           </TabsContent>
 
@@ -225,16 +236,14 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
             {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trophy className="w-5 h-5" />}
             {canSubmit ? "CADASTRAR TUDO" : `FINALIZAR (${filledCount}/${totalFields})`}
           </Button>
-          {expanded && (
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] text-muted-foreground">
-                {filledCount}/{totalFields} campos · {sentSteps.size}/10 passos
-              </span>
-              <Button variant="ghost" size="sm" className="text-[10px] text-muted-foreground h-6" onClick={disableCapture}>
-                Sair do modo
-              </Button>
-            </div>
-          )}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-muted-foreground">
+              {filledCount}/{totalFields} campos · {sentSteps.size}/10 passos
+            </span>
+            <Button variant="ghost" size="sm" className="text-[10px] text-muted-foreground h-6 px-2" onClick={disableCapture}>
+              Sair do modo
+            </Button>
+          </div>
         </footer>
       </SheetContent>
     </Sheet>

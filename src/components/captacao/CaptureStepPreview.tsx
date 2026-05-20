@@ -47,6 +47,7 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
   const [medias, setMedias] = useState<MediaItem[]>([]);
   const [renderedText, setRenderedText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [skippedAudios, setSkippedAudios] = useState(0);
 
   useEffect(() => {
     if (!open || !step) return;
@@ -84,12 +85,14 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
         rows = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
       }
 
+      let skipped = 0;
       if (step.variant === "B") {
         rows = rows.flatMap((m) => {
           if (String(m.kind).toLowerCase() !== "audio") return [m];
           if (m.transcript && m.transcript.trim()) {
             return [{ ...m, kind: "text", url: "", label: "transcrição do áudio" } as any];
           }
+          skipped += 1;
           return [];
         });
       }
@@ -97,6 +100,7 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
       if (!mounted) return;
       setMedias(rows);
       setRenderedText(txt);
+      setSkippedAudios(skipped);
       setLoading(false);
     })();
     return () => { mounted = false; };
@@ -153,6 +157,12 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
           {loading && (
             <div className="flex items-center justify-center py-8 text-muted-foreground gap-2">
               <Loader2 className="w-4 h-4 animate-spin" /> Carregando…
+            </div>
+          )}
+
+          {!loading && skippedAudios > 0 && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+              ⚠️ {skippedAudios} áudio{skippedAudios > 1 ? "s" : ""} sem transcrição — não {skippedAudios > 1 ? "serão enviados" : "será enviado"} na variante B. Gere a transcrição em <span className="font-semibold">/admin/fluxos</span>.
             </div>
           )}
 

@@ -1,39 +1,94 @@
-## Problema
+# Auditoria — Fluxo de Captação Manual
 
-O botão de envio (h-10 + "Eye + letra") ficou desproporcional ao card compacto. Em telinha pequena (390x650), domina visualmente cada linha.
+Escopo: `CaptureSheet` → `CaptureStepsList` → `CaptureStepPreview` → edge `manual-step-send`.
 
-## Mudanças (`src/components/captacao/CaptureStepsList.tsx`)
+## Veredito: ~90% — funciona, mas tem 5 ajustes para ficar 100%
 
-### Card de passo (linha única, mais enxuta)
+---
 
-- **Botão**: trocar de `h-10 px-3` com ícone+letra por um botão-ícone circular `h-9 w-9 rounded-full` só com `Send` (sem letra, sem `Eye`). Alvo de toque continua 36px (aceitável; iOS recomenda 44, mas a área hit ainda é confortável num card de 44px de altura). Para garantir alvo confortável sem peso visual, uso `relative` + `before:absolute before:inset-[-6px]` (área invisível extra de 6px no toque) — visual 36px, hit-area efetiva 48px.
-- **Variante**: badge `A`/`B`/`C` pequena (`text-[9px]`) no canto inferior direito do número `#N`, em vez de no botão. Quem quer trocar variante abre a prévia.
-- **Linha de meta**: remover o texto "X variantes / variante A" (redundante com o badge). Manter só os ícones de mídia (mic/img/vídeo) com `w-3 h-3`.
-- **Padding do card**: `py-1.5 pl-2 pr-1.5` → `py-2 pl-2.5 pr-2`. Bordas `rounded-lg` mantidas.
-- **Tipografia**: título `text-xs` → `text-[13px]` (mais legível, ainda compacto). Removida a segunda linha de meta quando só tem ícones — fica em linha única com o título.
+## ✅ O que está correto
 
-### Layout final por card (~46px altura)
+1. **Variant switching no preview** — `changeVariant` troca `confirmStep.row` e o dialog re-renderiza com mídia/texto da nova variante (A/B/C). `onSend` usa `confirmStep.row`, então envia a variante escolhida.
+2. **Variante B (sem áudio)** — front substitui áudio por transcrição; edge faz o mesmo via `ensureAudioTranscript`. Consistente.
+3. **Substituição de variáveis** — `{{nome}}`, `{{valor}}`, `{{economia_*}}` idênticas no preview e no edge (mesmo formato pt-BR, 2 decimais, 20%).
+4. **Capture steps automáticos** — edge gera prompt automático (`message_text → retry_text → fallback por tipo`) com debounce de 20s e mapeia para legacy step (`aguardando_conta`, etc). Bem implementado.
+5. **Bot pause clearing** — ao enviar capture step, limpa `bot_paused`, `assigned_human_id`, `custom_step_retries`. Correto.
+6. **Minimização/expansão** — sheet permite ver o chat por trás (overlay transparente quando não-expandido); botão minimizar não bloqueia input.
+7. **Auth** — verifica JWT + consultantId match OU super_admin via RPC.
 
+---
+
+## ⚠️ Problemas encontrados
+
+### 1. `sentSteps` é por `row.id` (variant-specific), não por `step_key`
+
+**Local:** `CaptureStepsList.tsx:169` (`onSent(row.id)`) + `:218` (`variantKeys.some((v) => sentSteps.has(g.variants[v].id))`).
+**Comportamento:** ao enviar variante A, o grupo aparece como enviado. Mas se o consultor trocar para B no preview e enviar de novo, marca outro row.id — o `Check` continua, mas `sentSteps.size` no header passa a contar 2 envios do mesmo passo (badge "Passos 11/10" possível). 
+**Fix:** marcar com `g.step_key` em vez de `row.id`, ou deduplicar no contador do header (`new Set([...sentSteps].map(id → step_key))`).
+
+### 2. Numeração instável quando filtro "Pendentes" ativo
+
+**Local:** `CaptureStepsList.tsx:216` — `num = groups.findIndex(...)` usa o array completo, OK. Mas se `onlyPending` esconde itens, a numeração visível pula (1, 3, 5...). É proposital? Se não, basta `filtered.findIndex`.
+
+### 3. Edge não desfaz `capture_mode=manual` quando consultor envia step manual
+
+**Local:** `CaptureSheet.tsx:42` força `capture_mode='manual'` ao abrir. Mas `manual-step-send` com `continueFlow:false` (caso atual) NÃO toca `capture_mode` nem `bot_paused`. Resultado: se o bot estava pausado, continua pausado; se não estava, o bot continua respondendo em paralelo com o consultor. **Recomendado:** pausar bot (`bot_paused=true`, reason="manual_capture") automaticamente ao 1º envio manual da sheet — ou expor toggle no header.
+
+### 4. Botão "Sair do modo" só aparece em modo expandido
+
+**Local:** `CaptureSheet.tsx:228-237` — `disableCapture` está dentro de `{expanded && ...}`. No modo compacto (default) o consultor não consegue sair sem fechar a sheet inteira. **Fix:** mover para o menu de 3 pontos ou mostrar sempre.
+
+### 5. Hit area do botão Send está OK no toque, mas falta feedback de "passo atual"
+
+- Não há indicação visual de qual passo é o "próximo lógico" baseado em `customer.conversation_step`. O consultor precisa lembrar onde parou. **Sugestão:** badge `Atual` no card cujo `step_key` bate com `conversation_step`.
+
+### 6. Variante B sem transcript = áudio simplesmente sumido (silencioso)
+
+**Local:** `manual-step-send/index.ts:120-122` — `console.warn` + pula. O frontend (`CaptureStepPreview:87-95`) também filtra silenciosamente. Consultor não vê erro, mas mídia some. **Fix:** preview mostrar aviso "áudio sem transcrição — não será enviado na variante B".
+
+### 7. Dedup de variantes pega só a `updated_at` mais recente por letra
+
+**Local:** `CaptureStepsList.tsx:79-83`. Se houver 2 fluxos `is_active=true` com `variant='A'`, descarta o mais antigo silenciosamente. Não é bug, mas é uma armadilha em ambientes com múltiplos fluxos ativos. **Fix:** logar warning ou exibir badge.
+
+---
+
+## 🔧 Plano de correções (prioridade)
+
+
+| #   | Issue                                                          | Arquivo                                                 | Esforço |
+| --- | -------------------------------------------------------------- | ------------------------------------------------------- | ------- |
+| 1   | Marcar `sentSteps` por `step_key` (dedup do contador)          | `CaptureStepsList.tsx`, `CaptureSheet.tsx`              | 5 min   |
+| 2   | Pausar bot ao 1º envio manual                                  | `CaptureSheet.tsx` (opt) ou `manual-step-send/index.ts` | 10 min  |
+| 3   | Badge "Atual" no passo correspondente a `conversation_step`    | `CaptureStepsList.tsx`                                  | 5 min   |
+| 4   | "Sair do modo" sempre visível (menu compacto)                  | `CaptureSheet.tsx`                                      | 3 min   |
+| 5   | Aviso no preview quando variante B remove áudio sem transcript | `CaptureStepPreview.tsx`                                | 5 min   |
+| 6   | `findIndex` no `filtered` para numeração estável com filtros   | `CaptureStepsList.tsx`                                  | 2 min   |
+
+
+Total estimado: ~30 min. Nada bloqueante — o fluxo funciona hoje, mas esses ajustes deixam 100%.
+
+---
+
+## Diagrama do fluxo atual
+
+```text
+[CaptureSheet] open
+   └─ força capture_mode='manual'
+   └─ [CaptureStepsList]
+        └─ carrega bot_flows (variants A/B/C) + bot_flow_steps
+        └─ agrupa por step_key, ordena por position
+        └─ usa defaultVariant (customer.flow_variant)
+        └─ click → [CaptureStepPreview]
+             └─ render mídias + texto substituído
+             └─ chips A/B/C → changeVariant → re-render
+             └─ Enviar → manual-step-send
+                  ├─ resolve customer + phone + step
+                  ├─ medias (variant B: áudio→transcript)
+                  ├─ envia via Whapi (audio→image→video→text)
+                  ├─ se step capture_*: prompt + maps to legacy step
+                  │   + limpa bot_paused, marca last_custom_prompt_at
+                  └─ retorna sent[]
+        └─ onSent(row.id) → marca como enviado (✓ verde)
 ```
-[●#N·A]  Apresentação inicial 🎤🖼️           [⤴]
-```
 
-- bolinha número+variante à esquerda (28px)
-- título + ícones de mídia inline no meio (1 linha truncada)
-- botão circular `Send` 36px à direita (com hit-area 48px invisível)
-
-### Estado "enviado"
-
-- Bolinha vira verde sólida com `Check` (já está).
-- Botão circular vira `variant="outline"` com `Check` (em vez de `Send`).
-
-## Fora de escopo
-
-Header, footer, modal de prévia, tabs, lógica.
-
-## Validação
-
-1. 390x650: cabem 5-6 passos sem rolar.
-2. Botão visualmente discreto mas com hit-area ≥44px (testar tocando nas bordas).
-3. Badge da variante visível ao lado do número.
-4. Sem botões/textos cortados em 320px.
+Quer que eu aplique as 6 correções de uma vez? Sim
