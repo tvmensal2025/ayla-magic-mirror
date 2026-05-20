@@ -241,7 +241,9 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
                           size="sm"
                           onClick={async () => {
                             try {
-                              const res = await startFacebookOAuth("connect");
+                              // Campanhas usam o token da PLATAFORMA. Super admin reconecta plataforma;
+                              // consultor comum reconecta sua própria conta (fallback).
+                              const res = await startFacebookOAuth(isSuperAdmin ? { scope: "platform", mode: "switch" } : { mode: "switch" });
                               window.location.href = res.url;
                             } catch (e: any) {
                               toast({ title: "Falha ao iniciar reconexão", description: e?.message || "Erro", variant: "destructive" });
@@ -250,7 +252,7 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
                           className="h-7 text-xs gap-1 bg-[#1877F2] hover:bg-[#1877F2]/90 text-white"
                         >
                           <Facebook className="w-3 h-3" />
-                          Reconectar Facebook
+                          {isSuperAdmin ? "Reconectar Facebook (Plataforma)" : "Reconectar Facebook"}
                         </Button>
                       ) : (c.status === "pending_review" || c.status === "paused") && (
                         <Button size="sm" variant="outline" onClick={() => tryReactivate(c)} disabled={reactivating === c.id} className="h-7 text-xs gap-1">

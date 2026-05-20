@@ -3,8 +3,7 @@
 // Pode ser invocado:
 //   - via cron horário (sem body) → varre todas
 //   - via cliente com { campaign_id } → tenta UMA específica (botão "tentar reativar")
-import { adminClient, authConsultant, corsHeaders, fbFetch } from "../_shared/fb-graph.ts";
-import { decryptToken } from "../_shared/fb-crypto.ts";
+import { adminClient, authConsultant, corsHeaders, fbFetch, loadCampaignConnection } from "../_shared/fb-graph.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -51,13 +50,10 @@ async function reactivateOne(admin: any, campaignDbId: string, consultantId: str
   if (!c?.fb_campaign_id) return { activated: false, reason: "Campanha sem ID Meta" };
   if (c.status === "active") return { activated: true };
 
-  const { data: conn } = await admin
-    .from("facebook_connections")
-    .select("access_token_encrypted")
-    .eq("consultant_id", consultantId)
-    .maybeSingle();
-  if (!conn?.access_token_encrypted) return { activated: false, reason: "Sem token Meta" };
-  const token = await decryptToken(conn.access_token_encrypted);
+  // Campanhas usam SEMPRE o token da plataforma (conta-mãe), não o token pessoal do consultor.
+  const conn = await loadCampaignConnection(consultantId);
+  if (!conn?.token) return { activated: false, reason: "Sem token Meta (plataforma desconectada)" };
+  const token = conn.token;
 
   try {
     for (const adsetId of (c.fb_adset_ids || []) as string[]) {
