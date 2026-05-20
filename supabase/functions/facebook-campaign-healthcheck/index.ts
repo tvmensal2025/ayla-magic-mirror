@@ -50,13 +50,10 @@ async function reactivateOne(admin: any, campaignDbId: string, consultantId: str
   if (!c?.fb_campaign_id) return { activated: false, reason: "Campanha sem ID Meta" };
   if (c.status === "active") return { activated: true };
 
-  const { data: conn } = await admin
-    .from("facebook_connections")
-    .select("access_token_encrypted")
-    .eq("consultant_id", consultantId)
-    .maybeSingle();
-  if (!conn?.access_token_encrypted) return { activated: false, reason: "Sem token Meta" };
-  const token = await decryptToken(conn.access_token_encrypted);
+  // Campanhas usam SEMPRE o token da plataforma (conta-mãe), não o token pessoal do consultor.
+  const conn = await loadCampaignConnection(consultantId);
+  if (!conn?.token) return { activated: false, reason: "Sem token Meta (plataforma desconectada)" };
+  const token = conn.token;
 
   try {
     for (const adsetId of (c.fb_adset_ids || []) as string[]) {
