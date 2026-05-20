@@ -105,6 +105,7 @@ export function SaveMessageAsTemplateDialog({ open, onOpenChange, message, consu
         throw error;
       }
       toast.success(`Template "${name.trim()}" salvo${shortcutNormalized ? ` (atalho ${shortcutNormalized})` : ""}`);
+      try { window.dispatchEvent(new Event("templates:refresh")); } catch (_) {}
       onSaved?.();
       onOpenChange(false);
     } catch (e: any) {
