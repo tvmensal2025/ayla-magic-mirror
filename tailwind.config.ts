@@ -109,6 +109,38 @@ export default {
           from: { opacity: "0", transform: "translateY(20px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        "xp-rise": {
+          "0%":   { opacity: "0", transform: "translateY(8px) scale(0.8)" },
+          "20%":  { opacity: "1", transform: "translateY(0) scale(1.05)" },
+          "70%":  { opacity: "1", transform: "translateY(-30px) scale(1)" },
+          "100%": { opacity: "0", transform: "translateY(-50px) scale(0.9)" },
+        },
+        "combo-pop": {
+          "0%":   { transform: "scale(0.6) rotate(-6deg)", opacity: "0" },
+          "60%":  { transform: "scale(1.15) rotate(2deg)", opacity: "1" },
+          "100%": { transform: "scale(1) rotate(0)", opacity: "1" },
+        },
+        "shimmer-gold": {
+          "0%, 100%": { backgroundPosition: "0% 50%" },
+          "50%":      { backgroundPosition: "100% 50%" },
+        },
+        "card-flip": {
+          "0%":   { transform: "rotateY(0deg)" },
+          "100%": { transform: "rotateY(360deg)" },
+        },
+        "field-flash": {
+          "0%":   { boxShadow: "0 0 0 0 hsl(var(--primary) / 0.6)", transform: "scale(1)" },
+          "40%":  { boxShadow: "0 0 0 8px hsl(var(--primary) / 0)",   transform: "scale(1.03)" },
+          "100%": { boxShadow: "0 0 0 0 hsl(var(--primary) / 0)",     transform: "scale(1)" },
+        },
+        "bg-drift": {
+          "0%, 100%": { backgroundPosition: "0% 0%" },
+          "50%":      { backgroundPosition: "100% 100%" },
+        },
+        "boss-pulse": {
+          "0%, 100%": { transform: "scale(1)", boxShadow: "0 0 24px hsl(var(--primary)/0.4)" },
+          "50%":      { transform: "scale(1.025)", boxShadow: "0 0 48px hsl(45 95% 55%/0.5)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -121,6 +153,13 @@ export default {
         "pulse-green": "pulse-green 2s ease-in-out infinite",
         "float": "float 3s ease-in-out infinite",
         "counter": "counter 0.8s ease-out forwards",
+        "xp-rise": "xp-rise 1.4s ease-out forwards",
+        "combo-pop": "combo-pop 0.4s cubic-bezier(.34,1.56,.64,1) forwards",
+        "shimmer-gold": "shimmer-gold 4s ease-in-out infinite",
+        "card-flip": "card-flip 0.6s ease-in-out",
+        "field-flash": "field-flash 0.6s ease-out",
+        "bg-drift": "bg-drift 14s ease-in-out infinite",
+        "boss-pulse": "boss-pulse 1.8s ease-in-out infinite",
       },
     },
   },
