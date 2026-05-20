@@ -4062,6 +4062,7 @@ export type Database = {
           stripe_fees_cents: number
         }[]
       }
+      get_team_consultant_ids: { Args: { _leader: string }; Returns: string[] }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -4080,6 +4081,10 @@ export type Database = {
         Returns: undefined
       }
       is_super_admin: { Args: { _user_id: string }; Returns: boolean }
+      is_team_member: {
+        Args: { _leader: string; _member: string }
+        Returns: boolean
+      }
       lint_bot_flow_consistency: {
         Args: { _consultant_id?: string }
         Returns: {
