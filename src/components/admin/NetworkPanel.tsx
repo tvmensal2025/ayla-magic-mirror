@@ -614,6 +614,48 @@ export function NetworkPanel({ consultantId }: NetworkPanelProps) {
     );
   }, [members, search]);
 
+  // Measure intrinsic tree size (independent of zoom) and auto-fit to container width.
+  useLayoutEffect(() => {
+    if (viewMode !== "tree") return;
+    const inner = treeInnerRef.current;
+    const container = treeScrollRef.current;
+    if (!inner || !container) return;
+
+    const measure = () => {
+      // Temporarily neutralize transform to read intrinsic size
+      const prev = inner.style.transform;
+      inner.style.transform = "none";
+      const w = inner.scrollWidth;
+      const h = inner.scrollHeight;
+      inner.style.transform = prev;
+      if (w && h) setContentSize(prev2 => (prev2.w === w && prev2.h === h ? prev2 : { w, h }));
+
+      if (!zoomTouched && w > 0) {
+        const cw = container.clientWidth - 16; // breathing room
+        const fit = Math.max(0.35, Math.min(1, cw / w));
+        setZoom(z => (Math.abs(z - fit) < 0.01 ? z : fit));
+      }
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [tree, viewMode, zoomTouched]);
+
+  // Center horizontally after layout if content overflows
+  useLayoutEffect(() => {
+    if (viewMode !== "tree") return;
+    const container = treeScrollRef.current;
+    if (!container || !contentSize.w) return;
+    if (didInitialCenterRef.current && zoomTouched) return;
+    const scaled = contentSize.w * zoom;
+    if (scaled > container.clientWidth) {
+      container.scrollLeft = (container.scrollWidth - container.clientWidth) / 2;
+    }
+    didInitialCenterRef.current = true;
+  }, [contentSize, zoom, viewMode, zoomTouched]);
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-3">
