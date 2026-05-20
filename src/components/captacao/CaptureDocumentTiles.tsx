@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Camera, Loader2, RefreshCw, FileImage } from "lucide-react";
-import { fireMiniConfetti } from "@/lib/captureGame";
+import { fireRandomCelebration } from "@/lib/captureGame";
 
 type DocKey = "document_front_url" | "document_back_url" | "electricity_bill_photo_url";
 
