@@ -281,7 +281,14 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
     if (search.trim().length < 2) { setHits([]); return; }
     const t = setTimeout(async () => {
       setSearchLoading(true);
-      try { setHits(await searchCities(search)); } catch (e: any) { toast({ title: "Falha na busca", description: e.message, variant: "destructive" }); }
+      try {
+        const r = await searchCities(search);
+        setHits(r.cities);
+        // Token FB inválido: o banner amarelo no topo já avisa — não joga toast vermelho.
+        if (r.needsReconnect) return;
+      } catch (e: any) {
+        toast({ title: "Falha na busca", description: e.message, variant: "destructive" });
+      }
       finally { setSearchLoading(false); }
     }, 350);
     return () => clearTimeout(t);
