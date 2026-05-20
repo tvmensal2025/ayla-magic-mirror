@@ -38,11 +38,13 @@ function isAccessibleUrl(url?: string): boolean {
   return false;
 }
 
-function AudioPlayer({ message, onLoadMedia }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null> }) {
+function AudioPlayer({ message, onLoadMedia, onLoaded }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null>; onLoaded?: (url: string) => void }) {
   const [audioSrc, setAudioSrc] = useState<string | null>(
     isAccessibleUrl(message.mediaUrl) ? message.mediaUrl! : null
   );
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => { if (audioSrc) onLoaded?.(audioSrc); }, [audioSrc]);
 
   const handleLoad = useCallback(async () => {
     if (audioSrc || !onLoadMedia) return;
@@ -84,6 +86,7 @@ function AudioPlayer({ message, onLoadMedia }: { message: ChatMessage; onLoadMed
     </Button>
   );
 }
+
 
 function ImageViewer({ message, onLoadMedia }: { message: ChatMessage; onLoadMedia?: (id: string) => Promise<string | null> }) {
   const [imgSrc, setImgSrc] = useState<string | null>(
