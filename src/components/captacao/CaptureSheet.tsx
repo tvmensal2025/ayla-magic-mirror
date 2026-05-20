@@ -148,11 +148,12 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
   );
 }
 
-/** Reuses CaptureLeadCard but unconstrained width (no aside w-80) */
+/** Embedded ficha (no extra header/footer — Sheet provides them) */
 function FichaWrap({ customerId }: { customerId: string }) {
   return (
-    <div className="h-full w-full overflow-hidden [&_aside]:!w-full [&_aside]:!border-l-0 [&_aside]:!border-0">
-      <CaptureLeadCard customerId={customerId} />
+    <div className="h-full w-full overflow-hidden">
+      <CaptureLeadCard customerId={customerId} embedded />
     </div>
   );
 }
+
