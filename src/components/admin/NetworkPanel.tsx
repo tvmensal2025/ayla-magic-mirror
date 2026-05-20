@@ -522,6 +522,11 @@ export function NetworkPanel({ consultantId }: NetworkPanelProps) {
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"tree" | "table">("tree");
   const [zoom, setZoom] = useState(0.85);
+  const [zoomTouched, setZoomTouched] = useState(false);
+  const [contentSize, setContentSize] = useState({ w: 0, h: 0 });
+  const treeScrollRef = useRef<HTMLDivElement>(null);
+  const treeInnerRef = useRef<HTMLDivElement>(null);
+  const didInitialCenterRef = useRef(false);
   const [selectedMember, setSelectedMember] = useState<NetworkMember | null>(null);
   const { toast } = useToast();
 
