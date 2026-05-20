@@ -85,12 +85,14 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
         rows = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
       }
 
+      let skipped = 0;
       if (step.variant === "B") {
         rows = rows.flatMap((m) => {
           if (String(m.kind).toLowerCase() !== "audio") return [m];
           if (m.transcript && m.transcript.trim()) {
             return [{ ...m, kind: "text", url: "", label: "transcrição do áudio" } as any];
           }
+          skipped += 1;
           return [];
         });
       }
@@ -98,6 +100,7 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
       if (!mounted) return;
       setMedias(rows);
       setRenderedText(txt);
+      setSkippedAudios(skipped);
       setLoading(false);
     })();
     return () => { mounted = false; };
