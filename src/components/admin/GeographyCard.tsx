@@ -1,18 +1,10 @@
 import { MapPin, Building2 } from "lucide-react";
-import { dddToUf } from "@/lib/dddToUf";
+import { ufFromPhone } from "@/lib/dddToUf";
 
 interface Customer {
   address_state?: string | null;
   distribuidora?: string | null;
   phone_whatsapp?: string | null;
-}
-
-function ufFromPhone(phone?: string | null): string | null {
-  if (!phone) return null;
-  const digits = phone.replace(/\D/g, "");
-  // Brazilian phone: 55 + DDD(2) + number — pick DDD
-  const ddd = digits.length >= 12 ? digits.substring(2, 4) : digits.substring(0, 2);
-  return dddToUf(ddd) || null;
 }
 
 function Bar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
