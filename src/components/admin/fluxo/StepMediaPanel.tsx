@@ -275,7 +275,11 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
   }
 
   async function removeMedia(m: Media) {
-    if (!confirm(`Remover "${m.label}"?`)) return;
+    if (variant !== "A") {
+      toast.error("Mídias são compartilhadas entre A/B/C. Remova pela aba A. Na B, áudios já são ignorados automaticamente.");
+      return;
+    }
+    if (!confirm(`Remover "${m.label}"? Isso remove de TODAS as variantes (A, B e C).`)) return;
     const { error } = await supabase.from("ai_media_library").update({ active: false }).eq("id", m.id);
     if (error) {
       toast.error(error.message);
