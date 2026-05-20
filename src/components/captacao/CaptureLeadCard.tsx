@@ -211,20 +211,23 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false }: P
         })}
       </div>
 
-      <div className="p-3 border-t border-border space-y-2">
-        <Button
-          size="lg"
-          className="w-full gap-2 font-bold text-base"
-          disabled={!canSubmit || submitting}
-          onClick={() => void handleSubmit()}
-        >
-          {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trophy className="w-4 h-4" />}
-          CADASTRAR TUDO
-        </Button>
-        <p className="text-[10px] text-center text-muted-foreground">
-          {canSubmit ? "Pronto pra enviar ao portal." : `Faltam ${totalFields - filledCount} ${totalFields - filledCount === 1 ? "dado" : "dados"}.`}
-        </p>
-      </div>
+      {!embedded && (
+        <div className="p-3 border-t border-border space-y-2">
+          <Button
+            size="lg"
+            className="w-full gap-2 font-bold text-base"
+            disabled={!canSubmit || submitting}
+            onClick={() => void handleSubmit()}
+          >
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trophy className="w-4 h-4" />}
+            CADASTRAR TUDO
+          </Button>
+          <p className="text-[10px] text-center text-muted-foreground">
+            {canSubmit ? "Pronto pra enviar ao portal." : `Faltam ${totalFields - filledCount} ${totalFields - filledCount === 1 ? "dado" : "dados"}.`}
+          </p>
+        </div>
+      )}
     </aside>
   );
 }
+
