@@ -206,11 +206,28 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
                 </div>
                 {c.rejection_reason && (() => {
                   const exp = explainRejection(c.rejection_reason);
+                  const isSession = exp?.kind === "session";
                   return (
                     <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs space-y-1.5">
                       <div className="font-bold text-destructive flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" />{exp?.title || "Erro"}</div>
                       <div className="text-muted-foreground">{exp?.suggestion}</div>
-                      {(c.status === "pending_review" || c.status === "paused") && (
+                      {isSession ? (
+                        <Button
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              const res = await startFacebookOAuth("connect");
+                              window.location.href = res.url;
+                            } catch (e: any) {
+                              toast({ title: "Falha ao iniciar reconexão", description: e?.message || "Erro", variant: "destructive" });
+                            }
+                          }}
+                          className="h-7 text-xs gap-1 bg-[#1877F2] hover:bg-[#1877F2]/90 text-white"
+                        >
+                          <Facebook className="w-3 h-3" />
+                          Reconectar Facebook
+                        </Button>
+                      ) : (c.status === "pending_review" || c.status === "paused") && (
                         <Button size="sm" variant="outline" onClick={() => tryReactivate(c)} disabled={reactivating === c.id} className="h-7 text-xs gap-1">
                           {reactivating === c.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                           Tentar reativar
