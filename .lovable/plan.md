@@ -1,51 +1,79 @@
-# Atalhos ⚡ disponíveis para TODOS os clientes
+# Token Facebook inválido não pode quebrar o wizard
 
 ## Diagnóstico
 
-Hoje o `FlowQuickBar` em `MessageComposer` só aparece quando existe `customerId`:
-
-```ts
-// FlowQuickBar.tsx (linha 143)
-if (!consultantId || !customerId) return null;
+Logs de `facebook-search-cities`:
+```
+[fbFetch] code=190 subcode=460 OAuthException
+"Error validating access token: The session has been invalidated…"
 ```
 
-E em `ChatView.tsx` o `customerId` só é preenchido se o telefone do chat já existir na tabela `customers` (linhas 134-147). Resultado: ao trocar para um contato WhatsApp que ainda não foi salvo como cliente, o botão ⚡ desaparece — exatamente o que o usuário relatou.
+O token Meta da consultora foi invalidado (mudança de senha / FB security). O Graph responde 400 em todo `/search`. Hoje:
 
-O backend `manual-step-send` **exige** `customerId` (linha 45), porque precisa gravar conversations, variant A/B/C, etc.
+- `fbFetch` (`_shared/fb-graph.ts:241`) faz `throw new Error(msg)` para 190 — correto, não retenta.
+- No modo **bulk** isso vira `unresolved`, mas a busca **autocomplete** cai no `catch` (`facebook-search-cities/index.ts:117`) e devolve **HTTP 500** com `{ error, cities: [] }`.
+- O front (`CreateCampaignWizard.tsx:284`) recebe 500 → `supabase.functions.invoke` joga erro → toast vermelho **"Falha na busca · Edge Function returned a non-2xx status code"** a cada letra digitada.
+- Idem para qualquer outro passo do wizard que dependa do token (preflight, validate, search) — todos viram 500 e cospem toast.
+
+O banner amarelo "Token expirado ou inválido — reconecte ao Facebook" já está visível no topo; o erro vermelho é redundante e atrapalha.
 
 ## Solução
 
-Deixar o ⚡ sempre visível enquanto houver um chat aberto. Quando o usuário disparar um passo, garantir um cliente — criando automaticamente se ainda não existir.
+Tratar **erro 190 (token inválido) como estado normal de UI**, não como exceção HTTP.
 
-### 1. Auto-criar cliente quando o chat é aberto (ChatView)
+### 1. Helper compartilhado `fbFetch` (`supabase/functions/_shared/fb-graph.ts`)
 
-No `useEffect` que faz lookup do customer (linhas 134-147):
-- Buscar por `phone_whatsapp` **escopado ao `consultant_id`** (multi-tenant correto).
-- Se não encontrar, fazer `insert` mínimo:
-  ```ts
-  { consultant_id, phone_whatsapp: phone, name: chat.pushName || phone,
-    customer_origin: 'whatsapp_lead', conversation_step: 'novo_lead' }
-  ```
-  Pegar o `id` retornado e setar em `customerId`.
-- Aplicar memória [Customer Origin Separation] usando `customer_origin: 'whatsapp_lead'` para não poluir a aba "Clientes iGreen".
+Trocar o `throw new Error(msg)` por um erro tipado quando `e.code === 190` (ou `type === "OAuthException"`):
 
-Assim, qualquer chat aberto passa a ter `customerId` válido e o ⚡ aparece — sem mudar o backend.
+```ts
+class FbAuthError extends Error {
+  readonly code = 190;
+  readonly subcode: number | null;
+  readonly needsReconnect = true;
+  constructor(msg: string, subcode: number | null) { super(msg); this.subcode = subcode; }
+}
+// dentro do !res.ok:
+if (Number(e.code) === 190) throw new FbAuthError(msg, Number(e.error_subcode) || null);
+```
 
-### 2. Guarda contra race (FlowQuickBar)
+Exportar `FbAuthError` para todas as edge functions reaproveitarem.
 
-Manter o gate `if (!consultantId) return null;` mas remover `!customerId`. Enquanto o auto-create está em andamento (≈300 ms), desabilitar o botão com `disabled={!customerId}` no `PopoverTrigger`, mostrando tooltip "Carregando cliente…". Isso evita disparo sem ID.
+### 2. `facebook-search-cities/index.ts`
 
-### 3. Sem mudanças no backend
+**Bulk:**
+- No primeiro `FbAuthError` capturado dentro do loop, **abortar** o restante (já que nenhum outro item vai resolver) e marcar todos como `unresolved: { reason: "needs_reconnect" }`.
+- Devolver **HTTP 200** com `{ cities, unresolved, needs_reconnect: true }`.
 
-`manual-step-send` continua igual. Os hooks de captação (`useCaptureSession`), CRM e a aba "Adicionar Cliente" já funcionam com a row criada.
+**Autocomplete:**
+- Envolver `fbFetch(...)` em try/catch; se `err instanceof FbAuthError`, retornar `200 { cities: [], needs_reconnect: true }`.
+
+Erros não-token continuam 500 (para não esconder bugs reais).
+
+### 3. `src/services/facebookAds.ts`
+
+`searchCities` e `searchCitiesBulk`: ler `data.needs_reconnect`. Quando `true`, **não jogar** — retornar a tupla normal (`[]` ou `{ cities, unresolved }`) e expor a flag:
+
+```ts
+export interface CitySearchResult { cities: CityHit[]; needsReconnect?: boolean }
+```
+
+Mantém retrocompat: callers que não leem a flag simplesmente recebem lista vazia.
+
+### 4. `CreateCampaignWizard.tsx` e `UseTemplateDialog.tsx`
+
+No catch de `searchCities`/`searchCitiesBulk`: **suprimir** o toast "Falha na busca" quando a resposta vier com `needsReconnect`. O banner amarelo do topo já comunica o problema. Para outras falhas, manter o toast.
+
+Opcional: no campo de busca, quando `needsReconnect`, mostrar inline um `"Reconecte o Facebook para buscar cidades"` em vez de loading vazio.
 
 ## Arquivos a editar
 
-- `src/components/whatsapp/ChatView.tsx` — auto-create de customer no lookup (linhas 134-147), com filtro por `consultant_id`.
-- `src/components/whatsapp/FlowQuickBar.tsx` — trocar `if (!consultantId || !customerId) return null;` por `if (!consultantId) return null;` e desabilitar o trigger enquanto `!customerId`.
+- `supabase/functions/_shared/fb-graph.ts` — adicionar classe `FbAuthError` e usar dentro do `fbFetch`.
+- `supabase/functions/facebook-search-cities/index.ts` — short-circuit bulk + autocomplete 200 quando token inválido.
+- `src/services/facebookAds.ts` — propagar `needs_reconnect` sem throw.
+- `src/components/admin/ads/CreateCampaignWizard.tsx` — suprimir toast em caso de `needsReconnect`.
+- `src/components/admin/ads/UseTemplateDialog.tsx` — idem.
 
 ## Fora do escopo
 
-- Mudar regra de origem dos leads (continua entrando como `whatsapp_lead`).
-- Mexer em `manual-step-send` ou no fluxo automático do bot.
-- Renomear/mover o botão ⚡.
+- Implementar reconexão automática do token (já existe a UI manual).
+- Refatorar todas as outras edges Facebook agora. Esta mudança no `fbFetch` é compatível: qualquer outra função que use `fbFetch` continua jogando erro como antes, só que agora identificável via `instanceof FbAuthError` quando quisermos aplicar o mesmo padrão.

@@ -217,6 +217,21 @@ export async function getOrCreateWallet(consultantId: string): Promise<{
 // Ref: https://developers.facebook.com/docs/marketing-api/error-reference
 const TRANSIENT_FB_CODES = new Set([1, 2, 4, 17, 32, 341, 613]);
 
+// Erro tipado quando o token Facebook está inválido/expirado (code 190).
+// Ele NÃO é transitório — não adianta retry — e a UI deve mostrar
+// banner de reconexão em vez de toast vermelho.
+export class FbAuthError extends Error {
+  readonly isFbAuthError = true;
+  readonly code = 190;
+  readonly subcode: number | null;
+  readonly needsReconnect = true;
+  constructor(message: string, subcode: number | null) {
+    super(message);
+    this.name = "FbAuthError";
+    this.subcode = subcode;
+  }
+}
+
 // Faz fetch com retry exponencial + tratamento de transientes Meta.
 export async function fbFetch(path: string, init?: RequestInit, retries = 4): Promise<any> {
   const url = path.startsWith("http") ? path : `${FB_GRAPH}${path.startsWith("/") ? path : "/" + path}`;
@@ -236,14 +251,20 @@ export async function fbFetch(path: string, init?: RequestInit, retries = 4): Pr
         ].filter(Boolean);
         const msg = parts.length ? parts.join(" | ") : `HTTP ${res.status}`;
         try { console.error("[fbFetch]", url.split("?")[0], JSON.stringify(e)); } catch (_) {}
+        // Token inválido/expirado — não retentar e expor erro tipado
+        if (Number(e.code) === 190) {
+          throw new FbAuthError(msg, Number(e.error_subcode) || null);
+        }
         const isTransient = res.status >= 500 || res.status === 429 || TRANSIENT_FB_CODES.has(Number(e.code));
-        // Token inválido/expirado (190) ou permissão (200/10/294) — não adianta retry
+        // Permissão (200/10/294) — não adianta retry
         if (!isTransient) throw new Error(msg);
         lastErr = new Error(msg);
       } else {
         return json;
       }
     } catch (e) {
+      // Token inválido escapa imediatamente do loop de retry
+      if (e instanceof FbAuthError) throw e;
       lastErr = e;
       // Erros de rede também são transientes
     }
