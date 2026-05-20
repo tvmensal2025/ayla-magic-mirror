@@ -1,153 +1,88 @@
-# Plano — Modo Captação em formato Game (v2)
 
-Hoje a tela é "uma ficha com confete". O usuário sente que está preenchendo formulário, não jogando. Vamos transformar em um mini-game de captura, mantendo o ambiente profissional (sem virar fliperama).
+# Auditoria Pré-Publicação — iGreen Cloud
 
-## Princípios
-
-- Game **acompanha** a ação, não atrapalha (animações 200–400ms, som curtos opt-in).
-- Cada microação dá feedback **imediato + visível + recompensador**.
-- Progressão clara: XP → Nível → Missão → Vitória.
-- Nada bloqueia o consultor. Tudo é decorativo sobre o fluxo real.
+Levantamento do estado real do projeto hoje, com foco em "está 100% pra liberar para consultores?". Separei em **Bloqueadores**, **Riscos médios**, **Acertos confirmados** e **Plano de hardening** (executável em outro passo, com sua aprovação).
 
 ---
 
-## 1. Sistema de XP, Nível e Combo (novo `useCaptureGameState`)
+## 1. Bloqueadores (resolver ANTES de publicar)
 
-Hook central que escuta `filledCount`, `sentSteps`, tempo entre ações:
+### 1.1 Linter Supabase: 63 issues, 1 ERROR
+- **ERROR — Security Definer View**: existe view com `SECURITY DEFINER` exposta na API. Em produção isso permite que qualquer logado bypasse RLS.
+- **WARN — RLS Policy Always True (3x)**: 3 políticas com `USING (true)` em UPDATE/DELETE/INSERT. Tabelas precisam ser revisadas — risco de escalonamento entre consultores (multi-tenant!).
+- **WARN — Public Bucket Allows Listing (5x)**: 5 buckets públicos com SELECT amplo em `storage.objects`. Permite listar arquivos de outros consultores (contas de energia, documentos!). **Crítico para LGPD.**
+- **WARN — SECURITY DEFINER Function executável por anon/authenticated**: funções privilegiadas chamáveis sem auth ou por qualquer logado.
+- **INFO — RLS Enabled No Policy**: tabela com RLS mas sem política = ninguém lê, mas indica tabela "morta" ou config esquecida.
 
-- **XP por campo:** +10 (normal), +25 (campo via OCR/IA aceita), +50 (documento), bônus +20 se preencheu em <30s desde último.
-- **Combo:** contador "x2 / x3 / x4" se duas capturas acontecerem em <20s. Reseta após 30s parado. Multiplica XP.
-- **Nível do lead:** 5 níveis (Bronze → Prata → Ouro → Platina → ⚡Pronto) ligados a `filledCount/totalFields`. Cada nível troca cor da barra e dispara animação maior.
-- **Persistência:** apenas o `total_xp_today` vai pra `capture_scoreboard` (nova coluna). Combo/nível são UI local.
+### 1.2 Senha vazada (Leaked Password Protection)
+- Desabilitado no Auth. Para um produto multi-tenant com consultores, ligar é 1 clique e protege contra reuso de senha comprometida.
 
-## 2. HUD de jogo no topo do painel direito (substitui ficha estática)
-
-Substituir o header atual do `CaptureLeadCard` por um HUD compacto:
-
-- Avatar circular do lead + nome + telefone.
-- Barra XP com brilho que "enche líquido" (gradient animado, shimmer).
-- Badge de Nível atual com pulse ao subir.
-- Indicador de Combo grande (x2/x3) que aparece e some.
-- Mini "missão atual": "Capture nome do titular" (sugere próximo campo vazio prioritário).
-
-Componentes novos:
-
-- `src/components/captacao/CaptureHud.tsx`
-- `src/components/captacao/CaptureLevelBadge.tsx`
-- `src/components/captacao/CaptureComboIndicator.tsx`
-- `src/components/captacao/CaptureMissionHint.tsx`
-
-## 3. Feedback por campo (linha viva)
-
-No `CaptureLeadCard`, quando um campo é preenchido:
-
-- A linha faz **flash verde** + **scale 1→1.05→1** + **check icon "draw"** (300ms).
-- Mostra um **+XP** flutuando subindo e sumindo (texto pequeno animado).
-- Som curto opt-in (toggle 🔊 no header; default off para não incomodar).
-- Se veio da IA: usa cor âmbar + texto "🤖 +25 XP IA".
-
-Componente: `src/components/captacao/XpFloater.tsx` (portal absoluto).
-
-## 4. Steps Grid mais atrativos
-
-No `CaptureStepsGrid`:
-
-- Numerar como cartas (#1..#10) com **hover lift + glow** suave.
-- Quando enviado, vira **carta "virada"** (efeito flip 3D) com check brilhante.
-- Adicionar barra fininha de progresso "passos enviados X/10" acima do grid.
-- Conquistas visuais quando todos os 10 forem enviados → toast especial + confete.
-
-## 5. Sistema de Conquistas / Missões diárias
-
-Painel pequeno no header (substituir/complementar o `CaptureScoreboard`):
-
-- "Missões de hoje" com 3 metas:
-  - 🥉 Capturar 3 leads completos
-  - 🥈 Streak de 5 dias
-  - 🥇 Aceitar 5 sugestões da IA
-- Cada uma com barra de progresso. Ao completar: explosão de XP, badge desbloqueada (persiste em `capture_achievements` nova tabela ou só localStorage por consultor).
-
-Por simplicidade na 1ª versão: **localStorage** com sync diário ao scoreboard.
-
-## 6. Sons opcionais (Web Audio simples)
-
-`src/lib/captureSfx.ts`:
-
-- `pop()` ao preencher campo (sininho curto 80ms)
-- `levelUp()` ao trocar de nível
-- `combo()` ao engatar combo
-- `victory()` no cadastro completo
-- Toggle global salvo em localStorage `capture-sfx-enabled`.
-
-Sons gerados via WebAudio (oscilador) — sem arquivo externo, zero peso.
-
-## 7. Animações ambiente sutis
-
-- Background do painel central com **gradiente animado** muito sutil (4–8s loop) — verde-esmeralda passando devagar.
-- Quando combo ativo, borda do painel ganha **glow pulsante verde**.
-- Quando lead chega a 100%, painel inteiro recebe **shimmer dourado** + CTA "CADASTRAR" passa a **vibrar suavemente** chamando atenção.
-
-## 8. Botão "CADASTRAR TUDO" como boss-fight
-
-Quando `canSubmit`:
-
-- Botão grande, gradient verde→dourado animado, ícone troféu girando lento.
-- Texto: "⚡ FINALIZAR CAPTURA — +100 XP"
-- Ao clicar: animação de "loading épico" (barra preenchendo com partículas) por 1.5s antes do toast de sucesso → confete grande + som de vitória + soma no scoreboard.
-
-## 9. Lista de leads (esquerda) com ranking visual
-
-No `CaptureLeadList`:
-
-- Cada lead mostra **medalha de nível** ao lado do nome (bronze/prata/ouro conforme % preenchido).
-- Lead 100% pronto aparece com **borda dourada pulsante**.
-- No topo, mini-leaderboard "Hoje: X cadastros" já existe — adicionar **mini sparkline** dos últimos 7 dias para sensação de progresso.
-
-## 10. Não tornar chato — guardas
-
-- Toasts limitados: máx 1 a cada 3s (debounce); frases motivacionais só em milestones (3, 5, 7, 10), não em todo campo.
-- Confete grande só em: subir de nível, completar lead, completar missão diária. Microconfete em campos.
-- Sons **off por padrão**.
-- Animações respeitam `prefers-reduced-motion`: cai para fade simples.
+### 1.3 Validação manual recomendada
+- Confirmar que `customers`, `messages`, `bot_flows`, `templates`, `consultants`, `whatsapp_instances` têm RLS escopada por `consultant_id` (já corrigimos em várias sessões, mas precisa um sweep final).
+- Confirmar que os 5 buckets públicos são realmente públicos por design (igreen-public assets/vídeos) e que NÃO incluem `documents`, `contas`, `bills` (PII de cliente).
 
 ---
 
-## Arquivos a criar
+## 2. Riscos Médios (não bloqueia, mas vai dar trabalho depois)
 
-- `src/hooks/useCaptureGameState.ts`
-- `src/lib/captureSfx.ts`
-- `src/components/captacao/CaptureHud.tsx`
-- `src/components/captacao/CaptureLevelBadge.tsx`
-- `src/components/captacao/CaptureComboIndicator.tsx`
-- `src/components/captacao/CaptureMissionHint.tsx`
-- `src/components/captacao/CaptureMissionsPanel.tsx`
-- `src/components/captacao/XpFloater.tsx`
+### 2.1 Limpeza de repo
+- 70+ arquivos `.md` de status/sessão/troubleshooting na raiz (`RESUMO_*`, `ANALISE_*`, `DEPLOY_*`, `STATUS_*`). Polui o repo e confunde leitura. Mover para `/docs/_arquivo/`.
+- Pasta `screenshots/simulacao/` versionada com HTMLs — pode sair do git.
 
-## Arquivos a editar
+### 2.2 Edge functions (80 deployadas)
+- Várias parecem deprecadas (paralelo whapi↔evolution, ad-creative-*, facebook-* experimentais). Confirmar quais o consultor realmente usa hoje e desabilitar/marcar as outras. Cada função ativa = superfície de ataque + custo.
+- `whapi-webhook` confirmado ativo. `evolution-webhook` é "espelho futuro" (memory). OK.
+- Crons rodando (`bot-stuck-recovery`, `send-scheduled-messages`, `migrate-supabase-to-minio`) — logs limpos no último ciclo. ✅
 
-- `src/components/captacao/CaptacaoPanel.tsx` — montar HUD + missões + ambient bg.
-- `src/components/captacao/CaptureLeadCard.tsx` — integrar XP por campo, floater, flash.
-- `src/components/captacao/CaptureStepsGrid.tsx` — cards estilo "carta" + flip.
-- `src/components/captacao/CaptureLeadList.tsx` — medalhas + sparkline + borda pronta.
-- `src/components/captacao/CaptureProgressBar.tsx` — shimmer e troca de cor por nível.
-- `src/lib/captureGame.ts` — adicionar tier system, helpers de nível, mais frases curtas.
-- `src/hooks/useCaptureScoreboard.ts` — adicionar `xpToday` e arrays de 7 dias para sparkline.
+### 2.3 Modo Captação (gamificação que acabamos de entregar)
+- HUD, XP, combo, level-up, boss-fight: implementado.
+- Falta validar visualmente no preview real (não há QA visual ainda do bloco completo). Quero rodar um teste rápido com você antes de liberar.
 
-## Migração de banco (opcional, pode ficar p/ v2)
+### 2.4 Observabilidade
+- Não vi alerta automático para: bot caído >5min, fila WhatsApp travada, OCR/IA falhando em sequência. Hoje só descobrimos quando consultor reclama. Recomendo painel "Saúde" agregando os crons + last_heartbeat.
 
-- `capture_scoreboard.xp_today integer default 0` — para persistir XP agregado.
-- Sem novas tabelas nesta entrega; conquistas em localStorage.
+---
 
-## Detalhes técnicos
+## 3. O que JÁ está bom (confirmado nesta sessão)
 
-- Animações com Tailwind keyframes já existentes + 3 novas: `xp-rise`, `card-flip`, `shimmer-gold`.
-- Tokens semânticos (HSL) — adicionar `--gold` e `--combo-glow` ao `index.css`.
-- `prefers-reduced-motion` via `@media` desabilita keyframes pesadas.
+- ✅ Pausa do bot respeitada por crons + helper `_shared/bot/paused.ts` + envio manual ignora pausa (corrigido nas últimas mensagens).
+- ✅ Multi-variante A/B/C resolvendo `bot_flows` por variant (sem `.maybeSingle()` quebrando).
+- ✅ Notificações de novo lead + handoff (`consultants.notification_phone`).
+- ✅ Separação `customer_origin` (lead WA vs cliente iGreen).
+- ✅ Captação Intel e Bot Health Intel (Gemini) rodando.
+- ✅ Compressão de vídeo no `/admin/fluxos` via worker.
+- ✅ Storage strategy clara (MinIO estático / Supabase dinâmico).
+- ✅ Crons recentes sem erro nos logs.
 
-## Fora de escopo
+---
 
-- Reorganização do fluxo de captura ou regras de IA/OCR.
-- Mudanças no `manual-step-send`, scoreboard backend, ou bot.
-- Multiplayer/ranking entre consultores (fica para depois).
+## 4. Plano de hardening proposto (após sua aprovação)
 
-siga completa com o plano
+Em ordem de prioridade, cada item é uma migration/PR isolado:
+
+1. **Revisar e corrigir as 3 políticas `USING (true)`** — bloqueador LGPD.
+2. **Auditar os 5 buckets públicos** — manter público só os de marketing; mover documentos/contas para bucket privado com signed URLs.
+3. **Corrigir Security Definer View** — trocar para `security_invoker=on` ou recriar como função com `SECURITY INVOKER`.
+4. **Revogar EXECUTE público em funções `SECURITY DEFINER`** que não devem ser chamáveis por anon/authenticated.
+5. **Ligar Leaked Password Protection** no Supabase Auth (1 toggle).
+6. **Limpar repo**: mover `.md`s de sessão para `/docs/_arquivo/`, remover `screenshots/simulacao/` do versionamento.
+7. **Mapear e desativar edge functions não usadas** (lista a confirmar com você).
+8. **QA visual do Modo Captação** no preview (você navegando + eu validando).
+9. **Painel Saúde Geral** (opcional v2): semáforo dos 6 crons + última atividade do bot por consultor.
+
+---
+
+## 5. Veredito Go/No-Go
+
+🔴 **Hoje: NÃO-GO para publicar em massa.**
+Os itens 1.1 (buckets listáveis + políticas `true`) são incompatíveis com multi-tenant exposto a vários consultores manipulando dados de clientes finais (CPF, conta de energia).
+
+🟢 **Resolvendo 1–5 do plano acima (estimativa: 1 ciclo de migrations + 2h de revisão): GO.**
+
+---
+
+## Quer que eu siga?
+
+Posso começar pelos itens 1 a 5 (os bloqueadores de segurança) em uma única migration com tudo isolado, e logo depois fazer a limpeza do repo. Os itens 6–9 entram numa segunda rodada.
+
+Se quiser, ao invés do plano completo, eu posso só **listar exatamente quais tabelas/buckets/funções estão com problema** primeiro (read-only), pra você decidir o que de fato fica público vs privado antes de eu mexer.
