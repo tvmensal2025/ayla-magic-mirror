@@ -321,7 +321,8 @@ export function useAnalytics(
         events.filter((e) => e.event_type === "click" && e.event_target).map((e) => e.event_target as string)
       ));
       const clicksByTargetDetailed: Record<string, { total: number; spark: number[]; current: number; previous: number; change: number; }> = {};
-      for (const t of allTargets) {
+      for (const tRaw of allTargets) {
+        const t = tRaw as string;
         const targetEvents = events.filter((e) => e.event_type === "click" && e.event_target === t);
         const spark: number[] = [];
         for (let i = 6; i >= 0; i--) {
