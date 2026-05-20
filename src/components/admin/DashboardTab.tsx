@@ -252,14 +252,32 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
         </div>
       </div>
 
-      {/* CLIENTES iGREEN */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+      {/* Toggle Líder */}
+      {isLeader && (
+        <div className="flex items-center gap-2">
+          <Crown className="w-4 h-4 text-primary" />
+          <ToggleGroup type="single" value={scope} onValueChange={(v) => v && setScope(v as "me" | "team")} className="bg-card/40 border border-border/40 rounded-lg p-1">
+            <ToggleGroupItem value="me" className="h-7 px-3 text-xs">Meus clientes</ToggleGroupItem>
+            <ToggleGroupItem value="team" className="h-7 px-3 text-xs">Minha equipe ({teamIds.length})</ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+      )}
+
+      {/* CLIENTES iGREEN — 5 cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
         <StatCard icon={<Users className="w-5 h-5" />} label="Total de Clientes" value={filteredMetrics?.totalCustomers ?? 0} color="primary" />
-        <StatCard icon={<Zap className="w-5 h-5" />} label="Total kW (Consumo)" value={`${(filteredMetrics?.totalKw ?? 0).toLocaleString("pt-BR")} kW`} color="accent" subtitle={`Média: ${(filteredMetrics?.avgKw ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} kW`} />
+        <StatCard icon={<Zap className="w-5 h-5" />} label="Média kWh/cliente" value={`${(filteredMetrics?.avgKw ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 0 })} kW`} color="accent" subtitle={`Total: ${(filteredMetrics?.totalKw ?? 0).toLocaleString("pt-BR")} kW`} />
+        <StatCard icon={<DollarSign className="w-5 h-5" />} label="Ticket médio (conta)" value={(filteredMetrics?.avgBill ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })} color="primary" />
+        <StatCard icon={<PiggyBank className="w-5 h-5" />} label="Economia gerada" value={(filteredMetrics?.economiaGerada ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })} color="accent" subtitle="20% da soma das contas" />
         <StatCard icon={<TrendingUp className="w-5 h-5" />} label="Taxa de Conversão" value={`${(analytics?.conversionRate ?? 0).toFixed(1)}%`} color="primary" subtitle="Cliques / Visualizações" />
       </div>
 
       <CustomerCharts filteredMetrics={filteredMetrics} topLicenciados={analytics?.topLicenciados} />
+
+      <TopConsumersCard customers={filteredMetrics?.filteredCustomers} />
+      <GeographyCard customers={filteredMetrics?.filteredCustomers} />
+      <RetentionCard customers={filteredMetrics?.filteredCustomers} />
+
 
       {/* Credentials Dialog */}
       <Dialog open={showCredentialsDialog} onOpenChange={setShowCredentialsDialog}>
