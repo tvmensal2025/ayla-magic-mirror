@@ -228,23 +228,23 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
       )}
 
       {/* TOOLBAR */}
-      <div className="flex items-center justify-between gap-2 flex-wrap p-2 rounded-xl bg-card/40 border border-border/40 backdrop-blur">
-        <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center justify-between gap-1.5 flex-wrap p-1.5 rounded-xl bg-card/40 border border-border/40 backdrop-blur">
+        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
           <Select value={selectedLicenciado} onValueChange={setSelectedLicenciado}>
-            <SelectTrigger className="h-8 w-[200px] text-xs"><Filter className="w-3.5 h-3.5 mr-1.5" /><SelectValue placeholder="Filtrar licenciado" /></SelectTrigger>
+            <SelectTrigger className="h-7 w-[150px] sm:w-[180px] text-[11px] px-2"><Filter className="w-3 h-3 mr-1 shrink-0" /><SelectValue placeholder="Licenciado" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos os Licenciados</SelectItem>
               {licenciadoOptions.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={handleDashboardSync} disabled={syncingDashboard || syncCooldown > 0} className="h-8 text-xs gap-1.5">
-            {syncingDashboard ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            {syncingDashboard ? "Sincronizando..." : syncCooldown > 0 ? `Aguarde ${syncCooldown}s` : "Sincronizar iGreen"}
+          <Button variant="outline" size="sm" onClick={handleDashboardSync} disabled={syncingDashboard || syncCooldown > 0} className="h-7 text-[11px] px-2 gap-1" title="Sincronizar iGreen">
+            {syncingDashboard ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            <span className="hidden sm:inline">{syncingDashboard ? "Sincronizando..." : syncCooldown > 0 ? `${syncCooldown}s` : "Sincronizar"}</span>
           </Button>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <Select value={String(periodDays)} onValueChange={(v) => onPeriodChange(Number(v))}>
-            <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-7 w-[110px] text-[11px] px-2"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="7">Últimos 7 dias</SelectItem>
               <SelectItem value="15">Últimos 15 dias</SelectItem>
@@ -252,19 +252,9 @@ export function DashboardTab({ userId, form, onFormUpdate, periodDays, onPeriodC
               <SelectItem value="90">Últimos 90 dias</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exporting} className="h-8 text-xs gap-1.5">
-            {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
-            {exporting ? "Gerando..." : "PDF"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleResetPerformance}
-            disabled={resettingPerf}
-            className="h-8 text-xs gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-          >
-            {resettingPerf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-            {resettingPerf ? "Resetando..." : "Resetar"}
+          <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exporting} className="h-7 text-[11px] px-2 gap-1" title="Exportar PDF">
+            {exporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileDown className="w-3 h-3" />}
+            <span className="hidden sm:inline">{exporting ? "Gerando..." : "PDF"}</span>
           </Button>
         </div>
       </div>
