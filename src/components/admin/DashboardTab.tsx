@@ -1,16 +1,21 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { Eye as EyeIcon, EyeOff, Users, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Trash2 } from "lucide-react";
+import { Eye as EyeIcon, EyeOff, Users, Zap, TrendingUp, RefreshCw, Loader2, Filter, KeyRound, FileDown, AlertTriangle, Trash2, DollarSign, PiggyBank, Crown } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAnalytics } from "@/hooks/useAnalytics";
+import { useTeamConsultantIds } from "@/hooks/useTeamConsultantIds";
 import { StatCard } from "./StatCard";
 import { CustomerCharts } from "./CustomerCharts";
+import { TopConsumersCard } from "./TopConsumersCard";
+import { GeographyCard } from "./GeographyCard";
+import { RetentionCard } from "./RetentionCard";
 
 interface DashboardTabProps {
   userId: string;
