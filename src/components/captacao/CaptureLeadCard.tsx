@@ -17,11 +17,30 @@ interface Props {
 
 export function CaptureLeadCard({ customerId, onSubmitted }: Props) {
   const { customer, loading, filledCount, totalFields, progress, updateField } = useCaptureSession(customerId);
+  const { suggestions, resolve } = useCaptureSuggestions(customerId);
   const { toast } = useToast();
   const lastCountRef = useRef<number>(0);
   const [editing, setEditing] = useState<CaptureFieldKey | null>(null);
   const [editValue, setEditValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const suggestionByField = new Map(suggestions.map((s) => [s.field_name, s]));
+
+  const acceptSuggestion = async (key: CaptureFieldKey) => {
+    const s = suggestionByField.get(key);
+    if (!s) return;
+    try {
+      let value: any = s.suggested_value;
+      if (key === "electricity_bill_value") value = Number(String(value).replace(",", ".")) || null;
+      await updateField(key, value);
+      await resolve(s.id, "accepted");
+      fireMiniConfetti();
+      toast({ title: `🤖 IA capturou ${key}!`, duration: 1800 });
+    } catch (e: any) {
+      toast({ title: "Erro", description: e?.message || String(e), variant: "destructive" });
+    }
+  };
+
 
   useEffect(() => {
     if (loading || !customer) { lastCountRef.current = filledCount; return; }
