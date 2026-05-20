@@ -108,6 +108,14 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
           </div>
           <CaptureProgressBar progress={progress} filled={filledCount} total={totalFields} />
           <p className="text-[11px] text-center mt-1.5 font-semibold text-primary/90">{phrase}</p>
+          {nextMissing && !canSubmit && (
+            <p className="text-[11px] text-center mt-0.5 text-muted-foreground">
+              🎯 Próximo: <span className="font-bold text-foreground">{nextMissing.label}</span>
+            </p>
+          )}
+          <p className="text-[10px] text-center mt-0.5 text-muted-foreground">
+            Passo {sentSteps.size} de 10 enviado
+          </p>
         </header>
 
         {/* Tabs */}
