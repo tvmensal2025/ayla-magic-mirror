@@ -1,37 +1,65 @@
-## Problema
-No celular (≤390px) o /admin está apertado: o topo (logo + ícones + abas) corta "Central de Anúncios", e os cards do dashboard ficam ou estreitos demais ou com valores cortados ("R$ 50.4...").
+## Diagnóstico (do que vi no print + estrutura do projeto)
 
-## O que vou ajustar (apenas mobile — desktop fica igual)
+A tela da aba **Clientes** está apertada no celular/tablet pequeno:
+- 3 botões coloridos no topo (filtros rápidos por status) viram **quadrados sem rótulo** — parece bug, não funcionalidade.
+- "Importar Excel" + "Novo" ficaram empilhados de forma desbalanceada.
+- Os 3 selects de filtro (Licenciado / Distribuidora / Cidade) ocupam 2+1 linha — quebra ruim.
+- Cards de cliente: nome cortado ("Antonio..."), telefone "+55 (11) 9 5198-7403" quebra em **5 linhas verticais**, distribuidora também empilhada.
+- Paginação no rodapé respira pouco.
 
-### 1. Topo do /admin
-- **Logo iGreen**: reduzir altura no mobile (de ~h-8 para h-6) pra dar respiro.
-- **Ícones da direita** (preview / monitor / sparkles / sino / engrenagem / logout): no mobile passam a ter `gap-1`, `size-8` e ícone `w-4 h-4`. Esconder os menos críticos (`monitor`, `sparkles`) abaixo de `sm:` — já existem em outros menus.
-- **Tabs (Dashboard, CRM, Clientes, Rede, WhatsApp, Central de Anúncios)**:
-  - Wrapper recebe `overflow-x-auto scrollbar-thin` com `snap-x`.
-  - Cada item: `shrink-0`, `px-2.5`, label `text-[11px]`, ícone `w-4 h-4`.
-  - Adicionar fade nas bordas (gradient mask) pra deixar claro que rola lateralmente.
+E pelo inventário do projeto, outras telas usam padrões parecidos que precisam do mesmo tratamento:
+**CRM / Kanban**, **WhatsApp** (chat sidebar + conversa), **Rede** (NetworkPanel), **Central de Anúncios** (HeroKpis, AdMetricsCards, MainChart).
 
-### 2. Toolbar (Filtrar licenciado / Sincronizar / Período / PDF / Resetar)
-- No mobile vira **2 linhas balanceadas**: linha 1 = filtros (select + sincronizar), linha 2 = ações (período + PDF + resetar).
-- Selects ganham `w-full` no mobile com `max-w-[180px]`, botões `flex-1` pra preencher a linha sem quebrar feio.
+## Plano em 3 ondas (executo todas nesta etapa)
 
-### 3. Cards de estatística (os 5 do topo)
-- Trocar grid pra `grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5` **OU** manter 2 colunas mas:
-  - Reduzir padding do `StatCard` no mobile (`p-3` em vez de `p-4`).
-  - Valor `text-xl sm:text-2xl` com `truncate` + `title={fullValue}` pra mostrar tooltip se cortar.
-  - Para valores monetários grandes, formatar com **abreviação** (`R$ 50,4 mil` em vez de `R$ 50.400`) quando ≥ 10.000, usando `Intl.NumberFormat("pt-BR", { notation: "compact" })`.
-  - Ícone menor no mobile (`w-4 h-4` em vez de `w-5 h-5`).
-- Vou recomendar **1 coluna no celular** (cards largos ficam mais legíveis e ninguém precisa apertar olho), 2 no `sm`, 3 no `md`, 5 no `lg`. É o padrão de dashboards mobile-first.
+### Onda 1 — Aba **Clientes** (CustomerManager + CustomerListItem)
+1. **Top action row**: "Importar Excel" e "Novo" viram `flex-1` no mobile, com `text-xs h-9` e ícone só. Já desktop volta ao tamanho normal.
+2. **Quick filters de status** (os 3 quadrados): adicionar rótulo curto ao lado do ícone no mobile (`Aprovados`, `Pendentes`, `Devolutiva`) ou virar uma única `Select` no mobile (vou pelo Select — mais limpo).
+3. **3 selects de filtro**: grid 1 coluna no mobile, `sm:grid-cols-2`, `md:grid-cols-3`. Cada um `w-full`.
+4. **Status pills** (927 Todos / 58 Aprovados / 54 Falta Assinatura...): manter scroll horizontal mas adicionar máscara de fade nas laterais + `snap-x`.
+5. **Card de cliente** (CustomerListItem): no mobile reorganizar em 2 linhas — linha 1: avatar + nome (truncate) + status badge; linha 2: telefone formatado em 1 linha + distribuidora curta + cidade. Esconder badges duplicados ("Devolutiva" aparece 2x).
 
-## Arquivos a editar
+### Onda 2 — **CRM / Kanban** (KanbanBoard, KanbanColumn, KanbanDealCard, SalesFunnelBoard)
+1. Colunas Kanban no mobile: `min-w-[280px]` com scroll horizontal smooth + indicador "deslize para ver mais".
+2. Cards do deal: padding reduzido (`p-3`), avatar menor (`w-8`), nome `truncate`, badges em linha única com `flex-wrap` controlado.
+3. Header do Kanban (filtros + stage selector): vira `Sheet` (gaveta) no mobile com um botão "Filtros".
+
+### Onda 3 — **WhatsApp**, **Rede**, **Anúncios**
+1. **WhatsAppTab/ChatSidebar/ChatView**: já é responsivo mas o header do chat (nome + telefone + ações) está apertado — reduzir ícones (`size-8`), esconder texto secundário no mobile, `Sheet` para painel lateral de cliente.
+2. **NetworkPanel** (Rede): cards de equipe em `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` com avatares menores.
+3. **AdsCentralTab** (HeroKpis, AdMetricsCards, MainChart): mesma tratativa do dashboard — `StatCard` compacto + chart com altura responsiva (`h-[220px] sm:h-[300px]`).
+
+### Padrões aplicados em todas
+- **Spacing**: trocar `gap-4`/`p-4` por `gap-2.5 sm:gap-4` e `p-3 sm:p-5`.
+- **Fontes**: títulos `text-base sm:text-2xl`, labels `text-[10px] sm:text-xs`.
+- **Botões**: ações primárias `h-9 sm:h-10`, ícones `w-4 h-4` no mobile.
+- **Linhas de filtro**: sempre `grid` (não `flex-wrap`) no mobile pra evitar "órfão" de 1 select sozinho na 2ª linha.
+- **Tabelas → cards**: nada de tabela rolável no mobile; vira lista vertical de cards.
+- **Scroll horizontal intencional**: sempre com fade-mask + `snap-x`.
+
+## Arquivos que vou tocar (estimado)
 ```text
-src/components/admin/AdminHeader.tsx        (logo + ícones + tabs responsivo)
-src/components/admin/DashboardTab.tsx       (toolbar 2-linhas mobile + grid 1→2→3→5)
-src/components/admin/StatCard.tsx           (padding, font, truncate, compact format)
+src/components/whatsapp/CustomerManager.tsx       (toolbar + filtros + status pills)
+src/components/whatsapp/CustomerListItem.tsx      (card mobile)
+src/components/whatsapp/KanbanBoard.tsx           (scroll + indicador)
+src/components/whatsapp/KanbanColumn.tsx          (largura mínima)
+src/components/whatsapp/KanbanDealCard.tsx        (densidade)
+src/components/whatsapp/WhatsAppTab.tsx           (chat header)
+src/components/whatsapp/ChatSidebar.tsx           (lista de conversas mobile)
+src/components/whatsapp/ChatView.tsx              (header conversa)
+src/components/admin/NetworkPanel.tsx             (grid equipe)
+src/components/admin/ads/AdsCentralTab.tsx        (toolbar)
+src/components/admin/dashboard/HeroKpis.tsx       (cards)
+src/components/admin/dashboard/AdMetricsCards.tsx (cards)
+src/components/admin/dashboard/MainChart.tsx      (altura)
+src/index.css                                     (utility para fade-mask)
 ```
-(Vou abrir os 2 primeiros pra confirmar os class names exatos antes de editar.)
 
 ## Fora de escopo
-- Mudar paleta, ícones ou copy.
-- Reordenar abas ou esconder funcionalidade — só layout responsivo.
-- Mexer em `CustomerCharts`, `TopConsumersCard`, `GeographyCard`, `RetentionCard` (a queixa foi "cards e topo"; se quiser depois eu ajusto esses também).
+- Mudar paleta, fontes, copy ou estrutura de dados.
+- Esconder funcionalidade — só reorganizar visualmente.
+- LP pública (`/ayla-viana` etc.) — só painel `/admin`.
+- Refatorar lógica de filtros ou queries.
+
+## Verificação
+Vou conferir o resultado em 3 viewports: **390x844** (iPhone), **768x1024** (tablet) e **1280x720** (desktop) via screenshot do preview pra garantir que nada quebrou no caminho.
