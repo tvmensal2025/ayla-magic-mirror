@@ -672,13 +672,13 @@ export function NetworkPanel({ consultantId }: NetworkPanelProps) {
 
             {viewMode === "tree" && (
               <div className="flex items-center rounded-xl bg-white/[0.04] border border-white/[0.08] p-0.5">
-                <button onClick={() => setZoom(z => Math.max(z - 0.15, 0.3))} className="px-2 py-1.5 text-muted-foreground hover:text-foreground rounded-lg transition-colors">
+                <button onClick={() => { setZoomTouched(true); setZoom(z => Math.max(z - 0.15, 0.3)); }} className="px-2 py-1.5 text-muted-foreground hover:text-foreground rounded-lg transition-colors">
                   <ZoomOut className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => setZoom(0.85)} className="px-2 py-1.5 text-[10px] text-muted-foreground hover:text-foreground font-mono rounded-lg transition-colors">
+                <button onClick={() => { setZoomTouched(false); didInitialCenterRef.current = false; }} className="px-2 py-1.5 text-[10px] text-muted-foreground hover:text-foreground font-mono rounded-lg transition-colors" title="Ajustar à tela">
                   {Math.round(zoom * 100)}%
                 </button>
-                <button onClick={() => setZoom(z => Math.min(z + 0.15, 1.5))} className="px-2 py-1.5 text-muted-foreground hover:text-foreground rounded-lg transition-colors">
+                <button onClick={() => { setZoomTouched(true); setZoom(z => Math.min(z + 0.15, 1.5)); }} className="px-2 py-1.5 text-muted-foreground hover:text-foreground rounded-lg transition-colors">
                   <ZoomIn className="w-3.5 h-3.5" />
                 </button>
               </div>
