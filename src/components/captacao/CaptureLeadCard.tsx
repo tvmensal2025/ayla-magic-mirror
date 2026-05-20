@@ -125,14 +125,17 @@ export function CaptureLeadCard({ customerId, onSubmitted }: Props) {
           const filled = v !== null && v !== undefined && String(v).trim() !== "" && (f.key !== "electricity_bill_value" || Number(v) > 0);
           const isDoc = f.key === "document_front_url";
           const isEditingThis = editing === f.key;
+          const sugg = suggestionByField.get(f.key);
 
           return (
             <div
               key={f.key}
               className={`group rounded-md border p-2 transition-all ${
+                sugg ? "border-amber-400/60 bg-amber-400/5 ring-1 ring-amber-400/30 animate-pulse" :
                 filled ? "border-primary/30 bg-primary/5" : "border-border bg-background hover:border-primary/30"
               }`}
             >
+
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 min-w-0">
                   {filled ? <Check className="w-3.5 h-3.5 text-primary shrink-0" /> : <div className="w-3.5 h-3.5 rounded-full border-2 border-muted-foreground/30 shrink-0" />}
