@@ -110,18 +110,11 @@ Deno.serve(async (req) => {
       .order("send_order", { ascending: true });
     let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
     if (variant === "B") {
-      const transformed: any[] = [];
-      for (const m of medias) {
-        if (String(m.kind).toLowerCase() !== "audio") { transformed.push(m); continue; }
-        const transcript = await ensureAudioTranscript(supabase, m);
-        if (transcript && transcript.trim()) {
-          transformed.push({ ...m, _asText: true, _transcript: transcript.trim() });
-          console.log(`[manual-step-send] variant=B: audio "${m.label || m.id}" → text (${transcript.length} chars)`);
-        } else {
-          console.warn(`[manual-step-send] variant=B: audio "${m.label || m.id}" sem transcript → pulado`);
-        }
+      const before = medias.length;
+      medias = medias.filter((m) => String(m.kind).toLowerCase() !== "audio");
+      if (before !== medias.length) {
+        console.log(`[manual-step-send] variant=B: removed ${before - medias.length} audio media(s)`);
       }
-      medias = transformed;
     }
 
 
