@@ -9,7 +9,7 @@ interface QuickReplyMenuProps {
   onExactShortcut?: (template: MessageTemplate | null) => void;
 }
 
-export function QuickReplyMenu({ templates, search, onSelect, onClose }: QuickReplyMenuProps) {
+export function QuickReplyMenu({ templates, search, onSelect, onClose, onExactShortcut }: QuickReplyMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   const q = search.toLowerCase();
