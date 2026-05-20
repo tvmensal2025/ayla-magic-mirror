@@ -1,59 +1,54 @@
 ## Diagnóstico
 
-**1. Por que foi para Campinas em vez de Uberlândia**
+O erro do card é da Meta, não nosso:
 
-As 2 campanhas mais recentes do `rafael.ids@icloud.com` foram salvas no DB com **apenas** `[{key: 247071, name: "Campinas"}]` e o nome segue o padrão do **smartPublish** (`"…CPFL Paulista (Campinas)…"`), não do wizard.
-
-O fluxo `smartPublish` (`src/services/smartPublish.ts`) detecta a região pelo DDD do WhatsApp do consultor, escolhe um preset de distribuidora compatível e pega a **1ª cidade do preset** (Campinas no CPFL Paulista). Ele ignora qualquer seleção manual de cidade — o botão "Publicar inteligente" do card de template dispara isso.
-
-Ou seja: o usuário clicou em **"Publicar com 1 clique"** num template (que vai pro smartPublish), e não no wizard "Nova campanha" onde ele realmente escolheu Uberlândia. Como o DDD do telefone dele é SP, caiu no CPFL Paulista → Campinas.
-
-**2. Raio de 25km**
-
-`supabase/functions/facebook-create-campaign/index.ts` linha 316 envia hardcoded:
-```ts
-cities: body.cities.map((c) => ({ key: c.key, radius: 25, distance_unit: "kilometer" }))
 ```
-Meta interpreta `radius=25km` como "cidade + entorno". Para anunciar **só na cidade**, basta omitir `radius`/`distance_unit` (default = município).
+Error validating access token: The session has been invalidated because
+the user changed their password or Facebook has changed the session for
+security reasons. | subcode=460 | code=190
+```
 
-**3. Excluir campanha**
+Significa: o **token do Facebook do consultor** (Rafael Ferreiras) **foi invalidado pelo próprio Facebook** — provavelmente porque ele trocou a senha, encerrou sessões, ou a Meta expirou a sessão por segurança. Não há nada que o healthcheck possa fazer: clicar em "Tentar reativar" vai falhar de novo até o token ser renovado via OAuth.
 
-Não existe edge function de delete. Precisa:
-- Edge `facebook-delete-campaign` que valida SuperAdmin, chama `DELETE /{fb_campaign_id}` no Graph, marca `status=deleted` em `facebook_campaigns` (ou faz `DELETE` físico) e loga em `admin_audit_log`.
-- Botão na `CampaignsList` visível só para SuperAdmin.
+Confirmação nos logs:
+- `facebook-campaign-healthcheck` → `OAuthException code=190 subcode=460` (token revogado).
+- A campanha "CPFL Paulista" do Rafael está **pausada** por esse motivo, não por saldo nem por política.
+
+## Por que `explainRejection` não pegou esse caso amigavelmente
+
+Em `CampaignsList.tsx` (`explainRejection`), o branch de token só dispara se a string contiver `"token"` + (`"expired" | "expirou" | "invalid"`). A mensagem real da Meta diz `"session has been invalidated"` — não bate em nenhum branch específico, cai no genérico "Erro ao publicar no Meta" + raw text. Por isso o cartão vermelho mostra o texto cru e o botão "Tentar reativar" que nunca vai funcionar.
 
 ## Plano
 
-### 1. `supabase/functions/facebook-create-campaign/index.ts`
-- Linha 316: trocar para `cities: body.cities.map((c) => ({ key: c.key }))` — sem `radius`, sem `distance_unit`.
-- Ajustar comentário das linhas 309-315 explicando que agora é só município.
+### 1. `src/components/admin/ads/CampaignsList.tsx` — melhorar diagnóstico
 
-### 2. `src/services/smartPublish.ts` (corrigir desvio Uberlândia→Campinas)
-- Em vez de derivar a cidade só pelo DDD, **preferir a cidade conectada ao perfil do consultor** quando houver (`consultants.city` / `consultant_ad_settings.city`, se existir). Se não houver, manter fallback atual por DDD.
-- Adicionar log claro no `onProgress` mostrando qual cidade foi escolhida (ex.: "Publicando em Uberlândia (CEMIG)…") para o consultor perceber antes do `done`.
+Em `explainRejection`, adicionar branch específico **antes** do branch genérico de token:
 
-Observação: alternativa mais radical seria abrir um confirm/seletor de cidade antes de publicar no smartPublish. Posso fazer isso se preferir.
+- Detectar `subcode=460`, `session has been invalidated`, `session for security reasons`, `code=190` → retornar:
+  - **title**: "Conexão com Facebook expirou"
+  - **suggestion**: "O Facebook invalidou a sessão (provavelmente por troca de senha ou segurança). Reconecte sua conta Facebook no card de conexão acima e republique a campanha. O botão 'Tentar reativar' não resolve esse caso."
 
-### 3. Nova edge `supabase/functions/facebook-delete-campaign/index.ts`
-- Valida JWT, checa `is_super_admin(user_id)`.
-- Recebe `{ campaign_id }`, carrega row de `facebook_campaigns`.
-- Chama `DELETE https://graph.facebook.com/v21.0/{fb_campaign_id}?access_token=…` (token vem de `platform_facebook_account`).
-- Em caso de sucesso (ou se `fb_campaign_id` já era nulo), faz `DELETE FROM facebook_campaigns WHERE id = …`.
-- Loga em `admin_audit_log` (`action='facebook_campaign_deleted'`).
+Quando o motivo for token/sessão inválida, **esconder o botão "Tentar reativar"** (que não funciona) e mostrar um botão **"Reconectar Facebook"** que faz scroll/foco no card de conexão FB (componente `FacebookConnectionCard` ou similar) — ou simplesmente abre `https://www.facebook.com/settings` em nova aba, mas o ideal é scrollar para o card existente.
 
-### 4. `src/components/admin/ads/CampaignsList.tsx`
-- Receber/usar `isSuperAdmin` (via `useUserRole` ou prop).
-- Adicionar botão `Trash2` no cabeçalho de cada card, **só visível quando `isSuperAdmin`**.
-- Confirm dialog antes de excluir (`AlertDialog`).
-- Após sucesso, remover item da lista local e mostrar toast.
+### 2. `supabase/functions/facebook-campaign-healthcheck/index.ts` — gravar motivo legível
 
-### 5. Onde renderiza `CampaignsList`
-- Passar `isSuperAdmin` derivado do hook `useUserRole` (ou consultar lá dentro com `useAdminAuth`).
+Quando o fetch retornar `code=190` / `subcode=460`, atualizar `facebook_campaigns.rejection_reason` com uma string padronizada tipo:
+
+```
+SESSION_INVALIDATED: Token do Facebook foi invalidado (senha alterada ou
+sessão encerrada por segurança). Reconecte a conta no painel.
+```
+
+Assim o front mostra mensagem amigável mesmo sem precisar parsear o texto cru da Meta toda vez.
+
+### 3. Sinalizar globalmente no card de conexão Facebook
+
+No componente que renderiza a conexão FB do consultor (provavelmente `FacebookConnectionCard` em `src/components/admin/ads/`), se houver pelo menos uma campanha com `rejection_reason` contendo `SESSION_INVALIDATED` ou `code=190`, mostrar badge vermelho "Token expirado — reconectar" com CTA destacado.
 
 ## Fora de escopo
-- Reescrever o wizard.
-- Mexer em saldo/carteira.
-- Alterar lógica de detecção de distribuidora por DDD (apenas adicionar fallback por cidade configurada).
+- Renovar token automaticamente (não dá — exige re-OAuth do usuário).
+- Mexer em saldo/carteira (já está R$ 240,89, OK).
+- Alterar lógica de criação de campanha.
 
 ## Pergunta
-Confirma que (a) o "Publicar 1 clique" deve **respeitar a cidade configurada no perfil do consultor** quando houver, e (b) o delete é permanente (apaga row do DB) e não soft-delete?
+Posso seguir com (1) + (2) + (3), ou prefere só (1) (UI clara) por enquanto?
