@@ -1,7 +1,7 @@
 // Wrapper único para chamar a edge `manual-step-send` com toast amigável
-// padronizado por código de erro. Centraliza a tradução PT-BR e o fluxo
-// "name guard" (consultor é instruído a clicar em "Pedir nome" antes de
-// avançar quando o lead ainda não tem nome capturado).
+// padronizado por código de erro. Centraliza a tradução PT-BR, timeout do
+// client e o fluxo "name guard" (consultor é instruído a clicar em
+// "Pedir nome" antes de avançar quando o lead ainda não tem nome capturado).
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -26,6 +26,8 @@ export interface SendStepResult {
   data?: any;
 }
 
+const CLIENT_TIMEOUT_MS = 20_000;
+
 const FRIENDLY: Record<string, string> = {
   unauthorized: "Sessão expirada — faça login novamente.",
   forbidden: "Sem permissão para enviar em nome deste consultor.",
@@ -45,8 +47,11 @@ const FRIENDLY: Record<string, string> = {
   instance_disconnected:
     "WhatsApp do consultor desconectado. Reconecte em /admin/conexao.",
   whapi_send_failed: "WhatsApp recusou o envio. Veja o detalhe e tente de novo.",
+  whapi_network: "Sem resposta da Whapi (rede). Tente novamente em alguns segundos.",
   partial_send: "Parte dos itens não foi enviada. Tente reenviar só o que faltou.",
   internal_error: "Erro interno no servidor.",
+  client_timeout: "Servidor demorou demais (20s). Tente de novo.",
+  empty_send_ok: "Edge respondeu OK mas não disparou nada. Veja se o passo tem mídia/texto.",
 };
 
 function pickMessage(code?: string, fallback?: string): string {
@@ -54,63 +59,93 @@ function pickMessage(code?: string, fallback?: string): string {
   return fallback || "Não consegui enviar — tente de novo.";
 }
 
+async function parseErrorBody(error: any): Promise<{ code: string; message: string }> {
+  let code = "internal_error";
+  let message = error?.message || "Falha ao chamar o servidor.";
+  const ctx: any = error?.context;
+  if (!ctx) return { code, message };
+  try {
+    // ctx pode ser uma Response — clonamos pra não consumir o body.
+    if (typeof ctx.clone === "function") {
+      const cloned = ctx.clone();
+      try {
+        const body = await cloned.json();
+        code = body?.code || body?.error || code;
+        message = body?.message || message;
+        return { code, message };
+      } catch {
+        try {
+          const txt = await cloned.text();
+          if (txt) message = txt.slice(0, 200);
+        } catch { /* ignore */ }
+      }
+    } else if (typeof ctx.json === "function") {
+      const body = await ctx.json();
+      code = body?.code || body?.error || code;
+      message = body?.message || message;
+    }
+  } catch { /* ignore */ }
+  return { code, message };
+}
+
 export async function sendStepWithFeedback(
   payload: SendStepPayload,
   opts?: { silent?: boolean; onNameGuard?: () => void },
 ): Promise<SendStepResult> {
-  try {
-    const { data, error } = await supabase.functions.invoke("manual-step-send", {
-      body: payload,
-    });
+  // Timeout no client — evita botão girando pra sempre.
+  const timeoutPromise = new Promise<SendStepResult>((resolve) => {
+    setTimeout(() => {
+      if (!opts?.silent) toast.error(FRIENDLY.client_timeout);
+      resolve({ ok: false, code: "client_timeout", message: FRIENDLY.client_timeout });
+    }, CLIENT_TIMEOUT_MS);
+  });
 
-    // Erro de rede / 5xx: supabase-js entrega em `error`. Em alguns casos
-    // o body de erro do edge function vem como FunctionsHttpError com .context.
-    if (error) {
-      let code = "internal_error";
-      let message = error.message || "Falha ao chamar o servidor.";
-      try {
-        const ctx: any = (error as any).context;
-        if (ctx && typeof ctx.json === "function") {
-          const body = await ctx.json();
-          code = body?.code || body?.error || code;
-          message = body?.message || message;
-        }
-      } catch {
-        /* ignora parsing */
-      }
-      if (code === "name_not_captured_yet" && opts?.onNameGuard) {
-        opts.onNameGuard();
-      }
-      if (!opts?.silent) toast.error(pickMessage(code, message));
-      return { ok: false, code, message };
-    }
+  const invokePromise = (async (): Promise<SendStepResult> => {
+    try {
+      const { data, error } = await supabase.functions.invoke("manual-step-send", {
+        body: payload,
+      });
 
-    // Edge respondeu 200 mas com ok:false (ex.: partial_send / nothing_to_send)
-    if (data && data.ok === false) {
-      const code = data.code || data.error || "unknown_error";
-      const message = pickMessage(code, data.message);
-      if (code === "name_not_captured_yet" && opts?.onNameGuard) {
-        opts.onNameGuard();
+      if (error) {
+        const { code, message } = await parseErrorBody(error);
+        if (code === "name_not_captured_yet" && opts?.onNameGuard) opts.onNameGuard();
+        if (!opts?.silent) toast.error(pickMessage(code, message));
+        return { ok: false, code, message };
       }
-      if (!opts?.silent) toast.error(message);
-      return { ok: false, code, message, data };
-    }
 
-    if (!opts?.silent) {
+      if (data && data.ok === false) {
+        const code = data.code || data.error || "unknown_error";
+        const message = pickMessage(code, data.message);
+        if (code === "name_not_captured_yet" && opts?.onNameGuard) opts.onNameGuard();
+        if (!opts?.silent) toast.error(message);
+        return { ok: false, code, message, data };
+      }
+
       const sentCount = Array.isArray(data?.sent) ? data.sent.length : 0;
       const continued = data?.continued ? " (fluxo seguiu)" : "";
-      toast.success(
-        sentCount > 0
-          ? `${sentCount} item${sentCount > 1 ? "s" : ""} enviado${sentCount > 1 ? "s" : ""}${continued}`
-          : `Enviado${continued}`,
-      );
+
+      // Edge respondeu OK mas não enviou nada — sinalizar como warning.
+      if (sentCount === 0 && !data?.continued) {
+        if (!opts?.silent) toast.warning(FRIENDLY.empty_send_ok);
+        return { ok: false, code: "empty_send_ok", message: FRIENDLY.empty_send_ok, data };
+      }
+
+      if (!opts?.silent) {
+        toast.success(
+          sentCount > 0
+            ? `${sentCount} item${sentCount > 1 ? "s" : ""} enviado${sentCount > 1 ? "s" : ""}${continued}`
+            : `Enviado${continued}`,
+        );
+      }
+      return { ok: true, data };
+    } catch (e: any) {
+      const message = e?.message || "Erro inesperado.";
+      if (!opts?.silent) toast.error(message);
+      return { ok: false, code: "client_error", message };
     }
-    return { ok: true, data };
-  } catch (e: any) {
-    const message = e?.message || "Erro inesperado.";
-    if (!opts?.silent) toast.error(message);
-    return { ok: false, code: "client_error", message };
-  }
+  })();
+
+  return Promise.race([invokePromise, timeoutPromise]);
 }
 
 /**
@@ -123,7 +158,6 @@ export async function askLeadName(opts: {
   customerId: string;
   phoneHint?: string;
 }): Promise<SendStepResult> {
-  // Tenta achar o passo "pedir nome" no fluxo ativo da variante do lead.
   const { data: customer } = await supabase
     .from("customers")
     .select("flow_variant, name")
@@ -168,11 +202,6 @@ export async function askLeadName(opts: {
     });
   }
 
-  // Fallback: dispara texto direto via edge (usa o próprio manual-step-send
-  // com um stepId "virtual" — nesse projeto não temos, então usamos a edge
-  // específica `whatsapp-send-text` se existir, senão fallback para insert
-  // direto na fila do consultor).
-  // Para simplicidade, devolve um aviso pro usuário tratar manualmente.
   toast.error(
     "Não achei o passo de 'pedir nome' no fluxo ativo. Adicione um passo perguntando o nome no /admin/fluxos.",
   );
