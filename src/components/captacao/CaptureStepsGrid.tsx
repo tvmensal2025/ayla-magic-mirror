@@ -87,11 +87,13 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
   // Próximo tile não enviado (cabeça da fila) — único habilitado quando há trava
   const nextUnsentIdx = display.findIndex((s) => !sentSteps.has(s.id));
 
-  const sendStep = async (step: StepRow, label: string, continueFlow = true) => {
+  const sendStep = async (step: StepRow, label: string) => {
     if (sending) return;
     setSending(step.id);
     try {
-      const payload: any = { consultantId, customerId, part: "all", continueFlow, variant };
+      // Modo Game: envia APENAS o passo clicado, sem encadear próximos.
+      // Manual = consultor clica; Auto = dispara o próximo só após inbound do lead.
+      const payload: any = { consultantId, customerId, part: "all", continueFlow: false, variant };
       if (step.__synthetic) payload.stepKey = step.step_key;
       else payload.stepId = step.id;
       const { data, error } = await supabase.functions.invoke("manual-step-send", {
@@ -102,8 +104,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
         throw new Error(parsed.message);
       }
       onSent(step.id);
-      const next = (data as any)?.next_step;
-      toast({ title: continueFlow ? `Seguindo fluxo ✓` : `Passo enviado ✓`, description: next ? `${label} → ${next}` : label });
+      toast({ title: "Passo enviado ✓", description: label });
     } catch (e: any) {
       toast({ title: "Erro ao enviar", description: e?.message || String(e), variant: "destructive" });
     } finally {

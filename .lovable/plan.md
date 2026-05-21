@@ -1,74 +1,39 @@
+# Diagnóstico — lead JOSINETE (5511971254913)
 
-# Plano — Finalizar Cadastro → Portal Worker (VPS) → OTP do cliente
+**O que aconteceu:** o consultor clicou em **"1. Captura do nome"** (passo 2) no Modo Game. O backend disparou em sequência, sem esperar resposta do lead:
+1. Conteúdo do passo 2 — "Captura do nome" (`message`)
+2. Conteúdo do passo 3 — "2. Boas-vindas" (`message`)
+3. Conteúdo do passo 4 — "JOSINETE, qual o valor médio da sua conta de luz?" (`message`, termina em `?` → aí parou)
 
-## O que já existe (não vamos reinventar)
-- `worker-portal` (VPS/Easypanel) expõe `POST /submit-lead`, `POST /confirm-otp`, `GET /health`.
-- `whapi-webhook/handlers/bot-flow.ts` já tem a lógica completa de "lead pronto": setta `status=portal_submitting`, faz health-check, dispara `/submit-lead` com retry, e cai em `worker_offline` se falhar.
-- `submit-otp` repassa o código digitado pelo cliente para `/confirm-otp` no worker.
-- `worker-callback` recebe `otp_required` / `signing_ready` / `registration_complete` / `error` do worker e dispara as mensagens certas no WhatsApp do cliente.
-- `otp-intercept` já captura códigos numéricos que o cliente cole no WhatsApp quando `status ∈ {awaiting_otp, portal_submitting}`.
+Resultado: 3 passos despachados em ~5s, lead bombardeado sem chance de responder. Só sobrou a última mensagem visível na conversa.
 
-## O que está faltando
-Hoje o botão **Finalizar Cadastro** do Modo Game chama `manual-step-send` com `stepKey=finalizar_cadastro`, ou seja, só envia uma mensagem do fluxo — **não dispara o worker da VPS**. Precisa virar um gatilho real para o portal.
+**Causa raiz:** `CaptureStepsGrid.tsx` (linha ~98) chama `supabase.functions.invoke('manual-step-send', { … continueFlow: true … })`. Com `continueFlow:true`, o `manual-step-send/index.ts` roda `buildContinuationPatch()` (linha 592) que **encadeia passos `message` seguintes** até bater em capture/pergunta/intent. Isso faz sentido para o bot automático, mas é o oposto do esperado no Modo Game manual — onde o consultor é quem decide quando avançar (ainda mais com a trava de ordem e o toggle Auto/Manual recém-criados).
 
-## Mudanças propostas
+**Por que escapou:** o passo 2 ("Captura do nome") está cadastrado como `step_type=message` (não `capture_*` nem `inline_capture`), então o chain não para nele. Idem passo 3 (boas-vindas). Só o passo 4 com `?` no fim cortou o chain.
 
-### 1. Nova edge function `finalize-capture`
-Responsabilidade única: validar + disparar o worker.
+# Plano de correção
 
-Entrada: `{ customerId, consultantId }` (auth via JWT do consultor logado; service role internamente).
+## 1. `CaptureStepsGrid.tsx` — desligar chain por padrão
+- Mudar a chamada para `continueFlow: false`. Cada clique envia **apenas o conteúdo do tile clicado** (texto + mídias daquele passo, com os delays internos já existentes entre mídia/texto do mesmo passo).
+- O cursor `conversation_step` continua sendo reposicionado no passo clicado (o handler já faz isso quando `part==='all'` mesmo sem chain — ver linhas 477-495 do `manual-step-send`).
+- Ajustar o toast: remover "→ próximo passo" quando não houver `next_step` na resposta.
 
-Fluxo:
-1. Carrega `customers` + valida no servidor (defesa em profundidade — UI já valida):
-   - 10 campos preenchidos, 3 documentos com URL, `name_mismatch_flag` resolvido.
-   - Não está em estado terminal (`portal_submitting`, `awaiting_otp`, `registered_igreen`, etc.).
-2. Regenera `igreen_link` a partir do `consultants.cadastro_url` do dono (mesmo guard do bot-flow para evitar lead caindo no consultor errado).
-3. Update: `status='portal_submitting'`, `conversation_step='portal_submitting'`, `finalized_at=now()`, `finalized_by=auth.uid()`.
-4. Envia mensagem ao cliente: "✅ Todos os dados coletados! Em instantes você recebe o código…" (via `_shared/whatsapp` — mesmo helper do bot-flow, respeita `bot_paused`/`assigned_human_id`).
-5. Health-check `/health` (5 s). Se offline → marca `status='worker_offline'`, retorna `{ ok: false, reason: 'worker_offline' }` e a UI mostra aviso amarelo "Worker offline — será reprocessado em alguns minutos" (o cron `recover-stuck-otp` / polling do worker já cuida).
-6. Online → `POST /submit-lead` com retry (3×, 2 s) reaproveitando o mesmo trecho de `bot-flow.ts` (extrair p/ `_shared/portal-worker.ts`).
-7. Retorna `{ ok, status, mode: 'dispatched'|'queued' }` para a UI.
+## 2. AutoMode permanece exatamente como está
+- O toggle 🤖 AUTO já dispara o próximo tile **só quando chega inbound do lead** (Realtime em `conversations`). Isso é o comportamento correto de "aguardar resposta" — não precisa de chain do backend.
+- Em MANUAL, consultor clica tile-a-tile. Em AUTO, sistema clica tile-a-tile ao receber resposta. Em nenhum dos dois faz sentido o backend encadear passos sozinho.
 
-Reuso: extrair o bloco "dispatch portal worker" de `bot-flow.ts` (linhas ~4269-4331) e do mirror em `evolution-webhook/handlers/bot-flow.ts` para `supabase/functions/_shared/portal-worker.ts` (`dispatchPortalWorker(supabase, customerId)`). Tanto o webhook quanto a nova função usam o mesmo helper — uma única fonte de verdade.
+## 3. Sem mudanças no backend
+- `manual-step-send` continua suportando `continueFlow:true` (usado por outros caminhos, p.ex. `FinalizeButton` antigo / fluxos de teste). Não vamos mexer no helper.
+- Nenhuma migração, nenhuma edge function nova.
 
-### 2. `FinalizeButton.tsx`
-- Trocar `supabase.functions.invoke('manual-step-send', { stepKey:'finalizar_cadastro' })` por `supabase.functions.invoke('finalize-capture', { customerId, consultantId })`.
-- Toast de sucesso: "🏆 Cadastro enviado ao portal! Aguardando código…"
-- Em caso de `worker_offline`: toast amarelo "Portal momentaneamente offline. Reprocessamos automaticamente em poucos minutos."
+## 4. Verificação
+- Reenviar passo 1 para um lead de teste e confirmar nos logs `conversations` que sai **1 outbound apenas**.
+- Confirmar que o tile fica ✓ e o próximo destrava (já depende só de `sentSteps`, não do `next_step` do backend).
 
-### 3. Acompanhamento em tempo real no `CaptacaoPanel.tsx`
-Adicionar bloco compacto **"Status do Portal"** abaixo do FinalizeButton (visível só depois de finalizar), com Realtime em `customers` (`id=eq.{customerId}`):
+# Fora de escopo
+- Não tocar no `FinalizeButton` / `finalize-capture` (fluxo de portal worker já implementado).
+- Não tocar no bot automático do WhatsApp (`whapi-webhook/bot-flow.ts`) — o chain lá é desejado.
+- Não alterar `bot_flow_steps` da Camila/consultores (passos "Boas-vindas" continuam `message` — só não vão mais ser arrastados juntos no envio manual).
 
-| `status` / `conversation_step`              | Badge UI                              |
-|--|--|
-| `portal_submitting`                          | 🟡 "Abrindo portal no navegador da VPS…" |
-| `awaiting_otp` / `aguardando_otp`            | 🟠 "Código enviado ao WhatsApp do cliente — aguardando ele digitar" + mostra `otp_code` quando chegar |
-| `validating_otp`                             | 🔵 "Validando código…" |
-| `awaiting_signature` / `aguardando_assinatura` | 🟣 "Link de selfie enviado ao cliente" + copia do `link_assinatura` |
-| `registered_igreen` / `cadastro_concluido`   | 🟢 "Cadastro concluído ✅" + `igreen_code` |
-| `worker_offline` / `automation_failed`       | 🔴 `error_message` + botão "Tentar novamente" (chama `finalize-capture` de novo) |
-
-### 4. Botão "Tentar novamente" (retry manual)
-Quando `status ∈ {worker_offline, automation_failed}`, libera botão que rechama `finalize-capture` — útil quando o consultor sabe que o worker já voltou.
-
-### 5. Migration: campos de auditoria em `customers`
-- `finalized_at timestamptz`
-- `finalized_by uuid` (consultor que apertou Finalizar — pode ser admin operando lead alheio)
-Sem RLS nova; já coberto por policies existentes.
-
-## Fora do escopo
-- Mudanças no `worker-portal` da VPS (já funciona).
-- Tocar no `worker-callback` (já roteia OTP/signing certo).
-- Mexer na lógica do bot que finaliza sozinho quando o lead manda tudo pelo WhatsApp — fica intacta; o botão é só o caminho **manual** do consultor que captou no Modo Game.
-
-## Arquivos
-- **Criar**: `supabase/functions/finalize-capture/index.ts`, `supabase/functions/_shared/portal-worker.ts`
-- **Editar**: `src/components/captacao/FinalizeButton.tsx`, `src/components/captacao/CaptacaoPanel.tsx`
-- **Refatorar (opcional, mesmo helper)**: `supabase/functions/whapi-webhook/handlers/bot-flow.ts` e `evolution-webhook/handlers/bot-flow.ts` para usar `dispatchPortalWorker()`.
-- **Migration**: `customers.finalized_at`, `customers.finalized_by`.
-
-## Pergunta antes de implementar
-Quando o consultor apertar Finalizar **e o worker estiver offline**, o que prefere?
-1. **Bloquear o envio** e mostrar erro vermelho ("Worker offline, tente em 1 min") — consultor decide quando retentar.
-2. **Enfileirar mesmo assim** (marca `worker_offline` no banco; o polling do próprio worker pega quando voltar) — zero clique extra, mas pode demorar.
-3. **Híbrido**: enfileira + mostra contador "Reprocessando em ~30s…" e tenta sozinho a cada 30 s por 5 min.
+# Arquivos
+- **Editar**: `src/components/captacao/CaptureStepsGrid.tsx` (1 flag + ajuste de toast)
