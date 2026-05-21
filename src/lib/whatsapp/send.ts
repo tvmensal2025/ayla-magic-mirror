@@ -17,6 +17,10 @@ export interface SendStepPayload {
   continueFlow?: boolean;
   /** pula a checagem de nome — usar apenas no botão "Pedir nome" */
   skipNameGuard?: boolean;
+  /** A/B/C escolhido pelo consultor nos chips (persiste no customer) */
+  variant?: "A" | "B" | "C";
+  /** ignora a trava awaiting_inbound (reenvio explícito) */
+  force?: boolean;
 }
 
 export interface SendStepResult {
