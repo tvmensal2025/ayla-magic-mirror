@@ -278,7 +278,19 @@ Deno.serve(async (req) => {
         });
         sentLog.push({ kind, mediaId: it.media.id });
       }
-      if (!isLast) await new Promise((r) => setTimeout(r, 1200));
+      if (!isLast) {
+        // Delay adaptativo: dá tempo do Whapi processar/despachar antes do próximo item,
+        // preservando a ordem real no celular do lead.
+        const delayByKind: Record<string, number> = {
+          audio: 4500,
+          video: 5000,
+          image: 2500,
+          document: 2500,
+          text: 1500,
+        };
+        const delay = delayByKind[it.kind] ?? 1500;
+        await new Promise((r) => setTimeout(r, delay));
+      }
     }
 
     const flowPatch = body.continueFlow && body.part === "all"
