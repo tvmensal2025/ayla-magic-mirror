@@ -117,7 +117,7 @@ export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, 
                   size="sm"
                   variant={sent ? "outline" : "default"}
                   className="h-7 px-2 text-[11px] flex-1"
-                  onClick={() => sendStep(s.id, s.title || s.step_key || `Passo ${i + 1}`)}
+                  onClick={() => sendStep(s.id, s.title || s.step_key || `Passo ${s.position}`)}
                   disabled={isSending}
                 >
                   {isSending ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Send className="w-3 h-3 mr-1" /> Enviar</>}
