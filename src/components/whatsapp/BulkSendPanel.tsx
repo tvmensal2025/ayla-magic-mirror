@@ -20,6 +20,7 @@ interface Customer {
   distribuidora?: string | null; observacao?: string | null; andamento_igreen?: string | null;
   media_consumo?: number | null; registered_by_name?: string | null;
   customer_origin?: "igreen_sync" | "whatsapp_lead" | "manual" | null;
+  do_not_contact?: boolean | null;
 }
 interface BulkSendPanelProps {
   instanceName: string; customers: Customer[]; templates: MessageTemplate[];
@@ -213,7 +214,8 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
     if (!message.trim() && !hasMedia) return;
     abortRef.current = false;
     setWarning(""); setIsSending(true); setResult(null);
-    const selected = customers.filter((c) => selectedIds.has(c.id));
+    // LGPD: nunca envia para quem optou por sair (do_not_contact=true).
+    const selected = customers.filter((c) => selectedIds.has(c.id) && !c.do_not_contact);
     let sent = 0, failed = 0;
     const tplMediaType = selectedTemplate?.media_type;
     const tplMediaUrl = selectedTemplate?.media_url;
