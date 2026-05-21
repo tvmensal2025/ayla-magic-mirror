@@ -199,6 +199,33 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
             {steps.length > 0 && <Badge variant="secondary" className="text-[10px] shrink-0">{steps.length} passos</Badge>}
           </div>
 
+          {/* Seletor A/B/C — troca o fluxo da conversa atual */}
+          <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Fluxo</span>
+            <div className="flex gap-1">
+              {(["A", "B", "C"] as const).map((v) => {
+                const enabled = variantsAvailable.includes(v);
+                const active = variant === v;
+                return (
+                  <Button
+                    key={v}
+                    size="sm"
+                    variant={active ? "default" : "outline"}
+                    className="h-6 px-2 text-[11px] font-bold"
+                    disabled={!enabled || !!seq}
+                    onClick={() => setVariant(v)}
+                    title={enabled ? `Usar fluxo ${v}` : `Fluxo ${v} não configurado`}
+                  >
+                    {v}
+                  </Button>
+                );
+              })}
+            </div>
+            <span className="text-[10px] text-muted-foreground ml-auto">
+              {variant === "A" ? "com áudio" : variant === "B" ? "só texto" : "com vídeo"}
+            </span>
+          </div>
+
 
           {seq && (
             <div className="px-3 py-2 bg-primary/5 border-b border-border flex items-center gap-2">
