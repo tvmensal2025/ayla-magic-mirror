@@ -538,11 +538,28 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
     updated_at: new Date().toISOString(),
   };
 
-  // Encadeia passos consecutivos do tipo "message" (sem capture nem aguardando resposta),
-  // até esbarrar num passo que exige input do cliente.
+  // Estado inicial: o "cursor" do conversation_step fica no passo clicado.
+  // Se não houver próximo passo (passo é o último), mantém o próprio passo —
+  // só vai pra "finalizando" se o passo clicado for de fato finalizar_cadastro.
+  const clickedType = String(step.step_type || "message");
+  if (clickedType === "finalizar_cadastro") {
+    patch.conversation_step = "finalizando";
+  } else if (clickedType !== "message") {
+    patch.conversation_step = mapCaptureStepToLegacy(clickedType, step.id, step.step_key);
+  } else {
+    patch.conversation_step = step.id;
+  }
+
   let cursorPos = Number(step.position) || 0;
-  let lastReached: any = null;
-  const MAX_CHAIN = 6; // proteção contra loop
+  const MAX_CHAIN = 20; // cobre fluxos grandes (10+ passos) sem loop infinito.
+
+  const _normEnd = (s: any) => String(s?.message_text || "").trim()
+    .replace(/[\s\u200B-\u200D\uFEFF]+$/g, "");
+  const _looksLikeQuestion = (s: any) => _normEnd(s).endsWith("?");
+  const _hasInlineCapture = (s: any) => Array.isArray(s?.captures)
+    && s.captures.some((c: any) => c?.enabled === true);
+  const _hasIntentTransitions = (s: any) => Array.isArray(s?.transitions)
+    && s.transitions.some((t: any) => Array.isArray(t?.trigger_phrases) && t.trigger_phrases.length > 0);
 
   for (let i = 0; i < MAX_CHAIN; i++) {
     const { data: next } = await supabase
@@ -555,16 +572,13 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
       .limit(1)
       .maybeSingle();
 
-    if (!next) {
-      if (!lastReached) patch.conversation_step = "finalizando";
-      break;
-    }
-    lastReached = next;
-    cursorPos = Number(next.position) || cursorPos + 1;
+    if (!next) break; // sem próximo — mantém conversation_step já definido.
 
+    cursorPos = Number(next.position) || cursorPos + 1;
     const ntype = String(next.step_type || "message");
-    // Passos que exigem input do cliente — para a cadeia, posiciona o lead
-    // e dispara o prompt da captura (message_text → retry_text → fallback).
+
+    // Critério 1: próximo é passo de captura (não-message) → envia prompt,
+    // grava legacy correspondente e PARA. Cliente precisa responder.
     if (ntype !== "message") {
       const legacy = mapCaptureStepToLegacy(ntype, next.id, next.step_key);
       patch.conversation_step = legacy;
@@ -590,23 +604,19 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
       break;
     }
 
-    // Passo do tipo message — envia agora e segue para o próximo.
-    patch.conversation_step = next.id;
+    // Próximo é message — despacha conteúdo, atualiza cursor de conversation_step.
     const sentNext = await sendConfiguredStep(supabase, sender, remoteJid, consultantId, customer.id, next, vars, variant);
     if (sentNext) patch.last_custom_prompt_at = new Date().toISOString();
+    patch.conversation_step = next.id;
 
-    // Se tem regras de transição esperando resposta do cliente, para aqui.
-    const hasTransitions = Array.isArray(next.transitions) && next.transitions.length > 0;
-    // Se o passo tem captures inline esperando input (ex: "Captura do nome"),
-    // também para a corrente — o cliente precisa responder antes do próximo.
-    const hasInlineCapture = Array.isArray(next.captures)
-      && next.captures.some((c: any) => c?.enabled === true);
-    // Heurística: texto que termina com "?" é pergunta — espera resposta.
-    const looksLikeQuestion = String(next.message_text || "").trim().endsWith("?");
-    if (hasInlineCapture || looksLikeQuestion) break;
-    if (hasTransitions && Array.isArray(next.transitions) && next.transitions.some((t: any) => Array.isArray(t?.trigger_phrases) && t.trigger_phrases.length > 0)) break;
+    // Critério 2: passo message COM captura inline (ex.: "Captura do nome") → PARA.
+    if (_hasInlineCapture(next)) break;
+    // Critério 3: texto termina em "?" — pergunta → PARA.
+    if (_looksLikeQuestion(next)) break;
+    // Critério 4: transitions com trigger_phrases (intent) → PARA.
+    if (_hasIntentTransitions(next)) break;
 
-    // Pequeno delay entre passos encadeados.
+    // Pequeno delay entre passos puramente informativos.
     await new Promise((r) => setTimeout(r, 2500));
   }
 

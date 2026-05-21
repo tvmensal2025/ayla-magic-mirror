@@ -2245,48 +2245,59 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             }
 
             if (nextCustom) {
-              // Heurística: passo cujo texto termina em "?" é uma pergunta — aguarda resposta.
-              const _looksLikeQuestion = (s: any) =>
-                String(s?.message_text || "").trim().replace(/[\s\u200B-\u200D\uFEFF]+$/g, "").endsWith("?");
+              // Mesmos 4 critérios de parada do manual-step-send para garantir
+              // que envio manual + avanço pelo webhook decidam IGUAL:
+              // 1) step_type !== "message" (capture) → vira legacy e para
+              // 2) captures inline → para
+              // 3) texto termina em "?" → para
+              // 4) transitions com trigger_phrases (intents) → para
+              const _normEnd = (s: any) => String(s?.message_text || "").trim()
+                .replace(/[\s\u200B-\u200D\uFEFF]+$/g, "");
+              const _looksLikeQuestion = (s: any) => _normEnd(s).endsWith("?");
+              const _hasInlineCapture = (s: any) => Array.isArray((s as any)?.captures)
+                && (s as any).captures.some((c: any) => c?.enabled === true);
+              const _hasIntentTransitions = (s: any) => Array.isArray(s?.transitions)
+                && s.transitions.some((t: any) => Array.isArray(t?.trigger_phrases) && t.trigger_phrases.length > 0);
 
-              // Chain: avança automaticamente passos message que tenham default sem phrases
-              // E que NÃO sejam perguntas (texto não termina em "?").
               let current = nextCustom;
               let dispatchedAny = false;
-              for (let hops = 0; hops < 8; hops++) {
+              for (let hops = 0; hops < 20; hops++) {
                 const ok = await dispatchStepFromFlow(current.step_key, _vars);
                 dispatchedAny = dispatchedAny || !!ok;
                 console.log(`[custom-step-resolver] chain-emit step=${current.step_key} pos=${current.position} dispatched=${ok}`);
                 const ctype = String(current.step_type || "message");
+                // Critério 1
                 if (ctype !== "message") break;
+                // Critério 2
+                if (_hasInlineCapture(current)) {
+                  console.log(`[chain-stop] pos=${current.position} step=${current.step_key} motivo=inline-capture`);
+                  break;
+                }
+                // Critério 3
                 if (_looksLikeQuestion(current)) {
                   console.log(`[chain-stop] pos=${current.position} step=${current.step_key} motivo=pergunta(text ends with ?)`);
                   break;
                 }
+                // Critério 4
+                if (_hasIntentTransitions(current)) {
+                  console.log(`[chain-stop] pos=${current.position} step=${current.step_key} motivo=intent-transitions`);
+                  break;
+                }
+                // Avanço: prioriza default-goto, senão próxima position
                 const ctxns = Array.isArray(current.transitions) ? current.transitions : [];
                 const defTxn = ctxns.find((t: any) =>
                   String(t?.trigger_intent || "").toLowerCase() === "default"
                   && (!Array.isArray(t?.trigger_phrases) || t.trigger_phrases.length === 0)
                 );
-                if (!defTxn) break; // tem pergunta/objeção → aguarda resposta
                 let nxt: any = null;
-                if (defTxn.goto_step_id) nxt = await _loadStepById(String(defTxn.goto_step_id));
+                if (defTxn?.goto_step_id) nxt = await _loadStepById(String(defTxn.goto_step_id));
                 if (!nxt) {
                   nxt = await findNextActiveFlowStep(supabase, customer.consultant_id, {
                     afterPosition: Number(current.position) || 0,
                   });
                 }
                 if (!nxt) break;
-                // Pre-check do próximo: se já parece pergunta, dispara e para
-                if (_looksLikeQuestion(nxt)) {
-                  await new Promise((r) => setTimeout(r, 1500));
-                  const okQ = await dispatchStepFromFlow(nxt.step_key, _vars);
-                  dispatchedAny = dispatchedAny || !!okQ;
-                  console.log(`[chain-stop] pos=${nxt.position} step=${nxt.step_key} motivo=proxima-eh-pergunta dispatched=${okQ}`);
-                  current = nxt;
-                  break;
-                }
-                console.log(`[chain-skip] from=${current.position} to=${nxt.position} motivo=default-no-phrases`);
+                console.log(`[chain-skip] from=${current.position} to=${nxt.position}`);
                 await new Promise((r) => setTimeout(r, 1500));
                 current = nxt;
               }
@@ -2300,9 +2311,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               else if (ntype === "finalizar_cadastro") nextStepValue = "finalizando";
               console.log(`[custom-step-resolver] message→advance final=${current.step_key} type=${ntype} isCapture=${_isCapture}`);
               const _updates: any = { conversation_step: nextStepValue, __inline_sent: (emittedCurrent || dispatchedAny) || undefined };
-              // Marca timestamp também para steps "message" que tenham capture inline
-              // (ex: electricity_bill_value), além dos capture_* — fecha a porta para
-              // re-emissão na próxima rajada de inbound.
+              // Marca timestamp para steps com inline capture (mesmo sendo message)
+              // ou para capture_* — bloqueia re-emissão na próxima rajada.
               const _currentHasInlineCapture = Array.isArray((current as any)?.captures)
                 && (current as any).captures.some((c: any) => c?.enabled === true);
               if ((_isCapture || _currentHasInlineCapture) && (emittedCurrent || dispatchedAny)) {
