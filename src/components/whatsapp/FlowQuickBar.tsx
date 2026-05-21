@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
+import { normalizeSendStepError } from "@/lib/whatsapp/send";
 import { Zap, Send, ListChecks, FastForward, Loader2, StopCircle, ExternalLink, Eye } from "lucide-react";
 import { ManualStepDialog } from "@/components/admin/AIAgentTab/ManualStepDialog";
 import { StepPartPreview, type PartKind } from "@/components/whatsapp/StepPartPreview";
@@ -129,8 +130,8 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
     const { data, error } = await supabase.functions.invoke("manual-step-send", {
       body: { consultantId, customerId, stepId, part: "all" },
     });
-    if (error || (data as { error?: string })?.error) {
-      const msg = error?.message || (data as { error?: string })?.error || "Falha";
+    if (error || (data as { error?: string; ok?: boolean })?.error || (data as { ok?: boolean })?.ok === false) {
+      const msg = normalizeSendStepError(error, data).message;
       toast({ title: "Erro ao enviar passo", description: msg, variant: "destructive" });
       return false;
     }
