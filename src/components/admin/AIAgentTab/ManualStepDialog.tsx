@@ -135,7 +135,7 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
     setSending(true);
     try {
       const { data, error } = await supabase.functions.invoke("manual-step-send", {
-        body: { consultantId, customerId, stepId: selectedStep!.id, part: "all" },
+        body: { consultantId, customerId, stepId: selectedStep!.id, part: "all", variant },
       });
       if (error || (data as any)?.error || (data as any)?.ok === false) {
         throw new Error(normalizeSendStepError(error, data).message);
