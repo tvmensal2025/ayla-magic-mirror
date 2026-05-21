@@ -1164,18 +1164,21 @@ export type Database = {
         Row: {
           bot_global_enabled: boolean
           id: string
+          resolver_strict_mode: boolean
           updated_at: string
           updated_by: string | null
         }
         Insert: {
           bot_global_enabled?: boolean
           id?: string
+          resolver_strict_mode?: boolean
           updated_at?: string
           updated_by?: string | null
         }
         Update: {
           bot_global_enabled?: boolean
           id?: string
+          resolver_strict_mode?: boolean
           updated_at?: string
           updated_by?: string | null
         }
