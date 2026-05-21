@@ -1,92 +1,89 @@
-## Objetivo
+## Diagnóstico
 
-1. Acabar com as falhas silenciosas de envio (template rápido / passo de fluxo) que afetam alguns clientes.
-2. Garantir que TODO lead novo tenha o nome capturado — não importa se entrou por WhatsApp, foi importado por Excel ou criado no Modo Captação.
-3. Garantir que a gamificação (XP + missões da Captação) comece automática para todo lead novo.
-4. Dar controle ao consultor: confirmar/editar/cancelar cada envio 1-a-1 antes de disparar.
+1. **Tamanho:** `CaptureSheet` abre em 52dvh com header gordo (logo+título+barra+frase+botão "Pedir nome"), `TabsList h-10`, padding `p-3`, footer com botão `h-11` + linha de stats. `CaptureStepsList` já é compacto mas o `CaptureStepPreview` (modal de prévia) ocupa muita tela. Combinado: o painel come metade do dispositivo antes mesmo de ver o primeiro passo.
 
----
+2. **Lead 5511916827893 não existe** no banco hoje (busquei por `phone_whatsapp ilike '%91682%'` e por `name ilike '%marc%'` — a Marcia Aparecida Alvares está com `phone_whatsapp=5514998582013`, e a Marcia Regina Dias está como `sem_celular_*`). A migration anterior tentou “resetar” esse número mas ele não corresponde a nenhum registro — daí o erro: ao tentar enviar o fluxo o front chama `manual-step-send` com um `customerId` que não bate / ou o lead tem `phone_whatsapp` que começa com `sem_celular_` e cai em `lead_sem_whatsapp` silenciosamente.
 
-## Diagnóstico (o que descobri investigando o caso da Marcia 5511916827893 e o código)
+3. **Falhas silenciosas:**
+   - `manual-step-send` retorna JSON com `code` mas a `supabase.functions.invoke` só popula `error` quando o HTTP status é ≥400; quando devolvo `ok:false` com **200** (caso `partial_send`/`nothing_to_send`) o wrapper trata, mas alguns paths retornam **400/409/502** e o `error.context.json()` nem sempre é lido (race no body já consumido).
+   - O modal `CaptureStepPreview` chama `doSend` que só lê `res.ok` e fecha — toast some no `finally` antes do usuário entender o que aconteceu.
+   - Botão fica girando quando a edge demora >10s sem timeout no client.
+   - Whapi pode responder 200 mas com `sent:false` (não tratamos esse caso).
 
-- Lead criado às 00:03, `name="(11) 91682-7893"` (placeholder do telefone), `name_source="unknown"`.
-- Primeiro outbound foi o passo **position=4** ("qual o valor médio da sua conta?") — **pulou os passos 2 e 3** que pedem o nome e dão boas-vindas. Por isso o `{{nome}}` renderizou como `"(11)"` (primeiro token do placeholder).
-- O `manual-step-send` hoje retorna 6 tipos de erro (`lead_sem_whatsapp`, `customer_no_phone`, `whapi_token_missing`, `no_active_flow`, `step_not_found`, `nothing_to_send`) — mas o front nem sempre mostra o toast com a mensagem amigável. Em outros casos a chamada parece OK mas a Whapi rejeita silenciosamente (instância desconectada / número inválido na operadora).
-- Não existe pré-flight do status da instância Whapi nem confirmação antes do disparo.
-- Quando o consultor abre o chat e dispara um passo pelo meio do fluxo, o nome do lead nunca é pedido → quebra todos os `{{nome}}` seguintes e a gamificação fica zerada.
+4. **Sequência inteira:** hoje só existe envio 1-a-1 por passo. Não há botão para disparar os 10 passos com delays humanos (cliente quer também). O botão “CADASTRAR TUDO” é outro fluxo (submit pro portal) — tá ok, mas precisa desabilitar/avisar quando `bot_paused=true`.
 
 ---
 
 ## Plano
 
-### Parte 1 — Envio 1-a-1 robusto (resolve "não dá pra enviar pra alguns")
+### Parte A — Compactar Modo Captação (visual)
 
-**A. Pré-flight no `manual-step-send**` (e mesma checagem reutilizada em `whatsapp-bulk-send` e `manual-flow-send`):
+**`CaptureSheet.tsx`:**
+- Altura padrão: `h-[44dvh]` (era 52dvh), `min-h-[320px]`.
+- Header: agrupar em **1 linha só**: ícone 6×6, nome + telefone inline (`text-[11px]`), botões de ação `h-7 w-7`. Remover `mb-1.5` extra e o `CaptureProgressBar` vira `h-1` (em vez de 2). Frase motivacional vira `text-[10px] mt-0.5`.
+- Botão “Pedir nome do lead”: passa pra **chip inline** ao lado da frase motivacional, `h-6 px-2 text-[10px]` (em vez de bloco centrado com `mt-1.5`).
+- `TabsList`: `h-7`, ícones `w-3 h-3`, badges `text-[9px]`.
+- Footer: botão principal `h-9 text-xs` (era h-11), stats line ganha `text-[9px]` e perde 1 linha.
+- Modo expandido mantém os tamanhos atuais — só o modo padrão fica compacto.
 
-- Normalizar telefone BR (9º dígito, DDI 55, validar 10–13 dígitos).
-- Checar `consultants.whapi_instance_status` — se ≠ `connected`, retornar `instance_disconnected` com mensagem "WhatsApp do consultor desconectado, reconecte em /admin/conexao".
-- Checar se a Whapi reconhece o número (chamada `check_phones` antes do primeiro envio para esse lead, cache 7 dias em `customers.whapi_phone_valid_at` + `whapi_phone_valid` boolean) — se inválido, retornar `phone_not_on_whatsapp`.
-- Se passo não tem mídia nem texto (já tratado), mas melhorar mensagem.
+**`CaptureStepsList.tsx`:**
+- Cada linha `py-1` (era 1.5), bola do número `w-6 h-6 text-[10px]`, botão de envio `w-7 h-7` (era 9). Título `text-[12px]` (era 13).
+- Espaçamento da lista `space-y-1` (era 1.5).
 
-**B. Diálogo de confirmação antes do disparo (novo)**
+**`CaptureStepPreview.tsx`:** abrir como **popover compacto** (max-w-sm, max-h-[60dvh] com scroll interno) em vez de dialog full-screen no mobile; preview de mídia em thumbs 64×64; botões de variante viram pílulas pequenas.
 
-- Novo componente `ConfirmSendDialog` aberto pelo `CaptureSheet` / `QuickTemplateButton` / botões de passo, mostrando:
-  - Nome + número formatado do lead.
-  - Preview do conteúdo (texto renderizado, miniaturas das mídias).
-  - Botões: **Confirmar envio** / **Editar texto** (abre textarea inline) / **Cancelar**.
-- Preferência por consultor em `localStorage` ("não perguntar de novo nesta sessão") — default ligado.
+### Parte B — Destravar envio (1-a-1)
 
-**C. Toasts unificados**
+**`src/lib/whatsapp/send.ts` (sendStepWithFeedback):**
+- Adicionar `AbortController` com timeout de **20s** → toast “Servidor não respondeu, tente de novo”.
+- Ler `error.context` de forma defensiva: clonar antes de chamar `.json()`, fallback pra `.text()`.
+- Detectar `data.sent.length === 0 && data.ok === true` → mostrar warning (“Edge respondeu OK mas não enviou nada”).
 
-- Wrapper `sendStepWithFeedback(payload)` em `src/lib/whatsapp/send.ts` que chama as 3 edges, lê `error.code`, e mostra toast amigável (mapa de códigos → mensagens em PT-BR). Substituir chamadas diretas em `CaptureSheet.tsx`, `QuickTemplates.tsx`, `BulkSend*`.
+**`manual-step-send` (edge):**
+- Quando `phone_whatsapp` começa com `sem_celular_` OU não passa no regex BR, **logar com `console.warn`** já está, mas adicionar resposta `409` com `code:"lead_sem_whatsapp"` consistente (hoje é 400 — front trata ambos, só padronizar).
+- Antes de qualquer envio, checar `consultants.whapi_instance_status`: se ≠ `connected`, retornar `instance_disconnected` cedo (evita 502 silencioso da Whapi).
+- Quando `whapi.sendText/sendMedia` lança erro de rede, classificar como `whapi_network` (hoje cai em `whapi_send_failed` genérico) e expor `whapi_error` no toast.
+- Após enviar com sucesso, fazer `select` pra confirmar que `conversations.insert` gravou (defensive — alguns leads sem RLS adequado falham silenciosos).
 
-### Parte 2 — Captura de nome universal
+**`CaptureStepsList.tsx` / `CaptureStepPreview.tsx`:**
+- `doSend` agora não fecha o modal automaticamente em erro — mantém aberto mostrando o toast.
+- Botão de envio mostra **3 estados**: idle/sending/error (X vermelho por 3s) em vez de só voltar pro Send.
 
-**A. Inbound novo (WhatsApp)**
+### Parte C — Enviar sequência inteira (novo botão)
 
-- No `whapi-webhook`, ao criar customer pela primeira mensagem, garantir que o **primeiro outbound seja sempre o passo `step_type=message` com `captures: [{field:name}]**` (procurar por captura de `name` no fluxo da variante; se não encontrar, usar welcome legacy com "Qual seu nome?").
-- Auditar o resolver custom-flow para não pular esse passo quando a variante não tem áudio.
+**Novo botão “Enviar todos os passos” no `CaptureSheet` footer (esq. do CADASTRAR):**
+- Abre confirm dialog compacto: “Vou disparar os {N} passos pendentes pro {nome}. Delays humanos entre cada um (2–5s). Continuar?”
+- Cliente itera por `groups` (em ordem), chamando `sendStepWithFeedback` com `part:"all", continueFlow:false` pra cada passo não enviado.
+- Entre passos: delay aleatório 2500–4500ms (parecido com humano).
+- Mostra progress “3 de 10 enviados” no toast persistente; cancelável.
+- Se algum passo retornar `name_not_captured_yet`, pausa a fila e força clicar em “Pedir nome”.
+- Respeita guard: se `bot_paused=true` E `assigned_human_id != consultor logado`, avisa.
 
-**B. Lead criado pelo Modo Captação / chat aberto manualmente**
+### Parte D — Caso da Marcia 5511916827893
 
-- No `manual-step-send` e `manual-flow-send`: se `customer.name_source === 'unknown'` E o passo solicitado NÃO é de captura de nome, **bloquear** com erro `name_not_captured_yet` + mensagem "Antes de avançar peça o nome do lead — clique em 'Pedir nome'". 
-- Adicionar botão **"Pedir nome"** no header do `CaptureSheet` que dispara um capture_nome rápido (texto: "Antes de continuar, qual é o seu nome? 😊") e marca `conversation_step='aguardando_nome'`.
-- Quando o lead responder, o webhook salva em `customers.name` + `name_source='whatsapp_reply'` (lógica já existente, só validar).
-
-**C. Excel import (`igreen_sync` / `sem_celular_`)**
-
-- No upsert do importer, marcar `name_source='excel'` se nome veio preenchido — assim a regra B não bloqueia envio.
-
-### Parte 3 — Gamificação automática para todo lead novo
-
-- Trigger Postgres `on_customer_insert_gamify`:
-  - Garante `capture_mode='auto'` (já é default, só consolidar).
-  - Insere linha em `capture_xp_events` com `event='lead_in'` (+5 XP) se ainda não houver.
-  - Inicializa `capture_missions` (ou tabela equivalente) com missões padrão pendentes (capturar nome, conta, documento, finalizar cadastro).
-- No `whapi-webhook`, no primeiro inbound de cada lead, disparar `capture_xp_events` com `event='first_inbound'` (+5 XP) se ainda não existir.
-- Quando `name_source` muda de `unknown` → válido, disparar `event='name_captured'` (+10 XP). Idem para `bill_uploaded`, `doc_uploaded`, `cadastro_finalizado`.
-- `CaptureMissionsPanel` já lê dessas tabelas — só precisa que o trigger popule.
-
-### Parte 4 — Destravar a Marcia agora
-
-- Migration única para o lead `5511916827893`: zerar `conversation_step`, marcar pra perguntar o nome, disparar manual "Antes de continuar, qual é o seu nome?".
+- Adicionar **busca por telefone** no header do CaptureSheet: input “Buscar lead por número” → se não achar, oferecer “Criar lead novo com este número” (chama `customers insert` com `name=null, name_source=unknown, customer_origin='manual'`).
+- Migration auxiliar: garantir que o nome `5511916827893` seja procurado em variantes (com/sem 9º dígito) e logar quando o phone não existe (pra parar de tentar reset em leads-fantasma).
 
 ---
 
 ## Detalhes técnicos
 
-**Edges alteradas:** `manual-step-send`, `manual-flow-send`, `whatsapp-bulk-send`, `whapi-webhook` (apenas welcome path + first-inbound XP), novo helper `_shared/whapi/preflight.ts` e `_shared/captacao/xp.ts`.
+**Arquivos editados:**
+- `src/components/captacao/CaptureSheet.tsx` — compactar header/footer + botão “Enviar todos” + busca por telefone.
+- `src/components/captacao/CaptureStepsList.tsx` — linhas e botões menores; estado de erro.
+- `src/components/captacao/CaptureStepPreview.tsx` — popover compacto.
+- `src/lib/whatsapp/send.ts` — timeout 20s, parsing robusto de erro, detect “0 enviados”.
+- `supabase/functions/manual-step-send/index.ts` — pré-flight `whapi_instance_status`, classificação de `whapi_network`, status codes consistentes.
+- Novo `src/components/captacao/SendSequenceDialog.tsx` — confirma + barra de progresso + cancel.
 
-**Frontend alterado:** novo `src/components/whatsapp/ConfirmSendDialog.tsx`, novo `src/lib/whatsapp/send.ts` (wrapper + toast map), `src/components/captacao/CaptureSheet.tsx` (botão "Pedir nome" + usar wrapper), `src/components/whatsapp/QuickTemplates.tsx` (usar wrapper), `BulkSend*.tsx` (usar wrapper).
+**Sem mudança de DB.** (a checagem de `whapi_instance_status` já tem coluna em `consultants`).
 
-**DB:** colunas novas `customers.whapi_phone_valid` (bool), `customers.whapi_phone_valid_at` (timestamp), trigger `on_customer_insert_gamify`, eventos novos em `capture_xp_events` enum.
-
-**Memórias atualizadas:** `mem://features/manual-step-capture-prompt` (acrescentar bloqueio name_source=unknown), `mem://features/captacao-intel` (XP automático por lifecycle), nova `mem://whatsapp/preflight-and-confirm` documentando confirmação antes do disparo.
+**Memória nova:** `mem://features/capture-sheet-compact-and-sequence` — modo padrão compacto (h-44dvh), botão “Enviar todos” com delays humanos, timeout 20s no wrapper, busca por número para destravar leads-fantasma.
 
 ---
 
 ## Fora de escopo
 
-- Mudar copy dos passos de fluxo configurados pelos consultores (cada um edita o seu) MAS TEM O PRICIPAL DO SUPER ADMIN  NAO PODE SER APAGADO. .
-- Reescrever o OCR / `extract-energy-bill` (já tratado em fix anterior).
-- A/B/C variant rebalance.
+- Reescrever OCR.
+- Mudar copy dos passos.
+- ConfirmSendDialog global (fica adiado — o novo botão de sequência já cobre o caso crítico).
