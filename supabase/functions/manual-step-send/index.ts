@@ -257,6 +257,56 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ─── GUARD MISMATCH (auditoria 5511971254913): nome da conta ≠ nome do RG
+    // Bloqueia "Finalizar" enquanto consultor não confirmar titularidade.
+    {
+      const _stype = String((step as any).step_type || "");
+      const _skey = String((step as any).step_key || "").toLowerCase();
+      const isFinalStep = _stype === "finalizar_cadastro" || _skey === "finalizando" || _skey === "finalizar_cadastro";
+      const mismatch = (customer as any).name_mismatch_flag === true;
+      const acked = !!(customer as any).name_mismatch_acknowledged_at;
+      if (isFinalStep && mismatch && !acked && !body.skipNameGuard) {
+        return json({
+          ok: false, blocked: true,
+          code: "mismatch_pending",
+          error: "mismatch_pending",
+          message: `Antes de finalizar, confirme a titularidade: conta="${(customer as any).bill_holder_name || "—"}" × documento="${(customer as any).doc_holder_name || "—"}". Use o banner amarelo acima dos passos.`,
+        });
+      }
+    }
+
+    // ─── DEBOUNCE manual (5s) por (customer, step, part) — evita double-click duplicando áudio/texto
+    if (!body.force) {
+      try {
+        const sinceIso = new Date(Date.now() - 5_000).toISOString();
+        const targetStepKey = (step as any).step_key || String((step as any).id);
+        const { data: recentManual } = await supabase
+          .from("conversations")
+          .select("id, message_type, created_at")
+          .eq("customer_id", customer.id)
+          .eq("message_direction", "outbound")
+          .eq("conversation_step", targetStepKey)
+          .gte("created_at", sinceIso)
+          .order("created_at", { ascending: false })
+          .limit(5);
+        if (Array.isArray(recentManual) && recentManual.length > 0) {
+          const partMatch = body.part === "all"
+            ? true
+            : recentManual.some((r: any) => String(r.message_type) === body.part);
+          if (partMatch) {
+            const ageMs = Date.now() - new Date(recentManual[0].created_at).getTime();
+            console.log(`[manual-step-send] debounce — step="${targetStepKey}" part=${body.part} idade=${ageMs}ms`);
+            return json({
+              ok: true,
+              sent: [],
+              debounced: true,
+              message: "Mesma ação enviada há poucos segundos — ignorada para não duplicar.",
+            });
+          }
+        }
+      } catch (_e) { /* anti-rep é best-effort */ }
+    }
+
     const slotKey = (step as any).slot_key || (step as any).step_key;
 
 
