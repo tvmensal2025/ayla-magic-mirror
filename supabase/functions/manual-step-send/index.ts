@@ -323,12 +323,16 @@ Deno.serve(async (req) => {
             ? "phone_not_on_whatsapp"
             : lower.includes("instance") || lower.includes("disconnected") || lower.includes("not connected")
               ? "instance_disconnected"
-              : "whapi_send_failed";
+              : lower.includes("fetch") || lower.includes("network") || lower.includes("timeout") || lower.includes("econn")
+                ? "whapi_network"
+                : "whapi_send_failed";
           const friendly = code === "phone_not_on_whatsapp"
             ? `Esse número (${rawPhone}) não tem WhatsApp ativo.`
             : code === "instance_disconnected"
               ? "WhatsApp do consultor desconectado. Reconecte em /admin/conexao e tente de novo."
-              : `Whapi recusou o envio: ${msg}`;
+              : code === "whapi_network"
+                ? "Sem resposta da Whapi (rede). Tente novamente em alguns segundos."
+                : `Whapi recusou o envio: ${msg}`;
           return json({ code, error: code, message: friendly, whapi_error: msg }, 502);
         }
         // Parcial: avisa mas mantém o que já foi.
