@@ -8,15 +8,45 @@ import { normalizeSendStepError } from "@/lib/whatsapp/send";
 interface Props {
   consultantId: string;
   customerId: string;
+  /** Variante A/B/C do lead — filtra o fluxo certo */
+  variant?: "A" | "B" | "C";
   /** Map stepId -> "sent" | "responded" status */
   sentSteps: Set<string>;
   onSent: (stepId: string) => void;
   onEditTemplate?: (stepKey: string, text: string) => void;
 }
 
-interface StepRow { id: string; title: string | null; step_key: string | null; position: number; message_text: string | null; }
+interface StepRow {
+  id: string;
+  title: string | null;
+  step_key: string | null;
+  position: number;
+  message_text: string | null;
+  step_type?: string | null;
+  /** quando true, este é um tile sintético (não existe em bot_flow_steps) */
+  __synthetic?: boolean;
+}
 
-export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, onEditTemplate }: Props) {
+const SYNTHETIC_EMAIL: StepRow = {
+  id: "__synth_ask_email",
+  title: "📧 E-mail",
+  step_key: "ask_email",
+  position: 98,
+  message_text: null,
+  step_type: "capture_email",
+  __synthetic: true,
+};
+const SYNTHETIC_CONFIRM_PHONE: StepRow = {
+  id: "__synth_confirm_phone",
+  title: "📱 Confirmar WhatsApp",
+  step_key: "ask_phone_confirm",
+  position: 99,
+  message_text: null,
+  step_type: "confirm_phone",
+  __synthetic: true,
+};
+
+export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sentSteps, onSent, onEditTemplate }: Props) {
   const { toast } = useToast();
   const [sending, setSending] = useState<string | null>(null);
   const [steps, setSteps] = useState<StepRow[]>([]);
@@ -25,37 +55,49 @@ export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, 
     let mounted = true;
     (async () => {
       const { data: flows } = await supabase
-        .from("bot_flows").select("id")
-        .eq("consultant_id", consultantId).eq("is_active", true).limit(1);
-      if (!flows?.[0]) { if (mounted) setSteps([]); return; }
+        .from("bot_flows").select("id, variant")
+        .eq("consultant_id", consultantId).eq("is_active", true)
+        .order("variant", { ascending: true });
+      const list = (flows as any[]) || [];
+      const flow = list.find((f) => String(f.variant) === variant) || list[0];
+      if (!flow) { if (mounted) setSteps([]); return; }
       const { data } = await supabase
         .from("bot_flow_steps")
-        .select("id, title, step_key, position, message_text")
-        .eq("flow_id", flows[0].id)
+        .select("id, title, step_key, position, message_text, step_type")
+        .eq("flow_id", flow.id)
         .eq("is_active", true)
         .order("position", { ascending: true })
-        .limit(10);
-      if (mounted) setSteps((data as StepRow[]) || []);
+        .limit(20);
+      const rows = ((data as StepRow[]) || []);
+      // Garante que email + confirm WhatsApp sempre apareçam (essenciais p/ cadastro).
+      const hasEmail = rows.some((r) => r.step_type === "capture_email" || r.step_key === "ask_email");
+      const hasConfirm = rows.some((r) => r.step_type === "confirm_phone" || r.step_key === "ask_phone_confirm");
+      const merged = [...rows.slice(0, 10)];
+      if (!hasEmail) merged.push(SYNTHETIC_EMAIL);
+      if (!hasConfirm) merged.push(SYNTHETIC_CONFIRM_PHONE);
+      if (mounted) setSteps(merged);
     })();
     return () => { mounted = false; };
-  }, [consultantId]);
+  }, [consultantId, variant]);
 
   const display = steps;
 
 
-  const sendStep = async (stepId: string, label: string, continueFlow = true) => {
-    // B1 — defesa anti double-click: ignora segundo clique enquanto qualquer envio rola.
+  const sendStep = async (step: StepRow, label: string, continueFlow = true) => {
     if (sending) return;
-    setSending(stepId);
+    setSending(step.id);
     try {
+      const payload: any = { consultantId, customerId, part: "all", continueFlow, variant };
+      if (step.__synthetic) payload.stepKey = step.step_key;
+      else payload.stepId = step.id;
       const { data, error } = await supabase.functions.invoke("manual-step-send", {
-        body: { consultantId, customerId, stepId, part: "all", continueFlow },
+        body: payload,
       });
       if (error || (data as any)?.error || (data as any)?.ok === false) {
         const parsed = normalizeSendStepError(error, data);
         throw new Error(parsed.message);
       }
-      onSent(stepId);
+      onSent(step.id);
       const next = (data as any)?.next_step;
       toast({ title: continueFlow ? `Seguindo fluxo ✓` : `Passo enviado ✓`, description: next ? `${label} → ${next}` : label });
     } catch (e: any) {
@@ -66,6 +108,7 @@ export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, 
   };
 
   const loadTemplate = async (stepId: string, stepKey: string | null) => {
+    if (stepId.startsWith("__synth_")) { onEditTemplate?.(stepKey || "", ""); return; }
     const { data } = await supabase.from("bot_flow_steps").select("message_text").eq("id", stepId).maybeSingle();
     onEditTemplate?.(stepKey || stepId, (data as any)?.message_text || "");
   };
@@ -119,7 +162,7 @@ export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, 
                   size="sm"
                   variant={sent ? "outline" : "default"}
                   className="h-7 px-2 text-[11px] flex-1"
-                  onClick={() => sendStep(s.id, s.title || s.step_key || `Passo ${s.position}`)}
+                  onClick={() => sendStep(s as StepRow, s.title || s.step_key || `Passo ${s.position}`)}
                   disabled={!!sending}
                   aria-busy={isSending}
                 >

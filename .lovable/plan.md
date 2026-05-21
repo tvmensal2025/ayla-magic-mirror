@@ -1,62 +1,85 @@
-# Plano
+# Auditoria — Lead 5511971254913 (Josinete/Paulo/Leoncio)
 
-## 1) Modo Game 100% funcional (atalhos, templates, fluxos)
+Investiguei o cliente `d4cd54bf-7c34-47d5-aa00-7595922fbe39` (ligado ao consultor `0c2711ad…`) cruzando `customers`, `conversations` e os edge logs. Aqui está o que aconteceu e o que precisa ser corrigido.
 
-Hoje o `GameComposer` é minimalista (só texto + áudio). Vou **substituir** pelo `MessageComposer` completo (mesmo do chat) já gancheado pra ganhar XP:
+## O que aconteceu de verdade
 
-- Em `CaptacaoPanel` (quando `gameOn && selectedId`), carregar `templates` via `useTemplates(consultantId)` e renderizar `<MessageComposer …/>` no lugar do `GameComposer` atual.
-- Bindings:
-  - `onSend(text)` → `sendWhatsAppMessage({mediaCategory:"text", phone, text, …})` + `progress.registerMessage("text")` + `sfx.coin` + `XpToast(+5)`.
-  - `onSendAudio(base64)` → envia OGG + `registerMessage("audio")` + XpToast(+10).
-  - `onSendAudioUrl(url)` → mesmo XP de áudio.
-  - `onSendMedia(url, caption, mediaType)` → envia + XpToast(+8) ("imagem/vídeo/documento").
-  - `templates` + `customerId`/`customerJid`/`customerName` passados pro composer → "/" abre `QuickReplyMenu`, atalhos `/oi` funcionam, anexar arquivo funciona, `FlowQuickBar` e `AiSuggestReplies` aparecem.
-- Detalhe XP: subir nível dispara `LevelUpOverlay` igual aos passos.
-- Remover o componente `GameComposer.tsx` (criado na turn anterior) — substituído pelo `MessageComposer`.
-
-**Arquivos**:
-- Editar `src/components/captacao/CaptacaoPanel.tsx`
-- Apagar `src/components/captacao/game/GameComposer.tsx`
-
-## 2) Mobile no Modo Game (viewport ≤ 768px)
-
-Hoje o shell é `[lista | main | aside]` em flex-row — quebra em 390px. Vou tornar **responsivo**:
-
-- **Mobile (`md:`-)**: layout em coluna única com 2 "telas":
-  - Sem lead selecionado → só a `CaptureLeadList` (full width).
-  - Com lead selecionado → header com botão **← Voltar** (limpa `selectedId`), depois grid de 10 passos, composer e (collapsible) ficha + achievements no fim. `CaptureLeadList` esconde.
-- **Desktop (`md:`+)**: mantém o layout atual 3 colunas.
-- `PlayerHud` e `QuestsBar` no topo viram chips menores no mobile (já dá com `text-xs` e flex-wrap).
-- Header do painel: ícone-toggle do som vira `size="icon"` em mobile pra liberar espaço.
-
-**Arquivos**:
-- Editar `src/components/captacao/CaptacaoPanel.tsx`
-- Editar `src/components/captacao/CaptureLeadList.tsx` (garantir `w-full md:w-72`)
-- Editar `src/components/captacao/CaptureLeadCard.tsx` (já tem `embedded`, garantir bom encolhimento)
-
-## 3) Ordem das mensagens (última = última)
-
-Bug em `src/hooks/useMessages.ts:164`:
-
-```ts
-.sort((a, b) => (a.timestamp - b.timestamp) || (b.sourceIndex - a.sourceIndex))
+```text
+15:04  inbound  "Oi"
+15:05  outbound "{Rafael}, qual o valor médio da sua conta de luz?"   ← variável não substituída
+15:05  inbound  "leoncio"                                              ← lead respondeu o NOME no slot de VALOR
+15:05  outbound "{Leoncio}, qual o valor médio…"                        ← bot capturou como nome só pra montar saudação
+15:06  inbound  "399"
+15:06  outbound "{Leoncio}, qual o valor…"                              ← REPETIU mesma pergunta
+15:08  inbound  "sim"
+15:08-10  outbound  passo a71ba814 (texto "É simples…" + imagem fazenda_solar) DUPLICADO 2x
+15:10  outbound passo 559b8f1b ("Deu para entender…") DUPLICADO 3x
+15:10  outbound aguardando_conta
+15:11  inbound  foto conta            → OCR: JOSINETE NUNES DA SILVA (bill_holder_name)
+15:11  inbound  "✅ SIM"               → confirmou conta
+15:11  outbound aguardando_doc_auto
+15:12  inbound  foto doc              → OCR: PAULO ROBERTO FIGUEIREDO (doc_holder_name)
+                                       mismatch_flag=TRUE (sim=0.04)
+15:12  inbound  "✅ SIM" doc
+        →  step pulou direto pra `finalizando` (esperado: `confirmar_titularidade`)
+        →  NUNCA pediu email, NUNCA confirmou WhatsApp, NUNCA fechou o resumo do game
 ```
 
-O tiebreaker assume sempre que o feed bruto é "newest-first". Quando o Whapi/Evolution devolve mensagens **com o mesmo `messageTimestamp`** (resolução de 1 segundo, comum no envio sequencial áudio→imagem→texto), e o feed vem na ordem normal (oldest-first em alguns endpoints), a lista fica embaralhada — a última enviada aparece **antes** das anteriores.
+Estado final em `customers`:
 
-Correção:
+- `name = "JOSINETE NUNES DA SILVA"` (sobrescrito pelo OCR da conta)
+- `doc_holder_name = "PAULO ROBERTO FIGUEIREDO"` (RG)
+- `name_mismatch_flag = true`, `name_mismatch_acknowledged_at = null`
+- `email = null`, `phone_contact_confirmed = false`
+- `conversation_step = "finalizando"`
+- `flow_variant = "A"` fixo (sem chip A/B/C no painel)
 
-1. Detectar a direção do feed bruto: `descSource = raw[0].timestamp >= raw[raw.length-1].timestamp`.
-2. Tiebreaker dinâmico:
-   - feed `desc` (newest-first) → `b.sourceIndex - a.sourceIndex` (mantém atual).
-   - feed `asc` (oldest-first) → `a.sourceIndex - b.sourceIndex`.
-3. Otimização local: ao adicionar mensagem otimista (`setMessages(prev => [...prev, optimistic])` na linha ~338), usar `timestamp: Date.now() / 1000` (float, sem `floor`) — garante que a otimista sempre vença qualquer empate inteiro vindo do servidor.
-4. Tiebreaker secundário por `id` lexicográfico quando `sourceIndex` empata — IDs do Whapi (BAE…) costumam ser monotônicos.
+## Causas-raiz identificadas
 
-**Arquivo**:
-- Editar `src/hooks/useMessages.ts`
+1. **Variável `{name}` não substituída** — o passo do FluxoCamila usa `{Rafael}` / `{Leoncio}` literais em vez do token `{{nome}}` esperado pelo replacer (ver mem `whatsapp-message-variables`). Por isso o bot tratou a primeira resposta ("leoncio") como nome e não como valor da conta.
+2. **Resolver de fluxo custom ignora `confirmar_titularidade**` — em `whapi-webhook/handlers/bot-flow.ts` o branch `confirmando_dados_doc → SIM` (linha ~3324) checa `name_mismatch_flag` e roteia para `confirmar_titularidade`. Mas quando há fluxo custom ativo, o resolver pós-switch (mem `custom-flow-step-engine`, ~linha 2347) usa `findNextActiveFlowStep` sem respeitar `updates.conversation_step = "confirmar_titularidade"`, sobrescrevendo para o próximo passo custom (`finalizando`). Resultado: pula confirmação de titularidade + email + confirmação de telefone.
+3. **Steps duplicados (audio/texto/imagem 2-3x)** — o passo `559b8f1b` foi disparado pelo cron de re-engajamento porque o lead respondeu "sim" enquanto o passo anterior ainda estava no buffer de envio. O anti-rep de 10min só cobre `last_custom_prompt_at` para `aguardando_conta/doc_auto`, não para passos `message` do fluxo custom.
+4. **Lock de nome funcionou tarde demais** — `safeAssignName` bloqueou o OCR do RG (mantendo JOSINETE), mas o lock deveria ter funcionado ao contrário aqui: o consultor deveria ter visto que o nome digitado pelo lead ("leoncio") foi descartado porque a variável veio errada. Nenhum aviso na UI.
+5. **MessageComposer no Modo Game não tem chip A/B/C** — variant fica fixo no que está em `customers.flow_variant` (round-robin), sem o consultor poder forçar B (sem áudio) ou C (vídeo).
+6. **Game não fechou cadastro** — os 10 quadrados marcaram só até "Documento com foto"; faltam os tiles "Email" e "Confirmar WhatsApp" porque o fluxo custom não tem passos `capture_email` nem `confirm_phone` ativos para essa variante.
 
-## Out of scope
+## Plano de correção
 
-- Não vou mexer em fluxo do webhook nem em horários de delay entre disparos do bot.
-- Não vou criar nova edge function; tudo no front.
+### A. Backend — `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
+
+1. **Honrar `confirmar_titularidade` mesmo com fluxo custom ativo.**
+  No bloco pós-switch (~2347 e equivalente do confirm doc), antes de chamar `findNextActiveFlowStep`, checar:
+2. **Anti-rep também para passos custom tipo `message`.** No `dispatchStepFromFlow`, gravar `last_custom_prompt_at` + `last_custom_prompt_step_id` e, antes de disparar, bloquear se < 30 s e mesmo step_id.
+3. **Fallback de titularidade quando custom flow não tem `capture_email`/`confirm_phone`.** Após `confirmar_titularidade` resolver "Mesma pessoa", mandar para `ask_email` (legacy) → `ask_phone_confirm` antes de `finalizando`, mesmo com flow custom ativo.
+
+### B. Backend — `supabase/functions/_shared/whatsapp-vars.ts` (ou equivalente do replacer)
+
+4. **Aceitar tanto `{nome}` / `{{nome}}` / `{name}**` (regex `\{\{?\s*(nome|name)\s*\}?\}`). Hoje os admins gravam `{Rafael}` achando que é variável e vira literal.
+
+### C. Frontend — Modo Game (`src/components/captacao/CaptacaoPanel.tsx` + `MessageComposer`)
+
+5. **Chip A/B/C visível no header do Game** — botão segmentado (`ToggleGroup`) que faz `update customers.flow_variant` + recarrega passos. Já existe lógica em `manual-step-send` (`variant`), só faltava a UI.
+6. **Aviso "nome divergente"** — banner amarelo quando `name_mismatch_flag=true` mostrando `bill_holder_name` × `doc_holder_name` e dois CTAs: "Mesma pessoa", "Outro titular (digitar relação)". Dispara o passo `confirmar_titularidade` via `manual-step-send`.
+7. **Sempre exibir os 10 tiles canônicos** (welcome→nome→valor→explicação→conta→confirma conta→doc→confirma doc→**email**→**confirma whatsapp**→finalizar) mesmo se o fluxo custom não tiver esses passos — os 2 últimos chamam `ask_email` e `ask_phone_confirm` legacy.
+
+### D. Limpeza do lead atual
+
+8. Reabrir o lead `d4cd54bf…`:
+  ```sql
+   UPDATE customers SET
+     name = NULL, name_source = 'unknown',
+     conversation_step = 'ask_email',
+     name_mismatch_acknowledged_at = now(),
+     bill_owner_relationship = 'titular'  -- a confirmar com o consultor
+   WHERE id = 'd4cd54bf-7c34-47d5-aa00-7595922fbe39';
+  ```
+   (faço só depois da sua aprovação — quero confirmar se o titular real é Josinete ou Paulo)
+
+## Fora de escopo
+
+- Não vou mexer no compress-worker, no portal-worker, nem no Evolution webhook.
+- Não vou refazer FluxoCamila no admin — só ajusto o engine pra tolerar passos faltando.
+
+## Pergunta para você antes de eu implementar
+
+Quem é o titular real desse cadastro: **Josinete** (nome da conta) ou **Paulo Roberto** (nome do RG)? IREMOS LIMPAR ESSE LEAD COLOQUEI PARA MAPEAR E ENTENDER O ERRO.

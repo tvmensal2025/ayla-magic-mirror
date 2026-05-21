@@ -47,6 +47,8 @@ const FRIENDLY: Record<string, string> = {
     "Antes de avançar, peça o nome do lead — clique em 'Pedir nome' no topo da ficha.",
   awaiting_inbound:
     "Aguarde o lead responder antes de enviar o próximo passo.",
+  mismatch_pending:
+    "Confirme a titularidade antes de finalizar — o nome da conta não bate com o do RG.",
   nothing_to_send: "Esse passo não tem mídia nem texto pra enviar.",
   whapi_token_missing: "Token do WhatsApp não configurado. Avise o admin.",
   phone_not_on_whatsapp: "Esse número não tem WhatsApp ativo.",
