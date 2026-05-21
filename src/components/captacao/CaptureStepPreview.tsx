@@ -23,7 +23,7 @@ interface Props {
   variants?: Record<string, StepLike>;
   /** Called when user changes the selected variant via chips. */
   onVariantChange?: (variant: string) => void;
-  onSend: () => void;
+  onSend: (opts?: { continueFlow?: boolean }) => void;
   sending?: boolean;
 }
 
