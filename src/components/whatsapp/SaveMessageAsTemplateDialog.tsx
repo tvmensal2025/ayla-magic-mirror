@@ -184,9 +184,9 @@ export function SaveMessageAsTemplateDialog({ open, onOpenChange, message, consu
               placeholder="/oi"
               className={shortcutInvalid ? "border-destructive" : ""}
             />
-            <p className="text-[10px] text-muted-foreground mt-1">
+            <p className={`text-[10px] mt-1 ${shortcutInvalid ? "text-destructive" : "text-muted-foreground"}`}>
               {shortcutInvalid
-                ? "Use /letras-ou-numeros (2-20 chars)"
+                ? "Atalho precisa ter pelo menos 2 letras/números após a / (ex: /oi)"
                 : "Digite no chat (ex: /oi) e o template é enviado direto"}
             </p>
           </div>
@@ -202,14 +202,31 @@ export function SaveMessageAsTemplateDialog({ open, onOpenChange, message, consu
               />
             </div>
           )}
+
+          {isTextOnly && (
+            <div>
+              <Label className="text-xs">Texto *</Label>
+              <Textarea
+                value={caption}
+                onChange={(e) => setCaption(e.target.value)}
+                placeholder="Conteúdo do template. Use {{nome}} e {{valor_conta}}"
+                rows={3}
+              />
+            </div>
+          )}
         </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>Cancelar</Button>
-          <Button onClick={handleSave} disabled={!canSave || saving}>
-            {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Bookmark className="w-4 h-4 mr-1" />}
-            Salvar template
-          </Button>
+        <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+          {disabledReason && (
+            <p className="text-[11px] text-amber-500 flex-1 text-left">⚠️ {disabledReason}</p>
+          )}
+          <div className="flex gap-2 justify-end">
+            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={!canSave || saving} title={disabledReason || undefined}>
+              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Bookmark className="w-4 h-4 mr-1" />}
+              Salvar template
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
