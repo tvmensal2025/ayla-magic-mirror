@@ -63,41 +63,46 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
     (async () => {
       setLoading(true);
 
-      // Descobre a variante A/B/C do cliente (consultor pode ter múltiplos
-      // bot_flows ativos — um por variante). Sem o filtro por variant, o
-      // popover pode mostrar passos do fluxo errado, ou vazio.
-      let variant = "A";
+      // Carrega TODOS os fluxos ativos (A, B, C) e a variante atual do cliente.
+      let custVariant: "A" | "B" | "C" = "A";
       if (customerId) {
         const { data: cust } = await supabase
           .from("customers").select("flow_variant")
           .eq("id", customerId).maybeSingle();
-        variant = (cust as { flow_variant?: string } | null)?.flow_variant || "A";
+        const v = String((cust as { flow_variant?: string } | null)?.flow_variant || "A").toUpperCase();
+        if (v === "A" || v === "B" || v === "C") custVariant = v;
       }
 
-      let { data: flow } = await supabase
-        .from("bot_flows").select("id")
+      const { data: flowsAll } = await supabase
+        .from("bot_flows").select("id, variant, created_at")
         .eq("consultant_id", consultantId).eq("is_active", true)
-        .eq("variant", variant)
-        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+        .order("created_at", { ascending: false });
+      const flowsList = ((flowsAll as Array<{ id: string; variant: string }> | null) || []);
+      const byVariant = new Map<"A" | "B" | "C", string>();
+      flowsList.forEach((f) => {
+        const v = String(f.variant || "A").toUpperCase() as "A" | "B" | "C";
+        if (["A", "B", "C"].includes(v) && !byVariant.has(v)) byVariant.set(v, f.id);
+      });
+      const available = (["A", "B", "C"] as const).filter((v) => byVariant.has(v));
+      if (mounted) setVariantsAvailable(available.length > 0 ? available : ["A"]);
 
-      if (!flow?.id) {
-        const { data: anyFlow } = await supabase
-          .from("bot_flows").select("id")
-          .eq("consultant_id", consultantId).eq("is_active", true)
-          .order("created_at", { ascending: false }).limit(1).maybeSingle();
-        flow = anyFlow;
-      }
+      // Variante selecionada: default = a do cliente (se existir), senão a primeira.
+      const selected: "A" | "B" | "C" = byVariant.has(custVariant)
+        ? custVariant
+        : (available[0] || "A");
+      if (mounted) setVariant(selected);
 
-      if (!flow?.id) { if (mounted) { setSteps([]); setLoading(false); } return; }
+      const flowId = byVariant.get(selected);
+      if (!flowId) { if (mounted) { setSteps([]); setLoading(false); } return; }
       const { data } = await supabase
         .from("bot_flow_steps")
         .select("id, step_key, title, slot_key, message_text, position")
-        .eq("flow_id", flow.id).eq("is_active", true)
+        .eq("flow_id", flowId).eq("is_active", true)
         .order("position", { ascending: true });
       if (mounted) { setSteps((data as Step[]) || []); setLoading(false); }
     })();
     return () => { mounted = false; };
-  }, [open, consultantId, customerId]);
+  }, [open, consultantId, customerId, variant]);
 
 
   // Load preview parts when opening the single-step preview
