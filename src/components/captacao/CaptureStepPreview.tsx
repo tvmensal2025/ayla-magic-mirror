@@ -117,98 +117,94 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto p-0">
-        <DialogHeader className="p-4 pb-2 border-b border-border space-y-2">
-          <DialogTitle className="text-sm flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold shrink-0">
-              Variante {step.variant}
+      <DialogContent className="max-w-sm max-h-[70dvh] overflow-y-auto p-0">
+        <DialogHeader className="p-2.5 pb-1.5 border-b border-border space-y-1.5">
+          <DialogTitle className="text-xs flex items-center gap-1.5">
+            <span className="px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground text-[9px] font-bold shrink-0">
+              V{step.variant}
             </span>
             <span className="truncate">{step.title || step.step_key}</span>
           </DialogTitle>
-          <p className="text-[11px] text-muted-foreground">Prévia exata do que o cliente vai receber</p>
           {variantKeys.length > 1 && onVariantChange && (
-            <div className="flex items-center gap-1.5 pt-1">
-              <span className="text-[10px] text-muted-foreground">Variante:</span>
+            <div className="flex items-center gap-1">
               {variantKeys.map((v) => (
                 <button
                   key={v}
                   type="button"
                   onClick={() => onVariantChange(v)}
-                  className={`px-2.5 h-7 rounded-full text-[11px] font-bold border transition-colors ${
+                  className={`px-1.5 h-5 rounded-full text-[10px] font-bold border transition-colors ${
                     v === step.variant
                       ? "bg-primary text-primary-foreground border-primary"
                       : "bg-card text-foreground border-border hover:border-primary/50"
                   }`}
                   title={VARIANT_HINT[v] || ""}
                 >
-                  {v} <span className="opacity-70 font-normal">{VARIANT_HINT[v] || ""}</span>
+                  {v}
                 </button>
               ))}
+              <span className="text-[9px] text-muted-foreground ml-1">{VARIANT_HINT[step.variant]}</span>
             </div>
           )}
         </DialogHeader>
 
-        <div className="p-4 space-y-3 bg-muted/20">
+        <div className="p-2.5 space-y-2 bg-muted/20">
           {loading && (
-            <div className="flex items-center justify-center py-8 text-muted-foreground gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" /> Carregando…
+            <div className="flex items-center justify-center py-4 text-muted-foreground gap-2 text-xs">
+              <Loader2 className="w-3 h-3 animate-spin" /> Carregando…
             </div>
           )}
 
           {!loading && skippedAudios > 0 && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
-              ℹ️ Variante B (texto puro): {skippedAudios} áudio{skippedAudios > 1 ? "s" : ""} ignorado{skippedAudios > 1 ? "s" : ""}. Escreva a versão em texto no campo do passo em <span className="font-semibold">/admin/fluxos</span>.
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-200">
+              ℹ️ Variante B: {skippedAudios} áudio ignorado.
             </div>
           )}
 
           {!loading && orderedMedias.length === 0 && !renderedText && (
-            <p className="text-xs text-muted-foreground italic text-center py-6">
-              Nenhuma mídia ou texto configurado para essa variante.
+            <p className="text-[11px] text-muted-foreground italic text-center py-4">
+              Nenhuma mídia ou texto.
             </p>
           )}
 
           {!loading && orderedMedias.map((m) => {
             const kind = String(m.kind).toLowerCase();
             return (
-              <div key={m.id} className="rounded-lg bg-card border border-border p-3 space-y-2">
-                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase font-semibold">
-                  {kind === "audio" && <Mic className="w-3 h-3 text-emerald-500" />}
-                  {kind === "image" && <ImageIcon className="w-3 h-3 text-amber-500" />}
-                  {kind === "video" && <Video className="w-3 h-3 text-cyan-500" />}
-                  {kind === "text" && <FileText className="w-3 h-3" />}
-                  {kind} {m.label ? `· ${m.label}` : ""}
+              <div key={m.id} className="rounded-md bg-card border border-border p-2 space-y-1.5">
+                <div className="flex items-center gap-1 text-[9px] text-muted-foreground uppercase font-semibold">
+                  {kind === "audio" && <Mic className="w-2.5 h-2.5 text-emerald-500" />}
+                  {kind === "image" && <ImageIcon className="w-2.5 h-2.5 text-amber-500" />}
+                  {kind === "video" && <Video className="w-2.5 h-2.5 text-cyan-500" />}
+                  {kind === "text" && <FileText className="w-2.5 h-2.5" />}
+                  {kind}
                 </div>
                 {kind === "audio" && m.url && (
-                  <audio src={m.url} controls className="w-full" />
+                  <audio src={m.url} controls className="w-full h-8" />
                 )}
                 {kind === "image" && m.url && (
-                  <img src={m.url} alt={m.label || "preview"} className="w-full rounded-md max-h-64 object-contain bg-black/20" />
+                  <img src={m.url} alt={m.label || "preview"} className="w-full rounded-md max-h-40 object-contain bg-black/20" />
                 )}
                 {kind === "video" && m.url && (
-                  <video src={m.url} controls className="w-full rounded-md max-h-64 bg-black/30" preload="metadata" />
+                  <video src={m.url} controls className="w-full rounded-md max-h-40 bg-black/30" preload="metadata" />
                 )}
               </div>
             );
           })}
 
           {!loading && renderedText && (
-            <div className="rounded-lg bg-[#005c4b]/90 text-white p-3 ml-6 shadow-sm">
-              <div className="flex items-center gap-1.5 text-[10px] opacity-80 uppercase font-semibold mb-1">
-                <FileText className="w-3 h-3" /> mensagem
-              </div>
-              <p className="text-sm whitespace-pre-wrap leading-snug">{renderedText}</p>
+            <div className="rounded-md bg-[#005c4b]/90 text-white p-2 ml-4 shadow-sm">
+              <p className="text-[12px] whitespace-pre-wrap leading-snug">{renderedText}</p>
             </div>
           )}
         </div>
 
-        <div className="p-3 border-t border-border bg-card sticky bottom-0">
+        <div className="p-2 border-t border-border bg-card sticky bottom-0">
           <Button
-            className="w-full h-11 gap-2 font-bold"
+            className="w-full h-9 gap-1.5 font-bold text-xs"
             onClick={onSend}
             disabled={sending}
           >
-            {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            Enviar variante {step.variant} agora
+            {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+            Enviar variante {step.variant}
           </Button>
         </div>
       </DialogContent>
