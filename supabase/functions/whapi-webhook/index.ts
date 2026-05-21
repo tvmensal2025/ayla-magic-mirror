@@ -491,12 +491,17 @@ Deno.serve(async (req) => {
       "ask_name", "ask_email", "ask_cpf", "ask_rg", "ask_cep",
       "ask_number", "ask_complement", "ask_bill_value",
       "ask_phone_confirm", "aguardando_conta", "confirmando_dados_conta",
-      "aguardando_doc_auto", "ask_doc_frente_manual", "ask_doc_verso_manual",
+      "aguardando_doc_auto", "aguardando_doc_frente", "aguardando_doc_verso",
+      "ask_doc_frente_manual", "ask_doc_verso_manual",
+      "ask_tipo_documento", "confirmando_dados_doc", "confirmar_titularidade",
       "ask_finalizar", "finalizando", "portal_submitting",
       "aguardando_otp", "validando_otp",
     ]);
     const currentStep = String((customer as any)?.conversation_step || "");
-    const inActiveCapture = ACTIVE_CAPTURE_STEPS.has(currentStep);
+    const UUID_RX_LOCAL = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isCustomFlowStep = UUID_RX_LOCAL.test(currentStep) || currentStep.startsWith("passo_");
+    const isCaptureModeManual = (customer as any)?.capture_mode === "manual";
+    const inActiveCapture = ACTIVE_CAPTURE_STEPS.has(currentStep) || (isCaptureModeManual && isCustomFlowStep);
 
     if (globalAiDisabled === true && !isFile && !inActiveCapture) {
       await supabase.from("conversations").insert({
