@@ -43,15 +43,55 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const [xpToast, setXpToast] = useState<number | null>(null);
   const [levelUp, setLevelUp] = useState<{ level: number; label: string } | null>(null);
 
-  useEffect(() => { setSentSteps(new Set()); setPhone(null); }, [selectedId]);
+  useEffect(() => { setSentSteps(new Set()); setPhone(null); setCustomerName(null); setShowAside(false); }, [selectedId]);
 
   useEffect(() => {
     if (!selectedId) return;
     void (async () => {
-      const { data } = await supabase.from("customers").select("phone_whatsapp").eq("id", selectedId).maybeSingle();
-      setPhone((data as { phone_whatsapp?: string } | null)?.phone_whatsapp || null);
+      const { data } = await supabase.from("customers").select("phone_whatsapp, name").eq("id", selectedId).maybeSingle();
+      const row = data as { phone_whatsapp?: string; name?: string } | null;
+      setPhone(row?.phone_whatsapp || null);
+      setCustomerName(row?.name || null);
     })();
   }, [selectedId]);
+
+  const customerJid = phone ? `${phone.replace(/\D/g, "")}@s.whatsapp.net` : undefined;
+
+  const xpReward = (kind: "text" | "audio" | "media") => {
+    const res = progress.registerMessage(kind);
+    setXpToast(res.gainedXp);
+    sfx.coin(sound);
+    if (res.leveledUp) {
+      setTimeout(() => { sfx.levelUp(sound); setLevelUp({ level: res.newLevel, label: progress.rank.label }); }, 500);
+    }
+  };
+
+  const sendText = async (text: string) => {
+    if (!phone) { sonnerToast.error("Lead sem telefone"); return; }
+    if (!instanceName) { sonnerToast.error("WhatsApp desconectado"); return; }
+    const r = await sendWhatsAppMessage({ instanceName, phone, mediaCategory: "text", text, isWhapi });
+    if (r.status === "failed") { sonnerToast.error(r.error || "Falha ao enviar"); return; }
+    xpReward("text");
+  };
+  const sendAudioB64 = async (b64: string) => {
+    if (!phone || !instanceName) return;
+    const r = await sendWhatsAppMessage({ instanceName, phone, mediaCategory: "audio", mediaUrl: `data:audio/ogg;base64,${b64}`, isWhapi });
+    if (r.status === "failed") { sonnerToast.error(r.error || "Falha ao enviar áudio"); return; }
+    xpReward("audio");
+  };
+  const sendAudioUrl = async (url: string) => {
+    if (!phone || !instanceName) return;
+    const r = await sendWhatsAppMessage({ instanceName, phone, mediaCategory: "audio", mediaUrl: url, isWhapi });
+    if (r.status === "failed") { sonnerToast.error(r.error || "Falha ao enviar áudio"); return; }
+    xpReward("audio");
+  };
+  const sendMedia = async (url: string, caption: string, mediaType: "image" | "video" | "document") => {
+    if (!phone || !instanceName) return;
+    const fileName = mediaType === "document" ? (url.split("/").pop()?.split("?")[0] || "documento") : undefined;
+    const r = await sendWhatsAppMessage({ instanceName, phone, mediaCategory: mediaType, mediaUrl: url, text: caption, fileName, isWhapi });
+    if (r.status === "failed") { sonnerToast.error(r.error || "Falha ao enviar mídia"); return; }
+    xpReward("media");
+  };
 
   const handleSubmitted = async () => {
     await bump();
