@@ -191,7 +191,7 @@ export function SendSequenceDialog({
                   <Send className="w-3.5 h-3.5" /> Forçar envio
                 </Button>
               ) : (
-                <Button size="sm" className="flex-1 h-9 gap-1.5 font-bold" onClick={() => sendNext()} disabled={phase === "sending" || phase === "ready_next" === false && phase !== "idle" && phase !== "error" && phase !== "ready_next"}>
+                <Button size="sm" className="flex-1 h-9 gap-1.5 font-bold" onClick={() => sendNext()} disabled={phase === "sending"}>
                   {phase === "sending" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                   {phase === "sending" ? "Enviando…" : idx === 0 ? "Enviar 1º passo" : "Enviar próximo passo"}
                 </Button>
