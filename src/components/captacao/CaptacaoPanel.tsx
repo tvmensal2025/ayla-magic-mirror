@@ -23,6 +23,9 @@ import { MessageComposer } from "@/components/whatsapp/MessageComposer";
 import { useTemplates } from "@/hooks/useTemplates";
 import { sendWhatsAppMessage } from "@/services/messageSender";
 import { toast as sonnerToast } from "sonner";
+import { useCaptureSession } from "@/hooks/useCaptureSession";
+import { FinalizeButton } from "@/components/captacao/FinalizeButton";
+import { Bot, User } from "lucide-react";
 
 interface Props { consultantId: string; onOpenChat?: (phone: string) => void; instanceName?: string | null; isWhapi?: boolean; }
 
