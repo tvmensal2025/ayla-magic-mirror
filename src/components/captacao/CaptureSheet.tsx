@@ -37,6 +37,7 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
   const lastCountRef = useRef(0);
 
   useEffect(() => { setSentSteps(new Set()); setMinimized(false); setExpanded(false); }, [customerId]);
+  const pendingSteps = useMemo(() => allSteps.filter((s) => !sentSteps.has(s.step_key)), [allSteps, sentSteps]);
   useEffect(() => { if (!open) { setMinimized(false); setExpanded(false); } }, [open]);
 
   // Garante modo manual ao abrir
