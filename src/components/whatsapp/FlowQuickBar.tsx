@@ -54,6 +54,8 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
   const [confirmFrom, setConfirmFrom] = useState<number | null>(null);
   const [fromParts, setFromParts] = useState<Record<string, Part[]>>({});
   const [oneByOneStepId, setOneByOneStepId] = useState<string | null>(null);
+  const [variant, setVariant] = useState<"A" | "B" | "C">("A");
+  const [variantsAvailable, setVariantsAvailable] = useState<Array<"A" | "B" | "C">>(["A"]);
 
   useEffect(() => {
     if (!open || !consultantId) return;
