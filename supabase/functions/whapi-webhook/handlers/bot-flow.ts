@@ -11,6 +11,7 @@ import {
   isValidEmailFormat,
   isSameContact,
 } from "../../_shared/validators.ts";
+import { isResolverStrictMode } from "../../_shared/bot/global-flag.ts";
 import {
   fetchWithTimeout,
   fetchInsecure,
@@ -4104,9 +4105,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           (updates as any).__inline_sent = ok || true;
           reply = "";
         } else {
-          console.warn(`⚠️ Step desconhecido: ${step} — resetando para aguardando_conta`);
-          updates.conversation_step = "aguardando_conta";
-          reply = `👋 Olá! Eu sou o assistente de *${nomeRepresentante}* em parceria com a *iGreen Energy*!\n\n📸 *Envie uma FOTO ou PDF da sua conta de energia* para começarmos!\n\nFormatos aceitos: JPG, PNG ou PDF`;
+          // F2 — strict mode: não reseta para aguardando_conta nem manda welcome
+          // genérico. Mantém step atual; consultor deve cuidar manualmente.
+          const _strict = await isResolverStrictMode(supabase).catch(() => false);
+          if (_strict) {
+            console.warn(`[resolver:strict] step "${step}" sem mapeamento e sem custom flow — mantendo step, sem reply`);
+            (updates as any).__inline_sent = true;
+            reply = "";
+          } else {
+            console.warn(`⚠️ Step desconhecido: ${step} — resetando para aguardando_conta`);
+            updates.conversation_step = "aguardando_conta";
+            reply = `👋 Olá! Eu sou o assistente de *${nomeRepresentante}* em parceria com a *iGreen Energy*!\n\n📸 *Envie uma FOTO ou PDF da sua conta de energia* para começarmos!\n\nFormatos aceitos: JPG, PNG ou PDF`;
+          }
         }
       }
       break;
