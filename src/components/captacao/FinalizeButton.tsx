@@ -3,7 +3,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Trophy, Loader2, AlertCircle } from "lucide-react";
 import { toast as sonnerToast } from "sonner";
-import { normalizeSendStepError } from "@/lib/whatsapp/send";
 
 interface Props {
   consultantId: string;
@@ -15,7 +14,7 @@ interface Props {
   pendingStepsCount: number;
 }
 
-export function FinalizeButton({ consultantId, customerId, variant = "A", missing, isComplete, allStepsSent, pendingStepsCount }: Props) {
+export function FinalizeButton({ consultantId, customerId, missing, isComplete, allStepsSent, pendingStepsCount }: Props) {
   const [sending, setSending] = useState(false);
   const canFinalize = isComplete && allStepsSent;
 
@@ -26,14 +25,22 @@ export function FinalizeButton({ consultantId, customerId, variant = "A", missin
     if (!canFinalize || sending) return;
     setSending(true);
     try {
-      const { data, error } = await supabase.functions.invoke("manual-step-send", {
-        body: { consultantId, customerId, part: "all", continueFlow: true, variant, stepKey: "finalizar_cadastro" },
+      const { data, error } = await supabase.functions.invoke("finalize-capture", {
+        body: { customerId, consultantId },
       });
-      if (error || (data as any)?.error || (data as any)?.ok === false) {
-        const parsed = normalizeSendStepError(error, data);
-        throw new Error(parsed.message);
+      if (error) throw new Error(error.message || "Falha ao finalizar");
+      const res = (data as any) || {};
+      if (res.error) {
+        const msg = res.error === "incomplete" ? `Faltam dados: ${(res.missing || []).join(", ")}` : String(res.error);
+        throw new Error(msg);
       }
-      sonnerToast.success("🏆 Cadastro finalizado! Enviando para o portal…");
+      if (res.already) {
+        sonnerToast.info("Lead já está em processamento no portal.");
+      } else if (res.mode === "queued_offline") {
+        sonnerToast.warning("Portal momentaneamente offline. Reprocessamos automaticamente em poucos minutos.");
+      } else {
+        sonnerToast.success("🏆 Cadastro enviado ao portal! Aguardando código…");
+      }
     } catch (e: any) {
       sonnerToast.error(e?.message || "Falha ao finalizar");
     } finally {
