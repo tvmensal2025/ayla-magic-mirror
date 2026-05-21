@@ -132,42 +132,40 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
     return () => { mounted = false; };
   }, [confirmFrom, steps, consultantId]);
 
-  async function invokeStep(stepId: string): Promise<boolean> {
-    if (!consultantId || !customerId) return false;
+  async function invokeStep(stepId: string, opts?: { force?: boolean }): Promise<{ ok: boolean; code?: string }> {
+    if (!consultantId || !customerId) return { ok: false };
     const { data, error } = await supabase.functions.invoke("manual-step-send", {
-      body: { consultantId, customerId, stepId, part: "all" },
+      body: { consultantId, customerId, stepId, part: "all", variant, force: opts?.force },
     });
-    if (error || (data as { error?: string; ok?: boolean })?.error || (data as { ok?: boolean })?.ok === false) {
-      const msg = normalizeSendStepError(error, data).message;
-      toast({ title: "Erro ao enviar passo", description: msg, variant: "destructive" });
-      return false;
+    const d = data as { error?: string; ok?: boolean; code?: string };
+    if (error || d?.error || d?.ok === false) {
+      const { code, message } = normalizeSendStepError(error, data);
+      toast({ title: code === "awaiting_inbound" ? "⏳ Aguardando lead" : "Erro ao enviar passo", description: message, variant: code === "awaiting_inbound" ? "default" : "destructive" });
+      return { ok: false, code };
     }
-    return true;
+    return { ok: true };
   }
 
   const confirmSendFull = useCallback(async () => {
     if (!previewStep) return;
     const step = previewStep;
     setSendingId(step.id);
-    const ok = await invokeStep(step.id);
+    const res = await invokeStep(step.id);
     setSendingId(null);
     setPreviewStep(null);
-    if (ok) toast({ title: `✅ Passo enviado`, description: step.title || step.step_key || `Passo ${step.position + 1}` });
-  }, [previewStep]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (res.ok) toast({ title: `✅ Passo enviado`, description: step.title || step.step_key || `Passo ${step.position + 1}` });
+  }, [previewStep, variant]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // "Daqui em diante" agora envia SÓ o passo escolhido (1 por vez). O backend
+  // bloqueia rajadas via awaiting_inbound. Para enviar o próximo, o consultor
+  // espera o lead responder e clica de novo.
   async function runFromHere(fromIdx: number) {
-    abortRef.current = false;
-    const slice = steps.slice(fromIdx);
-    setSeq({ current: 0, total: slice.length });
+    const step = steps[fromIdx];
+    if (!step) return;
+    setSeq({ current: 1, total: 1 });
     setOpen(false);
-    for (let i = 0; i < slice.length; i++) {
-      if (abortRef.current) { toast({ title: "⏹ Sequência interrompida" }); break; }
-      setSeq({ current: i + 1, total: slice.length });
-      const ok = await invokeStep(slice[i].id);
-      if (!ok) { abortRef.current = true; break; }
-      if (i < slice.length - 1) await new Promise((r) => setTimeout(r, 1200));
-    }
-    if (!abortRef.current) toast({ title: "✅ Sequência concluída" });
+    const res = await invokeStep(step.id);
+    if (res.ok) toast({ title: "✅ Passo enviado", description: `Aguarde o lead responder antes do próximo.` });
     setSeq(null);
   }
 
