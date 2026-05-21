@@ -616,11 +616,24 @@ function json(body: any, status = 200) {
  * (whapi-webhook trata essas chaves nativamente: aguardando_conta, etc).
  */
 function mapCaptureStepToLegacy(stepType: string, stepId: string, stepKey?: string): string {
+  // step_key explícito tem prioridade quando já é legacy reconhecido
+  const k = String(stepKey || "").toLowerCase();
+  if (["ask_name", "aguardando_nome", "ask_email", "ask_cpf", "ask_rg", "ask_cep",
+       "ask_number", "ask_complement", "ask_bill_value", "ask_phone_confirm",
+       "aguardando_conta", "confirmando_dados_conta", "aguardando_doc_auto",
+       "ask_doc_frente_manual", "ask_doc_verso_manual", "ask_finalizar",
+       "finalizando", "portal_submitting", "aguardando_otp", "validando_otp"].includes(k)) {
+    return k;
+  }
   switch (stepType) {
+    case "capture_name": return "ask_name";
     case "capture_conta": return "aguardando_conta";
     case "capture_documento":
     case "capture_doc": return "aguardando_doc_auto";
     case "capture_email": return "ask_email";
+    case "capture_cpf": return "ask_cpf";
+    case "capture_cep": return "ask_cep";
+    case "capture_bill_value": return "ask_bill_value";
     case "confirm_phone": return "ask_phone_confirm";
     case "finalizar_cadastro": return "finalizando";
     default: return stepKey || stepId;
