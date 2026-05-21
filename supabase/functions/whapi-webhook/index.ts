@@ -466,7 +466,8 @@ Deno.serve(async (req) => {
         const needsTrustedName = ["unknown", "whatsapp_profile", "freeform_multi", ""].includes(currentNameSource);
         const isEarly = (inboundCount ?? 0) <= 2; // 1ª ou 2ª inbound
         const isNameCaptureStep = ["ask_name", "aguardando_nome"].includes(stripPrefix((customer as any).conversation_step || ""));
-        if (isEarly || needsTrustedName || isNameCaptureStep) {
+        const manualMode = (customer as any)?.capture_mode === "manual";
+        if ((manualMode ? (isEarly || isNameCaptureStep) : (isEarly || needsTrustedName || isNameCaptureStep))) {
           const multi = extractMultiField(messageText);
           const patch = buildMultiFieldPatch(customer, multi);
           if (Object.keys(patch).length > 0) {
