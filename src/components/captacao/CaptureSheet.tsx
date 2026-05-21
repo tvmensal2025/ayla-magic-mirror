@@ -1,16 +1,17 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { CaptureStepsList } from "./CaptureStepsList";
 import { CaptureLeadCard } from "./CaptureLeadCard";
 import { CaptureProgressBar } from "./CaptureProgressBar";
+import { SendSequenceDialog, type SequenceStep } from "./SendSequenceDialog";
 import { useCaptureSession, CAPTURE_FIELDS } from "@/hooks/useCaptureSession";
 import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
 import { fireRandomCelebration, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy, ChevronDown, ChevronUp, Maximize2, Minimize2, UserPlus } from "lucide-react";
+import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy, ChevronDown, ChevronUp, Maximize2, Minimize2, UserPlus, Zap } from "lucide-react";
 import { askLeadName } from "@/lib/whatsapp/send";
 
 interface Props {
@@ -31,6 +32,8 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
   const [submitting, setSubmitting] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [allSteps, setAllSteps] = useState<SequenceStep[]>([]);
+  const [seqOpen, setSeqOpen] = useState(false);
   const lastCountRef = useRef(0);
 
   useEffect(() => { setSentSteps(new Set()); setMinimized(false); setExpanded(false); }, [customerId]);
