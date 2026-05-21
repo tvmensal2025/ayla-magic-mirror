@@ -109,12 +109,9 @@ Deno.serve(async (req) => {
       .eq("is_draft", false)
       .order("send_order", { ascending: true });
     let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+    // Envio manual ignora a regra de variante (override humano).
     if (variant === "B") {
-      const before = medias.length;
-      medias = medias.filter((m) => String(m.kind).toLowerCase() !== "audio");
-      if (before !== medias.length) {
-        console.log(`[manual-step-send] variant=B: removed ${before - medias.length} audio media(s)`);
-      }
+      console.log(`[manual-step-send] variant=B detected but manual override — audios kept`);
     }
 
 
@@ -392,7 +389,7 @@ async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string,
   const rawRows = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
   const items: Array<{ kind: string; text?: string; media?: any }> = [];
   for (const m of rawRows) {
-    if (variant === "B" && String(m.kind).toLowerCase() === "audio") continue; // áudios são ignorados na variante B
+    // Envio manual (continuação) ignora a regra de variante B
     items.push({ kind: String(m.kind || "document").toLowerCase(), media: m });
   }
   const text = step.message_text ? applyVars(String(step.message_text)) : "";
