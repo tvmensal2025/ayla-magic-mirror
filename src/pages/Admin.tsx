@@ -357,6 +357,7 @@ const AdminContent = () => {
           {userId && activeTab === "captacao" && (
             <CaptacaoPanel
               consultantId={userId}
+              instanceName={instanceName}
               onOpenChat={(phone) => { setPendingChatPhone(phone); setActiveTab("whatsapp"); }}
             />
           )}
