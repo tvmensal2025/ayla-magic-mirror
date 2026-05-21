@@ -68,7 +68,7 @@ export function useTemplates(consultantId: string) {
   );
 
   const updateTemplate = useCallback(
-    async (id: string, updates: { name?: string; image_url?: string | null; content?: string; media_url?: string | null; media_type?: string }) => {
+    async (id: string, updates: { name?: string; image_url?: string | null; content?: string; media_url?: string | null; media_type?: string; is_quick_reply?: boolean }) => {
       const { error, data, count } = await supabase
         .from("message_templates")
         .update(updates)
