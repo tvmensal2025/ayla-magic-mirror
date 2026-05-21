@@ -43,18 +43,19 @@ export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, 
   const display = steps;
 
 
-  const sendStep = async (stepId: string, label: string) => {
+  const sendStep = async (stepId: string, label: string, continueFlow = true) => {
     setSending(stepId);
     try {
       const { data, error } = await supabase.functions.invoke("manual-step-send", {
-        body: { consultantId, customerId, stepId, part: "all", continueFlow: false },
+        body: { consultantId, customerId, stepId, part: "all", continueFlow },
       });
       if (error || (data as any)?.error || (data as any)?.ok === false) {
         const parsed = normalizeSendStepError(error, data);
         throw new Error(parsed.message);
       }
       onSent(stepId);
-      toast({ title: `Passo enviado ✓`, description: label });
+      const next = (data as any)?.next_step;
+      toast({ title: continueFlow ? `Seguindo fluxo ✓` : `Passo enviado ✓`, description: next ? `${label} → ${next}` : label });
     } catch (e: any) {
       toast({ title: "Erro ao enviar", description: e?.message || String(e), variant: "destructive" });
     } finally {
