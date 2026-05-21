@@ -122,8 +122,19 @@ export function useGameProgress(consultantId: string | null): GameProgress {
     return { gainedXp: gained, leveledUp: newLevel > prevLevel, newLevel };
   }, [todayCount]);
 
+  const registerMessage = useCallback((kind: "text" | "audio") => {
+    const prev = xpRef.current;
+    const gained = kind === "audio" ? 10 : 5;
+    const newXp = prev + gained;
+    xpRef.current = newXp;
+    setTotalXp(newXp);
+    const prevLevel = levelFromXp(prev);
+    const newLevel = levelFromXp(newXp);
+    return { gainedXp: gained, leveledUp: newLevel > prevLevel, newLevel };
+  }, []);
+
   return {
     totalXp, level, rank, xpInLevel, xpToNext, progressPct,
-    todayCount, weekCount, streak, loading, reload: load, registerCapture,
+    todayCount, weekCount, streak, loading, reload: load, registerCapture, registerMessage,
   };
 }
