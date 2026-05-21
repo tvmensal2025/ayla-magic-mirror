@@ -453,8 +453,11 @@ Deno.serve(async (req) => {
           .select("id", { count: "exact", head: true })
           .eq("customer_id", customer.id)
           .eq("message_direction", "inbound");
+        const currentNameSource = inferNameSource((customer as any).name, (customer as any).name_source);
+        const needsTrustedName = ["unknown", "whatsapp_profile", "freeform_multi", ""].includes(currentNameSource);
         const isEarly = (inboundCount ?? 0) <= 2; // 1ª ou 2ª inbound
-        if (isEarly) {
+        const isNameCaptureStep = ["ask_name", "aguardando_nome"].includes(stripPrefix((customer as any).conversation_step || ""));
+        if (isEarly || needsTrustedName || isNameCaptureStep) {
           const multi = extractMultiField(messageText);
           const patch = buildMultiFieldPatch(customer, multi);
           if (Object.keys(patch).length > 0) {
@@ -470,8 +473,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    // (Gate global de IA desligada foi movido para o topo — antes mesmo de
-    // criar customer ou notificar. Veja bloco "global-off-silent" no início.)
+    if (globalAiDisabled) {
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "inbound",
+        message_text: messageText || (hasAudio ? "[áudio]" : "[arquivo]"),
+        message_type: hasAudio ? "audio" : (isFile ? "image" : "text"),
+        conversation_step: customer.conversation_step,
+      });
+      console.log(`🛑 [global-off-silent] IA desligada — inbound salvo sem resposta automática customer=${customer.id}`);
+      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_inbound_saved" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
 
 
