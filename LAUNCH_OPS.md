@@ -47,14 +47,18 @@ Documento vivo, atualizar a cada novo lote da auditoria.
 
 ## 2. Pre-launch checklist (cada novo deploy massivo)
 
-- [ ] Kill switch global está ATIVO (`app_settings.bot_global_enabled = true`)
-- [ ] `super_admin_phone` + `super_admin_instance_name` preenchidos no
-      SuperAdmin (Painel **Infra · MinIO + Alertas**)
-- [ ] MinIO último check `alive=true`, pct < 80%
-- [ ] Resolver Strict Mode permanece OFF até validar com 1 consultor piloto
-- [ ] Crons agendados em `cron.job` (ver seção 4)
-- [ ] Cookie banner / Política de Privacidade publicados (Fase 1)
-- [ ] `LAUNCH_OPS.md` revisado
+Status atual (atualizado pelo agente em 21/05/2026):
+
+- [x] Kill switch global está ATIVO (`app_settings.bot_global_enabled = true`)
+- [x] `super_admin_instance_name` = **Consutor-alertas** (preenchido via migration)
+- [ ] `super_admin_phone` — **PENDENTE**: preencher no painel Infra do SuperAdmin com o WhatsApp que vai receber os alertas (DDI+DDD+numero, ex: `5511999999999`). Sem isso a edge `super-admin-alerts` não dispara.
+- [x] `minio_alert_threshold_pct` = 85
+- [x] Secret `MINIO_TOTAL_BYTES` = 100 GB configurada na edge `minio-quota-check`
+- [ ] MinIO último check `alive=true`, pct < 80% (validar após primeiro cron rodar)
+- [x] Resolver Strict Mode permanece OFF (ligar pelo toggle quando validar com piloto)
+- [ ] Crons agendados em `cron.job` — **PENDENTE**: rodar `/mnt/documents/cron_setup.sql` no SQL Editor (já vem com anon key e project_ref preenchidos)
+- [x] Cookie banner / Política de Privacidade publicados (Fase 1)
+- [x] `LAUNCH_OPS.md` revisado
 
 ---
 
