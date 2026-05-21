@@ -144,8 +144,17 @@ interface PicCacheEntry {
 
 const GLOBAL_PIC_PAUSE_TTL = 5 * 60 * 1000; // 5 minutes
 
+const TRUSTED_NAME_SOURCES = new Set([
+  "self_introduced", "user_confirmed", "ocr_conta", "ocr_doc", "ocr_cnh", "ocr_rg", "manual", "freeform_multi",
+]);
+
+function digitsOnly(v: string | null | undefined): string {
+  return String(v || "").replace(/\D/g, "");
+}
+
 export function useChats(instanceName: string | null, isWhapi: boolean = false) {
   const [chats, setChats] = useState<ChatItem[]>([]);
+  const [customerNames, setCustomerNames] = useState<Map<string, string>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newMessageAlert, setNewMessageAlert] = useState(false);
@@ -156,6 +165,25 @@ export function useChats(instanceName: string | null, isWhapi: boolean = false) 
   const fetchingPicsRef = useRef(false);
   const globalPicPauseUntilRef = useRef(0);
   const { toast } = useToast();
+
+  // Overlay nomes capturados (self_introduced/OCR/user_confirmed) sobre o pushName
+  // do WhatsApp para que a sidebar e o header reflitam o nome real do lead.
+  const refreshCustomerNames = useCallback(async () => {
+    try {
+      const { data } = await supabase
+        .from("customers")
+        .select("name, name_source, phone_whatsapp")
+        .in("name_source", Array.from(TRUSTED_NAME_SOURCES))
+        .not("name", "is", null)
+        .limit(2000);
+      const map = new Map<string, string>();
+      (data || []).forEach((c: any) => {
+        const d = digitsOnly(c.phone_whatsapp);
+        if (d && c.name) map.set(d, String(c.name));
+      });
+      setCustomerNames(map);
+    } catch { /* non-critical */ }
+  }, []);
 
   const fetchContacts = useCallback(async () => {
     if (isWhapi) { contactsMapRef.current = new Map(); return; }
