@@ -1,39 +1,77 @@
-# Diagnóstico — lead JOSINETE (5511971254913)
+## Diagnóstico do caso Josinete
 
-**O que aconteceu:** o consultor clicou em **"1. Captura do nome"** (passo 2) no Modo Game. O backend disparou em sequência, sem esperar resposta do lead:
-1. Conteúdo do passo 2 — "Captura do nome" (`message`)
-2. Conteúdo do passo 3 — "2. Boas-vindas" (`message`)
-3. Conteúdo do passo 4 — "JOSINETE, qual o valor médio da sua conta de luz?" (`message`, termina em `?` → aí parou)
+Pelo histórico do lead `5511971254913`, os dados principais chegaram ao banco, mas o fluxo ficou com cursor incorreto em vários momentos:
 
-Resultado: 3 passos despachados em ~5s, lead bombardeado sem chance de responder. Só sobrou a última mensagem visível na conversa.
+- As respostas de texto do lead (`Luciana`, `500`, `Pode sim`, `Vamos`) foram registradas com `conversation_step = finalizando`, não no passo que tinha acabado de ser enviado.
+- Isso acontece porque a correção anterior desligou o `continueFlow`, mas o backend `manual-step-send` só atualiza o `conversation_step` quando `continueFlow=true`. Resultado: o clique manual envia a mensagem certa, mas não posiciona o lead naquele passo para a próxima resposta ser capturada.
+- O estado `confirmando_dados_doc` também não está na lista de etapas ativas quando a IA global está em modo manual. Por isso o log mostra: `global-off-silent ... step="confirmando_dados_doc"`, salvando a resposta `SIM` sem processar a confirmação do documento.
+- A ficha lateral hoje esconde cartões já confirmados (`CaptureDataConfirmCard` retorna `null` quando `confirmedAt` existe), então alguns dados parecem “sumir” mesmo estando salvos.
+- Os passos enviados (`sentSteps`) ficam só em estado local do React. Ao trocar/recarregar lead, a UI perde o histórico e não reconstrói os passos já enviados a partir da tabela `conversations`.
 
-**Causa raiz:** `CaptureStepsGrid.tsx` (linha ~98) chama `supabase.functions.invoke('manual-step-send', { … continueFlow: true … })`. Com `continueFlow:true`, o `manual-step-send/index.ts` roda `buildContinuationPatch()` (linha 592) que **encadeia passos `message` seguintes** até bater em capture/pergunta/intent. Isso faz sentido para o bot automático, mas é o oposto do esperado no Modo Game manual — onde o consultor é quem decide quando avançar (ainda mais com a trava de ordem e o toggle Auto/Manual recém-criados).
+## Plano de correção
 
-**Por que escapou:** o passo 2 ("Captura do nome") está cadastrado como `step_type=message` (não `capture_*` nem `inline_capture`), então o chain não para nele. Idem passo 3 (boas-vindas). Só o passo 4 com `?` no fim cortou o chain.
+### 1. Corrigir o cursor no envio manual
+Arquivo: `supabase/functions/manual-step-send/index.ts`
 
-# Plano de correção
+- Quando `part: "all"` e `continueFlow: false`, após enviar o conteúdo do tile, atualizar o customer para o passo clicado.
+- Para passos `message`, gravar `conversation_step = step.id`.
+- Para passos de captura, gravar a chave legacy correta:
+  - `capture_conta` → `aguardando_conta`
+  - `capture_documento` → `aguardando_doc_auto`
+  - `capture_email` → `ask_email`
+  - `confirm_phone` → `ask_phone_confirm`
+  - `finalizar_cadastro` → `finalizando`
+- Não encadear próximos passos. Apenas posicionar o lead para que a próxima resposta entre no lugar certo.
+- Retornar no JSON algo como `next_step: <passo_gravado>` para a UI exibir/depurar corretamente.
 
-## 1. `CaptureStepsGrid.tsx` — desligar chain por padrão
-- Mudar a chamada para `continueFlow: false`. Cada clique envia **apenas o conteúdo do tile clicado** (texto + mídias daquele passo, com os delays internos já existentes entre mídia/texto do mesmo passo).
-- O cursor `conversation_step` continua sendo reposicionado no passo clicado (o handler já faz isso quando `part==='all'` mesmo sem chain — ver linhas 477-495 do `manual-step-send`).
-- Ajustar o toast: remover "→ próximo passo" quando não houver `next_step` na resposta.
+### 2. Liberar processamento de confirmação de documento no modo manual
+Arquivo: `supabase/functions/whapi-webhook/index.ts`
 
-## 2. AutoMode permanece exatamente como está
-- O toggle 🤖 AUTO já dispara o próximo tile **só quando chega inbound do lead** (Realtime em `conversations`). Isso é o comportamento correto de "aguardar resposta" — não precisa de chain do backend.
-- Em MANUAL, consultor clica tile-a-tile. Em AUTO, sistema clica tile-a-tile ao receber resposta. Em nenhum dos dois faz sentido o backend encadear passos sozinho.
+- Incluir `confirmando_dados_doc` em `ACTIVE_CAPTURE_STEPS`.
+- Incluir também estados irmãos de documento/titularidade que não devem ser silenciados:
+  - `aguardando_doc_frente`
+  - `aguardando_doc_verso`
+  - `ask_tipo_documento`
+  - `confirmar_titularidade`
+- Assim, quando o cliente responder `SIM` para documento, o handler de confirmação roda antes de cair no silêncio do modo manual.
 
-## 3. Sem mudanças no backend
-- `manual-step-send` continua suportando `continueFlow:true` (usado por outros caminhos, p.ex. `FinalizeButton` antigo / fluxos de teste). Não vamos mexer no helper.
-- Nenhuma migração, nenhuma edge function nova.
+### 3. Permitir passos customizados ativos no modo captação manual
+Arquivo: `supabase/functions/whapi-webhook/index.ts`
 
-## 4. Verificação
-- Reenviar passo 1 para um lead de teste e confirmar nos logs `conversations` que sai **1 outbound apenas**.
-- Confirmar que o tile fica ✓ e o próximo destrava (já depende só de `sentSteps`, não do `next_step` do backend).
+- Se `capture_mode = manual` e o `conversation_step` atual for um UUID/step_key do fluxo customizado, não bloquear em `global-off-silent`.
+- Deixar o motor do fluxo processar capturas configuradas no passo, como nome e valor da conta.
+- Isso evita que respostas de texto a tiles manuais sejam apenas logadas sem preencher a ficha.
 
-# Fora de escopo
-- Não tocar no `FinalizeButton` / `finalize-capture` (fluxo de portal worker já implementado).
-- Não tocar no bot automático do WhatsApp (`whapi-webhook/bot-flow.ts`) — o chain lá é desejado.
-- Não alterar `bot_flow_steps` da Camila/consultores (passos "Boas-vindas" continuam `message` — só não vão mais ser arrastados juntos no envio manual).
+### 4. Manter dados confirmados visíveis na ficha lateral
+Arquivo: `src/components/captacao/CaptureDataConfirmCard.tsx`
 
-# Arquivos
-- **Editar**: `src/components/captacao/CaptureStepsGrid.tsx` (1 flag + ajuste de toast)
+- Não esconder o cartão quando `confirmedAt` existir.
+- Mostrar o cartão em modo somente leitura com badge “Confirmado”.
+- Esconder apenas os botões de confirmação quando já estiver confirmado.
+- Assim a lateral continua mostrando os dados lidos da conta/documento mesmo depois de confirmados.
+
+### 5. Reconstituir passos enviados ao selecionar o lead
+Arquivos: `src/components/captacao/CaptacaoPanel.tsx` e, se necessário, `src/components/captacao/CaptureStepsGrid.tsx`
+
+- Ao selecionar um lead, carregar os outbounds de `conversations` e marcar como enviados os steps que batem com `bot_flow_steps.id` ou `step_key`.
+- Atualizar o estado também por Realtime em novos inserts de `conversations` outbound.
+- Isso faz os checks dos tiles persistirem depois de troca de lead/reload, em vez de depender só do estado local.
+
+### 6. Verificação
+
+- Reproduzir o fluxo em um lead de teste:
+  1. Enviar tile de nome.
+  2. Responder com nome.
+  3. Confirmar que `customers.name` atualiza e `conversation_step` não fica em `finalizando`.
+  4. Enviar tile de valor.
+  5. Responder valor.
+  6. Confirmar que `electricity_bill_value` aparece na ficha lateral.
+  7. Enviar/confirmar documento com `SIM`.
+  8. Confirmar que `doc_data_confirmed_at` é preenchido e o cartão permanece visível como confirmado.
+
+## Resultado esperado
+
+- Cada clique manual envia somente um tile, mas deixa o lead posicionado corretamente para a resposta seguinte.
+- A ficha lateral passa a preencher e permanecer visível conforme o cliente responde.
+- O modo manual não silencia respostas importantes de confirmação.
+- O progresso dos passos enviados não se perde ao trocar de lead ou recarregar a tela.
