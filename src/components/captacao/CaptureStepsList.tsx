@@ -13,6 +13,8 @@ interface Props {
   onSent: (stepKey: string) => void;
   defaultVariant?: string | null;
   currentStep?: string | null;
+  /** expõe pra fora os passos carregados (usado pelo botão "Enviar tudo") */
+  onStepsLoaded?: (steps: Array<{ step_key: string; step_id: string; title: string }>) => void;
 }
 
 interface StepRow {
@@ -40,9 +42,10 @@ const VARIANT_META: Record<string, { label: string; hint: string }> = {
   C: { label: "C", hint: "com vídeo" },
 };
 
-export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, defaultVariant, currentStep }: Props) {
+export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, defaultVariant, currentStep, onStepsLoaded }: Props) {
   const { toast } = useToast();
   const [sending, setSending] = useState<string | null>(null);
+  const [errorStep, setErrorStep] = useState<string | null>(null);
   const [groups, setGroups] = useState<StepGroup[]>([]);
   const [query, setQuery] = useState("");
   const [onlyPending, setOnlyPending] = useState(false);
@@ -141,10 +144,24 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
         .filter(Boolean)
         .slice(0, 10);
 
-      if (mounted) setGroups(ordered);
+      if (mounted) {
+        setGroups(ordered);
+        if (onStepsLoaded) {
+          const dv = (defaultVariant || "A").toUpperCase();
+          onStepsLoaded(ordered.map((g, i) => {
+            const variantKeys = Object.keys(g.variants).sort();
+            const row = g.variants[dv] || g.variants[variantKeys[0]];
+            return {
+              step_key: g.step_key,
+              step_id: row?.id || "",
+              title: g.title || g.step_key || `Passo ${i + 1}`,
+            };
+          }).filter((x) => x.step_id));
+        }
+      }
     })();
     return () => { mounted = false; };
-  }, [consultantId]);
+  }, [consultantId, defaultVariant, onStepsLoaded]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -161,15 +178,22 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
 
   const doSend = async (row: StepRow, groupKey: string) => {
     setSending(row.id);
+    setErrorStep(null);
     try {
       const { sendStepWithFeedback } = await import("@/lib/whatsapp/send");
       const res = await sendStepWithFeedback({
         consultantId, customerId, stepId: row.id, part: "all", continueFlow: false,
       });
-      if (res.ok) onSent(groupKey);
+      if (res.ok) {
+        onSent(groupKey);
+        setConfirmStep(null);
+      } else {
+        // Mantém modal aberto pra usuário ler o toast; pisca erro vermelho 3s.
+        setErrorStep(row.id);
+        setTimeout(() => setErrorStep((cur) => (cur === row.id ? null : cur)), 3000);
+      }
     } finally {
       setSending(null);
-      setConfirmStep(null);
     }
   };
 
