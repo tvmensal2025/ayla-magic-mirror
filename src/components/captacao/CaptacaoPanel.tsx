@@ -258,6 +258,13 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                           {v}
                         </button>
                       ))}
+                      <button
+                        onClick={toggleAutoMode}
+                        className={`ml-1 flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold rounded-sm border transition ${autoMode ? "bg-emerald-500/20 border-emerald-500/60 text-emerald-300" : "bg-background/40 border-border/60 text-muted-foreground"}`}
+                      >
+                        {autoMode ? <Bot className="w-3 h-3" /> : <User className="w-3 h-3" />}
+                        {autoMode ? "AUTO" : "MAN"}
+                      </button>
                     </div>
                     {mismatch.flag && !mismatch.acked && (
                       <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-[11px] space-y-1.5">
