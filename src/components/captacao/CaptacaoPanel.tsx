@@ -23,6 +23,9 @@ import { MessageComposer } from "@/components/whatsapp/MessageComposer";
 import { useTemplates } from "@/hooks/useTemplates";
 import { sendWhatsAppMessage } from "@/services/messageSender";
 import { toast as sonnerToast } from "sonner";
+import { useCaptureSession } from "@/hooks/useCaptureSession";
+import { FinalizeButton } from "@/components/captacao/FinalizeButton";
+import { Bot, User } from "lucide-react";
 
 interface Props { consultantId: string; onOpenChat?: (phone: string) => void; instanceName?: string | null; isWhapi?: boolean; }
 
@@ -38,6 +41,18 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const { today, week, streak, bump } = useCaptureScoreboard(consultantId);
   const { toast } = useToast();
   const { templates } = useTemplates(consultantId);
+  const session = useCaptureSession(selectedId);
+  const [autoMode, setAutoMode] = useState<boolean>(() => {
+    try { return localStorage.getItem("capture_auto_mode") === "1"; } catch { return false; }
+  });
+  const toggleAutoMode = () => {
+    setAutoMode((v) => {
+      const next = !v;
+      try { localStorage.setItem("capture_auto_mode", next ? "1" : "0"); } catch {}
+      sonnerToast.success(next ? "🤖 Auto-pilot ligado — o próximo passo dispara sozinho após o lead responder." : "👤 Modo manual — você dispara cada passo.");
+      return next;
+    });
+  };
 
   // Game mode state
   const { enabled: gameOn, toggle: toggleGame, sound, toggleSound } = useGameMode(consultantId);
@@ -212,6 +227,14 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                           </button>
                         ))}
                       </div>
+                      <button
+                        onClick={toggleAutoMode}
+                        className={`hidden sm:flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-md border transition shrink-0 ${autoMode ? "bg-emerald-500/20 border-emerald-500/60 text-emerald-300" : "bg-background/40 border-border/60 text-muted-foreground hover:bg-muted/40"}`}
+                        title={autoMode ? "Auto-pilot ligado — clique para desligar" : "Clique para ligar o auto-pilot"}
+                      >
+                        {autoMode ? <Bot className="w-3 h-3" /> : <User className="w-3 h-3" />}
+                        {autoMode ? "AUTO" : "MANUAL"}
+                      </button>
                       {phone && onOpenChat && (
                         <Button size="sm" variant="outline" className="gap-1.5 shrink-0" onClick={() => onOpenChat(phone)}>
                           <MessageCircle className="w-3.5 h-3.5" />
@@ -235,6 +258,13 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                           {v}
                         </button>
                       ))}
+                      <button
+                        onClick={toggleAutoMode}
+                        className={`ml-1 flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold rounded-sm border transition ${autoMode ? "bg-emerald-500/20 border-emerald-500/60 text-emerald-300" : "bg-background/40 border-border/60 text-muted-foreground"}`}
+                      >
+                        {autoMode ? <Bot className="w-3 h-3" /> : <User className="w-3 h-3" />}
+                        {autoMode ? "AUTO" : "MAN"}
+                      </button>
                     </div>
                     {mismatch.flag && !mismatch.acked && (
                       <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-[11px] space-y-1.5">
@@ -254,7 +284,9 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       <CaptureStepsGrid
                         consultantId={consultantId}
                         customerId={selectedId}
+                        variant={variant}
                         sentSteps={sentSteps}
+                        autoMode={autoMode}
                         onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
                       />
                     </div>
@@ -265,6 +297,17 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       <AchievementsRail progress={progress} />
                     </div>
                   </div>
+
+                  {/* Finalizar Cadastro — habilita só quando tudo completo */}
+                  <FinalizeButton
+                    consultantId={consultantId}
+                    customerId={selectedId}
+                    variant={variant}
+                    missing={session.missing || []}
+                    isComplete={!!session.isComplete}
+                    allStepsSent={sentSteps.size > 0}
+                    pendingStepsCount={Math.max(0, 10 - sentSteps.size)}
+                  />
 
                   {/* Composer fixo no rodapé: atalhos /, templates, fluxos, anexos, áudio, AI suggest */}
                   <div className="border-t border-border/60 bg-card/40">
