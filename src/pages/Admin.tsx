@@ -232,6 +232,7 @@ const AdminContent = () => {
             >
               <Sparkles className="h-5 w-5" />
             </button>
+            <Suspense fallback={null}><InstallPwaButton /></Suspense>
             <Suspense fallback={<div className="w-9 h-9" />}>
               <NotificationCenter
                 notifications={notifications}
