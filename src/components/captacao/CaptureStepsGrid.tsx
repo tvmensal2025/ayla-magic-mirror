@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Send, Loader2, Check, MessageCircle, Mic, ImageIcon, Video, Edit3 } from "lucide-react";
+import { normalizeSendStepError } from "@/lib/whatsapp/send";
 
 interface Props {
   consultantId: string;
@@ -48,8 +49,10 @@ export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, 
       const { data, error } = await supabase.functions.invoke("manual-step-send", {
         body: { consultantId, customerId, stepId, part: "all", continueFlow: false },
       });
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).message || (data as any).error);
+      if (error || (data as any)?.error || (data as any)?.ok === false) {
+        const parsed = normalizeSendStepError(error, data);
+        throw new Error(parsed.message);
+      }
       onSent(stepId);
       toast({ title: `Passo enviado ✓`, description: label });
     } catch (e: any) {

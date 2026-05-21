@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Send, Play } from "lucide-react";
 import { StepPartPreview, type PartKind } from "@/components/whatsapp/StepPartPreview";
+import { normalizeSendStepError } from "@/lib/whatsapp/send";
 
 type Step = {
   id: string;
@@ -118,7 +119,9 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
       };
       if (part.media?.id) payload.mediaId = part.media.id;
       const { data, error } = await supabase.functions.invoke("manual-step-send", { body: payload });
-      if (error || (data as any)?.error) throw new Error(error?.message || (data as any).error);
+      if (error || (data as any)?.error || (data as any)?.ok === false) {
+        throw new Error(normalizeSendStepError(error, data).message);
+      }
       toast({ title: `✅ Enviado: ${indexLabel}` });
     } catch (e: any) {
       toast({ title: "Erro ao enviar", description: e?.message, variant: "destructive" });
@@ -131,7 +134,9 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
       const { data, error } = await supabase.functions.invoke("manual-step-send", {
         body: { consultantId, customerId, stepId: selectedStep!.id, part: "all" },
       });
-      if (error || (data as any)?.error) throw new Error(error?.message || (data as any).error);
+      if (error || (data as any)?.error || (data as any)?.ok === false) {
+        throw new Error(normalizeSendStepError(error, data).message);
+      }
       toast({ title: "✅ Passo completo enviado" });
       onOpenChange(false);
     } catch (e: any) {

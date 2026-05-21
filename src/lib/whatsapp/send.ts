@@ -54,6 +54,13 @@ const FRIENDLY: Record<string, string> = {
   empty_send_ok: "Edge respondeu OK mas não disparou nada. Veja se o passo tem mídia/texto.",
 };
 
+export function normalizeSendStepError(error: any, data?: any): { code: string; message: string } {
+  const context = error?.context;
+  const code = data?.code || data?.error || context?.code || context?.error || error?.code || "internal_error";
+  const rawMessage = data?.message || context?.message || error?.message || "Falha ao chamar o servidor.";
+  return { code, message: pickMessage(code, rawMessage) };
+}
+
 function pickMessage(code?: string, fallback?: string): string {
   if (code && FRIENDLY[code]) return FRIENDLY[code];
   return fallback || "Não consegui enviar — tente de novo.";
@@ -107,9 +114,12 @@ export async function sendStepWithFeedback(
       });
 
       if (error) {
-        const { code, message } = await parseErrorBody(error);
+        const parsed = await parseErrorBody(error);
+        const { code, message } = parsed.code === "internal_error"
+          ? normalizeSendStepError(error)
+          : { code: parsed.code, message: pickMessage(parsed.code, parsed.message) };
         if (code === "name_not_captured_yet" && opts?.onNameGuard) opts.onNameGuard();
-        if (!opts?.silent) toast.error(pickMessage(code, message));
+        if (!opts?.silent) toast.error(message);
         return { ok: false, code, message };
       }
 
