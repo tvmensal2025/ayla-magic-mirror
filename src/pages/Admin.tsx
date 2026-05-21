@@ -32,6 +32,8 @@ const NetworkPanel = lazy(() => import("@/components/admin/NetworkPanel").then(m
 const PanfletoModal = lazy(() => import("@/components/admin/PanfletoModal").then(m => ({ default: m.PanfletoModal })));
 
 const AdsCentralTab = lazy(() => import("@/components/admin/ads/AdsCentralTab").then(m => ({ default: m.AdsCentralTab })));
+const CaptacaoPanel = lazy(() => import("@/components/captacao/CaptacaoPanel").then(m => ({ default: m.CaptacaoPanel })));
+const InstallPwaButton = lazy(() => import("@/components/admin/InstallPwaButton").then(m => ({ default: m.InstallPwaButton })));
 import { SupportChatButton } from "@/components/support/SupportChatButton";
 
 const AdminContent = () => {
