@@ -204,7 +204,7 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
         const { data, error: invErr } = await supabase.functions.invoke("manual-step-send", {
           body: { consultantId: userId, customerId: row.id, stepId: stepValue, part: "all", continueFlow: true },
         });
-        if (invErr || (data as any)?.error) {
+        if (invErr || (data as any)?.error || (data as any)?.ok === false) {
           const errMsg = (data as any)?.message || (data as any)?.error || invErr?.message || "falha ao disparar";
           throw new Error(errMsg);
         }
