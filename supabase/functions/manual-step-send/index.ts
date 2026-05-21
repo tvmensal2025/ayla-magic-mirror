@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
     // Auth: must be logged-in user matching consultantId OR super_admin
     const authHeader = req.headers.get("Authorization") || "";
     const jwt = authHeader.replace(/^Bearer\s+/i, "");
-    if (!jwt) return json({ code: "unauthorized", error: "unauthorized", message: "Sessão expirada — faça login novamente." }, 401);
+    if (!jwt) return json({ ok: false, blocked: true, code: "unauthorized", error: "unauthorized", message: "Sessão expirada — faça login novamente." });
     const userClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!,
@@ -47,16 +47,16 @@ Deno.serve(async (req) => {
     );
     const { data: userRes } = await userClient.auth.getUser(jwt);
     const userId = userRes?.user?.id;
-    if (!userId) return json({ code: "unauthorized", error: "unauthorized", message: "Sessão expirada — faça login novamente." }, 401);
+    if (!userId) return json({ ok: false, blocked: true, code: "unauthorized", error: "unauthorized", message: "Sessão expirada — faça login novamente." });
 
     const body = (await req.json()) as Body & { skipNameGuard?: boolean };
     if (!body?.consultantId || !body?.customerId || !body?.part) {
-      return json({ code: "missing_fields", error: "missing_fields", message: "Faltam dados obrigatórios (consultor, cliente ou parte)." }, 400);
+      return json({ ok: false, blocked: true, code: "missing_fields", error: "missing_fields", message: "Faltam dados obrigatórios (consultor, cliente ou parte)." });
     }
     // Allow if same consultant OR has super_admin role
     if (userId !== body.consultantId) {
       const { data: isAdmin } = await supabase.rpc("is_super_admin", { _user_id: userId });
-      if (!isAdmin) return json({ code: "forbidden", error: "forbidden", message: "Sem permissão para enviar em nome deste consultor." }, 403);
+      if (!isAdmin) return json({ ok: false, blocked: true, code: "forbidden", error: "forbidden", message: "Sem permissão para enviar em nome deste consultor." });
     }
 
     // Resolve customer + phone
@@ -65,33 +65,36 @@ Deno.serve(async (req) => {
       .select("id, name, name_source, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at")
       .eq("id", body.customerId)
       .maybeSingle();
-    if (!customer) return json({ code: "customer_not_found", error: "customer_not_found", message: "Lead não encontrado." }, 404);
+    if (!customer) return json({ ok: false, blocked: true, code: "customer_not_found", error: "customer_not_found", message: "Lead não encontrado (pode ter sido removido). Recarregue a lista." });
 
     const rawPhone = String(customer.phone_whatsapp || "");
     if (rawPhone.startsWith("sem_celular_")) {
       return json({
+        ok: false, blocked: true,
         code: "lead_sem_whatsapp",
         error: "lead_sem_whatsapp",
         message: "Esse lead foi importado via Excel sem celular válido — não dá pra enviar pelo WhatsApp.",
-      }, 400);
+      });
     }
     let phoneDigits = rawPhone.replace(/\D/g, "");
     if (!phoneDigits || phoneDigits.length < 10) {
       return json({
+        ok: false, blocked: true,
         code: "customer_no_phone",
         error: "customer_no_phone",
         message: "Lead sem número de WhatsApp válido (precisa ter DDD + número, ex: 11912345678).",
-      }, 400);
+      });
     }
     if (phoneDigits.length === 10 || phoneDigits.length === 11) {
       phoneDigits = "55" + phoneDigits;
     }
     if (phoneDigits.length < 12 || phoneDigits.length > 13) {
       return json({
+        ok: false, blocked: true,
         code: "phone_invalid_format",
         error: "phone_invalid_format",
         message: `Número '${rawPhone}' fora do padrão BR (55 + DDD + 8 ou 9 dígitos).`,
-      }, 400);
+      });
     }
     const remoteJid = `${phoneDigits}@s.whatsapp.net`;
 
