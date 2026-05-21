@@ -90,6 +90,18 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
     onOpenChange(false);
   };
 
+  const [askingName, setAskingName] = useState(false);
+  const needsName = !customer?.name_source || String(customer.name_source).toLowerCase() === "unknown";
+  const handleAskName = async () => {
+    if (!customer) return;
+    setAskingName(true);
+    try {
+      await askLeadName({ consultantId, customerId: customer.id, phoneHint: phoneNumber || undefined });
+    } finally {
+      setAskingName(false);
+    }
+  };
+
   // Barra minimizada — flutua no rodapé sem bloquear o input do chat
   if (open && minimized) {
     return (
