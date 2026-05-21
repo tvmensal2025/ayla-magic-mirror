@@ -11,14 +11,18 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.4
 
 export interface PausableCustomer {
   bot_paused?: boolean | null;
+  bot_paused_reason?: string | null;
   assigned_human_id?: string | null;
   bot_paused_until?: string | null;
 }
 
 export function isCustomerPausedByHuman(c: PausableCustomer | null | undefined): boolean {
   if (!c) return false;
-  if (c.bot_paused === true) return true;
+  // Humano vinculado SEMPRE silencia.
   if (c.assigned_human_id) return true;
+  // Modo Captação assistido NÃO silencia o bot — OCR/capture handlers precisam rodar.
+  const reason = String(c.bot_paused_reason || "").toLowerCase();
+  if (c.bot_paused === true && reason !== "manual_capture") return true;
   if (c.bot_paused_until) {
     try {
       if (new Date(c.bot_paused_until).getTime() > Date.now()) return true;
