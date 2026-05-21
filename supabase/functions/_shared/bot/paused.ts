@@ -11,14 +11,18 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.4
 
 export interface PausableCustomer {
   bot_paused?: boolean | null;
+  bot_paused_reason?: string | null;
   assigned_human_id?: string | null;
   bot_paused_until?: string | null;
 }
 
 export function isCustomerPausedByHuman(c: PausableCustomer | null | undefined): boolean {
   if (!c) return false;
-  if (c.bot_paused === true) return true;
+  // Humano vinculado SEMPRE silencia.
   if (c.assigned_human_id) return true;
+  // Modo Captação assistido NÃO silencia o bot — OCR/capture handlers precisam rodar.
+  const reason = String(c.bot_paused_reason || "").toLowerCase();
+  if (c.bot_paused === true && reason !== "manual_capture") return true;
   if (c.bot_paused_until) {
     try {
       if (new Date(c.bot_paused_until).getTime() > Date.now()) return true;
@@ -41,7 +45,7 @@ export async function isPausedByPhone(
   if (!digits) return false;
   let q = supabase
     .from("customers")
-    .select("bot_paused, assigned_human_id, bot_paused_until")
+    .select("bot_paused, bot_paused_reason, assigned_human_id, bot_paused_until")
     .eq("phone_whatsapp", digits)
     .limit(1);
   if (consultantId) q = q.eq("consultant_id", consultantId);
