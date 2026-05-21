@@ -167,6 +167,7 @@ const AdminContent = () => {
     { id: "dashboard" as const, label: "Dashboard", icon: BarChart3 },
     { id: "crm" as const, label: "CRM", icon: LayoutGrid },
     { id: "clientes" as const, label: "Clientes", icon: Users },
+    { id: "captacao" as const, label: "Captação", icon: Gamepad2 },
     { id: "rede" as const, label: "Rede", icon: Network },
     { id: "whatsapp" as const, label: "WhatsApp", icon: MessageSquare },
     { id: "central-anuncios" as const, label: "Central de Anúncios", icon: Megaphone },
