@@ -48,11 +48,13 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
   const [busy, setBusy] = useState<"" | "self" | "client">("");
 
   if (!hasAny(customer, fields)) return null; // sem OCR ainda
-  if (confirmedAt) return null; // já confirmado — some
+  const isConfirmed = !!confirmedAt;
 
   const title = kind === "bill" ? "📄 Dados lidos da CONTA" : "🪪 Dados lidos do DOCUMENTO";
   const Icon = kind === "bill" ? FileText : IdCard;
-  const tone = kind === "bill" ? "border-amber-400/60 bg-amber-400/5" : "border-cyan-400/60 bg-cyan-400/5";
+  const tone = isConfirmed
+    ? "border-emerald-500/50 bg-emerald-500/5"
+    : kind === "bill" ? "border-amber-400/60 bg-amber-400/5" : "border-cyan-400/60 bg-cyan-400/5";
 
   const saveEdit = async () => {
     if (!editing) return;
@@ -137,7 +139,12 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
       <div className="flex items-center gap-1.5">
         <Icon className="w-3.5 h-3.5 text-amber-500" />
         <span className="text-[11px] font-bold uppercase tracking-wide">{title}</span>
-        {awaiting && (
+        {isConfirmed && (
+          <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-bold">
+            ✓ confirmado
+          </span>
+        )}
+        {!isConfirmed && awaiting && (
           <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded-full bg-amber-400/20 text-amber-700 dark:text-amber-300 font-bold animate-pulse">
             aguardando cliente
           </span>
@@ -168,9 +175,11 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
               ) : (
                 <>
                   <span className="flex-1 min-w-0 truncate font-semibold" title={String(v)}>{String(v)}</span>
-                  <button onClick={() => { setEditing(f.key); setEditVal(String(v)); }} className="opacity-60 hover:opacity-100 shrink-0">
-                    <Edit2 className="w-2.5 h-2.5" />
-                  </button>
+                  {!isConfirmed && (
+                    <button onClick={() => { setEditing(f.key); setEditVal(String(v)); }} className="opacity-60 hover:opacity-100 shrink-0">
+                      <Edit2 className="w-2.5 h-2.5" />
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -178,16 +187,18 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
         })}
       </div>
 
-      <div className="flex items-center gap-1 pt-1">
-        <Button size="sm" className="h-6 flex-1 text-[10px] font-bold gap-1" onClick={() => void confirmSelf()} disabled={busy !== ""}>
-          {busy === "self" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-          Eu confirmo
-        </Button>
-        <Button size="sm" variant="outline" className="h-6 flex-1 text-[10px] gap-1" onClick={() => void askClient()} disabled={busy !== ""}>
-          {busy === "client" ? <Loader2 className="w-3 h-3 animate-spin" /> : <MessageCircle className="w-3 h-3" />}
-          Pedir ao cliente
-        </Button>
-      </div>
+      {!isConfirmed && (
+        <div className="flex items-center gap-1 pt-1">
+          <Button size="sm" className="h-6 flex-1 text-[10px] font-bold gap-1" onClick={() => void confirmSelf()} disabled={busy !== ""}>
+            {busy === "self" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+            Eu confirmo
+          </Button>
+          <Button size="sm" variant="outline" className="h-6 flex-1 text-[10px] gap-1" onClick={() => void askClient()} disabled={busy !== ""}>
+            {busy === "client" ? <Loader2 className="w-3 h-3 animate-spin" /> : <MessageCircle className="w-3 h-3" />}
+            Pedir ao cliente
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

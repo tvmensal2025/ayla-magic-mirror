@@ -63,6 +63,41 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
 
   useEffect(() => { setSentSteps(new Set()); setPhone(null); setCustomerName(null); setShowAside(false); setVariant("A"); setMismatch({ flag: false, bill: "", doc: "", acked: false }); }, [selectedId]);
 
+  // Reconstitui sentSteps a partir do log de conversations outbound: tile fica ✓
+  // mesmo após trocar de lead ou recarregar a página.
+  useEffect(() => {
+    if (!selectedId) return;
+    let mounted = true;
+    (async () => {
+      // Pega os steps ativos do fluxo do consultor (qualquer variante) e os outbounds do lead
+      const { data: flows } = await supabase
+        .from("bot_flows").select("id")
+        .eq("consultant_id", consultantId).eq("is_active", true);
+      const flowIds = ((flows as any[]) || []).map((f) => f.id);
+      if (flowIds.length === 0) return;
+      const { data: steps } = await supabase
+        .from("bot_flow_steps").select("id, step_key")
+        .in("flow_id", flowIds).eq("is_active", true);
+      const stepIdByKey = new Map<string, string>();
+      ((steps as any[]) || []).forEach((s) => {
+        if (s.step_key) stepIdByKey.set(String(s.step_key), String(s.id));
+        stepIdByKey.set(String(s.id), String(s.id));
+      });
+      const { data: outs } = await supabase
+        .from("conversations").select("conversation_step")
+        .eq("customer_id", selectedId).eq("message_direction", "outbound")
+        .not("conversation_step", "is", null);
+      const found = new Set<string>();
+      ((outs as any[]) || []).forEach((o) => {
+        const key = String(o.conversation_step || "");
+        const id = stepIdByKey.get(key);
+        if (id) found.add(id);
+      });
+      if (mounted && found.size > 0) setSentSteps((prev) => new Set([...prev, ...found]));
+    })();
+    return () => { mounted = false; };
+  }, [selectedId, consultantId]);
+
   useEffect(() => {
     if (!selectedId) return;
     void (async () => {
