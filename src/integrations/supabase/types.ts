@@ -4109,6 +4109,15 @@ export type Database = {
         }
         Returns: string
       }
+      log_capture_event_if_new: {
+        Args: {
+          _consultant_id: string
+          _customer_id: string
+          _field: string
+          _source: string
+        }
+        Returns: undefined
+      }
       refund_consultant_wallet: {
         Args: {
           _amount_cents: number
