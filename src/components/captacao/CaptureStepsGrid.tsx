@@ -162,7 +162,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                   size="sm"
                   variant={sent ? "outline" : "default"}
                   className="h-7 px-2 text-[11px] flex-1"
-                  onClick={() => sendStep(s.id, s.title || s.step_key || `Passo ${s.position}`)}
+                  onClick={() => sendStep(s as StepRow, s.title || s.step_key || `Passo ${s.position}`)}
                   disabled={!!sending}
                   aria-busy={isSending}
                 >
