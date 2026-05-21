@@ -1,0 +1,29 @@
+// Kill switch global — Fase 0 da auditoria de lançamento.
+// Lido por webhooks e crons antes de qualquer ação automática.
+// Cache 5s para evitar query em cada inbound.
+
+import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+
+let _cache: { enabled: boolean; t: number } | null = null;
+const TTL_MS = 5_000;
+
+export async function isBotGloballyEnabled(supabase: SupabaseClient): Promise<boolean> {
+  if (_cache && Date.now() - _cache.t < TTL_MS) return _cache.enabled;
+  try {
+    const { data } = await supabase
+      .from("app_settings")
+      .select("bot_global_enabled")
+      .eq("id", "global")
+      .maybeSingle();
+    // Fail-open: se a linha não existir ou der erro, assume habilitado.
+    const enabled = data ? !!(data as any).bot_global_enabled : true;
+    _cache = { enabled, t: Date.now() };
+    return enabled;
+  } catch {
+    return true;
+  }
+}
+
+export function clearBotGlobalFlagCache() {
+  _cache = null;
+}
