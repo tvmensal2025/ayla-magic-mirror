@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
     // Resolve customer + phone
     const { data: customer } = await supabase
       .from("customers")
-      .select("id, name, name_source, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at")
+      .select("id, name, n, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at")
       .eq("id", body.customerId)
       .maybeSingle();
     if (!customer) return json({ ok: false, blocked: true, code: "customer_not_found", error: "customer_not_found", message: "Lead não encontrado (pode ter sido removido). Recarregue a lista." });
@@ -173,9 +173,12 @@ Deno.serve(async (req) => {
 
     // Guarda nome: se o lead ainda não tem nome real e o passo escolhido NÃO é "pedir nome",
     // bloqueia e instrui o consultor a pedir o nome primeiro (mantém {{nome}} válido + gameficação).
-    const nameSource = String((customer as any).name_source || "unknown").toLowerCase();
+    // Coluna real é `n` (não name_source). pushName do WhatsApp grava
+    // n="whatsapp_profile" — não conta como nome capturado de verdade.
+    const nameSource = String((customer as any).n || "unknown").toLowerCase();
+    const NAME_NOT_TRUSTED = new Set(["", "unknown", "whatsapp_profile"]);
     const stepAsksName = isNameAskingStep(step);
-    if (!body.skipNameGuard && nameSource === "unknown" && !stepAsksName) {
+    if (!body.skipNameGuard && NAME_NOT_TRUSTED.has(nameSource) && !stepAsksName) {
       return json({
         ok: false,
         blocked: true,
