@@ -43,13 +43,17 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
   const [sending, setSending] = useState(false);
   const [variant, setVariant] = useState<"A" | "B" | "C">("A");
   const [variantsAvailable, setVariantsAvailable] = useState<Array<"A" | "B" | "C">>(["A"]);
+  const byVariantRef = useRef<Map<"A" | "B" | "C", string>>(new Map());
 
+  // Efeito 1 — inicialização: define variante default a partir do cliente
+  // sem reagir a mudanças posteriores em `variant` (clique manual não pode
+  // ser revertido pela flow_variant do cliente).
   useEffect(() => {
     if (!open) { setSelectedStep(null); setParts([]); setPartIdx(0); return; }
+    let mounted = true;
     (async () => {
       setLoading(true);
 
-      // Descobre a variante do cliente + todas as variantes disponíveis (A/B/C).
       const { data: cust } = await supabase
         .from("customers").select("flow_variant")
         .eq("id", customerId).maybeSingle();
@@ -65,28 +69,49 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
         const v = String(f.variant || "A").toUpperCase() as "A" | "B" | "C";
         if (["A", "B", "C"].includes(v) && !byVariant.has(v)) byVariant.set(v, f.id);
       });
+      byVariantRef.current = byVariant;
       const available = (["A", "B", "C"] as const).filter((v) => byVariant.has(v));
+      if (!mounted) return;
       setVariantsAvailable(available.length > 0 ? available : ["A"]);
 
       const selected: "A" | "B" | "C" = byVariant.has(custVariant) ? custVariant : (available[0] || "A");
       setVariant(selected);
+      // Os passos serão carregados pelo Efeito 2 ao reagir a `variant`.
+      setLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, [open, consultantId, customerId]);
 
-      const flowId = byVariant.get(selected);
-      if (!flowId) { setSteps([]); setLoading(false); return; }
+  // Efeito 2 — troca manual: recarrega só os passos da variante escolhida,
+  // sem mexer em `variant` nem reler flow_variant.
+  useEffect(() => {
+    if (!open) return;
+    const byVariant = byVariantRef.current;
+    if (byVariant.size === 0) return;
+    const flowId = byVariant.get(variant);
+    if (!flowId) { setSteps([]); return; }
+    let mounted = true;
+    (async () => {
+      setLoading(true);
       const { data } = await supabase
         .from("bot_flow_steps")
         .select("id, step_key, title, slot_key, message_text, position")
         .eq("flow_id", flowId).eq("is_active", true)
         .order("position", { ascending: true });
-      const list = ((data as any) || []) as Step[];
+      if (!mounted) return;
+      const list = ((data as Step[]) || []);
       setSteps(list);
+      setSelectedStep(null);
+      setParts([]);
+      setPartIdx(0);
       setLoading(false);
       if (initialStepId) {
         const pre = list.find((s) => s.id === initialStepId);
         if (pre) loadStepParts(pre);
       }
     })();
-  }, [open, consultantId, customerId, initialStepId, variant]);
+    return () => { mounted = false; };
+  }, [open, variant, initialStepId]);
 
 
 
