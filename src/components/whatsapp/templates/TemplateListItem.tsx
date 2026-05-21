@@ -15,7 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 interface Props {
   template: MessageTemplate;
   consultantId: string;
-  onUpdateTemplate: (id: string, updates: { name?: string; image_url?: string | null; content?: string; media_url?: string | null; media_type?: string }) => Promise<void>;
+  onUpdateTemplate: (id: string, updates: { name?: string; image_url?: string | null; content?: string; media_url?: string | null; media_type?: string; is_quick_reply?: boolean }) => Promise<void>;
   onDeleteTemplate: (id: string) => Promise<void>;
   onPreview: (t: MessageTemplate) => void;
   onForked?: () => Promise<void> | void;
