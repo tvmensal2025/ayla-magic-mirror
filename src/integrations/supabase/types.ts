@@ -3185,6 +3185,7 @@ export type Database = {
           created_at: string | null
           id: string
           image_url: string | null
+          is_quick_reply: boolean
           media_type: string | null
           media_url: string | null
           name: string
@@ -3197,6 +3198,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           image_url?: string | null
+          is_quick_reply?: boolean
           media_type?: string | null
           media_url?: string | null
           name: string
@@ -3209,6 +3211,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           image_url?: string | null
+          is_quick_reply?: boolean
           media_type?: string | null
           media_url?: string | null
           name?: string

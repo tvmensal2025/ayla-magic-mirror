@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { File, Image, Trash2, Eye, Pencil, Save, X, Loader2, Upload, Copy } from "lucide-react";
+import { File, Image, Trash2, Eye, Pencil, Save, X, Loader2, Upload, Copy, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,7 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 interface Props {
   template: MessageTemplate;
   consultantId: string;
-  onUpdateTemplate: (id: string, updates: { name?: string; image_url?: string | null; content?: string; media_url?: string | null; media_type?: string }) => Promise<void>;
+  onUpdateTemplate: (id: string, updates: { name?: string; image_url?: string | null; content?: string; media_url?: string | null; media_type?: string; is_quick_reply?: boolean }) => Promise<void>;
   onDeleteTemplate: (id: string) => Promise<void>;
   onPreview: (t: MessageTemplate) => void;
   onForked?: () => Promise<void> | void;
@@ -219,6 +219,24 @@ export function TemplateListItem({ template: t, consultantId, onUpdateTemplate, 
         )}
       </div>
       <div className="flex items-center gap-1 shrink-0">
+        {canEditDirect && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={async () => {
+              try {
+                await onUpdateTemplate(t.id, { is_quick_reply: t.is_quick_reply === false });
+                toast.success(t.is_quick_reply === false ? "Aparece nas respostas rápidas" : "Removido das respostas rápidas");
+              } catch {
+                toast.error("Não consegui atualizar");
+              }
+            }}
+            className={`h-8 w-8 transition-all ${t.is_quick_reply === false ? "text-muted-foreground/40 opacity-0 group-hover:opacity-100" : "text-amber-400"}`}
+            title={t.is_quick_reply === false ? "Mostrar nas respostas rápidas" : "Aparece nas respostas rápidas (clique para esconder)"}
+          >
+            <Star className={`w-3.5 h-3.5 ${t.is_quick_reply === false ? "" : "fill-amber-400"}`} />
+          </Button>
+        )}
         {canEditDirect && (
           <Button variant="ghost" size="icon" onClick={startEditing}
             className="text-muted-foreground hover:text-purple-400 h-8 w-8 opacity-0 group-hover:opacity-100 transition-all"

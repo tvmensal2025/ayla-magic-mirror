@@ -1,0 +1,1 @@
+ALTER TABLE public.message_templates ADD COLUMN IF NOT EXISTS is_quick_reply boolean NOT NULL DEFAULT true;
