@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
     const settings: Record<string, string> = {};
     (settingsRows || []).forEach((s: any) => { settings[s.key] = s.value; });
     const whapiToken = settings.whapi_token || Deno.env.get("WHAPI_TOKEN") || "";
-    if (!whapiToken) return json({ error: "whapi_token_missing" }, 500);
+    if (!whapiToken) return json({ code: "whapi_token_missing", error: "whapi_token_missing", message: "Token do WhatsApp (Whapi) não configurado no sistema. Avise o admin." }, 500);
 
     const sender = createWhapiSender(whapiToken);
 
