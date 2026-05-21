@@ -27,7 +27,7 @@ export function GameComposer({ instanceName, isWhapi, phone, onSent }: Props) {
     lastSendRef.current = Date.now();
     setSending(true);
     try {
-      const result = await sendWhatsAppMessage({ instanceName, phone, text: trimmed, isWhapi });
+      const result = await sendWhatsAppMessage({ instanceName, phone, mediaCategory: "text", text: trimmed, isWhapi });
       if (result.status === "failed") {
         toast.error(result.error || "Falha ao enviar texto");
         return;
