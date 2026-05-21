@@ -209,28 +209,28 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
   const defaultV = (defaultVariant || "A").toUpperCase();
 
   return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-1.5 sticky top-0 z-10 bg-background/95 backdrop-blur py-1 -mx-1 px-1">
+    <div className="space-y-0.5">
+      <div className="flex items-center gap-1 sticky top-0 z-10 bg-background/95 backdrop-blur py-0.5 -mx-1 px-1">
         <div className="relative flex-1">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+          <Search className="absolute left-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 text-muted-foreground" />
           <Input
             placeholder="Buscar passo…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="h-7 pl-6 text-[11px]"
+            className="h-6 pl-5 text-[10px]"
           />
         </div>
         <Button
           size="sm"
           variant={onlyPending ? "default" : "outline"}
-          className="h-7 px-2 text-[10px] whitespace-nowrap"
+          className="h-6 px-1.5 text-[9px] whitespace-nowrap"
           onClick={() => setOnlyPending((v) => !v)}
         >
           Pendentes
         </Button>
       </div>
 
-      <ul className="space-y-1">
+      <ul className="space-y-0.5">
         {filtered.map((g, idx) => {
           const num = idx + 1;
           const variantKeys = Object.keys(g.variants).sort();
@@ -246,7 +246,7 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
           return (
             <li key={g.step_key}>
               <div
-                className={`rounded-md border flex items-center gap-1.5 pl-1.5 pr-1.5 py-1 transition-all ${
+                className={`rounded-md border flex items-center gap-1 pl-1 pr-1 py-0.5 transition-all ${
                   isError
                     ? "border-destructive/60 bg-destructive/10"
                     : isCurrent
@@ -258,7 +258,7 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
               >
                 <div className="relative shrink-0">
                   <span
-                    className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold tabular-nums ${
+                    className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold tabular-nums ${
                       anySent
                         ? "bg-primary text-primary-foreground"
                         : isCurrent
@@ -266,18 +266,18 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
                         : "bg-muted text-muted-foreground"
                     }`}
                   >
-                    {anySent ? <Check className="w-3 h-3" /> : num}
+                    {anySent ? <Check className="w-2.5 h-2.5" /> : num}
                   </span>
-                  <span className="absolute -bottom-0.5 -right-1 text-[8px] font-bold bg-background border border-border rounded-sm px-0.5 leading-none py-px text-foreground/80">
+                  <span className="absolute -bottom-0.5 -right-1 text-[7px] font-bold bg-background border border-border rounded-sm px-0.5 leading-none py-px text-foreground/80">
                     {defaultRow?.variant || defaultV}
                   </span>
                 </div>
                 <div className="flex-1 min-w-0 flex items-center gap-1">
-                  <p className="text-[12px] font-semibold truncate leading-tight">
+                  <p className="text-[11px] font-semibold truncate leading-tight">
                     {g.title || g.step_key || `Passo ${num}`}
                   </p>
                   {isCurrent && (
-                    <span className="text-[9px] font-bold uppercase tracking-wide px-1 py-px rounded bg-amber-400 text-black shrink-0">
+                    <span className="text-[8px] font-bold uppercase tracking-wide px-1 py-px rounded bg-amber-400 text-black shrink-0">
                       atual
                     </span>
                   )}
@@ -292,7 +292,7 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
                   disabled={isSending || !defaultRow}
                   onClick={() => defaultRow && setConfirmStep({ group: g, row: defaultRow })}
                   title={isError ? "Falhou — clique pra tentar de novo" : "Ver prévia e enviar"}
-                  className={`relative shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-colors disabled:opacity-50 ${
+                  className={`relative shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-colors disabled:opacity-50 ${
                     isError
                       ? "bg-destructive text-destructive-foreground"
                       : anySent
@@ -301,13 +301,13 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
                   }`}
                 >
                   {isSending ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <Loader2 className="w-3 h-3 animate-spin" />
                   ) : isError ? (
                     <span className="text-[10px] font-bold">!</span>
                   ) : anySent ? (
-                    <Check className="w-3.5 h-3.5" />
+                    <Check className="w-3 h-3" />
                   ) : (
-                    <Send className="w-3.5 h-3.5" />
+                    <Send className="w-3 h-3" />
                   )}
                 </button>
               </div>
