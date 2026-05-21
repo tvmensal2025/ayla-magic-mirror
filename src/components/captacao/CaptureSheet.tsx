@@ -197,14 +197,9 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
               sentSteps={sentSteps}
               onSent={async (key) => {
                 setSentSteps((s) => new Set(s).add(key));
-                // Pausa o bot no 1º envio manual (evita resposta dupla com o consultor)
-                if (sentSteps.size === 0 && customer?.id && !(customer as any).bot_paused) {
-                  await supabase.from("customers").update({
-                    bot_paused: true,
-                    bot_paused_reason: "manual_capture",
-                    bot_paused_at: new Date().toISOString(),
-                  }).eq("id", customer.id);
-                }
+                // NÃO pausar o bot — Modo Captação é assistido: consultor envia o prompt,
+                // mas o bot precisa continuar processando a resposta do lead (OCR da conta,
+                // captura de CPF/CEP, avanço do passo). Use o botão "Assumir" para takeover real.
               }}
               defaultVariant={(customer as any)?.flow_variant || "A"}
               currentStep={(customer as any)?.conversation_step}
