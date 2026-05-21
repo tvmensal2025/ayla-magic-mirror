@@ -95,6 +95,7 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
   const [warning, setWarning] = useState("");
   const [countdown, setCountdown] = useState(0);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortRef = useRef(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [originFilter, setOriginFilter] = useState<"whatsapp_lead" | "igreen_sync">("igreen_sync");
   const [devolutivaFilter, setDevolutivaFilter] = useState<string>("all");
@@ -210,6 +211,7 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
     if (selectedIds.size === 0) { setWarning("Selecione pelo menos um destinatário"); return; }
     const hasMedia = !!(selectedTemplate?.media_url);
     if (!message.trim() && !hasMedia) return;
+    abortRef.current = false;
     setWarning(""); setIsSending(true); setResult(null);
     const selected = customers.filter((c) => selectedIds.has(c.id));
     let sent = 0, failed = 0;
@@ -218,6 +220,7 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
     const tplImageUrl = selectedTemplate?.image_url;
 
     for (let i = 0; i < selected.length; i++) {
+      if (abortRef.current) break;
       setProgress({ total: selected.length, sent, failed });
       try {
         const phone = selected[i].phone_whatsapp;
@@ -259,7 +262,7 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
         } else { failed++; }
       } catch { failed++; }
 
-      if (i < selected.length - 1) {
+      if (i < selected.length - 1 && !abortRef.current) {
         const intervalS = getRandomInterval(i);
         setCountdown(intervalS);
         await new Promise<void>((resolve) => {
@@ -267,7 +270,7 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
           countdownRef.current = setInterval(() => {
             seconds--;
             setCountdown(seconds);
-            if (seconds <= 0) {
+            if (seconds <= 0 || abortRef.current) {
               if (countdownRef.current) clearInterval(countdownRef.current);
               countdownRef.current = null;
               resolve();
@@ -593,7 +596,15 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
           <div className="mb-4 space-y-3 rounded-xl bg-secondary/20 border border-border/30 p-4">
             <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
               <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
-              <span className="font-medium">Enviando... {progress.sent + progress.failed}/{progress.total}</span>
+              <span className="font-medium flex-1">Enviando... {progress.sent + progress.failed}/{progress.total}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-[11px] border-destructive/40 text-destructive hover:bg-destructive/10"
+                onClick={() => { abortRef.current = true; if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; } }}
+              >
+                Parar
+              </Button>
             </div>
             <Progress value={pct} className="h-2" />
             {countdown > 0 && (
