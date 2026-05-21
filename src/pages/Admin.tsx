@@ -49,6 +49,7 @@ const AdminContent = () => {
       if (tab === "performance" || tab === "anuncios" || tab === "central-anuncios") return "central-anuncios";
       if (tab === "agente" || tab === "historico") return "whatsapp";
       if (tab === "preview") return "links";
+      if (tab === "captacao" || tab === "game" || tab === "modo-game") return "captacao";
     }
     return "dashboard";
   });
