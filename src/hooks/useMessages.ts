@@ -354,7 +354,9 @@ export function useMessages(
             remoteJid,
             fromMe: true,
             text,
-            timestamp: Math.floor(Date.now() / 1000),
+            // Float (sub-second) garante que a otimista vença qualquer empate
+            // com mensagens vindas do servidor no mesmo segundo.
+            timestamp: Date.now() / 1000,
             status: 1,
           },
         ]);
