@@ -1,4 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { MessageTemplate } from "@/types/whatsapp";
 
 interface QuickReplyMenuProps {
@@ -11,20 +13,28 @@ interface QuickReplyMenuProps {
 
 export function QuickReplyMenu({ templates, search, onSelect, onClose, onExactShortcut }: QuickReplyMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const q = search.toLowerCase().trim();
 
-  const q = search.toLowerCase();
+  // Sem busca: mostra só os marcados como "resposta rápida".
+  // Com busca: olha em todos (favoritos ou não), para o consultor achar o que precisa.
+  const visible = useMemo(() => {
+    return q.length === 0
+      ? templates.filter((t) => t.is_quick_reply !== false)
+      : templates;
+  }, [templates, q]);
+
   // Match exato por atalho (digitou "oi" e existe template com shortcut="/oi")
   const exactShortcut = q.length >= 2
-    ? templates.find((t) => (t.shortcut || "").toLowerCase() === `/${q}`)
+    ? visible.find((t) => (t.shortcut || "").toLowerCase() === `/${q}`)
     : null;
 
-  const filtered = templates
+  const filtered = visible
     .filter((t) =>
+      q.length === 0 ||
       t.name.toLowerCase().includes(q) ||
       t.content.toLowerCase().includes(q) ||
-      (t.shortcut || "").toLowerCase().includes(q ? `/${q}` : "")
+      (t.shortcut || "").toLowerCase().includes(`/${q}`)
     )
-    // Atalho-match primeiro
     .sort((a, b) => {
       const aS = (a.shortcut || "").toLowerCase().startsWith(`/${q}`) ? 0 : 1;
       const bS = (b.shortcut || "").toLowerCase().startsWith(`/${q}`) ? 0 : 1;
@@ -41,18 +51,40 @@ export function QuickReplyMenu({ templates, search, onSelect, onClose, onExactSh
     return () => document.removeEventListener("mousedown", handleClick);
   }, [onClose]);
 
-  if (filtered.length === 0) return null;
+  const totalFavorites = templates.filter((t) => t.is_quick_reply !== false).length;
 
   return (
     <div
       ref={ref}
-      className="absolute bottom-full left-0 right-0 mb-1 bg-popover border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto z-50"
+      className="absolute bottom-full left-0 right-0 mb-1 bg-popover border border-border rounded-lg shadow-lg max-h-64 overflow-hidden z-50 flex flex-col"
     >
-      <div className="p-1">
-        <p className="text-[10px] text-muted-foreground px-2 py-1">
-          Respostas rápidas {exactShortcut && <span className="text-primary">· Enter envia "{exactShortcut.name}"</span>}
+      <div className="flex items-center justify-between px-2 py-1.5 border-b border-border/60 bg-secondary/30 shrink-0">
+        <p className="text-[10px] text-muted-foreground">
+          Respostas rápidas
+          <span className="ml-1 text-muted-foreground/60">
+            · {filtered.length}{q.length === 0 ? ` de ${totalFavorites} favoritas` : ""}
+          </span>
+          {exactShortcut && <span className="ml-1 text-primary">· Enter envia "{exactShortcut.name}"</span>}
         </p>
-        {filtered.map((t) => (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-5 w-5 text-muted-foreground hover:text-foreground"
+          onClick={onClose}
+          title="Fechar (Esc)"
+        >
+          <X className="h-3 w-3" />
+        </Button>
+      </div>
+
+      <div className="p-1 overflow-y-auto">
+        {filtered.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground px-3 py-4 text-center">
+            {q.length === 0
+              ? "Nenhum template marcado como resposta rápida. Marque a estrela nos templates para vê-los aqui."
+              : "Nenhum template encontrado."}
+          </p>
+        ) : filtered.map((t) => (
           <button
             key={t.id}
             onClick={() => onSelect(t)}
