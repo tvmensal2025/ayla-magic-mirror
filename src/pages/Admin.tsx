@@ -353,6 +353,13 @@ const AdminContent = () => {
             <AdsCentralTab consultantId={userId} />
           )}
 
+          {userId && activeTab === "captacao" && (
+            <CaptacaoPanel
+              consultantId={userId}
+              onOpenChat={(phone) => { setPendingChatPhone(phone); setActiveTab("whatsapp"); }}
+            />
+          )}
+
         </Suspense>
       </main>
 
