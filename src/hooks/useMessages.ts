@@ -164,6 +164,8 @@ export function useMessages(
         .map(mapMessage)
         .filter((m) => clearedAtMs === 0 || m.timestamp * 1000 >= clearedAtMs)
         .sort((a, b) => (a.timestamp - b.timestamp) || a.id.localeCompare(b.id));
+      setMessages(mapped);
+
 
       const fallbackSendTarget = raw.find((msg) => msg.key.remoteJidAlt)?.key.remoteJidAlt;
       if (fallbackSendTarget) {
