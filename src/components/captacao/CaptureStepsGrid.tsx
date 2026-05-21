@@ -8,15 +8,45 @@ import { normalizeSendStepError } from "@/lib/whatsapp/send";
 interface Props {
   consultantId: string;
   customerId: string;
+  /** Variante A/B/C do lead — filtra o fluxo certo */
+  variant?: "A" | "B" | "C";
   /** Map stepId -> "sent" | "responded" status */
   sentSteps: Set<string>;
   onSent: (stepId: string) => void;
   onEditTemplate?: (stepKey: string, text: string) => void;
 }
 
-interface StepRow { id: string; title: string | null; step_key: string | null; position: number; message_text: string | null; }
+interface StepRow {
+  id: string;
+  title: string | null;
+  step_key: string | null;
+  position: number;
+  message_text: string | null;
+  step_type?: string | null;
+  /** quando true, este é um tile sintético (não existe em bot_flow_steps) */
+  __synthetic?: boolean;
+}
 
-export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, onEditTemplate }: Props) {
+const SYNTHETIC_EMAIL: StepRow = {
+  id: "__synth_ask_email",
+  title: "📧 E-mail",
+  step_key: "ask_email",
+  position: 98,
+  message_text: null,
+  step_type: "capture_email",
+  __synthetic: true,
+};
+const SYNTHETIC_CONFIRM_PHONE: StepRow = {
+  id: "__synth_confirm_phone",
+  title: "📱 Confirmar WhatsApp",
+  step_key: "ask_phone_confirm",
+  position: 99,
+  message_text: null,
+  step_type: "confirm_phone",
+  __synthetic: true,
+};
+
+export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sentSteps, onSent, onEditTemplate }: Props) {
   const { toast } = useToast();
   const [sending, setSending] = useState<string | null>(null);
   const [steps, setSteps] = useState<StepRow[]>([]);
@@ -25,20 +55,30 @@ export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, 
     let mounted = true;
     (async () => {
       const { data: flows } = await supabase
-        .from("bot_flows").select("id")
-        .eq("consultant_id", consultantId).eq("is_active", true).limit(1);
-      if (!flows?.[0]) { if (mounted) setSteps([]); return; }
+        .from("bot_flows").select("id, variant")
+        .eq("consultant_id", consultantId).eq("is_active", true)
+        .order("variant", { ascending: true });
+      const list = (flows as any[]) || [];
+      const flow = list.find((f) => String(f.variant) === variant) || list[0];
+      if (!flow) { if (mounted) setSteps([]); return; }
       const { data } = await supabase
         .from("bot_flow_steps")
-        .select("id, title, step_key, position, message_text")
-        .eq("flow_id", flows[0].id)
+        .select("id, title, step_key, position, message_text, step_type")
+        .eq("flow_id", flow.id)
         .eq("is_active", true)
         .order("position", { ascending: true })
-        .limit(10);
-      if (mounted) setSteps((data as StepRow[]) || []);
+        .limit(20);
+      const rows = ((data as StepRow[]) || []);
+      // Garante que email + confirm WhatsApp sempre apareçam (essenciais p/ cadastro).
+      const hasEmail = rows.some((r) => r.step_type === "capture_email" || r.step_key === "ask_email");
+      const hasConfirm = rows.some((r) => r.step_type === "confirm_phone" || r.step_key === "ask_phone_confirm");
+      const merged = [...rows.slice(0, 10)];
+      if (!hasEmail) merged.push(SYNTHETIC_EMAIL);
+      if (!hasConfirm) merged.push(SYNTHETIC_CONFIRM_PHONE);
+      if (mounted) setSteps(merged);
     })();
     return () => { mounted = false; };
-  }, [consultantId]);
+  }, [consultantId, variant]);
 
   const display = steps;
 
