@@ -2,7 +2,7 @@ import React, { useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, BarChart3, LinkIcon, Settings, MessageSquare, LayoutGrid, Users, Copy, Download, X, Sparkles, FolderDown, Network, Eye, EyeOff, Megaphone } from "lucide-react";
+import { LogOut, BarChart3, LinkIcon, Settings, MessageSquare, LayoutGrid, Users, Copy, Download, X, Sparkles, FolderDown, Network, Eye, EyeOff, Megaphone, Gamepad2 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { OnboardingGate } from "@/components/admin/OnboardingGate";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
@@ -32,6 +32,8 @@ const NetworkPanel = lazy(() => import("@/components/admin/NetworkPanel").then(m
 const PanfletoModal = lazy(() => import("@/components/admin/PanfletoModal").then(m => ({ default: m.PanfletoModal })));
 
 const AdsCentralTab = lazy(() => import("@/components/admin/ads/AdsCentralTab").then(m => ({ default: m.AdsCentralTab })));
+const CaptacaoPanel = lazy(() => import("@/components/captacao/CaptacaoPanel").then(m => ({ default: m.CaptacaoPanel })));
+const InstallPwaButton = lazy(() => import("@/components/admin/InstallPwaButton").then(m => ({ default: m.InstallPwaButton })));
 import { SupportChatButton } from "@/components/support/SupportChatButton";
 
 const AdminContent = () => {
@@ -41,12 +43,13 @@ const AdminContent = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "links" | "whatsapp" | "crm" | "clientes" | "rede" | "central-anuncios">(() => {
+  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "links" | "whatsapp" | "crm" | "clientes" | "rede" | "central-anuncios" | "captacao">(() => {
     if (typeof window !== "undefined") {
       const tab = new URLSearchParams(window.location.search).get("tab");
       if (tab === "performance" || tab === "anuncios" || tab === "central-anuncios") return "central-anuncios";
       if (tab === "agente" || tab === "historico") return "whatsapp";
       if (tab === "preview") return "links";
+      if (tab === "captacao" || tab === "game" || tab === "modo-game") return "captacao";
     }
     return "dashboard";
   });
@@ -164,6 +167,7 @@ const AdminContent = () => {
     { id: "dashboard" as const, label: "Dashboard", icon: BarChart3 },
     { id: "crm" as const, label: "CRM", icon: LayoutGrid },
     { id: "clientes" as const, label: "Clientes", icon: Users },
+    { id: "captacao" as const, label: "Captação", icon: Gamepad2 },
     { id: "rede" as const, label: "Rede", icon: Network },
     { id: "whatsapp" as const, label: "WhatsApp", icon: MessageSquare },
     { id: "central-anuncios" as const, label: "Central de Anúncios", icon: Megaphone },
@@ -228,6 +232,7 @@ const AdminContent = () => {
             >
               <Sparkles className="h-5 w-5" />
             </button>
+            <Suspense fallback={null}><InstallPwaButton /></Suspense>
             <Suspense fallback={<div className="w-9 h-9" />}>
               <NotificationCenter
                 notifications={notifications}
@@ -347,6 +352,13 @@ const AdminContent = () => {
 
           {userId && activeTab === "central-anuncios" && (
             <AdsCentralTab consultantId={userId} />
+          )}
+
+          {userId && activeTab === "captacao" && (
+            <CaptacaoPanel
+              consultantId={userId}
+              onOpenChat={(phone) => { setPendingChatPhone(phone); setActiveTab("whatsapp"); }}
+            />
           )}
 
         </Suspense>

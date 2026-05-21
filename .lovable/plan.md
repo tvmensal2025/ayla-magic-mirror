@@ -1,43 +1,48 @@
-# Respostas Rápidas: fechar + filtrar quais aparecem
+# Modo Game no /admin + PWA instalável no celular
 
-## Problema
-No chat do WhatsApp, o menu "Respostas Rápidas" (atalho `/`) abre por cima do composer e não tem como fechar manualmente. Quando há muitos templates, vira poluição visual — e o consultor quer escolher só os "favoritos" que ficam visíveis ali.
+## 1. Modo Game — nova aba "Captação" no /admin do consultor
 
-## Mudanças
+**Diagnóstico:** O componente `CaptacaoPanel` (que contém o `GameModeToggle`) existe em `src/components/captacao/CaptacaoPanel.tsx`, mas não está montado em nenhuma página. Por isso o consultor não acha. A aba "Captação" do SuperAdmin é outra coisa (diagnóstico IA).
 
-### 1. Botão X para fechar o menu (UI)
-Arquivo: `src/components/whatsapp/QuickReplyMenu.tsx`
-- Adicionar header sticky no topo do popover com:
-  - Título "Respostas rápidas" + contador (ex: `12 de 30`)
-  - Botão X (ícone `lucide-react`) que dispara `onClose()`
-- Mantém o fechamento já existente por clique fora e tecla Esc.
+**Mudanças** (em `src/pages/Admin.tsx`):
+- Adicionar `"captacao"` ao tipo do `activeTab`.
+- Lazy-load: `const CaptacaoPanel = lazy(() => import("@/components/captacao/CaptacaoPanel"))`.
+- Adicionar item na lista de abas com label **"Captação"** e ícone `Gamepad2` (lucide).
+- Render condicional: `{activeTab === "captacao" && <CaptacaoPanel consultantId={userId} onOpenChat={(phone) => { setActiveTab("whatsapp"); setPendingChatPhone(phone); }} />}`.
+- Suportar `?tab=captacao` na URL inicial.
 
-### 2. Marcar templates "favoritos" (quais aparecem)
-Coluna nova em `message_templates`:
-- `is_quick_reply boolean default true` (migration)
-- Default `true` para não quebrar nada existente.
+Resultado: o consultor abre /admin → clica "Captação" → vê o toggle "Modo Game ON/OFF" + som + painel do jogo.
 
-Telas afetadas:
-- **Gerenciador de templates** (`src/components/admin/templates/...` — TemplateManager/TemplateListItem):
-  - Adicionar toggle/estrela "Mostrar em respostas rápidas" em cada template.
-  - Atualiza `is_quick_reply` via `useTemplates`.
-- **QuickReplyMenu**:
-  - Filtrar `templates.filter(t => t.is_quick_reply !== false)` antes de aplicar busca.
-  - Quando o usuário digita `/algo`, ignorar o filtro de favoritos (busca explícita acessa tudo) — só esconde os não-favoritos no menu "vazio".
-- **Header do menu** ganha link "Gerenciar" que abre o painel de templates.
+## 2. PWA — instalar no celular (manifest-only, sem service worker)
 
-### 3. Tipos
-`src/types/whatsapp.ts`:
-- Adicionar `is_quick_reply?: boolean` em `MessageTemplate`.
+**Diagnóstico:** Já existe `public/manifest.json` válido (display standalone, theme color, ícones) e o link no `index.html`. Para o "Adicionar à tela inicial" funcionar bem no iOS e Android falta apenas:
+- Meta tags Apple no `<head>` do `index.html`:
+  - `<meta name="apple-mobile-web-app-capable" content="yes" />`
+  - `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />`
+  - `<meta name="apple-mobile-web-app-title" content="iGreen" />`
+  - `<meta name="mobile-web-app-capable" content="yes" />`
+  - `<meta name="format-detection" content="telephone=no" />`
+- Liberar zoom (acessibilidade) no viewport: remover `maximum-scale=1.0, user-scalable=no` ou trocar por `viewport-fit=cover`.
+- Adicionar `id` e `scope` ao manifest para travar a identidade do PWA:
+  - `"id": "/admin"`, `"scope": "/"`, `"lang": "pt-BR"`, `"categories": ["business","productivity"]`.
+- Adicionar `shortcuts` ao manifest (atalhos no ícone): WhatsApp, CRM, Captação.
 
-`src/hooks/useTemplates.ts`:
-- Incluir o campo no select e no upsert.
+**Botão "Instalar app" + tela /install** (componente novo):
+- `src/components/admin/InstallPwaButton.tsx`: escuta `beforeinstallprompt`, mostra botão "📱 Instalar app" no header do /admin quando o evento dispara (Android/Chrome). Em iOS Safari (sem `beforeinstallprompt`), mostra modal com instrução visual "Toque em Compartilhar → Adicionar à Tela de Início".
+- Detecta `display-mode: standalone` para esconder o botão quando já instalado.
+- Persiste dismiss em `localStorage`.
 
-## Detalhes técnicos
-- Migration cria a coluna com default `true` para preservar o comportamento atual.
-- RLS continua o mesmo (já por `consultant_id`).
-- Sem mudança em envio de mensagem, fluxo do bot ou backend.
+**Não usaremos** `vite-plugin-pwa` / service worker. Motivos:
+- Lovable preview roda em iframe; SW quebra o preview e o usuário não precisa de offline.
+- Manifest puro já basta para "Adicionar à tela inicial" em iOS + Android.
+
+## Arquivos
+- editar `src/pages/Admin.tsx` (nova aba)
+- editar `index.html` (meta tags Apple + viewport)
+- editar `public/manifest.json` (id/scope/shortcuts/lang)
+- criar `src/components/admin/InstallPwaButton.tsx`
+- montar `<InstallPwaButton />` no header de `/admin`
 
 ## Fora de escopo
-- Reordenar templates (drag & drop) — pode ser feito depois se pedir.
-- Categorias/pastas de templates.
+- Push notifications, offline cache, sync.
+- Reformatar visualmente o painel Captação (só montar o que já existe).
