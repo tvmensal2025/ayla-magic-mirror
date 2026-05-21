@@ -43,19 +43,28 @@ export async function autoTakeoverByCustomerId(
   customerId: string,
   reason: Reason = "humano_assumiu",
 ): Promise<boolean> {
-  if (!customerId) return false;
+  const r = await takeoverByCustomerIdDetailed(customerId, reason);
+  return r === "new" || r === "already";
+}
+
+export async function takeoverByCustomerIdDetailed(
+  customerId: string,
+  reason: Reason = "humano_assumiu",
+): Promise<"new" | "already" | "fail"> {
+  if (!customerId) return "fail";
   try {
     const { data: cust } = await supabase
       .from("customers")
       .select("id, bot_paused, assigned_human_id")
       .eq("id", customerId)
       .maybeSingle();
-    if (!cust) return false;
-    if (cust.bot_paused && cust.assigned_human_id) return true; // já pausado por humano
-    return await applyPause(customerId, reason);
+    if (!cust) return "fail";
+    if (cust.bot_paused && cust.assigned_human_id) return "already";
+    const ok = await applyPause(customerId, reason);
+    return ok ? "new" : "fail";
   } catch (e) {
     console.warn("[auto-takeover] erro inesperado:", e);
-    return false;
+    return "fail";
   }
 }
 
@@ -63,8 +72,16 @@ export async function autoTakeoverByPhone(
   rawPhone: string,
   reason: Reason = "humano_assumiu",
 ): Promise<boolean> {
+  const r = await takeoverByPhoneDetailed(rawPhone, reason);
+  return r === "new" || r === "already";
+}
+
+export async function takeoverByPhoneDetailed(
+  rawPhone: string,
+  reason: Reason = "humano_assumiu",
+): Promise<"new" | "already" | "fail"> {
   const phoneDigits = (rawPhone || "").replace(/\D/g, "");
-  if (!phoneDigits) return false;
+  if (!phoneDigits) return "fail";
   try {
     const { data: cust } = await supabase
       .from("customers")
@@ -75,12 +92,47 @@ export async function autoTakeoverByPhone(
       .maybeSingle();
     if (!cust) {
       console.warn(`[auto-takeover] nenhum customer encontrado para ${phoneDigits}`);
-      return false;
+      return "fail";
     }
-    if (cust.bot_paused && cust.assigned_human_id) return true;
-    return await applyPause(cust.id, reason);
+    if (cust.bot_paused && cust.assigned_human_id) return "already";
+    const ok = await applyPause(cust.id, reason);
+    return ok ? "new" : "fail";
   } catch (e) {
     console.warn("[auto-takeover] erro inesperado:", e);
+    return "fail";
+  }
+}
+
+/** Desfaz o takeover: religa o bot e remove a vinculação humana. */
+export async function undoTakeoverByPhone(rawPhone: string): Promise<boolean> {
+  const phoneDigits = (rawPhone || "").replace(/\D/g, "");
+  if (!phoneDigits) return false;
+  try {
+    const { data: cust } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("phone_whatsapp", phoneDigits)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!cust) return false;
+    const patch = {
+      bot_paused: false,
+      bot_paused_reason: null,
+      bot_paused_until: null,
+      assigned_human_id: null,
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from("customers").update(patch).eq("id", cust.id);
+    if (error) {
+      const { error: invErr } = await supabase.functions.invoke("customer-takeover", {
+        body: { customerId: cust.id, paused: false },
+      });
+      if (invErr) return false;
+    }
+    return true;
+  } catch {
     return false;
   }
 }
+
