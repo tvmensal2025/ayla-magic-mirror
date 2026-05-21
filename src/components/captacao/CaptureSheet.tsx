@@ -59,7 +59,12 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
     lastCountRef.current = filledCount;
   }, [filledCount, customer, toast]);
 
-  const canSubmit = filledCount === totalFields;
+  const billHasData = !!(customer as any)?.numero_instalacao || !!(customer as any)?.address_street || !!(customer as any)?.bill_holder_name;
+  const docHasData = !!(customer as any)?.cpf || !!(customer as any)?.rg;
+  const billConfirmed = !billHasData || !!(customer as any)?.bill_data_confirmed_at;
+  const docConfirmed = !docHasData || !!(customer as any)?.doc_data_confirmed_at;
+  const allConfirmed = billConfirmed && docConfirmed;
+  const canSubmit = filledCount === totalFields && allConfirmed;
   const phrase = MOTIVATIONAL_PHRASES[filledCount] || `Faltam ${totalFields - filledCount} dados 💪`;
   const nextMissing = CAPTURE_FIELDS.find((f) => {
     const v = (customer as any)?.[f.key];
