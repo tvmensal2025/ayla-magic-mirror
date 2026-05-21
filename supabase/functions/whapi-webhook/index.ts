@@ -474,13 +474,22 @@ Deno.serve(async (req) => {
     }
 
     // IA em modo manual (globalAiDisabled=true) NÃO pode bloquear o pipeline
-    // operacional de captura (foto/PDF da conta, RG/CNH). O fluxo precisa
-    // baixar a mídia, rodar OCR e preencher o card do consultor — mas SEM
-    // enviar qualquer resposta automática ao WhatsApp.
-    //   - texto/áudio puro       → só salva inbound, sem outbound (igual antes)
-    //   - arquivo (foto/PDF)     → segue para runBotFlow com sender silencioso
-    const silentMode = globalAiDisabled === true;
-    if (silentMode && !isFile) {
+    // de cadastro: nome, email, CPF, CEP, conta de luz, documento, finalização
+    // no portal e OTP. Se o lead está em um passo ativo desses, o bot responde
+    // normalmente (igual ao fluxo da Camila), porque foi o consultor que clicou
+    // em "Devolver para o passo" e ativou o pipeline manualmente.
+    const ACTIVE_CAPTURE_STEPS = new Set<string>([
+      "ask_name", "ask_email", "ask_cpf", "ask_rg", "ask_cep",
+      "ask_number", "ask_complement", "ask_bill_value",
+      "ask_phone_confirm", "aguardando_conta", "confirmando_dados_conta",
+      "aguardando_doc_auto", "ask_doc_frente_manual", "ask_doc_verso_manual",
+      "ask_finalizar", "finalizando", "portal_submitting",
+      "aguardando_otp", "validando_otp",
+    ]);
+    const currentStep = String((customer as any)?.conversation_step || "");
+    const inActiveCapture = ACTIVE_CAPTURE_STEPS.has(currentStep);
+
+    if (globalAiDisabled === true && !isFile && !inActiveCapture) {
       await supabase.from("conversations").insert({
         customer_id: customer.id,
         message_direction: "inbound",
@@ -488,14 +497,22 @@ Deno.serve(async (req) => {
         message_type: hasAudio ? "audio" : "text",
         conversation_step: customer.conversation_step,
       });
-      console.log(`🛑 [global-off-silent] IA manual — inbound texto/áudio salvo sem resposta customer=${customer.id}`);
+      console.log(`🛑 [global-off-silent] IA manual — inbound texto/áudio salvo sem resposta customer=${customer.id} step="${currentStep}"`);
       return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_inbound_saved" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (silentMode && isFile) {
-      console.log(`🤫 [silent-capture] IA manual + arquivo recebido → rodando OCR/upload sem outbound automático customer=${customer.id}`);
+
+    // silentMode = arquivo recebido com IA manual MAS fora de qualquer passo
+    // ativo de captura. Roda OCR/upload em background sem outbound. Dentro de
+    // passo ativo, o bot envia tudo normalmente para guiar o cliente.
+    const silentMode = globalAiDisabled === true && isFile && !inActiveCapture;
+    if (silentMode) {
+      console.log(`🤫 [silent-capture] IA manual + arquivo fora de passo ativo → OCR/upload sem outbound customer=${customer.id}`);
+    } else if (globalAiDisabled === true && inActiveCapture) {
+      console.log(`✅ [manual-capture-active] IA manual mas lead em passo ativo "${currentStep}" → bot responde normalmente customer=${customer.id}`);
     }
+
 
 
 
