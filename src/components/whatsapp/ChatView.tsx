@@ -358,7 +358,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         onSendAudio={async (base64) => {
           const phone = await getResolvedPhone();
           if (!phone) return;
-          autoTakeoverByPhone(phone, "humano_assumiu_audio").catch(() => {});
+          void takeoverWithUndo(phone, "humano_assumiu_audio");
           try {
             // useAudioRecorder já gera OGG/Opus real, formato aceito pelo WhatsApp/Whapi.
             const audioDataUrl = `data:audio/ogg;base64,${base64}`;
@@ -378,7 +378,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         onSendAudioUrl={async (audioUrl) => {
           const phone = await getResolvedPhone();
           if (!phone) return;
-          autoTakeoverByPhone(phone, "humano_assumiu_audio").catch(() => {});
+          void takeoverWithUndo(phone, "humano_assumiu_audio");
           try {
             const result = await sendWhatsAppMessage({
               instanceName, phone, mediaCategory: "audio", mediaUrl: audioUrl, isWhapi,
@@ -396,7 +396,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         onSendMedia={async (mediaUrl, caption, mediaType) => {
           const phone = await getResolvedPhone();
           if (!phone) return;
-          autoTakeoverByPhone(phone, "humano_assumiu_midia").catch(() => {});
+          void takeoverWithUndo(phone, "humano_assumiu_midia");
           try {
             // Route documents through sendDocument for proper fileName handling
             const category = mediaType as "image" | "video" | "document";
