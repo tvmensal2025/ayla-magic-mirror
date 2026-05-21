@@ -56,14 +56,17 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
   const [oneByOneStepId, setOneByOneStepId] = useState<string | null>(null);
   const [variant, setVariant] = useState<"A" | "B" | "C">("A");
   const [variantsAvailable, setVariantsAvailable] = useState<Array<"A" | "B" | "C">>(["A"]);
+  const byVariantRef = useRef<Map<"A" | "B" | "C", string>>(new Map());
 
+  // Efeito 1 — inicialização: roda quando o popover abre ou o cliente muda.
+  // Define a variante default a partir de customers.flow_variant SEM ouvir mudanças
+  // posteriores em `variant` (senão o clique manual em A/B/C seria revertido).
   useEffect(() => {
     if (!open || !consultantId) return;
     let mounted = true;
     (async () => {
       setLoading(true);
 
-      // Carrega TODOS os fluxos ativos (A, B, C) e a variante atual do cliente.
       let custVariant: "A" | "B" | "C" = "A";
       if (customerId) {
         const { data: cust } = await supabase
@@ -83,26 +86,49 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
         const v = String(f.variant || "A").toUpperCase() as "A" | "B" | "C";
         if (["A", "B", "C"].includes(v) && !byVariant.has(v)) byVariant.set(v, f.id);
       });
+      byVariantRef.current = byVariant;
       const available = (["A", "B", "C"] as const).filter((v) => byVariant.has(v));
-      if (mounted) setVariantsAvailable(available.length > 0 ? available : ["A"]);
+      if (!mounted) return;
+      setVariantsAvailable(available.length > 0 ? available : ["A"]);
 
-      // Variante selecionada: default = a do cliente (se existir), senão a primeira.
       const selected: "A" | "B" | "C" = byVariant.has(custVariant)
         ? custVariant
         : (available[0] || "A");
-      if (mounted) setVariant(selected);
+      setVariant(selected);
+      // Steps serão carregados pelo Efeito 2 ao reagir à mudança de `variant`.
+      setLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, [open, consultantId, customerId]);
 
-      const flowId = byVariant.get(selected);
-      if (!flowId) { if (mounted) { setSteps([]); setLoading(false); } return; }
+  // Efeito 2 — troca manual de variante: só recarrega os passos do fluxo
+  // correspondente, sem mexer em `variant` nem reler flow_variant do cliente.
+  useEffect(() => {
+    if (!open || !consultantId) return;
+    const byVariant = byVariantRef.current;
+    if (byVariant.size === 0) return;
+    const flowId = byVariant.get(variant);
+    if (!flowId) { setSteps([]); return; }
+    let mounted = true;
+    (async () => {
+      setLoading(true);
       const { data } = await supabase
         .from("bot_flow_steps")
         .select("id, step_key, title, slot_key, message_text, position")
         .eq("flow_id", flowId).eq("is_active", true)
         .order("position", { ascending: true });
-      if (mounted) { setSteps((data as Step[]) || []); setLoading(false); }
+      if (!mounted) return;
+      setSteps((data as Step[]) || []);
+      // Limpa previews/seleções da variante anterior.
+      setPreviewStep(null);
+      setPreviewParts([]);
+      setOneByOneStepId(null);
+      setFromParts({});
+      setLoading(false);
     })();
     return () => { mounted = false; };
-  }, [open, consultantId, customerId, variant]);
+  }, [open, consultantId, variant]);
+
 
 
   // Load preview parts when opening the single-step preview
