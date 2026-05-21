@@ -25,6 +25,7 @@ import { sendWhatsAppMessage } from "@/services/messageSender";
 import { toast as sonnerToast } from "sonner";
 import { useCaptureSession } from "@/hooks/useCaptureSession";
 import { FinalizeButton } from "@/components/captacao/FinalizeButton";
+import { PortalStatusTracker } from "@/components/captacao/PortalStatusTracker";
 import { Bot, User } from "lucide-react";
 
 interface Props { consultantId: string; onOpenChat?: (phone: string) => void; instanceName?: string | null; isWhapi?: boolean; }
@@ -297,6 +298,9 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       <AchievementsRail progress={progress} />
                     </div>
                   </div>
+
+                  {/* Status do portal (VPS) — aparece após Finalizar */}
+                  <PortalStatusTracker customerId={selectedId} consultantId={consultantId} />
 
                   {/* Finalizar Cadastro — habilita só quando tudo completo */}
                   <FinalizeButton
