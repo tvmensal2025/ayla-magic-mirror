@@ -52,6 +52,11 @@ export interface CaptureCustomer {
   bill_data_confirmation_by?: string | null;
   doc_data_confirmed_at?: string | null;
   doc_data_confirmation_by?: string | null;
+  name_mismatch_flag?: boolean | null;
+  name_mismatch_reason?: string | null;
+  name_mismatch_acknowledged_at?: string | null;
+  bill_owner_relationship?: string | null;
+  phone_contact_confirmed?: boolean | null;
   created_at: string;
 }
 
