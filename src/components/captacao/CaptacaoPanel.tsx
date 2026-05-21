@@ -298,7 +298,6 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                         customerId={selectedId}
                         variant={variant}
                         sentSteps={sentSteps}
-                        autoMode={autoMode}
                         onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
                       />
                     </div>
