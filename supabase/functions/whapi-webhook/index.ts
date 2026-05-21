@@ -473,18 +473,28 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (globalAiDisabled) {
+    // IA em modo manual (globalAiDisabled=true) NÃO pode bloquear o pipeline
+    // operacional de captura (foto/PDF da conta, RG/CNH). O fluxo precisa
+    // baixar a mídia, rodar OCR e preencher o card do consultor — mas SEM
+    // enviar qualquer resposta automática ao WhatsApp.
+    //   - texto/áudio puro       → só salva inbound, sem outbound (igual antes)
+    //   - arquivo (foto/PDF)     → segue para runBotFlow com sender silencioso
+    const silentMode = globalAiDisabled === true;
+    if (silentMode && !isFile) {
       await supabase.from("conversations").insert({
         customer_id: customer.id,
         message_direction: "inbound",
         message_text: messageText || (hasAudio ? "[áudio]" : "[arquivo]"),
-        message_type: hasAudio ? "audio" : (isFile ? "image" : "text"),
+        message_type: hasAudio ? "audio" : "text",
         conversation_step: customer.conversation_step,
       });
-      console.log(`🛑 [global-off-silent] IA desligada — inbound salvo sem resposta automática customer=${customer.id}`);
+      console.log(`🛑 [global-off-silent] IA manual — inbound texto/áudio salvo sem resposta customer=${customer.id}`);
       return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_inbound_saved" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+    if (silentMode && isFile) {
+      console.log(`🤫 [silent-capture] IA manual + arquivo recebido → rodando OCR/upload sem outbound automático customer=${customer.id}`);
     }
 
 
