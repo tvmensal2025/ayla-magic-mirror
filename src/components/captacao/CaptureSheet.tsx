@@ -135,143 +135,171 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
         className={`w-full p-0 flex flex-col gap-0 border-0 bg-background sm:max-w-none shadow-[0_-12px_40px_-12px_hsl(var(--primary)/0.35)] ${
           expanded
             ? "h-[100dvh] rounded-none"
-            : "h-[52dvh] min-h-[380px] max-h-[100dvh] rounded-t-2xl"
+            : "h-[44dvh] min-h-[320px] max-h-[100dvh] rounded-t-2xl"
         }`}
       >
         {/* Grabber */}
         {!expanded && (
-          <div className="flex justify-center pt-1.5 pb-0.5 shrink-0">
-            <div className="w-10 h-1 rounded-full bg-muted-foreground/40" />
+          <div className="flex justify-center pt-1 pb-0.5 shrink-0">
+            <div className="w-8 h-0.5 rounded-full bg-muted-foreground/40" />
           </div>
         )}
 
-        {/* Header */}
-        <header className={`px-3 border-b border-border/60 bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20 ${expanded ? "pt-3 pb-2" : "pt-1.5 pb-1.5"}`}>
-          <div className={`flex items-center gap-1.5 ${expanded ? "mb-2" : "mb-1.5"}`}>
-            <div className={`rounded-full bg-primary/15 flex items-center justify-center shrink-0 ${expanded ? "w-9 h-9" : "w-7 h-7"}`}>
-              <Gamepad2 className={`text-primary ${expanded ? "w-4 h-4" : "w-3.5 h-3.5"}`} />
+        {/* Header — compactado */}
+        <header className={`px-2.5 border-b border-border/60 bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20 ${expanded ? "pt-3 pb-2" : "pt-1 pb-1"}`}>
+          <div className={`flex items-center gap-1.5 ${expanded ? "mb-2" : "mb-1"}`}>
+            <div className={`rounded-full bg-primary/15 flex items-center justify-center shrink-0 ${expanded ? "w-9 h-9" : "w-6 h-6"}`}>
+              <Gamepad2 className={`text-primary ${expanded ? "w-4 h-4" : "w-3 h-3"}`} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className={`font-bold truncate ${expanded ? "text-sm" : "text-xs"}`}>{customerName || phoneNumber || "Lead"}</p>
+              <p className={`font-bold truncate ${expanded ? "text-sm" : "text-[11px]"}`}>
+                {customerName || phoneNumber || "Lead"}
+                {!expanded && phoneNumber && customerName && (
+                  <span className="ml-1 text-[9px] text-muted-foreground font-normal">· {phoneNumber}</span>
+                )}
+              </p>
               {expanded && <p className="text-[10px] text-muted-foreground truncate">{phoneNumber}</p>}
             </div>
+            {needsName && (
+              <Button
+                size="sm"
+                variant="default"
+                className="h-6 px-2 text-[10px] gap-1 font-bold animate-pulse shrink-0"
+                onClick={handleAskName}
+                disabled={askingName}
+                title="Lead sem nome — peça agora pra liberar o resto"
+              >
+                {askingName ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <UserPlus className="w-2.5 h-2.5" />}
+                Pedir nome
+              </Button>
+            )}
             <div className="flex items-center gap-0.5 shrink-0">
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8"
+                className="h-6 w-6"
                 onClick={() => setExpanded((v) => !v)}
-                title={expanded ? "Recolher (ver chat)" : "Expandir tela cheia"}
+                title={expanded ? "Recolher" : "Expandir"}
               >
-                {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                {expanded ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
               </Button>
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8"
+                className="h-6 w-6"
                 onClick={() => setMinimized(true)}
-                title="Minimizar (liberar input do chat)"
+                title="Minimizar"
               >
-                <ChevronDown className="w-4 h-4" />
+                <ChevronDown className="w-3 h-3" />
               </Button>
-              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => onOpenChange(false)} title="Fechar">
-                <X className="w-4 h-4" />
+              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => onOpenChange(false)} title="Fechar">
+                <X className="w-3 h-3" />
               </Button>
             </div>
           </div>
           <CaptureProgressBar progress={progress} filled={filledCount} total={totalFields} />
-          <p className={`text-[11px] text-center font-semibold text-primary/90 ${expanded ? "mt-1.5" : "mt-1"}`}>{phrase}</p>
-          {expanded && nextMissing && !canSubmit && (
-            <p className="text-[11px] text-center mt-0.5 text-muted-foreground">
-              🎯 Próximo: <span className="font-bold text-foreground">{nextMissing.label}</span>
-            </p>
-          )}
-          {expanded && (
-            <p className="text-[10px] text-center mt-0.5 text-muted-foreground">
-              Passo {sentSteps.size} de 10 enviado
-            </p>
-          )}
-          {needsName && (
-            <div className="mt-1.5 flex items-center justify-center">
-              <Button
-                size="sm"
-                variant="default"
-                className="h-7 text-[11px] gap-1.5 font-bold animate-pulse"
-                onClick={handleAskName}
-                disabled={askingName}
-                title="Lead ainda sem nome — manda a pergunta agora pra liberar o resto do fluxo"
-              >
-                {askingName ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />}
-                Pedir nome do lead
-              </Button>
-            </div>
+          {expanded ? (
+            <>
+              <p className="text-[11px] text-center font-semibold text-primary/90 mt-1.5">{phrase}</p>
+              {nextMissing && !canSubmit && (
+                <p className="text-[11px] text-center mt-0.5 text-muted-foreground">
+                  🎯 Próximo: <span className="font-bold text-foreground">{nextMissing.label}</span>
+                </p>
+              )}
+              <p className="text-[10px] text-center mt-0.5 text-muted-foreground">
+                Passo {sentSteps.size} de 10 enviado
+              </p>
+            </>
+          ) : (
+            <p className="text-[10px] text-center font-semibold text-primary/90 mt-0.5 truncate">{phrase}</p>
           )}
         </header>
 
         {/* Tabs */}
         <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="mx-3 mt-2 grid grid-cols-2 h-10">
-            <TabsTrigger value="passos" className="gap-1.5 text-xs">
-              <ListChecks className="w-3.5 h-3.5" /> Passos
-              <span className="ml-1 text-[10px] bg-primary/15 px-1.5 py-0.5 rounded-full font-bold">{sentSteps.size}</span>
+          <TabsList className={`mx-2.5 grid grid-cols-2 ${expanded ? "mt-2 h-9" : "mt-1 h-7"}`}>
+            <TabsTrigger value="passos" className="gap-1 text-[11px]">
+              <ListChecks className="w-3 h-3" /> Passos
+              <span className="ml-0.5 text-[9px] bg-primary/15 px-1 py-px rounded-full font-bold">{sentSteps.size}</span>
             </TabsTrigger>
-            <TabsTrigger value="ficha" className="gap-1.5 text-xs">
-              <IdCard className="w-3.5 h-3.5" /> Ficha
-              <span className="ml-1 text-[10px] bg-primary/15 px-1.5 py-0.5 rounded-full font-bold">{filledCount}/{totalFields}</span>
+            <TabsTrigger value="ficha" className="gap-1 text-[11px]">
+              <IdCard className="w-3 h-3" /> Ficha
+              <span className="ml-0.5 text-[9px] bg-primary/15 px-1 py-px rounded-full font-bold">{filledCount}/{totalFields}</span>
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="passos" className="flex-1 overflow-y-auto p-3 mt-2 mb-0 data-[state=inactive]:hidden">
+          <TabsContent value="passos" className={`flex-1 overflow-y-auto ${expanded ? "p-3 mt-2" : "p-2 mt-1"} mb-0 data-[state=inactive]:hidden`}>
             <CaptureStepsList
               consultantId={consultantId}
               customerId={customerId}
               sentSteps={sentSteps}
               onSent={async (key) => {
                 setSentSteps((s) => new Set(s).add(key));
-                // NÃO pausar o bot — Modo Captação é assistido: consultor envia o prompt,
-                // mas o bot precisa continuar processando a resposta do lead (OCR da conta,
-                // captura de CPF/CEP, avanço do passo). Use o botão "Assumir" para takeover real.
               }}
               defaultVariant={(customer as any)?.flow_variant || "A"}
               currentStep={(customer as any)?.conversation_step}
+              onStepsLoaded={setAllSteps}
             />
           </TabsContent>
 
-          <TabsContent value="ficha" className="flex-1 overflow-hidden p-0 mt-2 mb-0 data-[state=inactive]:hidden">
+          <TabsContent value="ficha" className="flex-1 overflow-hidden p-0 mt-1 mb-0 data-[state=inactive]:hidden">
             <FichaWrap customerId={customerId} />
           </TabsContent>
         </Tabs>
 
-        {/* Footer */}
+        {/* Footer — compactado */}
         <footer
-          className={`border-t border-border/60 bg-card/80 backdrop-blur sticky bottom-0 z-20 ${expanded ? "p-3 space-y-2" : "px-3 pt-2 pb-2 space-y-1.5"}`}
-          style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom, 0px))" }}
+          className={`border-t border-border/60 bg-card/80 backdrop-blur sticky bottom-0 z-20 ${expanded ? "p-3 space-y-2" : "px-2.5 pt-1.5 pb-1.5 space-y-1"}`}
+          style={{ paddingBottom: "max(0.375rem, env(safe-area-inset-bottom, 0px))" }}
         >
           {customer?.conversation_step && ["finalizando", "portal_submitting", "aguardando_otp", "validando_otp"].includes(customer.conversation_step) && (
-            <p className="text-[11px] text-center text-primary font-semibold animate-pulse">
+            <p className="text-[10px] text-center text-primary font-semibold animate-pulse">
               🚀 Portal: {customer.conversation_step.replace("_", " ")}…
             </p>
           )}
-          <Button
-            size="lg"
-            className={`w-full font-bold gap-2 ${expanded ? "h-12 text-base" : "h-11 text-sm"} ${canSubmit ? "animate-pulse" : ""}`}
-            onClick={handleSubmit}
-            disabled={submitting || !customer?.name || !customer?.cpf}
-            title={!customer?.name || !customer?.cpf ? "Precisa de nome e CPF no mínimo" : "Enviar pro portal e disparar OTP"}
-          >
-            {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trophy className="w-5 h-5" />}
-            {canSubmit ? "CADASTRAR TUDO" : `FINALIZAR (${filledCount}/${totalFields})`}
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              className={`shrink-0 gap-1 font-bold ${expanded ? "h-12 px-3 text-xs" : "h-9 px-2 text-[10px]"}`}
+              onClick={() => setSeqOpen(true)}
+              disabled={pendingSteps.length === 0 || needsName}
+              title={needsName ? "Peça o nome do lead primeiro" : pendingSteps.length === 0 ? "Tudo enviado" : `Disparar ${pendingSteps.length} passos pendentes`}
+            >
+              <Zap className={`${expanded ? "w-4 h-4" : "w-3 h-3"}`} /> Enviar tudo ({pendingSteps.length})
+            </Button>
+            <Button
+              size="lg"
+              className={`flex-1 font-bold gap-1.5 ${expanded ? "h-12 text-base" : "h-9 text-xs"} ${canSubmit ? "animate-pulse" : ""}`}
+              onClick={handleSubmit}
+              disabled={submitting || !customer?.name || !customer?.cpf}
+              title={!customer?.name || !customer?.cpf ? "Precisa de nome e CPF" : "Enviar pro portal"}
+            >
+              {submitting ? <Loader2 className={`${expanded ? "w-5 h-5" : "w-3.5 h-3.5"} animate-spin`} /> : <Trophy className={`${expanded ? "w-5 h-5" : "w-3.5 h-3.5"}`} />}
+              {canSubmit ? "CADASTRAR" : `${filledCount}/${totalFields}`}
+            </Button>
+          </div>
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] text-muted-foreground">
-              {filledCount}/{totalFields} campos · {sentSteps.size}/10 passos
+            <span className="text-[9px] text-muted-foreground">
+              {filledCount}/{totalFields} · {sentSteps.size}/10
             </span>
-            <Button variant="ghost" size="sm" className="text-[10px] text-muted-foreground h-6 px-2" onClick={disableCapture}>
-              Sair do modo
+            <Button variant="ghost" size="sm" className="text-[9px] text-muted-foreground h-5 px-1.5" onClick={disableCapture}>
+              Sair
             </Button>
           </div>
         </footer>
       </SheetContent>
+
+      <SendSequenceDialog
+        open={seqOpen}
+        onOpenChange={setSeqOpen}
+        consultantId={consultantId}
+        customerId={customerId}
+        customerName={customerName || phoneNumber}
+        steps={pendingSteps}
+        onStepSent={(key) => setSentSteps((s) => new Set(s).add(key))}
+        onAskName={handleAskName}
+      />
     </Sheet>
   );
 }
