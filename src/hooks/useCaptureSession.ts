@@ -105,6 +105,17 @@ export function useCaptureSession(customerId: string | null) {
   const totalFields = CAPTURE_FIELDS.length;
   const progress = Math.round((filledCount / totalFields) * 100);
 
+  const missing = useMemo(() => {
+    const list: string[] = [];
+    CAPTURE_FIELDS.forEach((f) => { if (!isFieldFilled(customer, f.key)) list.push(f.label); });
+    if (!customer?.document_back_url) list.push("RG verso");
+    if (!customer?.electricity_bill_photo_url) list.push("Conta de luz");
+    if (customer?.name_mismatch_flag && !customer?.name_mismatch_acknowledged_at) list.push("Confirmar titularidade");
+    return list;
+  }, [customer]);
+
+  const isComplete = missing.length === 0 && !!customer;
+
   const updateField = useCallback(async (field: CaptureFieldKey, value: any) => {
     if (!customerId || !customer) return;
     const prevValue = (customer as any)[field];
@@ -132,5 +143,5 @@ export function useCaptureSession(customerId: string | null) {
     }
   }, [customerId, customer]);
 
-  return { customer, loading, filledCount, totalFields, progress, updateField, reload: load };
+  return { customer, loading, filledCount, totalFields, progress, missing, isComplete, updateField, reload: load };
 }
