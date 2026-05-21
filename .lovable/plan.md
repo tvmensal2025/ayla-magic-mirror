@@ -1,51 +1,62 @@
 # Plano
 
-## 1) Erro ao salvar template
+## 1) Modo Game 100% funcional (atalhos, templates, fluxos)
 
-Pelo replay vi você digitando nome `dasd` e atalho só `/`. O atalho exige **`/` + 2 a 20 letras/números** (ex: `/oi`). Com apenas `/`, o botão "Salvar template" trava como desabilitado e nenhum salvamento acontece. Não vejo bug no insert em si (a coluna nova `is_quick_reply` tem default `true` no banco, então `INSERT` antigo continua válido).
+Hoje o `GameComposer` é minimalista (só texto + áudio). Vou **substituir** pelo `MessageComposer` completo (mesmo do chat) já gancheado pra ganhar XP:
 
-Para destravar e melhorar a UX:
+- Em `CaptacaoPanel` (quando `gameOn && selectedId`), carregar `templates` via `useTemplates(consultantId)` e renderizar `<MessageComposer …/>` no lugar do `GameComposer` atual.
+- Bindings:
+  - `onSend(text)` → `sendWhatsAppMessage({mediaCategory:"text", phone, text, …})` + `progress.registerMessage("text")` + `sfx.coin` + `XpToast(+5)`.
+  - `onSendAudio(base64)` → envia OGG + `registerMessage("audio")` + XpToast(+10).
+  - `onSendAudioUrl(url)` → mesmo XP de áudio.
+  - `onSendMedia(url, caption, mediaType)` → envia + XpToast(+8) ("imagem/vídeo/documento").
+  - `templates` + `customerId`/`customerJid`/`customerName` passados pro composer → "/" abre `QuickReplyMenu`, atalhos `/oi` funcionam, anexar arquivo funciona, `FlowQuickBar` e `AiSuggestReplies` aparecem.
+- Detalhe XP: subir nível dispara `LevelUpOverlay` igual aos passos.
+- Remover o componente `GameComposer.tsx` (criado na turn anterior) — substituído pelo `MessageComposer`.
 
-- **`SaveMessageAsTemplateDialog`**: mostrar mensagem clara em vermelho abaixo do atalho ("Atalho precisa ter pelo menos 2 caracteres após a /") e o motivo do botão estar desabilitado num tooltip (nome vazio, atalho inválido, mídia ainda não carregou).
-- **Toast mais explícito** quando o erro vier do Supabase: incluir `error.code` e `error.details` para conseguirmos diagnosticar caso seja RLS/coluna.
-- **Permitir salvar template só de texto** (hoje o dialog só salva se houver mídia carregada — `mt === "audio"|"video"|"image"`). Vou liberar `mt === "text"` salvando sem `media_url`, útil quando você quer salvar uma mensagem digitada.
+**Arquivos**:
+- Editar `src/components/captacao/CaptacaoPanel.tsx`
+- Apagar `src/components/captacao/game/GameComposer.tsx`
 
-Se mesmo com nome + atalho válidos o erro persistir, me mande **o texto exato do toast vermelho** que aparece — com os logs extras eu identifico em 1 passo.
+## 2) Mobile no Modo Game (viewport ≤ 768px)
 
-## 2) Modo Game — composer com texto e áudio
+Hoje o shell é `[lista | main | aside]` em flex-row — quebra em 390px. Vou tornar **responsivo**:
 
-Hoje o `GameShell` (lead selecionado) só mostra os 10 passos prontos. Vou adicionar **acima da ficha**, na coluna central, um composer estilo arcade:
+- **Mobile (`md:`-)**: layout em coluna única com 2 "telas":
+  - Sem lead selecionado → só a `CaptureLeadList` (full width).
+  - Com lead selecionado → header com botão **← Voltar** (limpa `selectedId`), depois grid de 10 passos, composer e (collapsible) ficha + achievements no fim. `CaptureLeadList` esconde.
+- **Desktop (`md:`+)**: mantém o layout atual 3 colunas.
+- `PlayerHud` e `QuestsBar` no topo viram chips menores no mobile (já dá com `text-xs` e flex-wrap).
+- Header do painel: ícone-toggle do som vira `size="icon"` em mobile pra liberar espaço.
 
+**Arquivos**:
+- Editar `src/components/captacao/CaptacaoPanel.tsx`
+- Editar `src/components/captacao/CaptureLeadList.tsx` (garantir `w-full md:w-72`)
+- Editar `src/components/captacao/CaptureLeadCard.tsx` (já tem `embedded`, garantir bom encolhimento)
+
+## 3) Ordem das mensagens (última = última)
+
+Bug em `src/hooks/useMessages.ts:164`:
+
+```ts
+.sort((a, b) => (a.timestamp - b.timestamp) || (b.sourceIndex - a.sourceIndex))
 ```
-┌─ Alvo: +55 31 9... ──────────── [Abrir conversa] ─┐
-│  ⚔️ 10 passos · ataque rápido (já existe)          │
-│  ──────────────────────────────────────────────    │
-│  💬 [textarea com {{nome}} {{valor_conta}}]        │
-│  [🎤 Gravar áudio]  [📎 Imagem]  [🚀 Enviar +5XP]  │
-└────────────────────────────────────────────────────┘
-```
 
-Componente novo: `src/components/captacao/game/GameComposer.tsx`
-- Textarea + botão **Enviar** → usa `sendTextMessage` de `src/lib/whatsapp/send.ts` (mesmo helper do chat).
-- Botão **Gravar áudio** → reusa `useAudioRecorder` (mesmo que o WhatsApp chat usa) com waveform compacto; ao soltar, faz upload via `uploadMedia` (scope `chat`) e dispara áudio para o telefone do lead.
-- Ao enviar texto/áudio com sucesso: `progress.registerXp(+5)` (texto) ou `+10` (áudio), toca `sfx.coin`, mostra `XpToast`, conta como missão "mensagem manual" e mantém combo.
-- Erros: toast vermelho com motivo.
+O tiebreaker assume sempre que o feed bruto é "newest-first". Quando o Whapi/Evolution devolve mensagens **com o mesmo `messageTimestamp`** (resolução de 1 segundo, comum no envio sequencial áudio→imagem→texto), e o feed vem na ordem normal (oldest-first em alguns endpoints), a lista fica embaralhada — a última enviada aparece **antes** das anteriores.
 
-Mudanças em arquivos existentes:
-- `src/components/captacao/CaptacaoPanel.tsx`: dentro do bloco `gameOn && selectedId`, renderizar `<GameComposer phone={phone} consultantId={consultantId} onSent={(kind)=>{...XP, sfx, missão}}/>` logo após o grid dos 10 passos.
-- `src/components/captacao/game/useGameProgress.ts`: adicionar `registerMessage(kind: "text"|"audio")` retornando `{ gainedXp, leveledUp, newLevel }` (não muda contrato de `registerCapture`).
-- `src/hooks/useAudioRecorder.ts`: reusar como está (já existe).
+Correção:
 
-Fora de escopo:
-- Não vou mexer no modo "clássico" (sem game) — composer aparece **só** quando `gameOn = true`.
-- Sem mudar o fluxo do WhatsApp (continua usando o `messageSender` padrão).
+1. Detectar a direção do feed bruto: `descSource = raw[0].timestamp >= raw[raw.length-1].timestamp`.
+2. Tiebreaker dinâmico:
+   - feed `desc` (newest-first) → `b.sourceIndex - a.sourceIndex` (mantém atual).
+   - feed `asc` (oldest-first) → `a.sourceIndex - b.sourceIndex`.
+3. Otimização local: ao adicionar mensagem otimista (`setMessages(prev => [...prev, optimistic])` na linha ~338), usar `timestamp: Date.now() / 1000` (float, sem `floor`) — garante que a otimista sempre vença qualquer empate inteiro vindo do servidor.
+4. Tiebreaker secundário por `id` lexicográfico quando `sourceIndex` empata — IDs do Whapi (BAE…) costumam ser monotônicos.
 
-## Arquivos
+**Arquivo**:
+- Editar `src/hooks/useMessages.ts`
 
-**Editar**
-- `src/components/whatsapp/SaveMessageAsTemplateDialog.tsx`
-- `src/components/captacao/CaptacaoPanel.tsx`
-- `src/components/captacao/game/useGameProgress.ts`
+## Out of scope
 
-**Criar**
-- `src/components/captacao/game/GameComposer.tsx`
+- Não vou mexer em fluxo do webhook nem em horários de delay entre disparos do bot.
+- Não vou criar nova edge function; tudo no front.

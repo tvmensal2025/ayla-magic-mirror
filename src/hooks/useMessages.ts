@@ -158,10 +158,29 @@ export function useMessages(
         return true;
       });
 
+      // Detect feed direction: some endpoints return newest-first, others oldest-first.
+      // We need this to tie-break messages that share the same `messageTimestamp` (1s
+      // resolution → áudio/imagem/texto enviados em sequência costumam empatar).
+      const first = unique[0];
+      const last = unique[unique.length - 1];
+      const descSource =
+        first && last
+          ? (first.messageTimestamp || 0) >= (last.messageTimestamp || 0)
+          : true;
+
       const mapped = unique
         .map((msg, sourceIndex) => ({ ...mapMessage(msg), sourceIndex }))
         .filter((m) => clearedAtMs === 0 || m.timestamp * 1000 >= clearedAtMs)
-        .sort((a, b) => (a.timestamp - b.timestamp) || (b.sourceIndex - a.sourceIndex))
+        .sort((a, b) => {
+          if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+          // Mesmo segundo → mantém ordem cronológica do feed bruto.
+          const idxCmp = descSource
+            ? b.sourceIndex - a.sourceIndex
+            : a.sourceIndex - b.sourceIndex;
+          if (idxCmp !== 0) return idxCmp;
+          // Último critério: id lexicográfico (Whapi/Evolution costumam ser monotônicos).
+          return (a.id || "").localeCompare(b.id || "");
+        })
         .map(({ sourceIndex: _sourceIndex, ...m }) => m);
       setMessages(mapped);
 
@@ -335,7 +354,9 @@ export function useMessages(
             remoteJid,
             fromMe: true,
             text,
-            timestamp: Math.floor(Date.now() / 1000),
+            // Float (sub-second) garante que a otimista vença qualquer empate
+            // com mensagens vindas do servidor no mesmo segundo.
+            timestamp: Date.now() / 1000,
             status: 1,
           },
         ]);
