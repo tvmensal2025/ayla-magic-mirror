@@ -109,6 +109,25 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
       });
   }, [consultantId]);
 
+  // B10 — takeover com Desfazer (10s). Só notifica quando foi NOVO (não em mídias subsequentes).
+  const takeoverWithUndo = useCallback(async (phone: string, reason: "humano_assumiu_audio" | "humano_assumiu_midia" | "humano_assumiu") => {
+    const r = await takeoverByPhoneDetailed(phone, reason);
+    if (r === "new") {
+      toast({
+        title: "🤖 Bot pausado — você assumiu",
+        description: "A IA não vai responder neste lead enquanto você estiver na conversa.",
+        action: (
+          <ToastAction altText="Desfazer" onClick={async () => {
+            const ok = await undoTakeoverByPhone(phone);
+            toast({ title: ok ? "Bot reativado" : "Não consegui reativar", variant: ok ? "default" : "destructive" });
+          }}>Desfazer</ToastAction>
+        ),
+      });
+    }
+  }, [toast]);
+
+
+
   const handleSendToCrm = useCallback(async (stageKey: string) => {
     if (!chat) return;
     setSendingToCrm(true);
