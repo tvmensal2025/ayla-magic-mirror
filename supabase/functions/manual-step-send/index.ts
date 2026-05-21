@@ -110,14 +110,27 @@ Deno.serve(async (req) => {
         .eq("is_active", true)
         .eq("variant", variant)
         .maybeSingle();
-      if (!flow?.id) return json({ error: "no_active_flow", message: "Nenhum fluxo ativo encontrado para essa variante." }, 404);
+      if (!flow?.id) return json({ code: "no_active_flow", error: "no_active_flow", message: "Nenhum fluxo ativo encontrado para essa variante." }, 404);
       stepQuery = stepQuery.eq("flow_id", flow.id).eq("step_key", body.stepKey);
-    } else return json({ error: "missing_step", message: "Passo do fluxo não informado." }, 400);
+    } else return json({ code: "missing_step", error: "missing_step", message: "Passo do fluxo não informado." }, 400);
 
     const { data: step } = await stepQuery.maybeSingle();
-    if (!step) return json({ error: "step_not_found", message: "Passo selecionado não existe mais (foi removido ou desativado)." }, 404);
+    if (!step) return json({ code: "step_not_found", error: "step_not_found", message: "Passo selecionado não existe mais (foi removido ou desativado)." }, 404);
+
+    // Guarda nome: se o lead ainda não tem nome real e o passo escolhido NÃO é "pedir nome",
+    // bloqueia e instrui o consultor a pedir o nome primeiro (mantém {{nome}} válido + gameficação).
+    const nameSource = String((customer as any).name_source || "unknown").toLowerCase();
+    const stepAsksName = isNameAskingStep(step);
+    if (!body.skipNameGuard && nameSource === "unknown" && !stepAsksName) {
+      return json({
+        code: "name_not_captured_yet",
+        error: "name_not_captured_yet",
+        message: "Antes de avançar peça o nome do lead — clique em 'Pedir nome' no topo da ficha.",
+      }, 409);
+    }
 
     const slotKey = (step as any).slot_key || (step as any).step_key;
+
 
     // Resolve medias for slot
     const { data: mediaRows } = await supabase
