@@ -117,12 +117,95 @@ Deno.serve(async (req) => {
     results.push({ id: lead.id, sent });
   }
 
+  // ─── F6 — Recovery branch: leads parados em "finalizando" > 10min ─────
+  // Notifica o consultor (notification_phone) para intervenção manual.
+  // Sem requeue automático: finalizando envolve OTP/portal externos,
+  // não dá pra disparar mensagem genérica sem risco.
+  const finalizandoCutoff = new Date(Date.now() - 10 * 60_000).toISOString();
+  const handoffResults: Array<{ id: string; notified: boolean; reason?: string }> = [];
+  try {
+    const { data: stuckFinal } = await supabase
+      .from("customers")
+      .select("id, name, phone_whatsapp, consultant_id, conversation_step, updated_at")
+      .eq("conversation_step", "finalizando")
+      .lt("updated_at", finalizandoCutoff)
+      .eq("bot_paused", false)
+      .is("assigned_human_id", null)
+      .limit(50);
+
+    for (const lead of stuckFinal || []) {
+      if (!lead.consultant_id) {
+        handoffResults.push({ id: lead.id, notified: false, reason: "no_consultant" });
+        continue;
+      }
+
+      // Dedup: já notificamos esse lead nas últimas 6h?
+      const { data: recent } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("customer_id", lead.id)
+        .eq("conversation_step", "stuck_finalizando_notify")
+        .gte("created_at", new Date(Date.now() - 6 * 3600_000).toISOString())
+        .limit(1);
+      if (recent && recent.length > 0) {
+        handoffResults.push({ id: lead.id, notified: false, reason: "deduped" });
+        continue;
+      }
+
+      const { data: consultant } = await supabase
+        .from("consultants")
+        .select("notification_phone, name")
+        .eq("id", lead.consultant_id)
+        .maybeSingle();
+      const notifPhone = (consultant as any)?.notification_phone;
+      if (!notifPhone) {
+        handoffResults.push({ id: lead.id, notified: false, reason: "no_notification_phone" });
+        continue;
+      }
+
+      const { data: instance } = await supabase
+        .from("whatsapp_instances")
+        .select("instance_name")
+        .eq("consultant_id", lead.consultant_id)
+        .maybeSingle();
+      if (!instance?.instance_name) {
+        handoffResults.push({ id: lead.id, notified: false, reason: "no_instance" });
+        continue;
+      }
+
+      const msg =
+        `⚠️ Lead parado em *finalizando* há mais de 10 min\n\n` +
+        `👤 ${lead.name || "Sem nome"}\n` +
+        `📱 ${lead.phone_whatsapp}\n\n` +
+        `Verifique se o cadastro travou no portal/OTP e ajude manualmente.`;
+      const notifJid = `${String(notifPhone).replace(/\D/g, "")}@s.whatsapp.net`;
+      const ok = await sendWhatsAppText(instance.instance_name, notifJid, msg);
+
+      if (ok) {
+        // Marca dedup via conversations (sem mexer no updated_at do lead)
+        await supabase.from("conversations").insert({
+          customer_id: lead.id,
+          message_direction: "outbound",
+          message_text: "[handoff:finalizando] notificou consultor",
+          message_type: "text",
+          conversation_step: "stuck_finalizando_notify",
+        });
+      }
+      handoffResults.push({ id: lead.id, notified: ok });
+    }
+  } catch (e) {
+    console.error("[recover-stuck-otp] finalizando branch failed:", (e as Error).message);
+  }
+
   return new Response(
     JSON.stringify({
       ok: true,
       processed: results.length,
       sent: results.filter((r) => r.sent).length,
+      finalizando_processed: handoffResults.length,
+      finalizando_notified: handoffResults.filter((r) => r.notified).length,
       results,
+      handoffResults,
     }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
