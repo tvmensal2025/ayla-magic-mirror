@@ -325,7 +325,7 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
         variants={confirmStep?.group.variants}
         onVariantChange={changeVariant}
         sending={!!sending}
-        onSend={() => confirmStep && doSend(confirmStep.row, confirmStep.group.step_key)}
+        onSend={(opts) => confirmStep && doSend(confirmStep.row, confirmStep.group.step_key, opts?.continueFlow !== false)}
       />
     </div>
   );
