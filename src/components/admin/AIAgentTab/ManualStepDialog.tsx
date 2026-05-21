@@ -151,10 +151,37 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Enviar passo do fluxo</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            Enviar passo do fluxo
+            <Badge variant="outline" className="text-[10px]">Fluxo {variant}</Badge>
+          </DialogTitle>
           <DialogDescription>
-            Para <strong>{customerName || customerId}</strong>. ✓ O envio manual ignora a pausa do bot — funciona sempre.
+            Para <strong>{customerName || customerId}</strong>. ✓ Envio manual ignora pausa do bot.
           </DialogDescription>
+          {/* Chips A/B/C — troca o fluxo da conversa */}
+          <div className="flex items-center gap-2 pt-2">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Fluxo:</span>
+            {(["A", "B", "C"] as const).map((v) => {
+              const enabled = variantsAvailable.includes(v);
+              const active = variant === v;
+              return (
+                <Button
+                  key={v}
+                  size="sm"
+                  variant={active ? "default" : "outline"}
+                  className="h-6 px-2 text-[11px] font-bold"
+                  disabled={!enabled || sending}
+                  onClick={() => { setVariant(v); setSelectedStep(null); setParts([]); }}
+                  title={enabled ? `Usar fluxo ${v}` : `Fluxo ${v} não configurado`}
+                >
+                  {v}
+                </Button>
+              );
+            })}
+            <span className="text-[10px] text-muted-foreground ml-1">
+              {variant === "A" ? "com áudio" : variant === "B" ? "só texto" : "com vídeo"}
+            </span>
+          </div>
         </DialogHeader>
 
 
