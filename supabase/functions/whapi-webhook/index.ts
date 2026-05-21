@@ -23,6 +23,7 @@ import { botRequestStore, isTestPhone, logTestOutbound } from "../_shared/test-m
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
 import { syncDealStageFromStep } from "../_shared/crm-stage-sync.ts";
 import { isCustomerPausedByHuman, isConsultantAIDisabled } from "../_shared/bot/paused.ts";
+import { isBotGloballyEnabled } from "../_shared/bot/global-flag.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -48,6 +49,14 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
+
+    // Kill switch global (Fase 0 auditoria). Fail-open: erros = habilitado.
+    if (!(await isBotGloballyEnabled(supabase))) {
+      console.log("[whapi-webhook] bot_global_enabled=false → silenciado");
+      return new Response(JSON.stringify({ ok: true, msg: "bot_globally_disabled" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const body = await req.json();
     console.log("Whapi webhook received:", JSON.stringify(body).substring(0, 500));

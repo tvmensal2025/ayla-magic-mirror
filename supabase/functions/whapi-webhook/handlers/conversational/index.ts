@@ -680,6 +680,24 @@ function _finalize(stepKey: string, r: BotResult): BotResult {
 }
 
 export async function runConversationalFlow(ctx: BotContext): Promise<BotResult> {
+  // LGPD opt-out (Fase 3 auditoria): palavra-chave SAIR/PARAR encerra contato.
+  const optOut = String(ctx.messageText || "").trim().toUpperCase();
+  if (optOut === "SAIR" || optOut === "PARAR" || optOut === "STOP" || optOut === "CANCELAR") {
+    try {
+      await ctx.supabase.from("customers").update({
+        bot_paused: true,
+        bot_paused_reason: "opt_out",
+        bot_paused_at: new Date().toISOString(),
+        do_not_contact: true,
+        updated_at: new Date().toISOString(),
+      }).eq("id", ctx.customer.id);
+    } catch (e) { console.warn("[opt-out] update falhou:", (e as Error).message); }
+    return {
+      reply: "Tudo bem! Você foi removido da nossa lista de contato e não receberá mais mensagens automáticas. Se mudar de ideia, é só responder aqui. 🙏",
+      updates: { bot_paused: true, bot_paused_reason: "opt_out", do_not_contact: true },
+    };
+  }
+
   if (isQuietHourBRT()) {
     logQuietSkip("conversational", { customer_id: ctx.customer?.id });
     return { reply: "", updates: {} } as BotResult;

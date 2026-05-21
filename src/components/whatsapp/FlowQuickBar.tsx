@@ -343,9 +343,11 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
           </div>
           <DialogFooter className="px-5 py-3 border-t border-border bg-card flex-col-reverse sm:flex-row gap-2 sm:gap-2">
             <Button variant="ghost" onClick={() => setPreviewStep(null)} disabled={!!sendingId} className="w-full sm:w-auto">Cancelar</Button>
-            <Button onClick={confirmSendFull} disabled={!!sendingId || previewParts.length === 0} className="gap-2 w-full sm:w-auto">
+            <Button onClick={confirmSendFull} disabled={!!sendingId || previewParts.length === 0} className="gap-2 w-full sm:w-auto" aria-busy={!!sendingId}>
               {sendingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              Confirmar e enviar tudo
+              {sendingId
+                ? `Enviando ${previewParts.length} ${previewParts.length === 1 ? "parte" : "partes"}…`
+                : `Confirmar e enviar ${previewParts.length > 0 ? `(${previewParts.length} ${previewParts.length === 1 ? "parte" : "partes"})` : "tudo"}`}
             </Button>
           </DialogFooter>
         </DialogContent>

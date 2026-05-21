@@ -13,6 +13,7 @@ import { createEvolutionSender } from "../_shared/evolution-api.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { isQuietHourBRT, logQuietSkip } from "../_shared/quiet-hours.ts";
 import { isConsultantAIDisabled } from "../_shared/bot/paused.ts";
+import { isBotGloballyEnabled } from "../_shared/bot/global-flag.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -75,6 +76,12 @@ Deno.serve(async (req) => {
 
   try {
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    if (!(await isBotGloballyEnabled(supabase))) {
+      return new Response(JSON.stringify({ skipped: "bot_globally_disabled" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
       return new Response(JSON.stringify({ error: "Evolution API não configurada" }),

@@ -20,7 +20,8 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { createLogger } from "@/lib/logger";
-import { autoTakeoverByPhone } from "@/lib/whatsapp/auto-takeover";
+import { autoTakeoverByPhone, takeoverByPhoneDetailed, undoTakeoverByPhone } from "@/lib/whatsapp/auto-takeover";
+import { ToastAction } from "@/components/ui/toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Tables } from "@/integrations/supabase/types";
 
@@ -107,6 +108,25 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         if (data && data.length > 0) setKanbanStages(data);
       });
   }, [consultantId]);
+
+  // B10 — takeover com Desfazer (10s). Só notifica quando foi NOVO (não em mídias subsequentes).
+  const takeoverWithUndo = useCallback(async (phone: string, reason: "humano_assumiu_audio" | "humano_assumiu_midia" | "humano_assumiu") => {
+    const r = await takeoverByPhoneDetailed(phone, reason);
+    if (r === "new") {
+      toast({
+        title: "🤖 Bot pausado — você assumiu",
+        description: "A IA não vai responder neste lead enquanto você estiver na conversa.",
+        action: (
+          <ToastAction altText="Desfazer" onClick={async () => {
+            const ok = await undoTakeoverByPhone(phone);
+            toast({ title: ok ? "Bot reativado" : "Não consegui reativar", variant: ok ? "default" : "destructive" });
+          }}>Desfazer</ToastAction>
+        ),
+      });
+    }
+  }, [toast]);
+
+
 
   const handleSendToCrm = useCallback(async (stageKey: string) => {
     if (!chat) return;
@@ -338,7 +358,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         onSendAudio={async (base64) => {
           const phone = await getResolvedPhone();
           if (!phone) return;
-          autoTakeoverByPhone(phone, "humano_assumiu_audio").catch(() => {});
+          void takeoverWithUndo(phone, "humano_assumiu_audio");
           try {
             // useAudioRecorder já gera OGG/Opus real, formato aceito pelo WhatsApp/Whapi.
             const audioDataUrl = `data:audio/ogg;base64,${base64}`;
@@ -358,7 +378,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         onSendAudioUrl={async (audioUrl) => {
           const phone = await getResolvedPhone();
           if (!phone) return;
-          autoTakeoverByPhone(phone, "humano_assumiu_audio").catch(() => {});
+          void takeoverWithUndo(phone, "humano_assumiu_audio");
           try {
             const result = await sendWhatsAppMessage({
               instanceName, phone, mediaCategory: "audio", mediaUrl: audioUrl, isWhapi,
@@ -376,7 +396,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         onSendMedia={async (mediaUrl, caption, mediaType) => {
           const phone = await getResolvedPhone();
           if (!phone) return;
-          autoTakeoverByPhone(phone, "humano_assumiu_midia").catch(() => {});
+          void takeoverWithUndo(phone, "humano_assumiu_midia");
           try {
             // Route documents through sendDocument for proper fileName handling
             const category = mediaType as "image" | "video" | "document";

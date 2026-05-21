@@ -4,6 +4,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { notifyHandoff } from "../_shared/notify-consultant.ts";
+import { isBotGloballyEnabled } from "../_shared/bot/global-flag.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -21,6 +22,12 @@ Deno.serve(async (req) => {
 
   try {
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    if (!(await isBotGloballyEnabled(supabase))) {
+      return new Response(JSON.stringify({ skipped: "bot_globally_disabled" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // 1) Roda o lint global (todos os consultores)
     const { data: lintRows, error: lintErr } = await supabase
