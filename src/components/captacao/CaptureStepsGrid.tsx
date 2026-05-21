@@ -83,19 +83,21 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
   const display = steps;
 
 
-  const sendStep = async (stepId: string, label: string, continueFlow = true) => {
-    // B1 — defesa anti double-click: ignora segundo clique enquanto qualquer envio rola.
+  const sendStep = async (step: StepRow, label: string, continueFlow = true) => {
     if (sending) return;
-    setSending(stepId);
+    setSending(step.id);
     try {
+      const payload: any = { consultantId, customerId, part: "all", continueFlow, variant };
+      if (step.__synthetic) payload.stepKey = step.step_key;
+      else payload.stepId = step.id;
       const { data, error } = await supabase.functions.invoke("manual-step-send", {
-        body: { consultantId, customerId, stepId, part: "all", continueFlow },
+        body: payload,
       });
       if (error || (data as any)?.error || (data as any)?.ok === false) {
         const parsed = normalizeSendStepError(error, data);
         throw new Error(parsed.message);
       }
-      onSent(stepId);
+      onSent(step.id);
       const next = (data as any)?.next_step;
       toast({ title: continueFlow ? `Seguindo fluxo ✓` : `Passo enviado ✓`, description: next ? `${label} → ${next}` : label });
     } catch (e: any) {
@@ -106,6 +108,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
   };
 
   const loadTemplate = async (stepId: string, stepKey: string | null) => {
+    if (stepId.startsWith("__synth_")) { onEditTemplate?.(stepKey || "", ""); return; }
     const { data } = await supabase.from("bot_flow_steps").select("message_text").eq("id", stepId).maybeSingle();
     onEditTemplate?.(stepKey || stepId, (data as any)?.message_text || "");
   };
