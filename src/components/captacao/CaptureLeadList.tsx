@@ -80,7 +80,7 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect }: Props) {
   };
 
   return (
-    <aside className="w-72 shrink-0 flex flex-col border-r border-border bg-card/40 backdrop-blur-sm">
+    <aside className="w-full md:w-72 md:shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border bg-card/40 backdrop-blur-sm">
       <div className="p-3 border-b border-border space-y-2">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">Em captação</h3>
