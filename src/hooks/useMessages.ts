@@ -159,10 +159,11 @@ export function useMessages(
       });
 
       const mapped = unique
+        .slice()
+        .reverse() // Whapi devolve desc → reverter para asc estável
         .map(mapMessage)
         .filter((m) => clearedAtMs === 0 || m.timestamp * 1000 >= clearedAtMs)
-        .sort((a, b) => a.timestamp - b.timestamp);
-      setMessages(mapped);
+        .sort((a, b) => (a.timestamp - b.timestamp) || a.id.localeCompare(b.id));
 
       const fallbackSendTarget = raw.find((msg) => msg.key.remoteJidAlt)?.key.remoteJidAlt;
       if (fallbackSendTarget) {

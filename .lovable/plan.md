@@ -1,47 +1,49 @@
 ## Diagnóstico
 
-Lead **(11) 91682-7893** (`5511916827893`, `flow_variant=B`, consultor `0c2711ad…`).
+A Márcia respondeu agora ("Márcia") e o webhook está em `global-off-silent` (IA desligada manualmente), então o bot não tocou — isso é correto.
 
-Logs da Edge Function `manual-step-send`:
-```
-[manual-step-send] variant=B: removed 1 audio media(s)
-POST /manual-step-send → 400  (nothing_to_send)
-```
+O sintoma "mensagens fora de ordem" tem **duas causas distintas** que se somam:
 
-Causa: a função `manual-step-send` aplica a regra do teste A/B/C (variante B = sem áudio) e remove os áudios da lista de mídias **antes** de montar o `toSend`. Quando o consultor clica em "Enviar" no card de áudio do passo 1, sobra zero item e a função devolve `nothing_to_send` (400) → toast "Erro ao enviar / Edge Function returned a non-2xx status code".
-
-Isso vai acontecer em **todo lead na variante B** sempre que o consultor tentar mandar manualmente um áudio (individual ou via "Enviar tudo" de um passo que só tem áudio configurado).
-
-## Correção
-
-A regra de variante existe para o bot automático. No envio manual o consultor está fazendo override — se ele clicou, manda.
-
-### 1. `supabase/functions/manual-step-send/index.ts`
-
-Remover (ou desativar) o bloco que filtra áudios em variante B na função principal:
+### 1. Ordenação no chat do consultor (UI)
+`src/hooks/useMessages.ts` faz:
 ```ts
-if (variant === "B") {
-  medias = medias.filter((m) => String(m.kind).toLowerCase() !== "audio");
-  ...
-}
+const mapped = unique.map(mapMessage).sort((a, b) => a.timestamp - b.timestamp);
 ```
-Trocar por log informativo apenas (sem filtrar), porque agora envio manual ignora a variante.
+Whapi devolve `/messages/list` em ordem **descendente** (mais nova primeiro). O `Array.prototype.sort` no JS é **estável**: quando dois itens têm o mesmo `messageTimestamp` (precisão de segundo), a ordem original é preservada — ou seja, ficam **invertidos** (a nova aparece antes da antiga). Quando o envio sequencial dispara áudio + texto no mesmo segundo, eles aparecem trocados na tela.
 
-Mesma mudança em `sendConfiguredStep` (usado quando `continueFlow=true`): também é disparado por ação manual do consultor, então remover o `continue` que pula áudios em variante B.
+### 2. Ordem real de entrega no WhatsApp da Márcia
+Em `supabase/functions/manual-step-send/index.ts` linha 281, o delay entre itens no modo `"all"` é só **1200 ms**. O `sendMedia` de áudio retorna assim que o Whapi aceita o pedido, mas o Whapi ainda baixa/processa o arquivo antes de despachar. Em seguida o `sendText` dispara — e o texto chega no celular **antes** do áudio. Não é só percepção: é entrega real fora de ordem.
 
-### 2. Validação
+## Plano de correção
 
-- Reabrir diálogo "Enviar passo do fluxo" no lead 11916827893
-- Clicar "Enviar" no áudio do passo 1 (Captura do nome) → deve retornar 200 e a mensagem chega no WhatsApp
-- Conferir log: não pode mais ter `nothing_to_send` para esse caso
-- Testar com um lead variante A para garantir que nada quebrou
-- Conferir `manual-step-send` logs após o teste
+### A) `src/hooks/useMessages.ts` — sort determinístico
+- Antes de ordenar, reverter o array deduplicado (Whapi devolve desc → vira asc).
+- Adicionar critério de desempate por id do Whapi (lexicográfico) para casos extremos de mesmo segundo.
 
-### 3. Memory update
+```text
+const mapped = unique
+  .slice()
+  .reverse()                       // Whapi desc → asc base
+  .map(mapMessage)
+  .filter(...)
+  .sort((a, b) => (a.timestamp - b.timestamp) || a.id.localeCompare(b.id));
+```
 
-Atualizar `mem://features/ab-test-audio-vs-text`: o filtro de variante B agora vale **somente** para os dispatchers automáticos (`whapi-webhook`, `evolution-webhook`). `manual-step-send` ignora a variante porque é override humano.
+### B) `supabase/functions/manual-step-send/index.ts` — delay adaptativo
+Substituir o delay fixo de 1200 ms por valores adaptativos:
+- após `audio` → 4500 ms (Whapi precisa subir + transcodar voz)
+- após `video` → 5000 ms
+- após `image` → 2500 ms
+- após `text`  → 1500 ms
 
-## Por que não mexer em mais nada
+Assim a próxima mensagem só dispara depois que a anterior teve tempo razoável de ser despachada, garantindo a ordem **no celular do lead**.
 
-- O whapi-webhook (bot automático) continua respeitando A/B/C — variante B segue sem áudio para os leads que ainda não interagiram com humano.
-- Não precisa migração no banco, não precisa nova secret. Mudança isolada em 1 arquivo de edge function.
+### C) Validação
+1. Em uma conversa de teste (lead variante A), clicar "Enviar tudo (sequencial)" no passo 1 (áudio + texto).
+2. Conferir no celular do lead: áudio chega primeiro, depois texto.
+3. Conferir no chat do /admin: ordem cronológica respeitada mesmo recarregando.
+4. Reabrir conversa da Márcia (`5511916827893`) e validar que as mensagens já gravadas aparecem na ordem certa.
+
+## Fora do escopo
+- Não mexer no `whapi-webhook` (IA continua desligada via `global-off-silent` como o usuário deixou).
+- Não alterar regras de A/B/C nem o auto-takeover.
