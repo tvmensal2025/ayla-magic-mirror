@@ -17,6 +17,10 @@ export interface SendStepPayload {
   continueFlow?: boolean;
   /** pula a checagem de nome — usar apenas no botão "Pedir nome" */
   skipNameGuard?: boolean;
+  /** A/B/C escolhido pelo consultor nos chips (persiste no customer) */
+  variant?: "A" | "B" | "C";
+  /** ignora a trava awaiting_inbound (reenvio explícito) */
+  force?: boolean;
 }
 
 export interface SendStepResult {
@@ -41,6 +45,8 @@ const FRIENDLY: Record<string, string> = {
   step_not_found: "Esse passo não existe mais — foi removido ou desativado.",
   name_not_captured_yet:
     "Antes de avançar, peça o nome do lead — clique em 'Pedir nome' no topo da ficha.",
+  awaiting_inbound:
+    "Aguarde o lead responder antes de enviar o próximo passo.",
   nothing_to_send: "Esse passo não tem mídia nem texto pra enviar.",
   whapi_token_missing: "Token do WhatsApp não configurado. Avise o admin.",
   phone_not_on_whatsapp: "Esse número não tem WhatsApp ativo.",

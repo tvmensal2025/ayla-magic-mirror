@@ -54,6 +54,8 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
   const [confirmFrom, setConfirmFrom] = useState<number | null>(null);
   const [fromParts, setFromParts] = useState<Record<string, Part[]>>({});
   const [oneByOneStepId, setOneByOneStepId] = useState<string | null>(null);
+  const [variant, setVariant] = useState<"A" | "B" | "C">("A");
+  const [variantsAvailable, setVariantsAvailable] = useState<Array<"A" | "B" | "C">>(["A"]);
 
   useEffect(() => {
     if (!open || !consultantId) return;
@@ -61,41 +63,46 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
     (async () => {
       setLoading(true);
 
-      // Descobre a variante A/B/C do cliente (consultor pode ter múltiplos
-      // bot_flows ativos — um por variante). Sem o filtro por variant, o
-      // popover pode mostrar passos do fluxo errado, ou vazio.
-      let variant = "A";
+      // Carrega TODOS os fluxos ativos (A, B, C) e a variante atual do cliente.
+      let custVariant: "A" | "B" | "C" = "A";
       if (customerId) {
         const { data: cust } = await supabase
           .from("customers").select("flow_variant")
           .eq("id", customerId).maybeSingle();
-        variant = (cust as { flow_variant?: string } | null)?.flow_variant || "A";
+        const v = String((cust as { flow_variant?: string } | null)?.flow_variant || "A").toUpperCase();
+        if (v === "A" || v === "B" || v === "C") custVariant = v;
       }
 
-      let { data: flow } = await supabase
-        .from("bot_flows").select("id")
+      const { data: flowsAll } = await supabase
+        .from("bot_flows").select("id, variant, created_at")
         .eq("consultant_id", consultantId).eq("is_active", true)
-        .eq("variant", variant)
-        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+        .order("created_at", { ascending: false });
+      const flowsList = ((flowsAll as Array<{ id: string; variant: string }> | null) || []);
+      const byVariant = new Map<"A" | "B" | "C", string>();
+      flowsList.forEach((f) => {
+        const v = String(f.variant || "A").toUpperCase() as "A" | "B" | "C";
+        if (["A", "B", "C"].includes(v) && !byVariant.has(v)) byVariant.set(v, f.id);
+      });
+      const available = (["A", "B", "C"] as const).filter((v) => byVariant.has(v));
+      if (mounted) setVariantsAvailable(available.length > 0 ? available : ["A"]);
 
-      if (!flow?.id) {
-        const { data: anyFlow } = await supabase
-          .from("bot_flows").select("id")
-          .eq("consultant_id", consultantId).eq("is_active", true)
-          .order("created_at", { ascending: false }).limit(1).maybeSingle();
-        flow = anyFlow;
-      }
+      // Variante selecionada: default = a do cliente (se existir), senão a primeira.
+      const selected: "A" | "B" | "C" = byVariant.has(custVariant)
+        ? custVariant
+        : (available[0] || "A");
+      if (mounted) setVariant(selected);
 
-      if (!flow?.id) { if (mounted) { setSteps([]); setLoading(false); } return; }
+      const flowId = byVariant.get(selected);
+      if (!flowId) { if (mounted) { setSteps([]); setLoading(false); } return; }
       const { data } = await supabase
         .from("bot_flow_steps")
         .select("id, step_key, title, slot_key, message_text, position")
-        .eq("flow_id", flow.id).eq("is_active", true)
+        .eq("flow_id", flowId).eq("is_active", true)
         .order("position", { ascending: true });
       if (mounted) { setSteps((data as Step[]) || []); setLoading(false); }
     })();
     return () => { mounted = false; };
-  }, [open, consultantId, customerId]);
+  }, [open, consultantId, customerId, variant]);
 
 
   // Load preview parts when opening the single-step preview
@@ -125,42 +132,40 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
     return () => { mounted = false; };
   }, [confirmFrom, steps, consultantId]);
 
-  async function invokeStep(stepId: string): Promise<boolean> {
-    if (!consultantId || !customerId) return false;
+  async function invokeStep(stepId: string, opts?: { force?: boolean }): Promise<{ ok: boolean; code?: string }> {
+    if (!consultantId || !customerId) return { ok: false };
     const { data, error } = await supabase.functions.invoke("manual-step-send", {
-      body: { consultantId, customerId, stepId, part: "all" },
+      body: { consultantId, customerId, stepId, part: "all", variant, force: opts?.force },
     });
-    if (error || (data as { error?: string; ok?: boolean })?.error || (data as { ok?: boolean })?.ok === false) {
-      const msg = normalizeSendStepError(error, data).message;
-      toast({ title: "Erro ao enviar passo", description: msg, variant: "destructive" });
-      return false;
+    const d = data as { error?: string; ok?: boolean; code?: string };
+    if (error || d?.error || d?.ok === false) {
+      const { code, message } = normalizeSendStepError(error, data);
+      toast({ title: code === "awaiting_inbound" ? "⏳ Aguardando lead" : "Erro ao enviar passo", description: message, variant: code === "awaiting_inbound" ? "default" : "destructive" });
+      return { ok: false, code };
     }
-    return true;
+    return { ok: true };
   }
 
   const confirmSendFull = useCallback(async () => {
     if (!previewStep) return;
     const step = previewStep;
     setSendingId(step.id);
-    const ok = await invokeStep(step.id);
+    const res = await invokeStep(step.id);
     setSendingId(null);
     setPreviewStep(null);
-    if (ok) toast({ title: `✅ Passo enviado`, description: step.title || step.step_key || `Passo ${step.position + 1}` });
-  }, [previewStep]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (res.ok) toast({ title: `✅ Passo enviado`, description: step.title || step.step_key || `Passo ${step.position + 1}` });
+  }, [previewStep, variant]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // "Daqui em diante" agora envia SÓ o passo escolhido (1 por vez). O backend
+  // bloqueia rajadas via awaiting_inbound. Para enviar o próximo, o consultor
+  // espera o lead responder e clica de novo.
   async function runFromHere(fromIdx: number) {
-    abortRef.current = false;
-    const slice = steps.slice(fromIdx);
-    setSeq({ current: 0, total: slice.length });
+    const step = steps[fromIdx];
+    if (!step) return;
+    setSeq({ current: 1, total: 1 });
     setOpen(false);
-    for (let i = 0; i < slice.length; i++) {
-      if (abortRef.current) { toast({ title: "⏹ Sequência interrompida" }); break; }
-      setSeq({ current: i + 1, total: slice.length });
-      const ok = await invokeStep(slice[i].id);
-      if (!ok) { abortRef.current = true; break; }
-      if (i < slice.length - 1) await new Promise((r) => setTimeout(r, 1200));
-    }
-    if (!abortRef.current) toast({ title: "✅ Sequência concluída" });
+    const res = await invokeStep(step.id);
+    if (res.ok) toast({ title: "✅ Passo enviado", description: `Aguarde o lead responder antes do próximo.` });
     setSeq(null);
   }
 
@@ -192,6 +197,33 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
               <p className="text-[10px] text-primary mt-0.5">✓ Envio manual funciona mesmo com bot pausado</p>
             </div>
             {steps.length > 0 && <Badge variant="secondary" className="text-[10px] shrink-0">{steps.length} passos</Badge>}
+          </div>
+
+          {/* Seletor A/B/C — troca o fluxo da conversa atual */}
+          <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Fluxo</span>
+            <div className="flex gap-1">
+              {(["A", "B", "C"] as const).map((v) => {
+                const enabled = variantsAvailable.includes(v);
+                const active = variant === v;
+                return (
+                  <Button
+                    key={v}
+                    size="sm"
+                    variant={active ? "default" : "outline"}
+                    className="h-6 px-2 text-[11px] font-bold"
+                    disabled={!enabled || !!seq}
+                    onClick={() => setVariant(v)}
+                    title={enabled ? `Usar fluxo ${v}` : `Fluxo ${v} não configurado`}
+                  >
+                    {v}
+                  </Button>
+                );
+              })}
+            </div>
+            <span className="text-[10px] text-muted-foreground ml-auto">
+              {variant === "A" ? "com áudio" : variant === "B" ? "só texto" : "com vídeo"}
+            </span>
           </div>
 
 

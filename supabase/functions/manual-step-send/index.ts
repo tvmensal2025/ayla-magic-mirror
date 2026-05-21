@@ -17,6 +17,8 @@ interface Body {
   part: Part;        // which piece to send (or "all")
   mediaId?: string;  // when there are multiple medias of same kind, target one
   continueFlow?: boolean; // resume flow after sending the selected full step
+  variant?: "A" | "B" | "C"; // override de variante (consultor escolheu nos chips)
+  force?: boolean;   // ignora trava awaiting_inbound (reenvio explícito)
 }
 
 // Identifica intenção do passo (perguntar nome / saudar / etc) a partir do texto.
@@ -98,12 +100,60 @@ Deno.serve(async (req) => {
     }
     const remoteJid = `${phoneDigits}@s.whatsapp.net`;
 
+    // Override de variante: se o consultor escolheu A/B/C nos chips, persiste no
+    // customer pra não misturar variantes na mesma conversa.
+    let variant = String((customer as any)?.flow_variant || "A").toUpperCase();
+    if (body.variant && ["A", "B", "C"].includes(body.variant) && body.variant !== variant) {
+      await supabase.from("customers")
+        .update({ flow_variant: body.variant, updated_at: new Date().toISOString() })
+        .eq("id", customer.id);
+      variant = body.variant;
+    }
+
+    // Trava anti-disparo-em-massa: se o último outbound desse customer foi nos
+    // últimos 25s e o lead ainda NÃO respondeu, bloqueia (force=true ignora).
+    // Aplica só quando o consultor pede o "passo inteiro" (part==="all"); envios
+    // 1-a-1 e auto-prompts não disparam essa trava.
+    if (!body.force && body.part === "all" && !body.skipNameGuard) {
+      const { data: lastOut } = await supabase
+        .from("conversations")
+        .select("created_at")
+        .eq("customer_id", customer.id)
+        .eq("message_direction", "outbound")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (lastOut?.created_at) {
+        const lastOutAt = new Date(lastOut.created_at).getTime();
+        const elapsedMs = Date.now() - lastOutAt;
+        if (elapsedMs < 25_000) {
+          const { data: laterIn } = await supabase
+            .from("conversations")
+            .select("id")
+            .eq("customer_id", customer.id)
+            .eq("message_direction", "inbound")
+            .gt("created_at", lastOut.created_at)
+            .limit(1)
+            .maybeSingle();
+          if (!laterIn) {
+            const secs = Math.max(1, Math.ceil((25_000 - elapsedMs) / 1000));
+            return json({
+              ok: false,
+              blocked: true,
+              code: "awaiting_inbound",
+              error: "awaiting_inbound",
+              message: `Aguarde o lead responder antes de enviar o próximo passo (~${secs}s).`,
+            });
+          }
+        }
+      }
+    }
+
     // Resolve step
     let stepQuery = supabase
       .from("bot_flow_steps")
       .select("id, step_key, slot_key, message_text, media_order, flow_id, step_type, position, transitions, captures")
       .eq("is_active", true);
-    const variant = (customer as any)?.flow_variant || "A";
     if (body.stepId) stepQuery = stepQuery.eq("id", body.stepId);
     else if (body.stepKey) {
       const { data: flow } = await supabase
@@ -116,6 +166,7 @@ Deno.serve(async (req) => {
       if (!flow?.id) return json({ code: "no_active_flow", error: "no_active_flow", message: "Nenhum fluxo ativo encontrado para essa variante." }, 404);
       stepQuery = stepQuery.eq("flow_id", flow.id).eq("step_key", body.stepKey);
     } else return json({ code: "missing_step", error: "missing_step", message: "Passo do fluxo não informado." }, 400);
+
 
     const { data: step } = await stepQuery.maybeSingle();
     if (!step) return json({ code: "step_not_found", error: "step_not_found", message: "Passo selecionado não existe mais (foi removido ou desativado)." }, 404);

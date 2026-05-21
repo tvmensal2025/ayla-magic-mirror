@@ -41,41 +41,42 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
   const [parts, setParts] = useState<Part[]>([]);
   const [partIdx, setPartIdx] = useState(0);
   const [sending, setSending] = useState(false);
+  const [variant, setVariant] = useState<"A" | "B" | "C">("A");
+  const [variantsAvailable, setVariantsAvailable] = useState<Array<"A" | "B" | "C">>(["A"]);
 
   useEffect(() => {
     if (!open) { setSelectedStep(null); setParts([]); setPartIdx(0); return; }
     (async () => {
       setLoading(true);
 
-      // Descobre a variante A/B/C do cliente (consultor pode ter múltiplos
-      // bot_flows ativos — um por variante). Sem isso, .maybeSingle() quebra
-      // com "multiple rows" e o dialog fica vazio.
+      // Descobre a variante do cliente + todas as variantes disponíveis (A/B/C).
       const { data: cust } = await supabase
         .from("customers").select("flow_variant")
         .eq("id", customerId).maybeSingle();
-      const variant = (cust as { flow_variant?: string } | null)?.flow_variant || "A";
+      const custVariant = String((cust as { flow_variant?: string } | null)?.flow_variant || "A").toUpperCase() as "A" | "B" | "C";
 
-      // 1) tenta fluxo da variante do cliente
-      let { data: flow } = await supabase
-        .from("bot_flows").select("id")
+      const { data: flowsAll } = await supabase
+        .from("bot_flows").select("id, variant, created_at")
         .eq("consultant_id", consultantId).eq("is_active", true)
-        .eq("variant", variant)
-        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+        .order("created_at", { ascending: false });
+      const flowsList = ((flowsAll as Array<{ id: string; variant: string }> | null) || []);
+      const byVariant = new Map<"A" | "B" | "C", string>();
+      flowsList.forEach((f) => {
+        const v = String(f.variant || "A").toUpperCase() as "A" | "B" | "C";
+        if (["A", "B", "C"].includes(v) && !byVariant.has(v)) byVariant.set(v, f.id);
+      });
+      const available = (["A", "B", "C"] as const).filter((v) => byVariant.has(v));
+      setVariantsAvailable(available.length > 0 ? available : ["A"]);
 
-      // 2) fallback: qualquer fluxo ativo
-      if (!flow?.id) {
-        const { data: anyFlow } = await supabase
-          .from("bot_flows").select("id")
-          .eq("consultant_id", consultantId).eq("is_active", true)
-          .order("created_at", { ascending: false }).limit(1).maybeSingle();
-        flow = anyFlow;
-      }
+      const selected: "A" | "B" | "C" = byVariant.has(custVariant) ? custVariant : (available[0] || "A");
+      setVariant(selected);
 
-      if (!flow?.id) { setSteps([]); setLoading(false); return; }
+      const flowId = byVariant.get(selected);
+      if (!flowId) { setSteps([]); setLoading(false); return; }
       const { data } = await supabase
         .from("bot_flow_steps")
         .select("id, step_key, title, slot_key, message_text, position")
-        .eq("flow_id", flow.id).eq("is_active", true)
+        .eq("flow_id", flowId).eq("is_active", true)
         .order("position", { ascending: true });
       const list = ((data as any) || []) as Step[];
       setSteps(list);
@@ -85,7 +86,8 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
         if (pre) loadStepParts(pre);
       }
     })();
-  }, [open, consultantId, customerId, initialStepId]);
+  }, [open, consultantId, customerId, initialStepId, variant]);
+
 
 
   async function loadStepParts(step: Step) {
@@ -116,6 +118,7 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
         consultantId, customerId,
         stepId: selectedStep!.id,
         part: part.kind,
+        variant,
       };
       if (part.media?.id) payload.mediaId = part.media.id;
       const { data, error } = await supabase.functions.invoke("manual-step-send", { body: payload });
@@ -132,7 +135,7 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
     setSending(true);
     try {
       const { data, error } = await supabase.functions.invoke("manual-step-send", {
-        body: { consultantId, customerId, stepId: selectedStep!.id, part: "all" },
+        body: { consultantId, customerId, stepId: selectedStep!.id, part: "all", variant },
       });
       if (error || (data as any)?.error || (data as any)?.ok === false) {
         throw new Error(normalizeSendStepError(error, data).message);
@@ -148,10 +151,37 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Enviar passo do fluxo</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            Enviar passo do fluxo
+            <Badge variant="outline" className="text-[10px]">Fluxo {variant}</Badge>
+          </DialogTitle>
           <DialogDescription>
-            Para <strong>{customerName || customerId}</strong>. ✓ O envio manual ignora a pausa do bot — funciona sempre.
+            Para <strong>{customerName || customerId}</strong>. ✓ Envio manual ignora pausa do bot.
           </DialogDescription>
+          {/* Chips A/B/C — troca o fluxo da conversa */}
+          <div className="flex items-center gap-2 pt-2">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Fluxo:</span>
+            {(["A", "B", "C"] as const).map((v) => {
+              const enabled = variantsAvailable.includes(v);
+              const active = variant === v;
+              return (
+                <Button
+                  key={v}
+                  size="sm"
+                  variant={active ? "default" : "outline"}
+                  className="h-6 px-2 text-[11px] font-bold"
+                  disabled={!enabled || sending}
+                  onClick={() => { setVariant(v); setSelectedStep(null); setParts([]); }}
+                  title={enabled ? `Usar fluxo ${v}` : `Fluxo ${v} não configurado`}
+                >
+                  {v}
+                </Button>
+              );
+            })}
+            <span className="text-[10px] text-muted-foreground ml-1">
+              {variant === "A" ? "com áudio" : variant === "B" ? "só texto" : "com vídeo"}
+            </span>
+          </div>
         </DialogHeader>
 
 
