@@ -166,6 +166,7 @@ Deno.serve(async (req) => {
     ]);
 
     async function getActiveFlowId(): Promise<string | null> {
+      // 1) Tenta a variante do cliente.
       const { data: flow } = await supabase
         .from("bot_flows")
         .select("id")
@@ -173,7 +174,18 @@ Deno.serve(async (req) => {
         .eq("is_active", true)
         .eq("variant", variant)
         .maybeSingle();
-      return flow?.id ? String((flow as any).id) : null;
+      if (flow?.id) return String((flow as any).id);
+      // 2) Fallback: qualquer fluxo ativo do consultor (A primeiro, depois o que houver).
+      // Evita 404 quando o consultor só publicou uma variante e o cliente está em outra.
+      const { data: any1 } = await supabase
+        .from("bot_flows")
+        .select("id, variant")
+        .eq("consultant_id", body.consultantId)
+        .eq("is_active", true)
+        .order("variant", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      return any1?.id ? String((any1 as any).id) : null;
     }
 
     let step: any = null;
