@@ -1,125 +1,175 @@
-# Análise: o manual "1 a 1" / "seguir o fluxo" leva o lead até o portal?
 
-Resposta curta: **quase tudo está pronto, MAS há 2 pontos que ainda quebram o cadastro automático no portal quando a IA está em modo manual (globalAiDisabled = true).**
+# Plano: deixar o "Captura conta → … → Finalizar" 100% conectado
 
----
+Objetivo: clicar em **qualquer passo de captura** no painel `/admin` (Captura conta, Captura documento, Captura email, Finalizar cadastro) e o fluxo seguir sozinho até o portal iGreen. As únicas interações manuais permitidas são:
+- Consultor: **SIM / EDITAR / NÃO** no card de confirmação de dados extraídos.
+- Cliente: digitar valores (email, CPF, CEP, etc.) ou enviar foto/PDF/documento.
 
-## 1. O que JÁ funciona hoje
-
-Quando você clica **"Devolver para o passo"** em qualquer passo de captura, o `manual-step-send` faz o seguinte (`supabase/functions/manual-step-send/index.ts`):
-
-- Mapeia o passo custom para a chave legada (`mapCaptureStepToLegacy`):
-  - `capture_conta` → `aguardando_conta`
-  - `capture_documento` / `capture_doc` → `aguardando_doc_auto`
-  - `capture_email` → `ask_email`
-  - `confirm_phone` → `ask_phone_confirm`
-  - `finalizar_cadastro` → `finalizando`
-- Envia o prompt do passo (texto do passo → retry_text → fallback padrão).
-- Atualiza `customers.conversation_step` para a chave legada e despausa o bot.
-- A próxima resposta do cliente cai no `whapi-webhook`, que roteia pelo `bot-flow.ts` exatamente como no fluxo da Camila — captura **nome, email, CPF/RG, CEP, número, complemento, valor da conta, conta de luz (com OCR), documento frente/verso**.
-
-Depois que o cliente conclui o último campo, o fluxo chega a `finalizando` (linhas 4080–4290 de `bot-flow.ts`):
-
-1. Auto-confirma o telefone do WhatsApp se faltar.
-2. Roda `validateCustomerForPortal()` — se faltar algo, redireciona pro passo certo (anti-loop de 1 tentativa).
-3. Se passou na validação: marca `status = portal_submitting`, regenera `igreen_link` com o `cadastro_url` do consultor dono, envia a mensagem "✅ Todos os dados coletados…" e dispara `POST {portal_worker_url}/submit-lead` (com health-check + 3 retries).
-4. O worker da VPS abre o portal iGreen, recebe o OTP que volta via `submit-otp` (passo `aguardando_otp` → `validando_otp`) e finaliza com a validação facial.
-
-Ou seja: **o pipeline existe inteiro até o portal.**
+Tudo o que estiver entre essas interações deve ser automático.
 
 ---
 
-## 2. Pontos que QUEBRAM no modo manual atual
+## 1. Diagnóstico do bug que vi no print do Lucas
 
-### 2.1 `globalAiDisabled` + qualquer mensagem que NÃO seja arquivo
-
-O patch que apliquei agora libera o pipeline **somente quando `isFile = true**` (foto da conta, documento). Para:
-
-- texto do **nome** (passo `ask_name`),
-- texto do **email** (`ask_email`),
-- texto do **CPF / RG / CEP / número / valor** (`ask_cpf`, `ask_rg`, `ask_cep`, `ask_number`, `ask_bill_value`),
-- botão de **confirmar telefone**,
-- botão de **finalizar** (`ask_finalizar`),
-
-o webhook ainda retorna no early-gate do `globalAiDisabled` e **só salva o inbound sem rodar `runBotFlow**`. Resultado: o cliente responde, mas `conversation_step` não avança e os campos não são preenchidos.
-
-**Correção necessária:** ampliar o bypass do `globalAiDisabled` para qualquer cliente cujo `conversation_step` esteja em uma "lista de passos de captura ativa" — não só arquivos:
-
-```
-CAPTURE_STEPS = [
-  "ask_name", "ask_email", "ask_cpf", "ask_rg", "ask_cep",
-  "ask_number", "ask_complement", "ask_bill_value",
-  "ask_phone_confirm", "aguardando_conta", "confirmando_dados_conta",
-  "aguardando_doc_auto", "ask_doc_frente_manual", "ask_doc_verso_manual",
-  "ask_finalizar", "finalizando", "portal_submitting", "aguardando_otp"
-]
-```
-
-Quando `globalAiDisabled = true` E `conversation_step ∈ CAPTURE_STEPS` → segue para `runBotFlow`. O `silentMode` continua valendo **só para mídia inicial sem prompt** — quando você já mandou o lead para `ask_xxx`, o bot precisa responder normalmente, senão o cliente não sabe o que digitar a seguir.
-
-### 2.2 `finalizando` no modo manual precisa enviar de verdade
-
-Hoje o bloco `finalizando` faz `sendText(remoteJid, "✅ Todos os dados coletados…")` e chama `/submit-lead`. Com `silentMode` ativo, esse `sendText` vira no-op e o `/submit-lead` também precisa ser disparado.
-
-**Correção necessária:** no `finalizando` (e em `portal_submitting`, `aguardando_otp`, `validando_otp`), **desligar o silentMode** — independente do `globalAiDisabled`. São passos terminais críticos; precisam falar com o cliente e com o worker.
+- Cliente mandou o PDF da conta **antes** de o consultor clicar em qualquer passo. Na época, o gate `globalAiDisabled` antigo só salvava `[arquivo]` em `conversations` e não rodava OCR. Resultado: `customers.electricity_bill_photo_url`, `bill_message_id`, `bill_holder_name`, `distribuidora`, `cep`, etc. ficaram **vazios** — por isso a Ficha aparece praticamente em branco e o card "Dados lidos da CONTA" não renderiza (ele exige pelo menos 1 campo preenchido via `hasAny`).
+- Mesmo após o deploy de ontem (que liga silentMode + runBotFlow para arquivos), o PDF antigo se perdeu porque a URL/base64 não foi armazenada na época.
+- Hoje, se o consultor clicar em "Captura conta", `manual-step-send` apenas manda o prompt "me manda foto/PDF" e seta `aguardando_conta`. **Não reaproveita** o PDF que o cliente já tinha enviado.
 
 ---
 
-## 3. Plano de implementação
+## 2. Mudanças necessárias
 
-### Arquivo: `supabase/functions/whapi-webhook/index.ts`
+### 2.1 Garantir que TODO arquivo inbound seja persistido
 
-1. Definir `const ACTIVE_CAPTURE_STEPS = new Set([...lista acima])`.
-2. No gate `globalAiDisabled` (~linha 476), trocar a condição:
+Arquivo: `supabase/functions/whapi-webhook/index.ts`
+
+Logo após `let fileUrl / fileBase64` serem resolvidos (~ linha 670), e **antes** de qualquer return precoce (gate de IA manual, bot pausado, etc.), persistir em `customers`:
 
 ```ts
-const inActiveCapture = ACTIVE_CAPTURE_STEPS.has(customer?.conversation_step || "");
-const isTerminalPortalStep = ["finalizando","portal_submitting","aguardando_otp","validando_otp"]
-  .includes(customer?.conversation_step || "");
-
-if (globalAiDisabled && !isFile && !inActiveCapture) {
-  // mantém comportamento atual: salva inbound silencioso e retorna
+if (isFile && fileUrl) {
+  await supabase.from("customers").update({
+    last_inbound_media_url: fileUrl,
+    last_inbound_media_mime: imageMessage?.mimetype || documentMessage?.mimetype,
+    last_inbound_media_kind: hasDocument ? "document" : hasImage ? "image" : "other",
+    last_inbound_media_message_id: messageId || null,
+    last_inbound_media_at: new Date().toISOString(),
+  }).eq("id", customer.id);
 }
-// senão: segue para runBotFlow
-const silentMode = globalAiDisabled && isFile && !inActiveCapture && !isTerminalPortalStep;
 ```
 
-3. Manter o wrapper `silentMode` no `sender` apenas quando `silentMode === true`. Para passos de captura ativa e terminais, usar `sender` real (`sendText`, `sendButtons`, `sendMedia`, `sendPresence`).
-4. Não suprimir mais `finalReply` quando o passo é de captura ativa ou terminal.
+Migração:
+```sql
+alter table public.customers
+  add column if not exists last_inbound_media_url text,
+  add column if not exists last_inbound_media_mime text,
+  add column if not exists last_inbound_media_kind text,
+  add column if not exists last_inbound_media_message_id text,
+  add column if not exists last_inbound_media_at timestamptz;
+```
 
-### Arquivo: `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
-
-Sem mudanças. Toda a lógica de validação, envio ao portal e tratamento de OTP já está correta.
-
-### Arquivo: `supabase/functions/manual-step-send/index.ts`
-
-Sem mudanças. Já mapeia corretamente e despausa o bot.
-
----
-
-## 4. Validação após o fix
-
-1. Simular um lead novo com `ai_agent_config.enabled = false`.
-2. No `/admin`, clicar "Devolver para o passo: Captura do nome" → cliente recebe o prompt.
-3. Cliente responde nome → `ask_name` salva, avança para `ask_email`, bot envia prompt automaticamente.
-4. Continua até `ask_finalizar` → bot dispara `/submit-lead` no portal worker.
-5. Conferir nos logs: `lead_complete`, `worker-portal resposta 200`, e depois `aguardando_otp` recebendo o código.
+Isso garante que, mesmo com IA manual, qualquer foto/PDF pode ser reaproveitado depois.
 
 ---
 
-## 5. Resumo objetivo
+### 2.2 `manual-step-send` reaproveita arquivo já recebido
 
+Arquivo: `supabase/functions/manual-step-send/index.ts`
 
-| Etapa                                          | Status hoje            | Após o fix |
-| ---------------------------------------------- | ---------------------- | ---------- |
-| Devolver pro passo manualmente                 | ✅ funciona             | ✅          |
-| Cliente envia foto da conta (OCR + URL salvos) | ✅ (acabei de corrigir) | ✅          |
-| Cliente digita nome, email, CPF, CEP, etc.     | ❌ trava no gate        | ✅          |
-| Cliente envia documento (frente/verso)         | ⚠️ depende do passo    | ✅          |
-| Botão "Finalizar" → portal worker              | ❌ não chega lá         | ✅          |
-| OTP volta do worker e completa cadastro        | ✅ código já existe     | ✅          |
+No bloco que detecta passos `capture_conta` e `capture_documento` (antes de mandar prompt), checar se já existe arquivo:
 
+```ts
+if (stepType === "capture_conta") {
+  const billUrl = (customer as any).electricity_bill_photo_url || (customer as any).last_inbound_media_url;
+  const hasFile = !!billUrl;
+  if (hasFile) {
+    // Dispara reprocess via edge function dedicada (ver 2.3).
+    await supabase.functions.invoke("reprocess-capture", {
+      body: { customerId: customer.id, kind: "bill" },
+    });
+    // Pula prompt — o card SIM/EDITAR/NÃO vai aparecer na ficha do consultor.
+    return json({ ok: true, reused_existing_file: true, kind: "bill" });
+  }
+}
+```
 
-Pra ficar **exatamente igual ao fluxo da Camila**, falta só o ajuste no gate do `globalAiDisabled` descrito no item 3 acima.  
-  
-TEM QUE FUNCIONAR NO INDIVIDUAL E NO MODO GAME DE IR PASSANDO PASSO A PASSO
+Mesmo padrão para `capture_documento` com `document_front_url` / `last_inbound_media_url`.
+
+Quando NÃO houver arquivo: mantém o comportamento atual (manda prompt pedindo o arquivo).
+
+---
+
+### 2.3 Nova edge function `reprocess-capture`
+
+Arquivo novo: `supabase/functions/reprocess-capture/index.ts`
+
+Função única: dado `customer_id` + `kind` ("bill" | "doc_front" | "doc_back"), baixa a URL salva, monta `fileBase64`, força `conversation_step` no valor certo (`aguardando_conta`, `ask_doc_frente_manual`, `ask_doc_verso_manual`), e chama internamente `runBotFlow` com `silentMode=true` no sender (sem outbound — quem dispara mensagem ao cliente é o card "Pedir ao cliente" ou a confirmação do consultor).
+
+Resultado: OCR roda, campos do `customer` são preenchidos (`bill_holder_name`, `distribuidora`, `cep`, `address_*`, `electricity_bill_value`, `ocr_confianca` etc.), `CaptureDataConfirmCard` aparece com SIM/EDITAR/NÃO no painel.
+
+---
+
+### 2.4 SIM do consultor avança automaticamente o fluxo
+
+Arquivo: `src/components/captacao/CaptureDataConfirmCard.tsx`
+
+Hoje `confirmSelf()` só seta `bill_data_confirmed_at`. Adicionar, logo depois do update, uma chamada para avançar o fluxo:
+
+```ts
+await supabase.functions.invoke("manual-step-send", {
+  body: {
+    consultantId: customer.consultant_id,
+    customerId: customer.id,
+    stepKey: kind === "bill" ? "capture_email" : "finalizar_cadastro",
+    part: "all",
+    continueFlow: true,
+    skipNameGuard: true,
+  },
+});
+```
+
+Para `kind="doc"` (documento confirmado) → próximo passo é `finalizar_cadastro`.
+Para `kind="bill"` → próximo passo configurável (padrão `capture_email`, depois `capture_documento`).
+
+A chave do próximo passo deve vir da config do fluxo (lookup em `bot_flow_steps` pela `position` posterior ao step de captura atual) — não hard-coded. Adicionar helper que faz esse lookup no servidor (`manual-step-send` já tem `buildContinuationPatch` com lógica parecida — reutilizar).
+
+Versão pragmática: o frontend chama `manual-step-send` com `continueFlow=true` e sem `stepKey`, e o backend descobre o passo atual do customer e avança para o próximo de captura/finalização.
+
+---
+
+### 2.5 `manual-step-send` quando `step_type = finalizar_cadastro`
+
+Arquivo: `supabase/functions/manual-step-send/index.ts` (e/ou novo helper).
+
+Hoje só manda um prompt "Tô finalizando…". Precisa, em vez disso, executar o pipeline real:
+1. Setar `customer.conversation_step = "finalizando"`.
+2. Invocar internamente `runBotFlow` (ou função extraída do bloco `finalizando` em `bot-flow.ts`) que:
+   - Valida via `validateCustomerForPortal`.
+   - Se faltar campo → redireciona pro passo certo e dispara prompt pro cliente.
+   - Se tudo OK → marca `status=portal_submitting`, envia "✅ Todos os dados coletados…" ao cliente, dispara `POST {portal_worker_url}/submit-lead` com retries.
+3. Cliente recebe o OTP no WhatsApp e segue o ciclo `aguardando_otp → validando_otp → cadastro_completo`.
+
+Isso já existe em `bot-flow.ts` linhas 4080-4290. Extrair para `_shared/finalizing.ts` para que `manual-step-send` chame sem duplicar.
+
+---
+
+### 2.6 Cobertura de cliente que confere via WhatsApp (botão "Pedir ao cliente")
+
+Já existe (`bill_data_confirmation_by='awaiting_client'` + handler "SIM/OK" em `whapi-webhook/index.ts` ~ linha 520). Manter como está — está alinhado com a regra "cliente pode confirmar".
+
+Adicionar só: quando esse confirmation por cliente acontece, **também** disparar o avanço do fluxo (2.4) — atualmente só agradece e fica parado.
+
+---
+
+## 3. Resumo das mudanças por arquivo
+
+| Arquivo | Mudança |
+|---|---|
+| migração SQL | Adiciona 5 colunas `last_inbound_media_*` em `customers` |
+| `whapi-webhook/index.ts` | Persiste mídia inbound em `customers.last_inbound_media_*` antes de qualquer return precoce |
+| `whapi-webhook/index.ts` (handler `capture-confirm` ~ linha 530) | Após `bill_data_confirmed_at` setado pelo cliente, dispara `manual-step-send` continuFlow |
+| `manual-step-send/index.ts` | Para `capture_conta`/`capture_documento`: se já há arquivo, chama `reprocess-capture` e pula prompt. Para `finalizar_cadastro`: invoca pipeline `finalizando` extraído. |
+| `reprocess-capture/index.ts` (novo) | Baixa URL salva, base64, força step legacy, chama `runBotFlow` em silentMode |
+| `_shared/finalizing.ts` (novo, opcional) | Extrai o bloco `finalizando` de `bot-flow.ts` para ser chamado também pelo `manual-step-send` |
+| `CaptureDataConfirmCard.tsx` | Após `confirmSelf`, dispara `manual-step-send` `continueFlow=true` para próximo passo do fluxo |
+
+---
+
+## 4. Critério de aceite (replicar o caso Lucas)
+
+1. Cliente novo manda PDF da conta com IA manual ligada. → `electricity_bill_photo_url` e `last_inbound_media_*` salvos.
+2. Consultor abre Lucas em `/admin`, clica em "Captura conta". → backend reprocessa o PDF, Ficha preenche (titular, distribuidora, CEP, valor, etc.) sem mandar nova mensagem ao cliente.
+3. Card "Dados lidos da CONTA" aparece com SIM/EDITAR/NÃO. Consultor clica "Eu confirmo". → `manual-step-send` avança para `capture_email` e o bot pergunta "Qual seu melhor e-mail?" no WhatsApp do cliente.
+4. Cliente responde email. → bot avança para `capture_documento` e pede RG/CNH.
+5. Cliente manda foto do documento. → OCR roda, card "Dados lidos do DOCUMENTO" aparece com SIM/EDITAR/NÃO.
+6. Consultor confirma documento. → `manual-step-send` invoca pipeline `finalizando`, valida tudo, manda "✅ Todos os dados coletados…" ao cliente e dispara `POST /submit-lead` no portal worker.
+7. Cliente recebe OTP, digita, fluxo completa (`validando_otp → cadastro_completo`).
+
+Em **nenhum momento** o consultor precisa digitar texto livre ou mandar mídia manualmente — só clica em SIM/EDITAR/NÃO ou aciona algum passo do menu. O cliente só envia o que for solicitado pelo bot.
+
+---
+
+## 5. Notas
+
+- Para evitar loop, `manual-step-send` `continueFlow` precisa detectar se o próximo passo é o MESMO passo atual e abortar (já tem debounce `last_custom_prompt_at` de 20s).
+- `silentMode` no `whapi-webhook` continua valendo para mídia inbound recebida fora de passo ativo — preserva o comportamento "OCR roda mas sem outbound".
+- Botão "Pedir ao cliente" do card permanece como alternativa para deixar o cliente confirmar pelo WhatsApp em vez do consultor.
