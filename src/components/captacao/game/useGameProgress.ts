@@ -51,6 +51,7 @@ export interface GameProgress {
   reload: () => Promise<void>;
   // Returns the new level if level-up happened, else null
   registerCapture: () => { gainedXp: number; leveledUp: boolean; newLevel: number };
+  registerMessage: (kind: "text" | "audio") => { gainedXp: number; leveledUp: boolean; newLevel: number };
 }
 
 export function useGameProgress(consultantId: string | null): GameProgress {
@@ -121,8 +122,19 @@ export function useGameProgress(consultantId: string | null): GameProgress {
     return { gainedXp: gained, leveledUp: newLevel > prevLevel, newLevel };
   }, [todayCount]);
 
+  const registerMessage = useCallback((kind: "text" | "audio") => {
+    const prev = xpRef.current;
+    const gained = kind === "audio" ? 10 : 5;
+    const newXp = prev + gained;
+    xpRef.current = newXp;
+    setTotalXp(newXp);
+    const prevLevel = levelFromXp(prev);
+    const newLevel = levelFromXp(newXp);
+    return { gainedXp: gained, leveledUp: newLevel > prevLevel, newLevel };
+  }, []);
+
   return {
     totalXp, level, rank, xpInLevel, xpToNext, progressPct,
-    todayCount, weekCount, streak, loading, reload: load, registerCapture,
+    todayCount, weekCount, streak, loading, reload: load, registerCapture, registerMessage,
   };
 }

@@ -20,9 +20,11 @@ import { useGameMode } from "@/components/captacao/game/useGameMode";
 import { useGameProgress } from "@/components/captacao/game/useGameProgress";
 import { sfx } from "@/components/captacao/game/sfx";
 
-interface Props { consultantId: string; onOpenChat?: (phone: string) => void; }
+import { GameComposer } from "@/components/captacao/game/GameComposer";
 
-export function CaptacaoPanel({ consultantId, onOpenChat }: Props) {
+interface Props { consultantId: string; onOpenChat?: (phone: string) => void; instanceName?: string | null; isWhapi?: boolean; }
+
+export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, isWhapi = false }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
   const [phone, setPhone] = useState<string | null>(null);
@@ -132,6 +134,19 @@ export function CaptacaoPanel({ consultantId, onOpenChat }: Props) {
                         onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
                       />
                     </div>
+                    <GameComposer
+                      instanceName={instanceName}
+                      isWhapi={isWhapi}
+                      phone={phone}
+                      onSent={(kind) => {
+                        const res = progress.registerMessage(kind);
+                        setXpToast(res.gainedXp);
+                        sfx.coin(sound);
+                        if (res.leveledUp) {
+                          setTimeout(() => { sfx.levelUp(sound); setLevelUp({ level: res.newLevel, label: progress.rank.label }); }, 500);
+                        }
+                      }}
+                    />
                   </div>
                 </>
               )}

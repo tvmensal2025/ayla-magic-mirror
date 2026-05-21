@@ -1,48 +1,51 @@
-# Modo Game no /admin + PWA instalável no celular
+# Plano
 
-## 1. Modo Game — nova aba "Captação" no /admin do consultor
+## 1) Erro ao salvar template
 
-**Diagnóstico:** O componente `CaptacaoPanel` (que contém o `GameModeToggle`) existe em `src/components/captacao/CaptacaoPanel.tsx`, mas não está montado em nenhuma página. Por isso o consultor não acha. A aba "Captação" do SuperAdmin é outra coisa (diagnóstico IA).
+Pelo replay vi você digitando nome `dasd` e atalho só `/`. O atalho exige **`/` + 2 a 20 letras/números** (ex: `/oi`). Com apenas `/`, o botão "Salvar template" trava como desabilitado e nenhum salvamento acontece. Não vejo bug no insert em si (a coluna nova `is_quick_reply` tem default `true` no banco, então `INSERT` antigo continua válido).
 
-**Mudanças** (em `src/pages/Admin.tsx`):
-- Adicionar `"captacao"` ao tipo do `activeTab`.
-- Lazy-load: `const CaptacaoPanel = lazy(() => import("@/components/captacao/CaptacaoPanel"))`.
-- Adicionar item na lista de abas com label **"Captação"** e ícone `Gamepad2` (lucide).
-- Render condicional: `{activeTab === "captacao" && <CaptacaoPanel consultantId={userId} onOpenChat={(phone) => { setActiveTab("whatsapp"); setPendingChatPhone(phone); }} />}`.
-- Suportar `?tab=captacao` na URL inicial.
+Para destravar e melhorar a UX:
 
-Resultado: o consultor abre /admin → clica "Captação" → vê o toggle "Modo Game ON/OFF" + som + painel do jogo.
+- **`SaveMessageAsTemplateDialog`**: mostrar mensagem clara em vermelho abaixo do atalho ("Atalho precisa ter pelo menos 2 caracteres após a /") e o motivo do botão estar desabilitado num tooltip (nome vazio, atalho inválido, mídia ainda não carregou).
+- **Toast mais explícito** quando o erro vier do Supabase: incluir `error.code` e `error.details` para conseguirmos diagnosticar caso seja RLS/coluna.
+- **Permitir salvar template só de texto** (hoje o dialog só salva se houver mídia carregada — `mt === "audio"|"video"|"image"`). Vou liberar `mt === "text"` salvando sem `media_url`, útil quando você quer salvar uma mensagem digitada.
 
-## 2. PWA — instalar no celular (manifest-only, sem service worker)
+Se mesmo com nome + atalho válidos o erro persistir, me mande **o texto exato do toast vermelho** que aparece — com os logs extras eu identifico em 1 passo.
 
-**Diagnóstico:** Já existe `public/manifest.json` válido (display standalone, theme color, ícones) e o link no `index.html`. Para o "Adicionar à tela inicial" funcionar bem no iOS e Android falta apenas:
-- Meta tags Apple no `<head>` do `index.html`:
-  - `<meta name="apple-mobile-web-app-capable" content="yes" />`
-  - `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />`
-  - `<meta name="apple-mobile-web-app-title" content="iGreen" />`
-  - `<meta name="mobile-web-app-capable" content="yes" />`
-  - `<meta name="format-detection" content="telephone=no" />`
-- Liberar zoom (acessibilidade) no viewport: remover `maximum-scale=1.0, user-scalable=no` ou trocar por `viewport-fit=cover`.
-- Adicionar `id` e `scope` ao manifest para travar a identidade do PWA:
-  - `"id": "/admin"`, `"scope": "/"`, `"lang": "pt-BR"`, `"categories": ["business","productivity"]`.
-- Adicionar `shortcuts` ao manifest (atalhos no ícone): WhatsApp, CRM, Captação.
+## 2) Modo Game — composer com texto e áudio
 
-**Botão "Instalar app" + tela /install** (componente novo):
-- `src/components/admin/InstallPwaButton.tsx`: escuta `beforeinstallprompt`, mostra botão "📱 Instalar app" no header do /admin quando o evento dispara (Android/Chrome). Em iOS Safari (sem `beforeinstallprompt`), mostra modal com instrução visual "Toque em Compartilhar → Adicionar à Tela de Início".
-- Detecta `display-mode: standalone` para esconder o botão quando já instalado.
-- Persiste dismiss em `localStorage`.
+Hoje o `GameShell` (lead selecionado) só mostra os 10 passos prontos. Vou adicionar **acima da ficha**, na coluna central, um composer estilo arcade:
 
-**Não usaremos** `vite-plugin-pwa` / service worker. Motivos:
-- Lovable preview roda em iframe; SW quebra o preview e o usuário não precisa de offline.
-- Manifest puro já basta para "Adicionar à tela inicial" em iOS + Android.
+```
+┌─ Alvo: +55 31 9... ──────────── [Abrir conversa] ─┐
+│  ⚔️ 10 passos · ataque rápido (já existe)          │
+│  ──────────────────────────────────────────────    │
+│  💬 [textarea com {{nome}} {{valor_conta}}]        │
+│  [🎤 Gravar áudio]  [📎 Imagem]  [🚀 Enviar +5XP]  │
+└────────────────────────────────────────────────────┘
+```
+
+Componente novo: `src/components/captacao/game/GameComposer.tsx`
+- Textarea + botão **Enviar** → usa `sendTextMessage` de `src/lib/whatsapp/send.ts` (mesmo helper do chat).
+- Botão **Gravar áudio** → reusa `useAudioRecorder` (mesmo que o WhatsApp chat usa) com waveform compacto; ao soltar, faz upload via `uploadMedia` (scope `chat`) e dispara áudio para o telefone do lead.
+- Ao enviar texto/áudio com sucesso: `progress.registerXp(+5)` (texto) ou `+10` (áudio), toca `sfx.coin`, mostra `XpToast`, conta como missão "mensagem manual" e mantém combo.
+- Erros: toast vermelho com motivo.
+
+Mudanças em arquivos existentes:
+- `src/components/captacao/CaptacaoPanel.tsx`: dentro do bloco `gameOn && selectedId`, renderizar `<GameComposer phone={phone} consultantId={consultantId} onSent={(kind)=>{...XP, sfx, missão}}/>` logo após o grid dos 10 passos.
+- `src/components/captacao/game/useGameProgress.ts`: adicionar `registerMessage(kind: "text"|"audio")` retornando `{ gainedXp, leveledUp, newLevel }` (não muda contrato de `registerCapture`).
+- `src/hooks/useAudioRecorder.ts`: reusar como está (já existe).
+
+Fora de escopo:
+- Não vou mexer no modo "clássico" (sem game) — composer aparece **só** quando `gameOn = true`.
+- Sem mudar o fluxo do WhatsApp (continua usando o `messageSender` padrão).
 
 ## Arquivos
-- editar `src/pages/Admin.tsx` (nova aba)
-- editar `index.html` (meta tags Apple + viewport)
-- editar `public/manifest.json` (id/scope/shortcuts/lang)
-- criar `src/components/admin/InstallPwaButton.tsx`
-- montar `<InstallPwaButton />` no header de `/admin`
 
-## Fora de escopo
-- Push notifications, offline cache, sync.
-- Reformatar visualmente o painel Captação (só montar o que já existe).
+**Editar**
+- `src/components/whatsapp/SaveMessageAsTemplateDialog.tsx`
+- `src/components/captacao/CaptacaoPanel.tsx`
+- `src/components/captacao/game/useGameProgress.ts`
+
+**Criar**
+- `src/components/captacao/game/GameComposer.tsx`

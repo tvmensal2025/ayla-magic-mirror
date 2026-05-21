@@ -61,7 +61,7 @@ const AdminContent = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [periodDays, setPeriodDays] = useState(30);
 
-  const { instanceName } = useWhatsApp(userId || "");
+  const { instanceName, isWhapi } = useWhatsApp(userId || "");
   // Hidrata a partir do sessionStorage para nunca mostrar 0 ao abrir/F5.
   // O refetch acontece em background logo a seguir.
   const [customers, setCustomers] = useState<Record<string, unknown>[]>(() => {
@@ -357,6 +357,8 @@ const AdminContent = () => {
           {userId && activeTab === "captacao" && (
             <CaptacaoPanel
               consultantId={userId}
+              instanceName={instanceName}
+              isWhapi={isWhapi}
               onOpenChat={(phone) => { setPendingChatPhone(phone); setActiveTab("whatsapp"); }}
             />
           )}
