@@ -298,6 +298,17 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                     </div>
                   </div>
 
+                  {/* Finalizar Cadastro — habilita só quando tudo completo */}
+                  <FinalizeButton
+                    consultantId={consultantId}
+                    customerId={selectedId}
+                    variant={variant}
+                    missing={session.missing || []}
+                    isComplete={!!session.isComplete}
+                    allStepsSent={sentSteps.size > 0}
+                    pendingStepsCount={Math.max(0, 10 - sentSteps.size)}
+                  />
+
                   {/* Composer fixo no rodapé: atalhos /, templates, fluxos, anexos, áudio, AI suggest */}
                   <div className="border-t border-border/60 bg-card/40">
                     <MessageComposer
