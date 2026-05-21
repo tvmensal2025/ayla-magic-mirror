@@ -321,7 +321,7 @@ export function useChats(instanceName: string | null, isWhapi: boolean = false) 
 
     const init = async () => {
       await fetchContacts();
-      await fetchChats();
+      await Promise.all([fetchChats(), refreshCustomerNames()]);
     };
     init();
 
@@ -343,11 +343,29 @@ export function useChats(instanceName: string | null, isWhapi: boolean = false) 
     };
     document.addEventListener("visibilitychange", onVisibility);
 
+    // Realtime: quando customer.name muda (bot capturou nome do lead), atualiza overlay
+    const customerCh = supabase
+      .channel(`customers-names-${Math.random().toString(36).slice(2, 8)}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "customers" }, () => {
+        refreshCustomerNames();
+      })
+      .subscribe();
+
     return () => {
       stopPolling();
       document.removeEventListener("visibilitychange", onVisibility);
+      supabase.removeChannel(customerCh);
     };
-  }, [fetchContacts, fetchChats, instanceName, isWhapi]);
+  }, [fetchContacts, fetchChats, refreshCustomerNames, instanceName, isWhapi]);
 
-  return { chats, isLoading, error, refetch: fetchChats, newMessageAlert, clearAlert: () => setNewMessageAlert(false) };
+  // Apply customer-name overlay on top of WhatsApp pushNames
+  const chatsWithNames = customerNames.size === 0
+    ? chats
+    : chats.map((c) => {
+        const phoneDigits = digitsOnly((c.sendTargetJid || c.remoteJid).split("@")[0]);
+        const overriddenName = customerNames.get(phoneDigits);
+        return overriddenName && overriddenName !== c.name ? { ...c, name: overriddenName } : c;
+      });
+
+  return { chats: chatsWithNames, isLoading, error, refetch: fetchChats, newMessageAlert, clearAlert: () => setNewMessageAlert(false) };
 }
