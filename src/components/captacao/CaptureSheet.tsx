@@ -262,13 +262,21 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
             </Button>
             <Button
               size="lg"
-              className={`flex-1 font-bold gap-1 ${expanded ? "h-12 text-base" : "h-7 text-[10px]"} ${canSubmit ? "animate-pulse" : ""}`}
+              className={`flex-1 font-bold gap-1 ${expanded ? "h-12 text-base" : "h-7 text-[10px]"} ${
+                canSubmit
+                  ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:opacity-95 animate-pulse shadow-lg shadow-emerald-500/40"
+                  : "bg-muted text-muted-foreground opacity-60 cursor-not-allowed hover:bg-muted"
+              }`}
               onClick={handleSubmit}
-              disabled={submitting || !customer?.name || !customer?.cpf}
-              title={!customer?.name || !customer?.cpf ? "Precisa de nome e CPF" : "Enviar pro portal"}
+              disabled={submitting || !canSubmit}
+              title={
+                !canSubmit
+                  ? `Faltam: ${filledCount < totalFields ? `${totalFields - filledCount} campo(s)` : ""}${!billConfirmed ? " · confirmar conta" : ""}${!docConfirmed ? " · confirmar doc" : ""}`
+                  : "Enviar pro portal (VPS + OTP)"
+              }
             >
               {submitting ? <Loader2 className={`${expanded ? "w-5 h-5" : "w-3 h-3"} animate-spin`} /> : <Trophy className={`${expanded ? "w-5 h-5" : "w-3 h-3"}`} />}
-              {canSubmit ? "CADASTRAR" : `${filledCount}/${totalFields} · ${sentSteps.size}/10`}
+              {canSubmit ? "CADASTRAR" : `${filledCount}/${totalFields}${!billConfirmed ? " ·📄" : ""}${!docConfirmed ? " ·🪪" : ""}`}
             </Button>
             <Button variant="ghost" size="sm" className={`shrink-0 text-muted-foreground ${expanded ? "h-12 text-xs px-2" : "h-7 px-1.5 text-[9px]"}`} onClick={disableCapture} title="Sair do modo captação">
               Sair
