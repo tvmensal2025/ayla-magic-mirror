@@ -55,6 +55,19 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const captureOn = captureCustomer?.capture_mode === "manual";
   const captureActive = captureOpen || captureOn;
 
+  // Auto-abre o painel de Captação quando o lead tem modo manual e ainda não completou cadastro.
+  // Usa sessionStorage para não repetir por chat na mesma sessão.
+  useEffect(() => {
+    if (!customerId || !captureCustomer) return;
+    if (captureCustomer.capture_mode !== "manual") return;
+    // já cadastrado: não abre
+    if (captureCustomer.name && captureCustomer.cpf) return;
+    const key = `cap-auto-open-${customerId}`;
+    if (typeof window !== "undefined" && window.sessionStorage.getItem(key)) return;
+    window.sessionStorage.setItem(key, "1");
+    setCaptureOpen(true);
+  }, [customerId, captureCustomer]);
+
   const toggleCapture = useCallback(() => {
     if (!customerId) {
       toast({ title: "Adicione o cliente antes", description: "Clique em 'Adicionar Cliente' para ativar a captação.", variant: "destructive" });
