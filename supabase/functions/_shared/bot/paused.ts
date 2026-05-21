@@ -45,7 +45,7 @@ export async function isPausedByPhone(
   if (!digits) return false;
   let q = supabase
     .from("customers")
-    .select("bot_paused, assigned_human_id, bot_paused_until")
+    .select("bot_paused, bot_paused_reason, assigned_human_id, bot_paused_until")
     .eq("phone_whatsapp", digits)
     .limit(1);
   if (consultantId) q = q.eq("consultant_id", consultantId);
