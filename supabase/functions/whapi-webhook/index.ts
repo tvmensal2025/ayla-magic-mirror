@@ -978,6 +978,10 @@ Deno.serve(async (req) => {
       // Sem fallback robotizado. Silêncio é melhor do que empurrar texto fantasma.
       finalReply = "";
     }
+    if (silentMode && finalReply) {
+      console.log(`🤫 [silent-capture] suprimindo reply final ("${finalReply.slice(0, 60)}...") — IA manual`);
+      finalReply = "";
+    }
     if (finalReply) {
       // 🛡️ Anti-duplicação universal: bloqueia envio de texto idêntico ao último
       // outbound feito ao mesmo cliente nos últimos 60s. Cobre TODAS as origens
