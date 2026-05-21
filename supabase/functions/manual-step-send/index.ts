@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
     // Resolve customer + phone
     const { data: customer } = await supabase
       .from("customers")
-      .select("id, name, name_source, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at")
+      .select("id, name, name_source, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at, electricity_bill_photo_url, document_front_url, document_back_url, last_inbound_media_url, last_inbound_media_kind, last_inbound_media_at, bill_data_confirmed_at, doc_data_confirmed_at")
       .eq("id", body.customerId)
       .maybeSingle();
     if (!customer) return json({ ok: false, blocked: true, code: "customer_not_found", error: "customer_not_found", message: "Lead não encontrado (pode ter sido removido). Recarregue a lista." });
@@ -271,6 +271,44 @@ Deno.serve(async (req) => {
     // e nada foi montado para enviar, gera um prompt automático.
     const stepType = String((step as any).step_type || "message");
     const isCaptureStep = stepType !== "message";
+
+    // ─── REAPROVEITAR ARQUIVO JÁ RECEBIDO ───
+    // Se consultor clicou em "Captura conta" / "Captura documento" e o cliente
+    // já tinha mandado o arquivo, roda OCR direto em vez de pedir de novo.
+    if (isCaptureStep && (stepType === "capture_conta" || stepType === "capture_documento" || stepType === "capture_doc")) {
+      const isBill = stepType === "capture_conta";
+      const targetKind: "image" | "document" | null = null;
+      const existingUrl = isBill
+        ? ((customer as any).electricity_bill_photo_url || (customer as any).last_inbound_media_url)
+        : ((customer as any).document_front_url || (customer as any).last_inbound_media_url);
+      const alreadyConfirmed = isBill
+        ? !!(customer as any).bill_data_confirmed_at
+        : !!(customer as any).doc_data_confirmed_at;
+      const recentMedia = (customer as any).last_inbound_media_at
+        ? (Date.now() - new Date((customer as any).last_inbound_media_at).getTime()) < 7 * 24 * 60 * 60 * 1000
+        : false;
+      const canReuse = !!existingUrl && !alreadyConfirmed
+        && (isBill ? true : !!(customer as any).last_inbound_media_kind || !!(customer as any).document_front_url)
+        && ((customer as any).electricity_bill_photo_url || (customer as any).document_front_url || recentMedia);
+      if (canReuse) {
+        try {
+          const { data: rpData, error: rpErr } = await supabase.functions.invoke("reprocess-capture", {
+            body: { customerId: customer.id, kind: isBill ? "bill" : "doc" },
+          });
+          if (rpErr) console.warn("[manual-step-send] reprocess-capture error:", rpErr.message);
+          return json({
+            ok: true,
+            reused_existing_file: true,
+            kind: isBill ? "bill" : "doc",
+            reprocess: rpData,
+            message: "Arquivo já recebido — OCR reprocessado. Confirme os dados na ficha do lead.",
+          });
+        } catch (e) {
+          console.warn("[manual-step-send] reprocess invoke failed:", (e as Error).message);
+        }
+      }
+    }
+
     if (isCaptureStep && toSend.length === 0) {
       const promptRaw = resolveCapturePrompt(step, renderedText);
       if (promptRaw) {

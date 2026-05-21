@@ -2300,6 +2300,11 @@ export type Database = {
           last_custom_prompt_at: string | null
           last_followup_at: string | null
           last_handoff_notified_at: string | null
+          last_inbound_media_at: string | null
+          last_inbound_media_kind: string | null
+          last_inbound_media_message_id: string | null
+          last_inbound_media_mime: string | null
+          last_inbound_media_url: string | null
           last_new_lead_notified_at: string | null
           last_rescue_at: string | null
           last_rule_fire_at: string | null
@@ -2429,6 +2434,11 @@ export type Database = {
           last_custom_prompt_at?: string | null
           last_followup_at?: string | null
           last_handoff_notified_at?: string | null
+          last_inbound_media_at?: string | null
+          last_inbound_media_kind?: string | null
+          last_inbound_media_message_id?: string | null
+          last_inbound_media_mime?: string | null
+          last_inbound_media_url?: string | null
           last_new_lead_notified_at?: string | null
           last_rescue_at?: string | null
           last_rule_fire_at?: string | null
@@ -2558,6 +2568,11 @@ export type Database = {
           last_custom_prompt_at?: string | null
           last_followup_at?: string | null
           last_handoff_notified_at?: string | null
+          last_inbound_media_at?: string | null
+          last_inbound_media_kind?: string | null
+          last_inbound_media_message_id?: string | null
+          last_inbound_media_mime?: string | null
+          last_inbound_media_url?: string | null
           last_new_lead_notified_at?: string | null
           last_rescue_at?: string | null
           last_rule_fire_at?: string | null

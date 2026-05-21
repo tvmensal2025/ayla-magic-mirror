@@ -713,6 +713,24 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── Persistir SEMPRE a última mídia recebida (mesmo IA manual / silentMode) ──
+    // Permite que "Captura conta" / "Captura documento" reaproveite o arquivo depois.
+    if (isFile && customer?.id && (fileUrl || fileBase64)) {
+      try {
+        const _mime = imageMessage?.mimetype || documentMessage?.mimetype || null;
+        const _kind = hasDocument ? "document" : (hasImage ? "image" : "other");
+        await supabase.from("customers").update({
+          last_inbound_media_url: fileUrl || null,
+          last_inbound_media_mime: _mime,
+          last_inbound_media_kind: _kind,
+          last_inbound_media_message_id: messageId || null,
+          last_inbound_media_at: new Date().toISOString(),
+        }).eq("id", customer.id);
+      } catch (e: any) {
+        console.warn(`⚠️ Falha ao persistir last_inbound_media: ${e?.message}`);
+      }
+    }
+
     // ─── Áudio do cliente → transcreve com Gemini e trata como texto ──────
     if (hasAudio && testMode) {
       // 🧪 modo teste: usa transcript embutido no payload
