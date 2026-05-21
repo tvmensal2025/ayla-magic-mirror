@@ -359,6 +359,9 @@ const SuperAdmin = () => {
             {/* Kill switch global — Fase 0 auditoria de lançamento */}
             <BotGlobalKillSwitch />
 
+            {/* F2 — Resolver strict mode (atrás de flag, default OFF) */}
+            <ResolverStrictModeToggle />
+
             {/* Health Panel — saúde geral + religar bot global */}
             <SystemHealthPanel />
 
