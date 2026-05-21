@@ -10,7 +10,8 @@ import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
 import { fireRandomCelebration, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy, ChevronDown, ChevronUp, Maximize2, Minimize2 } from "lucide-react";
+import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy, ChevronDown, ChevronUp, Maximize2, Minimize2, UserPlus } from "lucide-react";
+import { askLeadName } from "@/lib/whatsapp/send";
 
 interface Props {
   open: boolean;
@@ -87,6 +88,18 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
     await supabase.from("customers").update({ capture_mode: "auto" }).eq("id", customerId);
     toast({ title: "Modo Captação desligado" });
     onOpenChange(false);
+  };
+
+  const [askingName, setAskingName] = useState(false);
+  const needsName = !customer?.name_source || String(customer.name_source).toLowerCase() === "unknown";
+  const handleAskName = async () => {
+    if (!customer) return;
+    setAskingName(true);
+    try {
+      await askLeadName({ consultantId, customerId: customer.id, phoneHint: phoneNumber || undefined });
+    } finally {
+      setAskingName(false);
+    }
   };
 
   // Barra minimizada — flutua no rodapé sem bloquear o input do chat
@@ -174,6 +187,21 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
             <p className="text-[10px] text-center mt-0.5 text-muted-foreground">
               Passo {sentSteps.size} de 10 enviado
             </p>
+          )}
+          {needsName && (
+            <div className="mt-1.5 flex items-center justify-center">
+              <Button
+                size="sm"
+                variant="default"
+                className="h-7 text-[11px] gap-1.5 font-bold animate-pulse"
+                onClick={handleAskName}
+                disabled={askingName}
+                title="Lead ainda sem nome — manda a pergunta agora pra liberar o resto do fluxo"
+              >
+                {askingName ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />}
+                Pedir nome do lead
+              </Button>
+            </div>
           )}
         </header>
 

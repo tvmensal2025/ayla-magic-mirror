@@ -19,6 +19,14 @@ interface Body {
   continueFlow?: boolean; // resume flow after sending the selected full step
 }
 
+// Identifica intenção do passo (perguntar nome / saudar / etc) a partir do texto.
+function isNameAskingStep(step: any): boolean {
+  const t = String(step?.message_text || step?.title || step?.step_key || "").toLowerCase();
+  const captures = Array.isArray(step?.captures) ? step.captures : [];
+  if (captures.some((c: any) => String(c?.name || c?.field || "").toLowerCase() === "name")) return true;
+  return /seu\s+nome|qual\s+(é\s+)?o?\s*seu\s+nome|como\s+(você\s+)?se\s+chama|me\s+(diz\s+)?seu\s+nome/.test(t);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -31,7 +39,7 @@ Deno.serve(async (req) => {
     // Auth: must be logged-in user matching consultantId OR super_admin
     const authHeader = req.headers.get("Authorization") || "";
     const jwt = authHeader.replace(/^Bearer\s+/i, "");
-    if (!jwt) return json({ error: "unauthorized" }, 401);
+    if (!jwt) return json({ code: "unauthorized", error: "unauthorized", message: "Sessão expirada — faça login novamente." }, 401);
     const userClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!,
@@ -39,38 +47,50 @@ Deno.serve(async (req) => {
     );
     const { data: userRes } = await userClient.auth.getUser(jwt);
     const userId = userRes?.user?.id;
-    if (!userId) return json({ error: "unauthorized" }, 401);
+    if (!userId) return json({ code: "unauthorized", error: "unauthorized", message: "Sessão expirada — faça login novamente." }, 401);
 
-    const body = (await req.json()) as Body;
+    const body = (await req.json()) as Body & { skipNameGuard?: boolean };
     if (!body?.consultantId || !body?.customerId || !body?.part) {
-      return json({ error: "missing_fields", message: "Faltam dados obrigatórios (consultor, cliente ou parte)." }, 400);
+      return json({ code: "missing_fields", error: "missing_fields", message: "Faltam dados obrigatórios (consultor, cliente ou parte)." }, 400);
     }
     // Allow if same consultant OR has super_admin role
     if (userId !== body.consultantId) {
       const { data: isAdmin } = await supabase.rpc("is_super_admin", { _user_id: userId });
-      if (!isAdmin) return json({ error: "forbidden", message: "Sem permissão." }, 403);
+      if (!isAdmin) return json({ code: "forbidden", error: "forbidden", message: "Sem permissão para enviar em nome deste consultor." }, 403);
     }
 
     // Resolve customer + phone
     const { data: customer } = await supabase
       .from("customers")
-      .select("id, name, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at")
+      .select("id, name, name_source, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at")
       .eq("id", body.customerId)
       .maybeSingle();
-    if (!customer) return json({ error: "customer_not_found", message: "Lead não encontrado." }, 404);
+    if (!customer) return json({ code: "customer_not_found", error: "customer_not_found", message: "Lead não encontrado." }, 404);
 
     const rawPhone = String(customer.phone_whatsapp || "");
     if (rawPhone.startsWith("sem_celular_")) {
       return json({
+        code: "lead_sem_whatsapp",
         error: "lead_sem_whatsapp",
         message: "Esse lead foi importado via Excel sem celular válido — não dá pra enviar pelo WhatsApp.",
       }, 400);
     }
-    const phoneDigits = rawPhone.replace(/\D/g, "");
+    let phoneDigits = rawPhone.replace(/\D/g, "");
     if (!phoneDigits || phoneDigits.length < 10) {
       return json({
+        code: "customer_no_phone",
         error: "customer_no_phone",
-        message: "Lead sem número de WhatsApp válido.",
+        message: "Lead sem número de WhatsApp válido (precisa ter DDD + número, ex: 11912345678).",
+      }, 400);
+    }
+    if (phoneDigits.length === 10 || phoneDigits.length === 11) {
+      phoneDigits = "55" + phoneDigits;
+    }
+    if (phoneDigits.length < 12 || phoneDigits.length > 13) {
+      return json({
+        code: "phone_invalid_format",
+        error: "phone_invalid_format",
+        message: `Número '${rawPhone}' fora do padrão BR (55 + DDD + 8 ou 9 dígitos).`,
       }, 400);
     }
     const remoteJid = `${phoneDigits}@s.whatsapp.net`;
@@ -90,14 +110,27 @@ Deno.serve(async (req) => {
         .eq("is_active", true)
         .eq("variant", variant)
         .maybeSingle();
-      if (!flow?.id) return json({ error: "no_active_flow", message: "Nenhum fluxo ativo encontrado para essa variante." }, 404);
+      if (!flow?.id) return json({ code: "no_active_flow", error: "no_active_flow", message: "Nenhum fluxo ativo encontrado para essa variante." }, 404);
       stepQuery = stepQuery.eq("flow_id", flow.id).eq("step_key", body.stepKey);
-    } else return json({ error: "missing_step", message: "Passo do fluxo não informado." }, 400);
+    } else return json({ code: "missing_step", error: "missing_step", message: "Passo do fluxo não informado." }, 400);
 
     const { data: step } = await stepQuery.maybeSingle();
-    if (!step) return json({ error: "step_not_found", message: "Passo selecionado não existe mais (foi removido ou desativado)." }, 404);
+    if (!step) return json({ code: "step_not_found", error: "step_not_found", message: "Passo selecionado não existe mais (foi removido ou desativado)." }, 404);
+
+    // Guarda nome: se o lead ainda não tem nome real e o passo escolhido NÃO é "pedir nome",
+    // bloqueia e instrui o consultor a pedir o nome primeiro (mantém {{nome}} válido + gameficação).
+    const nameSource = String((customer as any).name_source || "unknown").toLowerCase();
+    const stepAsksName = isNameAskingStep(step);
+    if (!body.skipNameGuard && nameSource === "unknown" && !stepAsksName) {
+      return json({
+        code: "name_not_captured_yet",
+        error: "name_not_captured_yet",
+        message: "Antes de avançar peça o nome do lead — clique em 'Pedir nome' no topo da ficha.",
+      }, 409);
+    }
 
     const slotKey = (step as any).slot_key || (step as any).step_key;
+
 
     // Resolve medias for slot
     const { data: mediaRows } = await supabase
@@ -120,7 +153,7 @@ Deno.serve(async (req) => {
     const settings: Record<string, string> = {};
     (settingsRows || []).forEach((s: any) => { settings[s.key] = s.value; });
     const whapiToken = settings.whapi_token || Deno.env.get("WHAPI_TOKEN") || "";
-    if (!whapiToken) return json({ error: "whapi_token_missing" }, 500);
+    if (!whapiToken) return json({ code: "whapi_token_missing", error: "whapi_token_missing", message: "Token do WhatsApp (Whapi) não configurado no sistema. Avise o admin." }, 500);
 
     const sender = createWhapiSender(whapiToken);
 
@@ -247,6 +280,7 @@ Deno.serve(async (req) => {
       }
       return json({
         ok: false,
+        code: "nothing_to_send",
         error: "nothing_to_send",
         message: "Esse passo não tem mídia nem texto configurado para enviar.",
       }, 400);
@@ -256,31 +290,57 @@ Deno.serve(async (req) => {
     for (let i = 0; i < toSend.length; i++) {
       const it = toSend[i];
       const isLast = i === toSend.length - 1;
-      if (it.kind === "text" && it.text) {
-        await sender.sendText(remoteJid, it.text);
-        await supabase.from("conversations").insert({
-          customer_id: customer.id,
-          message_direction: "outbound",
-          message_text: it.text,
-          message_type: "text",
-          conversation_step: (step as any).step_key || null,
-        });
-        sentLog.push({ kind: "text" });
-      } else if (it.media?.url) {
-        const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
-        await sender.sendMedia(remoteJid, it.media.url, "", kind, Number(it.media.duration_sec || 0) || undefined);
-        await supabase.from("conversations").insert({
-          customer_id: customer.id,
-          message_direction: "outbound",
-          message_text: `[${kind}:${it.media.slot_key || slotKey}] (manual)`,
-          message_type: kind,
-          conversation_step: (step as any).step_key || null,
-        });
-        sentLog.push({ kind, mediaId: it.media.id });
+      try {
+        if (it.kind === "text" && it.text) {
+          await sender.sendText(remoteJid, it.text);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id,
+            message_direction: "outbound",
+            message_text: it.text,
+            message_type: "text",
+            conversation_step: (step as any).step_key || null,
+          });
+          sentLog.push({ kind: "text" });
+        } else if (it.media?.url) {
+          const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
+          await sender.sendMedia(remoteJid, it.media.url, "", kind, Number(it.media.duration_sec || 0) || undefined);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id,
+            message_direction: "outbound",
+            message_text: `[${kind}:${it.media.slot_key || slotKey}] (manual)`,
+            message_type: kind,
+            conversation_step: (step as any).step_key || null,
+          });
+          sentLog.push({ kind, mediaId: it.media.id });
+        }
+      } catch (sendErr) {
+        const msg = (sendErr as Error)?.message || "erro desconhecido";
+        console.error(`[manual-step-send] whapi send failed (kind=${it.kind}):`, msg);
+        // Se o primeiro item já falhou: erro fatal. Se já mandou algo, retorna parcial.
+        if (sentLog.length === 0) {
+          const lower = msg.toLowerCase();
+          const code = lower.includes("not on whatsapp") || lower.includes("phone not registered") || lower.includes("not a whatsapp")
+            ? "phone_not_on_whatsapp"
+            : lower.includes("instance") || lower.includes("disconnected") || lower.includes("not connected")
+              ? "instance_disconnected"
+              : "whapi_send_failed";
+          const friendly = code === "phone_not_on_whatsapp"
+            ? `Esse número (${rawPhone}) não tem WhatsApp ativo.`
+            : code === "instance_disconnected"
+              ? "WhatsApp do consultor desconectado. Reconecte em /admin/conexao e tente de novo."
+              : `Whapi recusou o envio: ${msg}`;
+          return json({ code, error: code, message: friendly, whapi_error: msg }, 502);
+        }
+        // Parcial: avisa mas mantém o que já foi.
+        return json({
+          ok: false,
+          code: "partial_send",
+          error: "partial_send",
+          message: `Mandei ${sentLog.length} de ${toSend.length} itens — o restante falhou: ${msg}`,
+          sent: sentLog,
+        }, 207);
       }
       if (!isLast) {
-        // Delay adaptativo: dá tempo do Whapi processar/despachar antes do próximo item,
-        // preservando a ordem real no celular do lead.
         const delayByKind: Record<string, number> = {
           audio: 4500,
           video: 5000,
@@ -302,10 +362,12 @@ Deno.serve(async (req) => {
 
     return json({ ok: true, sent: sentLog, continued: !!flowPatch, next_step: flowPatch?.conversation_step });
   } catch (e) {
-    console.error("[manual-step-send] error", (e as Error).message);
-    return json({ error: (e as Error).message }, 500);
+    const msg = (e as Error).message || "internal_error";
+    console.error("[manual-step-send] error", msg);
+    return json({ code: "internal_error", error: "internal_error", message: `Erro interno: ${msg}` }, 500);
   }
 });
+
 
 async function buildContinuationPatch(supabase: any, sender: any, remoteJid: string, consultantId: string, customer: any, step: any, vars: Record<string, string>, variant: string = "A") {
   const patch: any = {

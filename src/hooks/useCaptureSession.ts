@@ -38,6 +38,7 @@ export interface CaptureCustomer {
   capture_mode: string | null;
   capture_started_at: string | null;
   conversation_step: string | null;
+  name_source?: string | null;
   created_at: string;
 }
 
