@@ -134,6 +134,19 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                         onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
                       />
                     </div>
+                    <GameComposer
+                      instanceName={instanceName}
+                      isWhapi={isWhapi}
+                      phone={phone}
+                      onSent={(kind) => {
+                        const res = progress.registerMessage(kind);
+                        setXpToast(res.gainedXp);
+                        sfx.coin(sound);
+                        if (res.leveledUp) {
+                          setTimeout(() => { sfx.levelUp(sound); setLevelUp({ level: res.newLevel, label: progress.rank.label }); }, 500);
+                        }
+                      }}
+                    />
                   </div>
                 </>
               )}
