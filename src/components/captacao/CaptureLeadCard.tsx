@@ -12,6 +12,7 @@ import { sfxPop, sfxLevelUp, sfxVictory, sfxCombo } from "@/lib/captureSfx";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { CaptureDocumentTiles } from "./CaptureDocumentTiles";
+import { CaptureDataConfirmCard } from "./CaptureDataConfirmCard";
 import { bumpMission } from "./CaptureMissionsPanel";
 
 
