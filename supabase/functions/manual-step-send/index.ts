@@ -123,10 +123,12 @@ Deno.serve(async (req) => {
     const stepAsksName = isNameAskingStep(step);
     if (!body.skipNameGuard && nameSource === "unknown" && !stepAsksName) {
       return json({
+        ok: false,
+        blocked: true,
         code: "name_not_captured_yet",
         error: "name_not_captured_yet",
         message: "Antes de avançar peça o nome do lead — clique em 'Pedir nome' no topo da ficha.",
-      }, 409);
+      });
     }
 
     const slotKey = (step as any).slot_key || (step as any).step_key;
