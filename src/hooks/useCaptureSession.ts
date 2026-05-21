@@ -39,6 +39,19 @@ export interface CaptureCustomer {
   capture_started_at: string | null;
   conversation_step: string | null;
   name_source?: string | null;
+  flow_variant?: string | null;
+  nome_mae?: string | null;
+  address_neighborhood?: string | null;
+  address_city?: string | null;
+  address_state?: string | null;
+  distribuidora?: string | null;
+  numero_instalacao?: string | null;
+  bill_holder_name?: string | null;
+  doc_holder_name?: string | null;
+  bill_data_confirmed_at?: string | null;
+  bill_data_confirmation_by?: string | null;
+  doc_data_confirmed_at?: string | null;
+  doc_data_confirmation_by?: string | null;
   created_at: string;
 }
 
