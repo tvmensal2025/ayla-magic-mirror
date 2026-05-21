@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Send, Loader2, Check, MessageCircle, Mic, ImageIcon, Video, Edit3 } from "lucide-react";
+import { Send, Loader2, Check, MessageCircle, Mic, ImageIcon, Video, Edit3, Lock } from "lucide-react";
 import { normalizeSendStepError } from "@/lib/whatsapp/send";
 
 interface Props {
@@ -14,6 +14,8 @@ interface Props {
   sentSteps: Set<string>;
   onSent: (stepId: string) => void;
   onEditTemplate?: (stepKey: string, text: string) => void;
+  /** Quando true, dispara o próximo tile sozinho ao detectar resposta inbound do lead */
+  autoMode?: boolean;
 }
 
 interface StepRow {
@@ -46,10 +48,12 @@ const SYNTHETIC_CONFIRM_PHONE: StepRow = {
   __synthetic: true,
 };
 
-export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sentSteps, onSent, onEditTemplate }: Props) {
+export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sentSteps, onSent, onEditTemplate, autoMode = false }: Props) {
   const { toast } = useToast();
   const [sending, setSending] = useState<string | null>(null);
   const [steps, setSteps] = useState<StepRow[]>([]);
+  const [autoCountdown, setAutoCountdown] = useState<{ stepId: string; secs: number } | null>(null);
+  const autoTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -69,7 +73,6 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
         .order("position", { ascending: true })
         .limit(20);
       const rows = ((data as StepRow[]) || []);
-      // Garante que email + confirm WhatsApp sempre apareçam (essenciais p/ cadastro).
       const hasEmail = rows.some((r) => r.step_type === "capture_email" || r.step_key === "ask_email");
       const hasConfirm = rows.some((r) => r.step_type === "confirm_phone" || r.step_key === "ask_phone_confirm");
       const merged = [...rows.slice(0, 10)];
@@ -81,7 +84,8 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
   }, [consultantId, variant]);
 
   const display = steps;
-
+  // Próximo tile não enviado (cabeça da fila) — único habilitado quando há trava
+  const nextUnsentIdx = display.findIndex((s) => !sentSteps.has(s.id));
 
   const sendStep = async (step: StepRow, label: string, continueFlow = true) => {
     if (sending) return;
@@ -113,6 +117,45 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
     onEditTemplate?.(stepKey || stepId, (data as any)?.message_text || "");
   };
 
+  // Auto-pilot: dispara o próximo tile quando o lead responder no WhatsApp (inbound)
+  useEffect(() => {
+    if (!autoMode || !customerId || display.length === 0) return;
+    const ch = supabase
+      .channel(`autofire-${customerId}-${Math.random().toString(36).slice(2, 7)}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "conversations", filter: `customer_id=eq.${customerId}` },
+        (payload) => {
+          const row: any = payload.new;
+          if (String(row?.message_direction) !== "inbound") return;
+          const next = display.find((s) => !sentSteps.has(s.id));
+          if (!next) return;
+          // countdown visual 3..2..1
+          if (autoTimerRef.current) window.clearTimeout(autoTimerRef.current);
+          let secs = 3;
+          setAutoCountdown({ stepId: next.id, secs });
+          const tick = () => {
+            secs -= 1;
+            if (secs <= 0) {
+              setAutoCountdown(null);
+              void sendStep(next, next.title || next.step_key || `Passo ${next.position}`);
+            } else {
+              setAutoCountdown({ stepId: next.id, secs });
+              autoTimerRef.current = window.setTimeout(tick, 1000) as unknown as number;
+            }
+          };
+          autoTimerRef.current = window.setTimeout(tick, 1000) as unknown as number;
+        }
+      )
+      .subscribe();
+    return () => {
+      if (autoTimerRef.current) window.clearTimeout(autoTimerRef.current);
+      setAutoCountdown(null);
+      void supabase.removeChannel(ch);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoMode, customerId, display.length, sentSteps]);
+
   if (display.length === 0) {
     return (
       <div className="p-6 text-center text-sm text-muted-foreground border border-dashed border-border rounded-lg">
@@ -124,7 +167,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between text-[11px]">
-        <span className="font-bold uppercase tracking-wide text-muted-foreground">Passos enviados</span>
+        <span className="font-bold uppercase tracking-wide text-muted-foreground">Passos enviados (ordem travada)</span>
         <span className="tabular-nums font-bold text-primary">{sentSteps.size}/{display.length}</span>
       </div>
       <div className="h-1 rounded-full bg-secondary overflow-hidden">
@@ -135,20 +178,35 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
         {display.map((s: any, i: number) => {
           const sent = sentSteps.has(s.id);
           const isSending = sending === s.id;
+          const isNext = i === nextUnsentIdx;
+          const locked = !sent && !isNext;
+          const counting = autoCountdown?.stepId === s.id;
           return (
             <div
               key={s.id}
               className={`group relative rounded-lg border p-2.5 transition-all duration-300 ${
                 sent
                   ? "border-primary/60 bg-gradient-to-br from-primary/15 to-emerald-500/5 shadow-[0_0_18px_hsl(var(--primary)/0.25)] animate-card-flip"
-                  : "border-border bg-card hover:border-primary/40 hover:shadow-lg hover:-translate-y-0.5"
+                  : locked
+                    ? "border-border/40 bg-muted/20 opacity-50"
+                    : counting
+                      ? "border-emerald-500 bg-emerald-500/10 animate-pulse shadow-[0_0_20px_hsl(var(--primary)/0.5)]"
+                      : isNext
+                        ? "border-primary bg-card hover:border-primary/80 hover:shadow-lg hover:-translate-y-0.5 ring-1 ring-primary/30"
+                        : "border-border bg-card"
               }`}
             >
               <div className="flex items-start justify-between mb-1.5">
-                <span className={`text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded ${sent ? "bg-primary text-primary-foreground" : "bg-secondary text-primary"}`}>Passo {s.position}</span>
-                {sent && <Check className="w-3.5 h-3.5 text-primary drop-shadow-[0_0_4px_hsl(var(--primary))]" />}
+                <span className={`text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded ${sent ? "bg-primary text-primary-foreground" : locked ? "bg-secondary/40 text-muted-foreground" : "bg-secondary text-primary"}`}>Passo {s.position}</span>
+                {sent ? (
+                  <Check className="w-3.5 h-3.5 text-primary drop-shadow-[0_0_4px_hsl(var(--primary))]" />
+                ) : locked ? (
+                  <Lock className="w-3 h-3 text-muted-foreground" />
+                ) : counting ? (
+                  <span className="text-[10px] font-black text-emerald-400 tabular-nums">{autoCountdown?.secs}s</span>
+                ) : null}
               </div>
-              <p className="text-xs font-semibold leading-tight line-clamp-2 min-h-[2rem]">
+              <p className={`text-xs font-semibold leading-tight line-clamp-2 min-h-[2rem] ${locked ? "text-muted-foreground" : ""}`}>
                 {s.title || s.step_key || "Passo"}
               </p>
               <div className="flex items-center gap-1 mt-1 text-muted-foreground">
@@ -161,18 +219,19 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                 <Button
                   size="sm"
                   variant={sent ? "outline" : "default"}
-                  className="h-7 px-2 text-[11px] flex-1"
+                  className="h-8 px-2 text-[11px] flex-1 min-h-[40px] md:min-h-[32px]"
                   onClick={() => sendStep(s as StepRow, s.title || s.step_key || `Passo ${s.position}`)}
-                  disabled={!!sending}
+                  disabled={!!sending || locked}
                   aria-busy={isSending}
+                  title={locked ? "Conclua o passo anterior" : ""}
                 >
-                  {isSending ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Send className="w-3 h-3 mr-1" /> Enviar</>}
+                  {isSending ? <Loader2 className="w-3 h-3 animate-spin" /> : locked ? <Lock className="w-3 h-3" /> : <><Send className="w-3 h-3 mr-1" /> {sent ? "Reenviar" : "Enviar"}</>}
                 </Button>
-                {onEditTemplate && (
+                {onEditTemplate && !locked && (
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-7 w-7 p-0"
+                    className="h-8 w-8 p-0"
                     onClick={() => void loadTemplate(s.id, s.step_key)}
                     title="Editar antes de enviar"
                   >
