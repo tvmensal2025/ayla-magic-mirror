@@ -118,6 +118,7 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
         consultantId, customerId,
         stepId: selectedStep!.id,
         part: part.kind,
+        variant,
       };
       if (part.media?.id) payload.mediaId = part.media.id;
       const { data, error } = await supabase.functions.invoke("manual-step-send", { body: payload });
