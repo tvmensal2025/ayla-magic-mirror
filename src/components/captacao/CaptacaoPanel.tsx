@@ -20,9 +20,11 @@ import { useGameMode } from "@/components/captacao/game/useGameMode";
 import { useGameProgress } from "@/components/captacao/game/useGameProgress";
 import { sfx } from "@/components/captacao/game/sfx";
 
-interface Props { consultantId: string; onOpenChat?: (phone: string) => void; }
+import { GameComposer } from "@/components/captacao/game/GameComposer";
 
-export function CaptacaoPanel({ consultantId, onOpenChat }: Props) {
+interface Props { consultantId: string; onOpenChat?: (phone: string) => void; instanceName?: string | null; isWhapi?: boolean; }
+
+export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, isWhapi = false }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
   const [phone, setPhone] = useState<string | null>(null);
