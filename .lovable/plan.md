@@ -1,54 +1,35 @@
-# Por que o fluxo travou depois do passo 1
+Diagnóstico: o erro `step_not_found` acontece porque algumas telas ainda chamam `manual-step-send` com um `stepId` que pode ser um `step_key`/valor antigo, ou sem amarrar corretamente ao fluxo/variante ativa. Além disso, o fluxo atual tem posições `2..11`, mas a UI mostra como `1..10`; a navegação precisa ser por `position`, não por IDs fixos.
 
-No log do Whapi:
+Plano de correção:
 
-1. Consultor clicou em enviar o passo `boas_vindas` (áudio) para o Lucas.
-2. `manual-step-send` foi chamado com `continueFlow: false` (é o que todos os botões da UI passam hoje).
-3. Resultado: o áudio foi enviado, mas `customers.conversation_step` continuou em `novo_lead`.
-4. Cliente respondeu “OI” e depois “FERNANDO”.
-5. Como `novo_lead` NÃO está na lista `ACTIVE_CAPTURE_STEPS` do `whapi-webhook`, o gate `global-off-silent` apenas salvou as mensagens em silêncio (`🛑 [global-off-silent] IA manual — inbound texto/áudio salvo sem resposta step="novo_lead"`).
+1. Fortalecer o `manual-step-send`
+- Se receber `stepId`, tentar primeiro por `id` real.
+- Se não achar, tratar o valor recebido como `step_key` também.
+- Se ainda não achar, resolver pelo fluxo ativo do consultor + variante do lead e pelo `position`/ordem disponível, em vez de retornar `step_not_found`.
+- Garantir que `continueFlow=true` sempre usa o próximo registro ativo por `position` no mesmo `flow_id`.
 
-Ou seja, o backend já tem o motor de “seguir fluxo” pronto (`buildContinuationPatch`), mas **nenhum botão da UI manda `continueFlow: true`** — só o cartão de confirmação de dados (SIM/Editar/Não). Por isso clicar em qualquer passo na lista equivale a “apenas este passo”, mesmo quando o usuário acha que está mandando “seguir”.
+2. Corrigir os botões que enviam passo
+- `LiveConversationsPanel`: no menu “Devolver para…”, enviar o passo como ID real quando existir, mas sem gravar `conversation_step` com valor inválido antes da edge validar.
+- `FlowQuickBar`: o botão “Daqui em diante / Seguir” deve chamar `manual-step-send` com `continueFlow: true`, não apenas disparar um passo isolado.
+- `ManualStepDialog`: manter “1 a 1” como envio isolado, mas incluir opção clara de “Seguir fluxo” quando o usuário quiser continuar 1→2→3.
+- `CaptureDataConfirmCard`: ao confirmar conta/documento, não usar `stepKey: capture_documento/finalizar_cadastro` se esses keys não existem; buscar o próximo passo real por `position` ou por `step_type` no fluxo ativo.
 
-## O que muda
+3. Ajustar avanço automático do cliente no webhook
+- Quando o cliente responder a um passo custom `message`, o webhook deve avançar para o próximo `bot_flow_steps.position` ativo.
+- Para passos com `captures` inline, parar no passo correto e gravar `conversation_step` no ID/key atual até a resposta ser capturada.
+- Para `capture_conta`, `capture_documento` e `finalizar_cadastro`, continuar usando os estados legados necessários (`aguardando_conta`, `aguardando_doc_auto`, `finalizando`) para OCR/portal funcionarem.
 
-### 1. UI: dois botões claros em cada passo
+4. Validar com o fluxo real do Lucas
+- Fluxo ativo A do consultor tem 10 passos em posições `2..11`.
+- Após clicar “Seguir fluxo” no passo 1, o sistema deve enviar o passo 1, posicionar no próximo passo de captura/resposta e, quando o cliente responder, seguir para o próximo por ordem.
+- O erro 404 `step_not_found` deve virar fallback seguro: se o passo escolhido foi removido/trocado, a edge procura o equivalente no fluxo ativo antes de falhar.
 
-Arquivos: `CaptureStepsList.tsx`, `CaptureStepsGrid.tsx`, `SendSequenceDialog.tsx`.
+Arquivos previstos:
+- `supabase/functions/manual-step-send/index.ts`
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
+- `src/components/whatsapp/FlowQuickBar.tsx`
+- `src/components/admin/AIAgentTab/LiveConversationsPanel.tsx`
+- `src/components/admin/AIAgentTab/ManualStepDialog.tsx`
+- `src/components/captacao/CaptureDataConfirmCard.tsx`
 
-- Botão primário: **“Seguir fluxo”** → chama `manual-step-send` com `continueFlow: true, part: "all"`.
-- Botão secundário discreto: **“Só este passo”** → mantém `continueFlow: false`.
-- Confirmação atual continua, só troca o rótulo do botão principal.
-- Toast de sucesso mostra `next_step` retornado (“Lead posicionado em: ask_name”).
-
-### 2. Backend: nada de mudança funcional pesada
-
-`manual-step-send` já faz tudo que precisa quando `continueFlow=true`:
-- Envia o passo escolhido.
-- Encadeia até `MAX_CHAIN=6` passos `message` seguintes.
-- Ao encontrar `capture_*`, mapeia para chave legada (`ask_name`, `aguardando_conta`, etc.), grava em `conversation_step` e envia o prompt.
-
-Pequenos ajustes só pra fechar buracos:
-
-- `mapCaptureStepToLegacy` hoje não cobre `capture_name`/`ask_name`. Adicionar: `case "capture_name": return "ask_name";` e garantir fallback quando `step_key` já é `ask_name`/`aguardando_nome`.
-- Quando o passo de origem **é** o boas-vindas e o próximo step custom é `ask_name`, garantir que `patch.conversation_step = "ask_name"` (não o UUID do step custom) — assim o `whapi-webhook` reconhece em `ACTIVE_CAPTURE_STEPS` quando a IA global está manual.
-
-### 3. whapi-webhook: confirmar bypass
-
-`ACTIVE_CAPTURE_STEPS` já contém `ask_name, ask_email, ask_cpf, ask_cep, ask_bill_value, aguardando_conta, aguardando_doc_auto, ask_finalizar, finalizando, portal_submitting, aguardando_otp, validando_otp`. Nenhuma mudança — só validar com Lucas: depois do clique em “Seguir fluxo”, o lead vai pra `ask_name`, a resposta `FERNANDO` cai no caminho `[manual-capture-active]`, a IA grava o nome e o pipeline nativo segue até o portal sozinho.
-
-## Resultado esperado no caso do Lucas
-
-1. Consultor clica **Seguir fluxo** no passo `boas_vindas`.
-2. Áudio é enviado, `conversation_step` vira `ask_name` e o prompt “Qual é seu nome?” é disparado automaticamente.
-3. Cliente responde “FERNANDO” → webhook reconhece passo ativo, grava nome, segue para `ask_email` → `ask_cpf` → `ask_cep` → `aguardando_conta` → OCR → confirmação → `aguardando_doc_auto` → `submit-lead` no portal → `aguardando_otp` → `validando_otp` → cadastro fechado.
-4. Consultor só interfere se quiser editar dados (cartão SIM/Editar/Não continua funcionando igual).
-
-## Arquivos tocados
-
-- `src/components/captacao/CaptureStepsList.tsx`
-- `src/components/captacao/CaptureStepsGrid.tsx`
-- `src/components/captacao/SendSequenceDialog.tsx`
-- `supabase/functions/manual-step-send/index.ts` (apenas `mapCaptureStepToLegacy` + normalização do `conversation_step` final)
-
-Sem migração de banco. Sem mudança no `whapi-webhook`.
+Sem migração de banco.

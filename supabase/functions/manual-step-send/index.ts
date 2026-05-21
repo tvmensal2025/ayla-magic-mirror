@@ -156,13 +156,16 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Resolve step
-    let stepQuery = supabase
-      .from("bot_flow_steps")
-      .select("id, step_key, slot_key, message_text, media_order, flow_id, step_type, position, transitions, captures")
-      .eq("is_active", true);
-    if (body.stepId) stepQuery = stepQuery.eq("id", body.stepId);
-    else if (body.stepKey) {
+    // Resolve step — robusto: tenta por id, depois por step_key, depois por step_type
+    // (cobre o caso de UI mandar "capture_documento", "finalizar_cadastro" etc).
+    const SELECT_COLS = "id, step_key, slot_key, message_text, media_order, flow_id, step_type, position, transitions, captures";
+    const KNOWN_TYPES = new Set([
+      "capture_name", "capture_conta", "capture_documento", "capture_doc",
+      "capture_email", "capture_cpf", "capture_cep", "capture_bill_value",
+      "confirm_phone", "finalizar_cadastro",
+    ]);
+
+    async function getActiveFlowId(): Promise<string | null> {
       const { data: flow } = await supabase
         .from("bot_flows")
         .select("id")
@@ -170,12 +173,59 @@ Deno.serve(async (req) => {
         .eq("is_active", true)
         .eq("variant", variant)
         .maybeSingle();
-      if (!flow?.id) return json({ code: "no_active_flow", error: "no_active_flow", message: "Nenhum fluxo ativo encontrado para essa variante." }, 404);
-      stepQuery = stepQuery.eq("flow_id", flow.id).eq("step_key", body.stepKey);
-    } else return json({ code: "missing_step", error: "missing_step", message: "Passo do fluxo não informado." }, 400);
+      return flow?.id ? String((flow as any).id) : null;
+    }
 
+    let step: any = null;
+    if (body.stepId) {
+      const r1 = await supabase
+        .from("bot_flow_steps").select(SELECT_COLS)
+        .eq("is_active", true).eq("id", body.stepId).maybeSingle();
+      step = (r1 as any).data;
+      if (!step) {
+        // Talvez tenham mandado um step_key como stepId
+        const r2 = await supabase
+          .from("bot_flow_steps").select(SELECT_COLS)
+          .eq("is_active", true).eq("step_key", body.stepId)
+          .order("position", { ascending: true }).limit(1).maybeSingle();
+        step = (r2 as any).data;
+      }
+    } else if (body.stepKey) {
+      const flowId = await getActiveFlowId();
+      if (!flowId) return json({ code: "no_active_flow", error: "no_active_flow", message: "Nenhum fluxo ativo encontrado para essa variante." }, 404);
+      const r1 = await supabase
+        .from("bot_flow_steps").select(SELECT_COLS)
+        .eq("flow_id", flowId).eq("is_active", true)
+        .eq("step_key", body.stepKey).maybeSingle();
+      step = (r1 as any).data;
+      if (!step && KNOWN_TYPES.has(body.stepKey)) {
+        const wanted = body.stepKey === "capture_doc" ? "capture_documento" : body.stepKey;
+        const r2 = await supabase
+          .from("bot_flow_steps").select(SELECT_COLS)
+          .eq("flow_id", flowId).eq("is_active", true)
+          .eq("step_type", wanted)
+          .order("position", { ascending: true }).limit(1).maybeSingle();
+        step = (r2 as any).data;
+      }
+    } else {
+      return json({ code: "missing_step", error: "missing_step", message: "Passo do fluxo não informado." }, 400);
+    }
 
-    const { data: step } = await stepQuery.maybeSingle();
+    // Último fallback: se ainda não achou e continueFlow=true, pega o próximo
+    // passo ativo do fluxo a partir da posição atual do customer (ou o primeiro).
+    if (!step && body.continueFlow) {
+      const flowId = await getActiveFlowId();
+      if (flowId) {
+        const { data: fallbackStep } = await supabase
+          .from("bot_flow_steps").select(SELECT_COLS)
+          .eq("flow_id", flowId).eq("is_active", true)
+          .order("position", { ascending: true }).limit(1).maybeSingle();
+        if (fallbackStep) {
+          console.warn(`[manual-step-send] step não encontrado — usando primeiro passo do fluxo como fallback`);
+          step = fallbackStep;
+        }
+      }
+    }
     if (!step) return json({ code: "step_not_found", error: "step_not_found", message: "Passo selecionado não existe mais (foi removido ou desativado)." }, 404);
 
     // Guarda nome: se o lead ainda não tem nome real e o passo escolhido NÃO é "pedir nome",
