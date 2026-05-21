@@ -578,6 +578,23 @@ Deno.serve(async (req) => {
       : null;
     if (flowPatch) {
       await supabase.from("customers").update(flowPatch).eq("id", customer.id);
+    } else if (body.part === "all") {
+      // Sem encadeamento: ainda assim posiciona o cursor no passo clicado
+      // para que a próxima resposta do lead caia no step certo (captura/confirm).
+      const clickedType = String((step as any).step_type || "message");
+      const cursorStep = clickedType === "message"
+        ? (step as any).id
+        : mapCaptureStepToLegacy(clickedType, (step as any).id, (step as any).step_key);
+      try {
+        await supabase.from("customers").update({
+          conversation_step: cursorStep,
+          last_step_advanced_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", customer.id);
+      } catch (e) {
+        console.warn("[manual-step-send] cursor update failed:", (e as Error).message);
+      }
+      return json({ ok: true, sent: sentLog, continued: false, next_step: cursorStep });
     }
 
     return json({ ok: true, sent: sentLog, continued: !!flowPatch, next_step: flowPatch?.conversation_step });
