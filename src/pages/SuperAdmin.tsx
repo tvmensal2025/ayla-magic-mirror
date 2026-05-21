@@ -27,6 +27,7 @@ import { WorkerPhaseTimeline } from "@/components/superadmin/WorkerPhaseTimeline
 import { StuckLeadsWidget } from "@/components/superadmin/StuckLeadsWidget";
 import { SystemHealthPanel } from "@/components/superadmin/SystemHealthPanel";
 import { BotGlobalKillSwitch } from "@/components/superadmin/BotGlobalKillSwitch";
+import { ResolverStrictModeToggle } from "@/components/superadmin/ResolverStrictModeToggle";
 import { PlatformFacebookCard } from "@/components/admin/super/PlatformFacebookCard";
 import { PlatformPnLCard } from "@/components/admin/super/PlatformPnLCard";
 import { NetworkHealthPanel } from "@/components/admin/super/NetworkHealthPanel";
