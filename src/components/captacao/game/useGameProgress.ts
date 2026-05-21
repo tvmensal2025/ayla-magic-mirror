@@ -122,9 +122,9 @@ export function useGameProgress(consultantId: string | null): GameProgress {
     return { gainedXp: gained, leveledUp: newLevel > prevLevel, newLevel };
   }, [todayCount]);
 
-  const registerMessage = useCallback((kind: "text" | "audio") => {
+  const registerMessage = useCallback((kind: "text" | "audio" | "media") => {
     const prev = xpRef.current;
-    const gained = kind === "audio" ? 10 : 5;
+    const gained = kind === "audio" ? 10 : kind === "media" ? 8 : 5;
     const newXp = prev + gained;
     xpRef.current = newXp;
     setTotalXp(newXp);
