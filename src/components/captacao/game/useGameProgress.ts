@@ -51,7 +51,7 @@ export interface GameProgress {
   reload: () => Promise<void>;
   // Returns the new level if level-up happened, else null
   registerCapture: () => { gainedXp: number; leveledUp: boolean; newLevel: number };
-  registerMessage: (kind: "text" | "audio") => { gainedXp: number; leveledUp: boolean; newLevel: number };
+  registerMessage: (kind: "text" | "audio" | "media") => { gainedXp: number; leveledUp: boolean; newLevel: number };
 }
 
 export function useGameProgress(consultantId: string | null): GameProgress {
