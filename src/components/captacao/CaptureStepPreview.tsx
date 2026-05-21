@@ -61,10 +61,13 @@ export function CaptureStepPreview({ open, onOpenChange, consultantId, customerI
       const firstName = String(cust?.name || "").trim().split(/\s+/)[0] || "amigo";
       const bill = Number(cust?.electricity_bill_value || 0);
       const fmt = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const billStr = bill > 0 ? fmt(bill) : "___";
       const vars: Record<string, string> = {
         "{{nome}}": firstName, "{nome}": firstName,
         "{{nome_completo}}": String(cust?.name || ""), "{nome_completo}": String(cust?.name || ""),
-        "{{valor}}": fmt(bill), "{valor}": fmt(bill),
+        "{{valor}}": billStr, "{valor}": billStr,
+        "{{valor_conta}}": billStr, "{valor_conta}": billStr,
+        "{{conta}}": billStr, "{conta}": billStr,
         "{{economia_mensal}}": fmt(bill * 0.2), "{economia_mensal}": fmt(bill * 0.2),
         "{{economia_anual}}": fmt(bill * 0.2 * 12), "{economia_anual}": fmt(bill * 0.2 * 12),
       };

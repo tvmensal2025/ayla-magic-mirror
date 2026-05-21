@@ -39,6 +39,19 @@ export interface CaptureCustomer {
   capture_started_at: string | null;
   conversation_step: string | null;
   name_source?: string | null;
+  flow_variant?: string | null;
+  nome_mae?: string | null;
+  address_neighborhood?: string | null;
+  address_city?: string | null;
+  address_state?: string | null;
+  distribuidora?: string | null;
+  numero_instalacao?: string | null;
+  bill_holder_name?: string | null;
+  doc_holder_name?: string | null;
+  bill_data_confirmed_at?: string | null;
+  bill_data_confirmation_by?: string | null;
+  doc_data_confirmed_at?: string | null;
+  doc_data_confirmation_by?: string | null;
   created_at: string;
 }
 
@@ -60,7 +73,7 @@ export function useCaptureSession(customerId: string | null) {
     setLoading(true);
     const { data } = await supabase
       .from("customers")
-      .select("id, consultant_id, name, cpf, rg, data_nascimento, phone_whatsapp, phone_landline, email, cep, address_street, address_number, address_complement, electricity_bill_value, document_front_url, document_back_url, electricity_bill_photo_url, capture_mode, capture_started_at, conversation_step, created_at")
+      .select("id, consultant_id, name, cpf, rg, data_nascimento, nome_mae, phone_whatsapp, phone_landline, email, cep, address_street, address_number, address_complement, address_neighborhood, address_city, address_state, distribuidora, numero_instalacao, bill_holder_name, doc_holder_name, bill_data_confirmed_at, bill_data_confirmation_by, doc_data_confirmed_at, doc_data_confirmation_by, electricity_bill_value, document_front_url, document_back_url, electricity_bill_photo_url, capture_mode, capture_started_at, conversation_step, flow_variant, name_source, created_at")
       .eq("id", customerId)
       .maybeSingle();
     setCustomer((data as CaptureCustomer) || null);

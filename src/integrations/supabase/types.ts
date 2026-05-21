@@ -2238,6 +2238,8 @@ export type Database = {
           assinatura_cliente: string | null
           assinatura_igreen: string | null
           bill_base64: string | null
+          bill_data_confirmation_by: string | null
+          bill_data_confirmed_at: string | null
           bill_holder_name: string | null
           bill_message_id: string | null
           bill_owner_relationship: string | null
@@ -2274,6 +2276,8 @@ export type Database = {
           detour_count: number
           devolutiva: string | null
           distribuidora: string | null
+          doc_data_confirmation_by: string | null
+          doc_data_confirmed_at: string | null
           doc_holder_name: string | null
           document_back_url: string | null
           document_front_base64: string | null
@@ -2363,6 +2367,8 @@ export type Database = {
           assinatura_cliente?: string | null
           assinatura_igreen?: string | null
           bill_base64?: string | null
+          bill_data_confirmation_by?: string | null
+          bill_data_confirmed_at?: string | null
           bill_holder_name?: string | null
           bill_message_id?: string | null
           bill_owner_relationship?: string | null
@@ -2399,6 +2405,8 @@ export type Database = {
           detour_count?: number
           devolutiva?: string | null
           distribuidora?: string | null
+          doc_data_confirmation_by?: string | null
+          doc_data_confirmed_at?: string | null
           doc_holder_name?: string | null
           document_back_url?: string | null
           document_front_base64?: string | null
@@ -2488,6 +2496,8 @@ export type Database = {
           assinatura_cliente?: string | null
           assinatura_igreen?: string | null
           bill_base64?: string | null
+          bill_data_confirmation_by?: string | null
+          bill_data_confirmed_at?: string | null
           bill_holder_name?: string | null
           bill_message_id?: string | null
           bill_owner_relationship?: string | null
@@ -2524,6 +2534,8 @@ export type Database = {
           detour_count?: number
           devolutiva?: string | null
           distribuidora?: string | null
+          doc_data_confirmation_by?: string | null
+          doc_data_confirmed_at?: string | null
           doc_holder_name?: string | null
           document_back_url?: string | null
           document_front_base64?: string | null

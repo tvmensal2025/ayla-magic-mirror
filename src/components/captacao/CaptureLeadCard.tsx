@@ -12,6 +12,7 @@ import { sfxPop, sfxLevelUp, sfxVictory, sfxCombo } from "@/lib/captureSfx";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { CaptureDocumentTiles } from "./CaptureDocumentTiles";
+import { CaptureDataConfirmCard } from "./CaptureDataConfirmCard";
 import { bumpMission } from "./CaptureMissionsPanel";
 
 
@@ -170,6 +171,8 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
       {/* Embedded: 2 colunas (ficha | docs) em md+, stacked compacto no mobile */}
       <div className={embedded ? "flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[1fr_200px] gap-0 overflow-hidden" : "contents"}>
         <div className={`overflow-y-auto ${embedded ? "p-2 space-y-1" : "p-3 space-y-1.5"}`}>
+          <CaptureDataConfirmCard kind="bill" customer={customer} />
+          <CaptureDataConfirmCard kind="doc" customer={customer} />
           {CAPTURE_FIELDS.filter((f) => f.key !== "document_front_url").map(f => {
             const v = (customer as any)[f.key];
             const filled = v !== null && v !== undefined && String(v).trim() !== "" && (f.key !== "electricity_bill_value" || Number(v) > 0);
