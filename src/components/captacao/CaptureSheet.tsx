@@ -292,6 +292,7 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
         customerId={customerId}
         customerName={customerName || phoneNumber}
         steps={pendingSteps}
+        variant={(((customer as any)?.flow_variant || "A").toUpperCase()) as "A" | "B" | "C"}
         onStepSent={(key) => setSentSteps((s) => new Set(s).add(key))}
         onAskName={handleAskName}
       />
