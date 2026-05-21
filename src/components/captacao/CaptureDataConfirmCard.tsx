@@ -71,7 +71,27 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
         [kind === "bill" ? "bill_data_confirmed_at" : "doc_data_confirmed_at"]: new Date().toISOString(),
         [kind === "bill" ? "bill_data_confirmation_by" : "doc_data_confirmation_by"]: "consultant",
       }).eq("id", customer.id);
-      toast({ title: "✓ Confirmado", duration: 1500 });
+
+      // Avança automaticamente para o próximo passo do fluxo (sem texto digitado).
+      // bill confirmado → próximo passo geralmente é captura de documento ou email.
+      // doc confirmado → próximo passo é finalizar cadastro.
+      try {
+        const nextStepKey = kind === "bill" ? "capture_documento" : "finalizar_cadastro";
+        await supabase.functions.invoke("manual-step-send", {
+          body: {
+            consultantId: customer.consultant_id,
+            customerId: customer.id,
+            stepKey: nextStepKey,
+            part: "all",
+            continueFlow: true,
+            skipNameGuard: true,
+          },
+        });
+      } catch (advErr: any) {
+        console.warn("[confirm-self] advance flow failed:", advErr?.message);
+      }
+
+      toast({ title: "✓ Confirmado", description: "Avançando para o próximo passo…", duration: 1800 });
       onConfirmed?.();
     } catch (e: any) {
       toast({ title: "Erro", description: e?.message || String(e), variant: "destructive" });
