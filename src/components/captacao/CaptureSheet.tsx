@@ -73,9 +73,9 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
     if (!customer || !canSubmit) return;
     setSubmitting(true);
     try {
+      // Mantém capture_mode='manual' — captação fica sempre ligada por padrão para todos os leads.
       await supabase.from("customers").update({
         conversation_step: "finalizando",
-        capture_mode: "auto",
       }).eq("id", customer.id);
       fireRandomCelebration();
       await bump();
@@ -89,8 +89,8 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
   };
 
   const disableCapture = async () => {
-    await supabase.from("customers").update({ capture_mode: "auto" }).eq("id", customerId);
-    toast({ title: "Modo Captação desligado" });
+    // Apenas fecha o painel — modo Captação fica ligado para todos os leads.
+    toast({ title: "Painel fechado", description: "A captação continua ativa em segundo plano." });
     onOpenChange(false);
   };
 
