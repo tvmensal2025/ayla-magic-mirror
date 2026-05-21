@@ -31,6 +31,8 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
   const [phone, setPhone] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState<string | null>(null);
+  const [variant, setVariant] = useState<"A" | "B" | "C">("A");
+  const [mismatch, setMismatch] = useState<{ flag: boolean; bill: string; doc: string; acked: boolean }>({ flag: false, bill: "", doc: "", acked: false });
   const [missionsVersion, setMissionsVersion] = useState(0);
   const [showAside, setShowAside] = useState(false);
   const { today, week, streak, bump } = useCaptureScoreboard(consultantId);
@@ -43,17 +45,46 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const [xpToast, setXpToast] = useState<number | null>(null);
   const [levelUp, setLevelUp] = useState<{ level: number; label: string } | null>(null);
 
-  useEffect(() => { setSentSteps(new Set()); setPhone(null); setCustomerName(null); setShowAside(false); }, [selectedId]);
+  useEffect(() => { setSentSteps(new Set()); setPhone(null); setCustomerName(null); setShowAside(false); setVariant("A"); setMismatch({ flag: false, bill: "", doc: "", acked: false }); }, [selectedId]);
 
   useEffect(() => {
     if (!selectedId) return;
     void (async () => {
-      const { data } = await supabase.from("customers").select("phone_whatsapp, name").eq("id", selectedId).maybeSingle();
-      const row = data as { phone_whatsapp?: string; name?: string } | null;
+      const { data } = await supabase
+        .from("customers")
+        .select("phone_whatsapp, name, flow_variant, name_mismatch_flag, name_mismatch_acknowledged_at, bill_holder_name, doc_holder_name")
+        .eq("id", selectedId).maybeSingle();
+      const row = data as any;
       setPhone(row?.phone_whatsapp || null);
       setCustomerName(row?.name || null);
+      const v = String(row?.flow_variant || "A").toUpperCase();
+      setVariant((["A", "B", "C"].includes(v) ? v : "A") as "A" | "B" | "C");
+      setMismatch({
+        flag: !!row?.name_mismatch_flag,
+        bill: row?.bill_holder_name || "",
+        doc: row?.doc_holder_name || "",
+        acked: !!row?.name_mismatch_acknowledged_at,
+      });
     })();
   }, [selectedId]);
+
+  const changeVariant = async (next: "A" | "B" | "C") => {
+    if (!selectedId || next === variant) return;
+    setVariant(next);
+    await supabase.from("customers").update({ flow_variant: next, updated_at: new Date().toISOString() }).eq("id", selectedId);
+    sonnerToast.success(`Variante ${next} ativada — próximos disparos usam esse fluxo.`);
+  };
+
+  const ackMismatch = async (relationship: "titular" | "outro") => {
+    if (!selectedId) return;
+    await supabase.from("customers").update({
+      name_mismatch_acknowledged_at: new Date().toISOString(),
+      bill_owner_relationship: relationship === "titular" ? "titular" : "outro_titular",
+      updated_at: new Date().toISOString(),
+    }).eq("id", selectedId);
+    setMismatch((m) => ({ ...m, acked: true }));
+    sonnerToast.success(relationship === "titular" ? "Titularidade confirmada — pode finalizar." : "Anotado: conta em nome de outro titular.");
+  };
 
   const customerJid = phone ? `${phone.replace(/\D/g, "")}@s.whatsapp.net` : undefined;
 
