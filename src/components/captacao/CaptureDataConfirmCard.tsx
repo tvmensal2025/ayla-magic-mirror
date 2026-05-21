@@ -48,11 +48,13 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
   const [busy, setBusy] = useState<"" | "self" | "client">("");
 
   if (!hasAny(customer, fields)) return null; // sem OCR ainda
-  if (confirmedAt) return null; // já confirmado — some
+  const isConfirmed = !!confirmedAt;
 
   const title = kind === "bill" ? "📄 Dados lidos da CONTA" : "🪪 Dados lidos do DOCUMENTO";
   const Icon = kind === "bill" ? FileText : IdCard;
-  const tone = kind === "bill" ? "border-amber-400/60 bg-amber-400/5" : "border-cyan-400/60 bg-cyan-400/5";
+  const tone = isConfirmed
+    ? "border-emerald-500/50 bg-emerald-500/5"
+    : kind === "bill" ? "border-amber-400/60 bg-amber-400/5" : "border-cyan-400/60 bg-cyan-400/5";
 
   const saveEdit = async () => {
     if (!editing) return;
