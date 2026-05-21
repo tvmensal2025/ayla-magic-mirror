@@ -101,7 +101,7 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
 
   const [askingName, setAskingName] = useState(false);
   // Alinhado com manual-step-send: nome do perfil do WhatsApp NÃO conta como capturado.
-  const _nSrc = String((customer as any)?.name_source || "").toLowerCase();
+  const _nSrc = String((customer as any)?.name_source || ((customer as any)?.name ? "whatsapp_profile" : "")).toLowerCase();
   const needsName = ["", "unknown", "whatsapp_profile"].includes(_nSrc);
   const handleAskName = async () => {
     if (!customer) return;

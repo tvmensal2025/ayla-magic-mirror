@@ -9,6 +9,13 @@ import { createWhapiSender } from "../_shared/whapi-api.ts";
 
 type Part = "text" | "audio" | "image" | "video" | "document" | "all";
 
+function inferNameSource(name: string | null | undefined, currentSource: string | null | undefined): string {
+  const src = String(currentSource || "").toLowerCase();
+  if (src) return src;
+  const value = String(name || "").trim();
+  return value ? "whatsapp_profile" : "unknown";
+}
+
 interface Body {
   consultantId: string;
   customerId: string;
@@ -175,7 +182,7 @@ Deno.serve(async (req) => {
     // bloqueia e instrui o consultor a pedir o nome primeiro (mantém {{nome}} válido + gameficação).
     // pushName do WhatsApp grava name_source="whatsapp_profile" — não conta como
     // nome capturado de verdade (consultor precisa "Pedir nome" ou lead se apresentar).
-    const nameSource = String((customer as any).name_source || "unknown").toLowerCase();
+    const nameSource = inferNameSource((customer as any).name, (customer as any).name_source);
     const NAME_NOT_TRUSTED = new Set(["", "unknown", "whatsapp_profile"]);
     const stepAsksName = isNameAskingStep(step);
     if (!body.skipNameGuard && NAME_NOT_TRUSTED.has(nameSource) && !stepAsksName) {

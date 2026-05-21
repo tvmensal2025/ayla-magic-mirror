@@ -31,6 +31,13 @@ const corsHeaders = {
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY") || "";
 
+function inferNameSource(name: string | null | undefined, currentSource: string | null | undefined): string {
+  const src = String(currentSource || "").toLowerCase();
+  if (src) return src;
+  const value = String(name || "").trim();
+  return value ? "whatsapp_profile" : "unknown";
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -77,16 +84,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (como se desconectado) ──
-    // Antes de outboundHuman, dedup, customer/notify/conversation: se o switch
-    // estiver OFF, simplesmente ignoramos a mensagem. Nada é criado, nada é
-    // notificado, nem mesmo dedup é consumido.
-    if (await isConsultantAIDisabled(supabase, superAdminConsultantId)) {
-      console.log(`🛑 [global-off-silent] IA desligada — ignorando inbound`);
-      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // IA global OFF deve silenciar apenas respostas automáticas. O inbound ainda
+    // precisa ser salvo e alimentar captura (ex.: cliente digitou o nome após "Pedir nome").
+    const globalAiDisabled = await isConsultantAIDisabled(supabase, superAdminConsultantId);
 
     // ─── Outbound humano (consultor digitou no WhatsApp Business/app) ─
     if ((parsed as any).outboundHuman) {
@@ -453,8 +453,11 @@ Deno.serve(async (req) => {
           .select("id", { count: "exact", head: true })
           .eq("customer_id", customer.id)
           .eq("message_direction", "inbound");
+        const currentNameSource = inferNameSource((customer as any).name, (customer as any).name_source);
+        const needsTrustedName = ["unknown", "whatsapp_profile", "freeform_multi", ""].includes(currentNameSource);
         const isEarly = (inboundCount ?? 0) <= 2; // 1ª ou 2ª inbound
-        if (isEarly) {
+        const isNameCaptureStep = ["ask_name", "aguardando_nome"].includes(stripPrefix((customer as any).conversation_step || ""));
+        if (isEarly || needsTrustedName || isNameCaptureStep) {
           const multi = extractMultiField(messageText);
           const patch = buildMultiFieldPatch(customer, multi);
           if (Object.keys(patch).length > 0) {
@@ -470,8 +473,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    // (Gate global de IA desligada foi movido para o topo — antes mesmo de
-    // criar customer ou notificar. Veja bloco "global-off-silent" no início.)
+    if (globalAiDisabled) {
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "inbound",
+        message_text: messageText || (hasAudio ? "[áudio]" : "[arquivo]"),
+        message_type: hasAudio ? "audio" : (isFile ? "image" : "text"),
+        conversation_step: customer.conversation_step,
+      });
+      console.log(`🛑 [global-off-silent] IA desligada — inbound salvo sem resposta automática customer=${customer.id}`);
+      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_inbound_saved" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
 
 
