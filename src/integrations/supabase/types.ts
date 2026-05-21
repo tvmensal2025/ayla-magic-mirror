@@ -1160,6 +1160,27 @@ export type Database = {
         }
         Relationships: []
       }
+      app_settings: {
+        Row: {
+          bot_global_enabled: boolean
+          id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          bot_global_enabled?: boolean
+          id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          bot_global_enabled?: boolean
+          id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       bot_flow_qa: {
         Row: {
           created_at: string
@@ -2276,6 +2297,7 @@ export type Database = {
           detour_count: number
           devolutiva: string | null
           distribuidora: string | null
+          do_not_contact: boolean
           doc_data_confirmation_by: string | null
           doc_data_confirmed_at: string | null
           doc_holder_name: string | null
@@ -2410,6 +2432,7 @@ export type Database = {
           detour_count?: number
           devolutiva?: string | null
           distribuidora?: string | null
+          do_not_contact?: boolean
           doc_data_confirmation_by?: string | null
           doc_data_confirmed_at?: string | null
           doc_holder_name?: string | null
@@ -2544,6 +2567,7 @@ export type Database = {
           detour_count?: number
           devolutiva?: string | null
           distribuidora?: string | null
+          do_not_contact?: boolean
           doc_data_confirmation_by?: string | null
           doc_data_confirmed_at?: string | null
           doc_holder_name?: string | null
