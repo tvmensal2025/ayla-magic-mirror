@@ -136,24 +136,24 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
         className={`w-full p-0 flex flex-col gap-0 border-0 bg-background sm:max-w-none shadow-[0_-12px_40px_-12px_hsl(var(--primary)/0.35)] ${
           expanded
             ? "h-[100dvh] rounded-none"
-            : "h-[44dvh] min-h-[320px] max-h-[100dvh] rounded-t-2xl"
+            : "h-[36dvh] min-h-[240px] max-h-[100dvh] rounded-t-2xl"
         }`}
       >
         {/* Grabber */}
         {!expanded && (
-          <div className="flex justify-center pt-1 pb-0.5 shrink-0">
+          <div className="flex justify-center pt-0.5 pb-0 shrink-0">
             <div className="w-8 h-0.5 rounded-full bg-muted-foreground/40" />
           </div>
         )}
 
-        {/* Header — compactado */}
-        <header className={`px-2.5 border-b border-border/60 bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20 ${expanded ? "pt-3 pb-2" : "pt-1 pb-1"}`}>
-          <div className={`flex items-center gap-1.5 ${expanded ? "mb-2" : "mb-1"}`}>
-            <div className={`rounded-full bg-primary/15 flex items-center justify-center shrink-0 ${expanded ? "w-9 h-9" : "w-6 h-6"}`}>
-              <Gamepad2 className={`text-primary ${expanded ? "w-4 h-4" : "w-3 h-3"}`} />
+        {/* Header — 1 linha só no compacto */}
+        <header className={`px-2 border-b border-border/60 bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20 ${expanded ? "pt-3 pb-2" : "py-1"}`}>
+          <div className={`flex items-center gap-1 ${expanded ? "mb-2" : ""}`}>
+            <div className={`rounded-full bg-primary/15 flex items-center justify-center shrink-0 ${expanded ? "w-9 h-9" : "w-5 h-5"}`}>
+              <Gamepad2 className={`text-primary ${expanded ? "w-4 h-4" : "w-2.5 h-2.5"}`} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className={`font-bold truncate ${expanded ? "text-sm" : "text-[11px]"}`}>
+              <p className={`font-bold truncate ${expanded ? "text-sm" : "text-[10px] leading-tight"}`}>
                 {customerName || phoneNumber || "Lead"}
                 {!expanded && phoneNumber && customerName && (
                   <span className="ml-1 text-[9px] text-muted-foreground font-normal">· {phoneNumber}</span>
@@ -165,42 +165,30 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
               <Button
                 size="sm"
                 variant="default"
-                className="h-6 px-2 text-[10px] gap-1 font-bold animate-pulse shrink-0"
+                className={`gap-0.5 font-bold animate-pulse shrink-0 ${expanded ? "h-7 px-2 text-[10px]" : "h-5 px-1.5 text-[9px]"}`}
                 onClick={handleAskName}
                 disabled={askingName}
                 title="Lead sem nome — peça agora pra liberar o resto"
               >
                 {askingName ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <UserPlus className="w-2.5 h-2.5" />}
-                Pedir nome
+                Nome
               </Button>
             )}
-            <div className="flex items-center gap-0.5 shrink-0">
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-6 w-6"
-                onClick={() => setExpanded((v) => !v)}
-                title={expanded ? "Recolher" : "Expandir"}
-              >
-                {expanded ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+            <div className="flex items-center gap-0 shrink-0">
+              <Button size="icon" variant="ghost" className={expanded ? "h-6 w-6" : "h-5 w-5"} onClick={() => setExpanded((v) => !v)} title={expanded ? "Recolher" : "Expandir"}>
+                {expanded ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-2.5 h-2.5" />}
               </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-6 w-6"
-                onClick={() => setMinimized(true)}
-                title="Minimizar"
-              >
-                <ChevronDown className="w-3 h-3" />
+              <Button size="icon" variant="ghost" className={expanded ? "h-6 w-6" : "h-5 w-5"} onClick={() => setMinimized(true)} title="Minimizar">
+                <ChevronDown className={expanded ? "w-3 h-3" : "w-2.5 h-2.5"} />
               </Button>
-              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => onOpenChange(false)} title="Fechar">
-                <X className="w-3 h-3" />
+              <Button size="icon" variant="ghost" className={expanded ? "h-6 w-6" : "h-5 w-5"} onClick={() => onOpenChange(false)} title="Fechar">
+                <X className={expanded ? "w-3 h-3" : "w-2.5 h-2.5"} />
               </Button>
             </div>
           </div>
-          <CaptureProgressBar progress={progress} filled={filledCount} total={totalFields} />
-          {expanded ? (
+          {expanded && (
             <>
+              <CaptureProgressBar progress={progress} filled={filledCount} total={totalFields} />
               <p className="text-[11px] text-center font-semibold text-primary/90 mt-1.5">{phrase}</p>
               {nextMissing && !canSubmit && (
                 <p className="text-[11px] text-center mt-0.5 text-muted-foreground">
@@ -211,8 +199,6 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
                 Passo {sentSteps.size} de 10 enviado
               </p>
             </>
-          ) : (
-            <p className="text-[10px] text-center font-semibold text-primary/90 mt-0.5 truncate">{phrase}</p>
           )}
         </header>
 
