@@ -60,7 +60,7 @@ export function useCaptureSession(customerId: string | null) {
     setLoading(true);
     const { data } = await supabase
       .from("customers")
-      .select("id, consultant_id, name, cpf, rg, data_nascimento, phone_whatsapp, phone_landline, email, cep, address_street, address_number, address_complement, electricity_bill_value, document_front_url, document_back_url, electricity_bill_photo_url, capture_mode, capture_started_at, conversation_step, created_at")
+      .select("id, consultant_id, name, cpf, rg, data_nascimento, nome_mae, phone_whatsapp, phone_landline, email, cep, address_street, address_number, address_complement, address_neighborhood, address_city, address_state, distribuidora, numero_instalacao, bill_holder_name, doc_holder_name, bill_data_confirmed_at, bill_data_confirmation_by, doc_data_confirmed_at, doc_data_confirmation_by, electricity_bill_value, document_front_url, document_back_url, electricity_bill_photo_url, capture_mode, capture_started_at, conversation_step, flow_variant, name_source, created_at")
       .eq("id", customerId)
       .maybeSingle();
     setCustomer((data as CaptureCustomer) || null);
