@@ -7,7 +7,7 @@ type: feature
 # Silêncio total da IA
 
 Quando QUALQUER um destes for verdade, NENHUM motor automático envia mensagem:
-- `customers.bot_paused === true` (consultor clicou "Assumir")
+- `customers.bot_paused === true` (consultor clicou "Assumir") — **exceção:** `bot_paused_reason === 'manual_capture'` NÃO silencia. Modo Captação é assistido: o consultor envia o prompt manualmente, mas o bot precisa continuar processando a resposta do lead (OCR conta/doc, captura de campos, avanço do passo). `CaptureSheet` não pausa mais o bot ao enviar passos.
 - `customers.assigned_human_id IS NOT NULL` (humano vinculado)
 - `customers.bot_paused_until > now()` (pausa programada)
 - `ai_agent_config.enabled === false` para o `consultant_id` (switch global desligado)
