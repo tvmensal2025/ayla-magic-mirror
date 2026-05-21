@@ -227,6 +227,14 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                           </button>
                         ))}
                       </div>
+                      <button
+                        onClick={toggleAutoMode}
+                        className={`hidden sm:flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-md border transition shrink-0 ${autoMode ? "bg-emerald-500/20 border-emerald-500/60 text-emerald-300" : "bg-background/40 border-border/60 text-muted-foreground hover:bg-muted/40"}`}
+                        title={autoMode ? "Auto-pilot ligado — clique para desligar" : "Clique para ligar o auto-pilot"}
+                      >
+                        {autoMode ? <Bot className="w-3 h-3" /> : <User className="w-3 h-3" />}
+                        {autoMode ? "AUTO" : "MANUAL"}
+                      </button>
                       {phone && onOpenChat && (
                         <Button size="sm" variant="outline" className="gap-1.5 shrink-0" onClick={() => onOpenChat(phone)}>
                           <MessageCircle className="w-3.5 h-3.5" />
