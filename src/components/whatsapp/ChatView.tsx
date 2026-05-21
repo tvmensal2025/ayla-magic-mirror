@@ -52,15 +52,13 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const [resetting, setResetting] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
   const { customer: captureCustomer, filledCount, totalFields } = useCaptureSession(customerId);
-  const captureOn = captureCustomer?.capture_mode === "manual";
-  const captureActive = captureOpen || captureOn;
+  // Captação é SEMPRE manual (default global) — incompleto = pendente.
+  const captureIncomplete = !!captureCustomer && !(captureCustomer.name && captureCustomer.cpf && captureCustomer.email && Number(captureCustomer.electricity_bill_value || 0) > 0);
+  const captureActive = captureOpen || captureIncomplete;
 
-  // Auto-abre o painel de Captação quando o lead tem modo manual e ainda não completou cadastro.
-  // Usa sessionStorage para não repetir por chat na mesma sessão.
+  // Auto-abre o painel quando o lead ainda não completou cadastro (uma vez por sessão).
   useEffect(() => {
     if (!customerId || !captureCustomer) return;
-    if (captureCustomer.capture_mode !== "manual") return;
-    // já cadastrado: não abre
     if (captureCustomer.name && captureCustomer.cpf) return;
     const key = `cap-auto-open-${customerId}`;
     if (typeof window !== "undefined" && window.sessionStorage.getItem(key)) return;
@@ -70,18 +68,15 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
 
   const toggleCapture = useCallback(() => {
     if (!customerId) {
-      toast({ title: "Adicione o cliente antes", description: "Clique em 'Adicionar Cliente' para ativar a captação.", variant: "destructive" });
+      toast({ title: "Aguarde", description: "Estamos preparando o lead...", variant: "destructive" });
       return;
     }
-    // 1 clique = abre o painel imediatamente
     setCaptureOpen(true);
-    // Ativa modo manual em paralelo (sem bloquear UI)
-    if (!captureOn) {
-      void supabase.from("customers")
-        .update({ capture_mode: "manual", capture_started_at: new Date().toISOString() })
-        .eq("id", customerId);
-    }
-  }, [customerId, captureOn, toast]);
+    // Garante que o modo manual fique persistido (caso algum legado tenha voltado p/ auto)
+    void supabase.from("customers")
+      .update({ capture_mode: "manual", capture_started_at: new Date().toISOString() })
+      .eq("id", customerId);
+  }, [customerId, toast]);
 
 
   const handleReset = useCallback(async () => {

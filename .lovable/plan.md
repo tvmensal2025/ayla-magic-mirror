@@ -1,69 +1,70 @@
-## Diagnóstico
+## Diagnóstico do print
 
-Você falou duas coisas:
+Hoje só a **Bruna ROberta** (consultora do print) tem `ab_test_enabled=true`. Mas o problema real é outro:
 
-1. **"Ainda está grande"** — o `CaptureSheet` continua em `44dvh` com cabeçalho de 2 linhas (avatar + nome + botões + barra + frase), `TabsList h-7`, lista, e footer com 2 linhas (botões + stats/Sair). Em viewport 1148×650, isso ocupa ~290px = 45% da tela.
-2. **"Os novos leads não estão entrando no game e na captação"** — confirmei no código: o `capture_mode` só vira `manual` quando o consultor **clica no botão de captação** (`ChatView.toggleCapture`) ou abre o `CaptureLeadList`. Lead novo via WhatsApp / Excel / inbound entra com `capture_mode = 'auto'` e fica fora do painel — por isso parece que "não tem game pra ninguém".
+- **TODOS os 7.336 customers do banco estão com `capture_mode='auto'`.** O "ligado pro Rafael" é porque foi o único lead que você abriu o painel e o `CaptureSheet` deu UPDATE pra `manual`.
+- O trigger `customers_default_capture_mode` só dispara em **INSERT novo**, e ainda assim o `CaptureSheet.handleSubmit` e o botão "Sair" voltam o lead pra `auto`. Resultado: o botão Captação fica off em quase todo chat.
+- O `capture-extract` (edge que extrai nome/cpf/email/valor da conta com IA) **só roda quando `capture_mode='manual'**` — então hoje 99,9% dos leads passam batido.
+- A `capture-extract` extrai os campos mas **nunca pede confirmação** ("É 350 reais mesmo?"). Salva direto, e se a IA errar ninguém percebe.
 
-## Plano
+## O que muda
 
-### Parte 1 — Compactar de vez (visual only)
+### 1. Captação ON pra TODOS (default global)
 
-`CaptureSheet.tsx`:
+- **Migration**: `UPDATE customers SET capture_mode='manual', capture_started_at=COALESCE(capture_started_at, now()) WHERE capture_mode IS DISTINCT FROM 'manual'` — vira todos de uma vez.
+- **Trigger** `customers_default_capture_mode`: simplifica para **sempre** setar `manual` em INSERT (sem a exceção "já tem name+cpf"). Lead novo entra captando.
+- **CaptureSheet.handleSubmit** (linha 78) e **disableCapture** (linha 92): **remover** o `capture_mode='auto'`. Cadastro concluído fica como `manual` + `conversation_step='finalizando'` — o painel some sozinho porque `name+cpf` ficam completos, mas o modo continua manual (não “desliga” pra ninguém).
+- **CaptureLeadCard.tsx linha 125**: mesmo tratamento.
+- **ChatView.tsx**: botão Captação passa a renderizar sempre que `isCustomer && customerId`, sem depender de `capture_mode==='manual'` pra ficar verde — o estado “verde pulsando” passa a indicar **captação ainda em aberto** (faltam campos), e “outline” indica **completo**.
 
-- Altura padrão: `h-[36dvh]` `min-h-[260px]` (era 44dvh / 320px).
-- Header em **1 linha só**: ícone 5×5 + nome inline (`text-[10px]`) + chip "Pedir nome" `h-5 px-1.5 text-[9px]` + 3 ícones de ação `h-5 w-5`. Some a barra de progresso do header (ela já aparece no footer como contador).
-- Some a frase motivacional do modo compacto (só aparece no `expanded`).
-- `TabsList`: `h-6`, ícones `w-2.5 h-2.5`, badges `text-[8px]`.
-- Footer em **1 linha só**: junta "Enviar tudo (N)" + "CADASTRAR n/10" + "Sair" tudo em flex, `h-8 text-[10px]`. Stats viram tooltip no botão CADASTRAR.
-- Resultado alvo: ~180px de altura em mobile/tablet (28% da tela).
+### 2. Etapa de confirmação por campo
 
-`CaptureStepsList.tsx`: linhas `py-0.5`, bola `w-5 h-5 text-[9px]`, botão envio `w-6 h-6`, título `text-[11px]`, gap `space-y-0.5`.
+Cada vez que `capture-extract` extrair um dado (nome, valor da conta, e-mail, telefone, CPF, RG, endereço), antes de gravar no `customers`:
 
-`CaptureStepPreview.tsx`: já está OK (compacto, max-h-70dvh).
+```text
+IA detecta: nome="João Silva"
+   → grava em capture_confirmations (status='pending', proposed_value)
+   → envia WhatsApp: "Seu nome é *João Silva*, confirma? Responde SIM ou manda o nome certo."
+   → quando cliente responde "sim"/"s"/"ok"/"isso" → grava em customers.name + status='confirmed'
+   → se responde outro nome → atualiza proposed_value e pergunta de novo
+```
 
-### Parte 2 — Captação automática em todo lead novo E MANUAL EU ESCOLHE
+Já existe a tabela `capture_confirmations` (vista no `capture-extract/index.ts` linha 117) — vou aproveitá-la. Hoje grava o pending mas ninguém envia/lê de volta. Vou:
 
-Mudança de comportamento: `**capture_mode` passa a ser `manual` por padrão** para leads novos. Assim o painel aparece sozinho na primeira interação do consultor, com game/XP/passos prontos.
+- **Edge `capture-extract**`: ao detectar campo, em vez de UPDATE direto em `customers`, criar/atualizar `capture_confirmations(pending)` e disparar mensagem de confirmação via Whapi.
+- **whapi-webhook**: quando chega mensagem inbound e existe `capture_confirmations` pending pra esse customer, interpretar resposta (SIM = confirma e grava; valor novo = atualiza pending e re-pergunta) **antes** de cair no fluxo normal do bot.
+- Campos cobertos: `name`, `electricity_bill_value`, `cpf`, `rg`, `email`, `phone_landline`, `cep`, `address_number`. Documentos (foto da conta, RG frente/verso) entram pela OCR já existente mas também passam pelo mesmo ciclo de confirmação ("Recebi sua conta de luz, o valor é *R$ 350,00* e a titular é *Maria Souza*. Confirma?").
+- Textos padrão configuráveis num novo `capture_confirmation_templates` (admin pode editar), com fallback hardcoded em PT-BR.
 
-Implementação:
+### 3. Painel manual (passo-a-passo) continua intacto
 
-**a) Trigger no banco** (migration):
+O `CaptureSheet` + `CaptureStepsList` já permitem disparar manualmente um passo de cada vez. Adições:
 
-- `customers BEFORE INSERT`: se `capture_mode` é null OU `'auto'` E o lead é "novo" (sem `name` confiável OU `name_source IN ('unknown','whatsapp_push')`), seta `capture_mode = 'manual'` e `capture_started_at = now()`.
-- Excel import (`customer_origin = 'igreen_sync'`): mantém `capture_mode = 'manual'` também — você quer game pra eles.
+- Cada item da lista mostra um chip "🟡 aguardando confirmação" quando há `capture_confirmations` pending pro campo correspondente, e "✅ confirmado" depois.
+- Botão "Reenviar pergunta" se o cliente não responder em 30 min (já existe `bot-followup-checker` — vou só ensiná-lo a ressuscitar confirmações pending).
 
-**b) `ChatView.tsx**`: 
+### 4. Não mexe em
 
-- Auto-abre `CaptureSheet` (minimizado, não bloqueante) quando `captureCustomer.capture_mode === 'manual'` E é a primeira vez que o consultor abre aquele chat na sessão (flag `sessionStorage`).
-- Não auto-abre se o lead já tem `name` E `cpf` (cadastro completo) — evita ruído.
+- A/B/C variants (problema já resolvido — constraint aceita C agora).
+- Fluxo de pitch, vídeos, áudios — só interceptamos extração + confirmação.
+- Kanban CRM / Bulk send.
 
-**c) Notificação de "novo lead pra capturar"**: no `CaptacaoPanel`/header do CRM, mostrar contador de leads com `capture_mode='manual' AND name IS NULL` (chamariz pro consultor abrir).
+## Arquivos tocados
 
-### Parte 3 — Garantir captura de nome em todos os tipos
+- `supabase/functions/capture-extract/index.ts` (refator: confirma antes de gravar)
+- `supabase/functions/whapi-webhook/index.ts` (interceptar resposta de confirmação antes do roteador)
+- `supabase/functions/bot-followup-checker/index.ts` (reenvio de pending > 30 min)
+- `src/components/captacao/CaptureSheet.tsx` (não voltar pra `auto`)
+- `src/components/captacao/CaptureLeadCard.tsx` (idem)
+- `src/components/captacao/CaptureStepsList.tsx` (chip pending/confirmado)
+- `src/components/whatsapp/ChatView.tsx` (botão sempre visível)
+- Migration: backfill `capture_mode='manual'`, trigger simplificado, tabela `capture_confirmation_templates` (opcional, com defaults).
 
-Já existe `askLeadName` + botão "Pedir nome" no header. Adicionar:
+## Fora de escopo (peça depois se quiser)
 
-- **Cron leve** (ou trigger): pra todo lead novo `capture_mode='manual'` sem nome após 30s da criação, disparar `askLeadName` automaticamente uma vez (campo `name_ask_sent_at` pra não repetir).
-- Logar em `capture_field_events` quando o nome chega via reply (já existe lógica em `whapi-webhook` — só auditar).
+- Tela admin pra editar os textos de confirmação (vou deixar com fallback bom, dá pra adicionar UI depois). 
+- OCR novo — uso o que já existe.
+- Reescrita do gamification XP.  
+NAO PRECISA PERGUNTAR PARA O CLIENTE E SIM A IA SABE SE VAI SER NOME OU TELEFONE OUEMAIL ASSIM NAO FICA PERGUNTANDOPARA O CLIENTE
 
-## Detalhes técnicos
-
-**Arquivos editados:**
-
-- `src/components/captacao/CaptureSheet.tsx` — header 1 linha, footer 1 linha, h-36dvh.
-- `src/components/captacao/CaptureStepsList.tsx` — linhas ultra-compactas.
-- `src/components/whatsapp/ChatView.tsx` — auto-abrir minimizado quando manual.
-- Migration: trigger `customers_default_capture_mode` + coluna `name_ask_sent_at`.
-- Edge `whapi-webhook` (auditoria leve): garantir que insert de novo customer não força `capture_mode='auto'`.
-- Cron job `pg_cron` opcional: pedir nome auto após 30s sem nome.
-
-**Sem mudança de lógica de envio** (Parte B/C anteriores já estão no ar).
-
-**Memória atualizada:** `mem://features/lead-name-and-gamification` — captação ON por padrão, painel auto-minimizado, pedido de nome automático em 30s.
-
-## Fora de escopo
-
-- Mudar layout do CRM Kanban.
-- Reescrever sequência de envio (já existe).
-- OCR.
+&nbsp;

@@ -122,7 +122,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
     setSubmitting(true);
     try {
       await supabase.from("customers").update({
-        conversation_step: "finalizando", capture_mode: "auto",
+        conversation_step: "finalizando",
       }).eq("id", customer.id);
       bumpMission(customer.consultant_id, "leads");
       sfxVictory();

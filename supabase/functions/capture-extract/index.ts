@@ -104,15 +104,38 @@ Inclua sempre "confidence": { campo: 0..1 }`;
     }
 
     const conf = extracted.confidence || {};
-    const inserted: string[] = [];
+    const autoApplied: string[] = [];
+    const suggested: string[] = [];
+    const directUpdate: Record<string, any> = {};
 
     for (const field of missing) {
       const value = extracted[field];
       if (value === undefined || value === null || value === "") continue;
       const c = Number(conf[field] ?? 0.7);
-      if (c < 0.7) continue;
+      if (c < 0.6) continue;
 
-      // Skip if already pending for this field
+      // Normalização leve
+      let normalized: any = value;
+      if (field === "cpf" || field === "rg" || field === "cep" || field === "phone_landline") {
+        normalized = String(value).replace(/\D/g, "");
+      } else if (field === "email") {
+        normalized = String(value).trim().toLowerCase();
+      } else if (field === "electricity_bill_value") {
+        const n = Number(String(value).replace(",", "."));
+        if (!Number.isFinite(n) || n <= 0) continue;
+        normalized = n;
+      } else {
+        normalized = String(value).trim();
+      }
+
+      // IA confiante (>=0.85): grava direto em customers, sem pedir confirmação ao cliente.
+      if (c >= 0.85) {
+        directUpdate[field] = normalized;
+        autoApplied.push(field);
+        continue;
+      }
+
+      // Confiança média: vai pra fila de sugestões para o consultor revisar.
       const { data: existing } = await sb.from("capture_field_suggestions")
         .select("id").eq("customer_id", customer_id).eq("field_name", field).eq("status", "pending").maybeSingle();
       if (existing) continue;
@@ -121,14 +144,19 @@ Inclua sempre "confidence": { campo: 0..1 }`;
         customer_id,
         consultant_id: customer.consultant_id,
         field_name: field,
-        suggested_value: String(value),
+        suggested_value: String(normalized),
         confidence: Math.min(1, Math.max(0, c)),
         source_message_id: source_message_id || null,
       });
-      inserted.push(field);
+      suggested.push(field);
     }
 
-    return new Response(JSON.stringify({ ok: true, suggested: inserted }), {
+    if (Object.keys(directUpdate).length > 0) {
+      const { error: upErr } = await sb.from("customers").update(directUpdate).eq("id", customer_id);
+      if (upErr) console.warn("[capture-extract] direct update fail", upErr.message);
+    }
+
+    return new Response(JSON.stringify({ ok: true, auto_applied: autoApplied, suggested }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
