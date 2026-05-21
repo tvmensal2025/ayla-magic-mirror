@@ -138,7 +138,6 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
           const isSending = sending === s.id;
           const isNext = i === nextUnsentIdx;
           const locked = !sent && !isNext;
-          const counting = autoCountdown?.stepId === s.id;
           return (
             <div
               key={s.id}
@@ -147,9 +146,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                   ? "border-primary/60 bg-gradient-to-br from-primary/15 to-emerald-500/5 shadow-[0_0_18px_hsl(var(--primary)/0.25)] animate-card-flip"
                   : locked
                     ? "border-border/40 bg-muted/20 opacity-50"
-                    : counting
-                      ? "border-emerald-500 bg-emerald-500/10 animate-pulse shadow-[0_0_20px_hsl(var(--primary)/0.5)]"
-                      : isNext
+                    : isNext
                         ? "border-primary bg-card hover:border-primary/80 hover:shadow-lg hover:-translate-y-0.5 ring-1 ring-primary/30"
                         : "border-border bg-card"
               }`}
@@ -160,8 +157,6 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                   <Check className="w-3.5 h-3.5 text-primary drop-shadow-[0_0_4px_hsl(var(--primary))]" />
                 ) : locked ? (
                   <Lock className="w-3 h-3 text-muted-foreground" />
-                ) : counting ? (
-                  <span className="text-[10px] font-black text-emerald-400 tabular-nums">{autoCountdown?.secs}s</span>
                 ) : null}
               </div>
               <p className={`text-xs font-semibold leading-tight line-clamp-2 min-h-[2rem] ${locked ? "text-muted-foreground" : ""}`}>
