@@ -150,7 +150,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
 
   return (
     <aside className={embedded
-      ? "w-full h-full flex flex-col bg-transparent overflow-y-auto"
+      ? "w-full h-full flex flex-col bg-transparent overflow-hidden"
       : "w-80 shrink-0 flex flex-col border-l border-border bg-card/40 backdrop-blur-sm overflow-y-auto"}>
       <XpFloater events={game.events} />
 
@@ -167,76 +167,86 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
         />
       )}
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-        {CAPTURE_FIELDS.filter((f) => f.key !== "document_front_url").map(f => {
-          const v = (customer as any)[f.key];
-          const filled = v !== null && v !== undefined && String(v).trim() !== "" && (f.key !== "electricity_bill_value" || Number(v) > 0);
-          const isEditingThis = editing === f.key;
-          const sugg = suggestionByField.get(f.key);
-          const isFlashing = flashKey === f.key;
+      {/* Embedded: 2 colunas (ficha | docs) em md+, stacked compacto no mobile */}
+      <div className={embedded ? "flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[1fr_200px] gap-0 overflow-hidden" : "contents"}>
+        <div className={`overflow-y-auto ${embedded ? "p-2 space-y-1" : "p-3 space-y-1.5"}`}>
+          {CAPTURE_FIELDS.filter((f) => f.key !== "document_front_url").map(f => {
+            const v = (customer as any)[f.key];
+            const filled = v !== null && v !== undefined && String(v).trim() !== "" && (f.key !== "electricity_bill_value" || Number(v) > 0);
+            const isEditingThis = editing === f.key;
+            const sugg = suggestionByField.get(f.key);
+            const isFlashing = flashKey === f.key;
 
-          return (
-            <div
-              key={f.key}
-              className={`group rounded-md border p-2 transition-all ${
-                isFlashing ? "animate-field-flash border-primary bg-primary/10" :
-                sugg ? "border-amber-400/60 bg-amber-400/5 ring-1 ring-amber-400/30 animate-pulse" :
-                filled ? "border-primary/30 bg-primary/5" : "border-border bg-background hover:border-primary/30"
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
+            return (
+              <div
+                key={f.key}
+                className={`group rounded-md border transition-all ${embedded ? "px-2 py-1" : "p-2"} ${
+                  isFlashing ? "animate-field-flash border-primary bg-primary/10" :
+                  sugg ? "border-amber-400/60 bg-amber-400/5 ring-1 ring-amber-400/30 animate-pulse" :
+                  filled ? "border-primary/30 bg-primary/5" : "border-border bg-background hover:border-primary/30"
+                }`}
+              >
+                {/* Linha única: ícone + label + valor + edit (densa quando embedded) */}
                 <div className="flex items-center gap-1.5 min-w-0">
-                  {filled ? <Check className="w-3.5 h-3.5 text-primary shrink-0" /> : <div className="w-3.5 h-3.5 rounded-full border-2 border-muted-foreground/30 shrink-0" />}
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{f.label}</span>
+                  {filled ? <Check className="w-3 h-3 text-primary shrink-0" /> : <div className="w-3 h-3 rounded-full border-2 border-muted-foreground/30 shrink-0" />}
+                  <span className={`font-semibold uppercase tracking-wide text-muted-foreground shrink-0 ${embedded ? "text-[9px] w-16" : "text-[11px]"}`}>{f.label}</span>
+                  {!isEditingThis && (
+                    <span className={`flex-1 min-w-0 truncate ${embedded ? "text-[11px]" : "text-xs"} ${filled ? "text-foreground" : "text-muted-foreground italic"}`} title={filled ? String(v) : undefined}>
+                      {filled ? String(v) : "vazio"}
+                    </span>
+                  )}
+                  {!isEditingThis && (
+                    <button onClick={() => startEdit(f.key)} className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <Edit2 className="w-3 h-3 text-muted-foreground hover:text-primary" />
+                    </button>
+                  )}
                 </div>
-                {!isEditingThis && (
-                  <button onClick={() => startEdit(f.key)} className="opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Edit2 className="w-3 h-3 text-muted-foreground hover:text-primary" />
-                  </button>
+                {isEditingThis && (
+                  <div className="mt-1 flex items-center gap-1">
+                    <Input
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") void saveEdit(); if (e.key === "Escape") setEditing(null); }}
+                      autoFocus
+                      className="h-6 text-xs"
+                    />
+                    <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => void saveEdit()}><Check className="w-3 h-3" /></Button>
+                    <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setEditing(null)}><X className="w-3 h-3" /></Button>
+                  </div>
+                )}
+                {sugg && !isEditingThis && (
+                  <div className="mt-1 flex items-center gap-1 rounded bg-amber-400/10 border border-amber-400/40 px-1 py-0.5">
+                    <Bot className="w-3 h-3 text-amber-500 shrink-0" />
+                    <span className="text-[10px] flex-1 truncate text-amber-700 dark:text-amber-300">
+                      IA: <strong>{sugg.suggested_value}</strong>
+                    </span>
+                    <Button size="icon" variant="ghost" className="h-5 w-5 text-emerald-500 hover:text-emerald-600" onClick={() => void acceptSuggestion(f.key)} title="Aceitar">
+                      <Check className="w-3 h-3" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => { setEditing(f.key); setEditValue(sugg.suggested_value); void resolve(sugg.id, "edited"); }} title="Editar">
+                      <Edit2 className="w-3 h-3" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-5 w-5 text-muted-foreground" onClick={() => void resolve(sugg.id, "dismissed")} title="Descartar">
+                      <X className="w-3 h-3" />
+                    </Button>
+                  </div>
                 )}
               </div>
-              {isEditingThis ? (
-                <div className="mt-1.5 flex items-center gap-1">
-                  <Input
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") void saveEdit(); if (e.key === "Escape") setEditing(null); }}
-                    autoFocus
-                    className="h-7 text-xs"
-                  />
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => void saveEdit()}><Check className="w-3.5 h-3.5" /></Button>
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditing(null)}><X className="w-3.5 h-3.5" /></Button>
-                </div>
-              ) : (
-                <p className="text-xs mt-0.5 break-words text-foreground/80 min-h-[1rem]">{filled ? String(v) : <span className="text-muted-foreground italic">vazio</span>}</p>
-              )}
-              {sugg && !isEditingThis && (
-                <div className="mt-1.5 flex items-center gap-1 rounded bg-amber-400/10 border border-amber-400/40 p-1">
-                  <Bot className="w-3 h-3 text-amber-500 shrink-0" />
-                  <span className="text-[11px] flex-1 truncate text-amber-700 dark:text-amber-300">
-                    IA: <strong>{sugg.suggested_value}</strong>
-                  </span>
-                  <Button size="icon" variant="ghost" className="h-6 w-6 text-emerald-500 hover:text-emerald-600" onClick={() => void acceptSuggestion(f.key)} title="Aceitar">
-                    <Check className="w-3.5 h-3.5" />
-                  </Button>
-                  <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => { setEditing(f.key); setEditValue(sugg.suggested_value); void resolve(sugg.id, "edited"); }} title="Editar">
-                    <Edit2 className="w-3 h-3" />
-                  </Button>
-                  <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground" onClick={() => void resolve(sugg.id, "dismissed")} title="Descartar">
-                    <X className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+
+        {/* Documentos: coluna direita em md+, linha abaixo no mobile */}
+        <div className={embedded ? "md:border-l md:border-border/60 md:overflow-y-auto border-t md:border-t-0" : "contents"}>
+          <CaptureDocumentTiles
+            customerId={customerId}
+            customer={customer}
+            onUploaded={async (key, url) => { await updateField(key as any, url); }}
+            compact={embedded}
+          />
+        </div>
       </div>
 
-      <CaptureDocumentTiles
-        customerId={customerId}
-        customer={customer}
-        onUploaded={async (key, url) => { await updateField(key as any, url); }}
-      />
 
       {!embedded && (
         <div className="p-3 border-t border-border space-y-2">

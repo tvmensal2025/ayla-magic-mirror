@@ -136,7 +136,7 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
         className={`w-full p-0 flex flex-col gap-0 border-0 bg-background sm:max-w-none shadow-[0_-12px_40px_-12px_hsl(var(--primary)/0.35)] ${
           expanded
             ? "h-[100dvh] rounded-none"
-            : "h-[36dvh] min-h-[240px] max-h-[100dvh] rounded-t-2xl"
+            : "h-[44dvh] min-h-[260px] max-h-[100dvh] rounded-t-2xl"
         }`}
       >
         {/* Grabber */}

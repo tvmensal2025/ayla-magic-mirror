@@ -22,9 +22,10 @@ interface Props {
   customerId: string;
   customer: Record<string, any>;
   onUploaded: (key: DocKey, url: string) => Promise<void> | void;
+  compact?: boolean;
 }
 
-export function CaptureDocumentTiles({ customerId, customer, onUploaded }: Props) {
+export function CaptureDocumentTiles({ customerId, customer, onUploaded, compact = false }: Props) {
   const { toast } = useToast();
   const [busy, setBusy] = useState<DocKey | null>(null);
   const inputs = useRef<Record<DocKey, HTMLInputElement | null>>({
@@ -54,18 +55,18 @@ export function CaptureDocumentTiles({ customerId, customer, onUploaded }: Props
   };
 
   return (
-    <section className="px-3 pb-4 pt-2">
-      <h4 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">
-        Documentos do Lead
+    <section className={compact ? "px-2 pt-1.5 pb-2" : "px-3 pb-4 pt-2"}>
+      <h4 className={`font-bold uppercase tracking-wider text-muted-foreground ${compact ? "text-[9px] mb-1" : "text-[11px] mb-2"}`}>
+        Documentos
       </h4>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-1.5">
         {SLOTS.map((s) => {
           const url = customer?.[s.key] as string | null;
           const isBusy = busy === s.key;
           return (
             <div
               key={s.key}
-              className={`rounded-lg border p-2 flex flex-col gap-1.5 transition-all ${
+              className={`rounded-md border flex flex-col gap-0.5 transition-all ${compact ? "p-1" : "p-2 gap-1.5"} ${
                 url ? "border-primary/40 bg-primary/5" : "border-dashed border-border bg-card/50"
               }`}
             >
@@ -85,26 +86,28 @@ export function CaptureDocumentTiles({ customerId, customer, onUploaded }: Props
                 type="button"
                 disabled={isBusy}
                 onClick={() => inputs.current[s.key]?.click()}
-                className="relative aspect-square w-full rounded-md overflow-hidden bg-secondary/40 border border-border/50 flex items-center justify-center active:scale-95 transition"
+                className={`relative w-full rounded-md overflow-hidden bg-secondary/40 border border-border/50 flex items-center justify-center active:scale-95 transition ${
+                  compact ? "h-12" : "aspect-square"
+                }`}
               >
                 {isBusy ? (
-                  <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                  <Loader2 className={`${compact ? "w-3.5 h-3.5" : "w-5 h-5"} animate-spin text-primary`} />
                 ) : url ? (
                   url.toLowerCase().endsWith(".pdf") ? (
-                    <FileImage className="w-7 h-7 text-primary" />
+                    <FileImage className={compact ? "w-4 h-4 text-primary" : "w-7 h-7 text-primary"} />
                   ) : (
                     <img src={url} alt={s.label} className="w-full h-full object-cover" />
                   )
                 ) : (
-                  <Camera className="w-6 h-6 text-muted-foreground/60" />
+                  <Camera className={compact ? "w-4 h-4 text-muted-foreground/60" : "w-6 h-6 text-muted-foreground/60"} />
                 )}
                 {url && !isBusy && (
-                  <span className="absolute bottom-1 right-1 bg-background/80 backdrop-blur rounded-full p-1">
-                    <RefreshCw className="w-3 h-3 text-primary" />
+                  <span className="absolute bottom-0.5 right-0.5 bg-background/80 backdrop-blur rounded-full p-0.5">
+                    <RefreshCw className="w-2.5 h-2.5 text-primary" />
                   </span>
                 )}
               </button>
-              <p className="text-[10px] font-semibold text-center leading-tight">{s.label}</p>
+              <p className={`font-semibold text-center leading-tight truncate ${compact ? "text-[8px]" : "text-[10px]"}`}>{s.label}</p>
             </div>
           );
         })}
