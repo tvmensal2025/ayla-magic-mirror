@@ -9,6 +9,16 @@ import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
 import { Button } from "@/components/ui/button";
 import { Gamepad2, ExternalLink, MessageCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { GameModeToggle } from "@/components/captacao/game/GameModeToggle";
+import { GameShell } from "@/components/captacao/game/GameShell";
+import { PlayerHud } from "@/components/captacao/game/PlayerHud";
+import { QuestsBar } from "@/components/captacao/game/QuestsBar";
+import { AchievementsRail } from "@/components/captacao/game/AchievementsRail";
+import { LevelUpOverlay } from "@/components/captacao/game/LevelUpOverlay";
+import { XpToast } from "@/components/captacao/game/XpToast";
+import { useGameMode } from "@/components/captacao/game/useGameMode";
+import { useGameProgress } from "@/components/captacao/game/useGameProgress";
+import { sfx } from "@/components/captacao/game/sfx";
 
 interface Props { consultantId: string; onOpenChat?: (phone: string) => void; }
 
@@ -20,13 +30,19 @@ export function CaptacaoPanel({ consultantId, onOpenChat }: Props) {
   const { today, week, streak, bump } = useCaptureScoreboard(consultantId);
   const { toast } = useToast();
 
+  // Game mode state
+  const { enabled: gameOn, toggle: toggleGame, sound, toggleSound } = useGameMode(consultantId);
+  const progress = useGameProgress(consultantId);
+  const [xpToast, setXpToast] = useState<number | null>(null);
+  const [levelUp, setLevelUp] = useState<{ level: number; label: string } | null>(null);
+
   useEffect(() => { setSentSteps(new Set()); setPhone(null); }, [selectedId]);
 
   useEffect(() => {
     if (!selectedId) return;
     void (async () => {
       const { data } = await supabase.from("customers").select("phone_whatsapp").eq("id", selectedId).maybeSingle();
-      setPhone((data as any)?.phone_whatsapp || null);
+      setPhone((data as { phone_whatsapp?: string } | null)?.phone_whatsapp || null);
     })();
   }, [selectedId]);
 
@@ -34,73 +50,153 @@ export function CaptacaoPanel({ consultantId, onOpenChat }: Props) {
     await bump();
     bumpMission(consultantId, "leads");
     setMissionsVersion((v) => v + 1);
-    toast({ title: "🏆 +1 cadastro no placar!", duration: 2000 });
+
+    if (gameOn) {
+      const res = progress.registerCapture();
+      setXpToast(res.gainedXp);
+      sfx.coin(sound);
+      if (res.leveledUp) {
+        setTimeout(() => {
+          sfx.levelUp(sound);
+          setLevelUp({ level: res.newLevel, label: progress.rank.label });
+        }, 600);
+      }
+      void progress.reload();
+    } else {
+      toast({ title: "🏆 +1 cadastro no placar!", duration: 2000 });
+    }
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-220px)] min-h-[640px] rounded-xl border border-border overflow-hidden bg-background/60 capture-ambient animate-bg-drift">
+    <div className={`flex flex-col h-[calc(100vh-220px)] min-h-[640px] rounded-xl border ${gameOn ? "border-primary/40" : "border-border"} overflow-hidden bg-background/60 capture-ambient animate-bg-drift`}>
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/60 backdrop-blur-sm gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <Gamepad2 className="w-5 h-5 text-primary" />
           <div>
             <h2 className="text-sm font-bold">Modo Captação</h2>
-            <p className="text-[11px] text-muted-foreground">Capture, ganhe XP, suba de nível — e bate o placar do dia 🏆</p>
+            <p className="text-[11px] text-muted-foreground">
+              {gameOn ? "🎮 Game ON — capture, ganhe XP e suba de nível!" : "Capture, ganhe XP, suba de nível — e bate o placar do dia 🏆"}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <CaptureMissionsPanel consultantId={consultantId} streak={streak} bumpVersion={missionsVersion} />
-          <CaptureScoreboard today={today} week={week} streak={streak} />
+          {!gameOn && (
+            <>
+              <CaptureMissionsPanel consultantId={consultantId} streak={streak} bumpVersion={missionsVersion} />
+              <CaptureScoreboard today={today} week={week} streak={streak} />
+            </>
+          )}
+          <GameModeToggle enabled={gameOn} onToggle={toggleGame} sound={sound} onToggleSound={toggleSound} />
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
-        <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
+      {gameOn ? (
+        <GameShell>
+          <div className="px-4 py-3 space-y-3">
+            <PlayerHud progress={progress} />
+            <QuestsBar progress={progress} />
+          </div>
+          <div className="flex-1 flex overflow-hidden h-[calc(100vh-460px)] min-h-[420px]">
+            <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
+            <main className="flex-1 flex flex-col overflow-hidden">
+              {!selectedId ? (
+                <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
+                  <Gamepad2 className="w-14 h-14 text-primary/60 animate-game-bounce" />
+                  <h3 className="text-base font-black uppercase tracking-wide">Escolha um lead para começar a quest</h3>
+                  <p className="text-sm text-muted-foreground max-w-md">
+                    Cada cadastro completo te dá XP e pode disparar combos, conquistas e level-up.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="px-4 py-3 border-b border-border/60 bg-card/40 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Alvo atual</p>
+                      <p className="text-sm font-semibold">{phone || "—"}</p>
+                    </div>
+                    {phone && onOpenChat && (
+                      <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onOpenChat(phone)}>
+                        <MessageCircle className="w-3.5 h-3.5" /> Abrir conversa
+                        <ExternalLink className="w-3 h-3" />
+                      </Button>
+                    )}
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-wider text-primary mb-2">⚔️ 10 Passos · ataque rápido</h3>
+                      <CaptureStepsGrid
+                        consultantId={consultantId}
+                        customerId={selectedId}
+                        sentSteps={sentSteps}
+                        onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+            </main>
+            {selectedId ? (
+              <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />
+            ) : (
+              <aside className="w-72 border-l border-border/60 overflow-y-auto p-2">
+                <AchievementsRail progress={progress} />
+              </aside>
+            )}
+          </div>
+        </GameShell>
+      ) : (
+        <div className="flex-1 flex overflow-hidden">
+          <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
 
-        <main className="flex-1 flex flex-col overflow-hidden">
-          {!selectedId ? (
-            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
-              <Gamepad2 className="w-12 h-12 text-muted-foreground/40 animate-float" />
-              <h3 className="text-base font-semibold">Selecione um lead para começar</h3>
-              <p className="text-sm text-muted-foreground max-w-md">
-                Para adicionar um lead à captação, vá para o chat do WhatsApp, abra o cliente e marque "Capturar manualmente".
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="px-4 py-3 border-b border-border bg-card/40 flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">Conversando com</p>
-                  <p className="text-sm font-semibold">{phone || "—"}</p>
-                </div>
-                {phone && onOpenChat && (
-                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onOpenChat(phone)}>
-                    <MessageCircle className="w-3.5 h-3.5" /> Abrir conversa
-                    <ExternalLink className="w-3 h-3" />
-                  </Button>
-                )}
+          <main className="flex-1 flex flex-col overflow-hidden">
+            {!selectedId ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
+                <Gamepad2 className="w-12 h-12 text-muted-foreground/40 animate-float" />
+                <h3 className="text-base font-semibold">Selecione um lead para começar</h3>
+                <p className="text-sm text-muted-foreground max-w-md">
+                  Para adicionar um lead à captação, vá para o chat do WhatsApp, abra o cliente e marque "Capturar manualmente".
+                </p>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-2">10 Passos · clique para enviar</h3>
-                  <CaptureStepsGrid
-                    consultantId={consultantId}
-                    customerId={selectedId}
-                    sentSteps={sentSteps}
-                    onSent={(stepId) => setSentSteps((s) => new Set(s).add(stepId))}
-                  />
+            ) : (
+              <>
+                <div className="px-4 py-3 border-b border-border bg-card/40 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Conversando com</p>
+                    <p className="text-sm font-semibold">{phone || "—"}</p>
+                  </div>
+                  {phone && onOpenChat && (
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onOpenChat(phone)}>
+                      <MessageCircle className="w-3.5 h-3.5" /> Abrir conversa
+                      <ExternalLink className="w-3 h-3" />
+                    </Button>
+                  )}
                 </div>
-                <div className="rounded-lg border border-dashed border-border bg-secondary/20 p-3 text-[11px] text-muted-foreground space-y-1">
-                  <p>💡 <span className="font-semibold">Como funciona:</span> envie os passos, conforme o cliente responde os campos vão sendo preenchidos automaticamente (OCR ativo). Capturas em sequência ativam <span className="font-bold text-primary">combos</span>!</p>
-                  <p>Edite manualmente qualquer campo na ficha à direita.</p>
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-2">10 Passos · clique para enviar</h3>
+                    <CaptureStepsGrid
+                      consultantId={consultantId}
+                      customerId={selectedId}
+                      sentSteps={sentSteps}
+                      onSent={(stepId) => setSentSteps((s) => new Set(s).add(stepId))}
+                    />
+                  </div>
+                  <div className="rounded-lg border border-dashed border-border bg-secondary/20 p-3 text-[11px] text-muted-foreground space-y-1">
+                    <p>💡 <span className="font-semibold">Como funciona:</span> envie os passos, conforme o cliente responde os campos vão sendo preenchidos automaticamente (OCR ativo). Capturas em sequência ativam <span className="font-bold text-primary">combos</span>!</p>
+                    <p>Edite manualmente qualquer campo na ficha à direita.</p>
+                  </div>
                 </div>
-              </div>
-            </>
-          )}
-        </main>
+              </>
+            )}
+          </main>
 
-        {selectedId && <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />}
-      </div>
+          {selectedId && <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />}
+        </div>
+      )}
+
+      {xpToast !== null && <XpToast amount={xpToast} onDone={() => setXpToast(null)} />}
+      {levelUp && <LevelUpOverlay level={levelUp.level} rankLabel={levelUp.label} onClose={() => setLevelUp(null)} />}
     </div>
   );
 }
