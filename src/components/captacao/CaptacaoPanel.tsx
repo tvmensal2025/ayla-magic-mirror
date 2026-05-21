@@ -7,7 +7,7 @@ import { CaptureScoreboard } from "@/components/captacao/CaptureScoreboard";
 import { CaptureMissionsPanel, bumpMission } from "@/components/captacao/CaptureMissionsPanel";
 import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
 import { Button } from "@/components/ui/button";
-import { Gamepad2, ExternalLink, MessageCircle } from "lucide-react";
+import { Gamepad2, ExternalLink, MessageCircle, ChevronLeft, ChevronDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { GameModeToggle } from "@/components/captacao/game/GameModeToggle";
 import { GameShell } from "@/components/captacao/game/GameShell";
@@ -19,8 +19,10 @@ import { XpToast } from "@/components/captacao/game/XpToast";
 import { useGameMode } from "@/components/captacao/game/useGameMode";
 import { useGameProgress } from "@/components/captacao/game/useGameProgress";
 import { sfx } from "@/components/captacao/game/sfx";
-
-import { GameComposer } from "@/components/captacao/game/GameComposer";
+import { MessageComposer } from "@/components/whatsapp/MessageComposer";
+import { useTemplates } from "@/hooks/useTemplates";
+import { sendWhatsAppMessage } from "@/services/messageSender";
+import { toast as sonnerToast } from "sonner";
 
 interface Props { consultantId: string; onOpenChat?: (phone: string) => void; instanceName?: string | null; isWhapi?: boolean; }
 
@@ -28,9 +30,12 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
   const [phone, setPhone] = useState<string | null>(null);
+  const [customerName, setCustomerName] = useState<string | null>(null);
   const [missionsVersion, setMissionsVersion] = useState(0);
+  const [showAside, setShowAside] = useState(false);
   const { today, week, streak, bump } = useCaptureScoreboard(consultantId);
   const { toast } = useToast();
+  const { templates } = useTemplates(consultantId);
 
   // Game mode state
   const { enabled: gameOn, toggle: toggleGame, sound, toggleSound } = useGameMode(consultantId);
