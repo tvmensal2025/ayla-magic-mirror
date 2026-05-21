@@ -144,9 +144,12 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
             <PlayerHud progress={progress} />
             <QuestsBar progress={progress} />
           </div>
-          <div className="flex-1 flex overflow-hidden h-[calc(100vh-460px)] min-h-[420px]">
-            <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
-            <main className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex flex-col md:flex-row overflow-hidden md:h-[calc(100vh-460px)] md:min-h-[420px]">
+            {/* Mobile: lead list visível só quando NÃO há lead selecionado. Desktop: sempre. */}
+            <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-72 md:shrink-0 md:border-r border-border overflow-hidden`}>
+              <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
+            </div>
+            <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden`}>
               {!selectedId ? (
                 <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
                   <Gamepad2 className="w-14 h-14 text-primary/60 animate-game-bounce" />
@@ -157,19 +160,26 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                 </div>
               ) : (
                 <>
-                  <div className="px-4 py-3 border-b border-border/60 bg-card/40 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Alvo atual</p>
-                      <p className="text-sm font-semibold">{phone || "—"}</p>
+                  <div className="px-3 md:px-4 py-2 md:py-3 border-b border-border/60 bg-card/40 flex items-center justify-between gap-2">
+                    <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setSelectedId(null)} title="Voltar">
+                      <ChevronLeft className="w-4 h-4" />
+                    </Button>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] md:text-xs text-muted-foreground">Alvo atual</p>
+                      <p className="text-sm font-semibold truncate">{customerName || phone || "—"}</p>
                     </div>
                     {phone && onOpenChat && (
-                      <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onOpenChat(phone)}>
-                        <MessageCircle className="w-3.5 h-3.5" /> Abrir conversa
+                      <Button size="sm" variant="outline" className="gap-1.5 shrink-0" onClick={() => onOpenChat(phone)}>
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Abrir conversa</span>
                         <ExternalLink className="w-3 h-3" />
                       </Button>
                     )}
+                    <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setShowAside((s) => !s)} title="Ficha">
+                      <ChevronDown className={`w-4 h-4 transition-transform ${showAside ? "rotate-180" : ""}`} />
+                    </Button>
                   </div>
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-4">
                     <div>
                       <h3 className="text-xs font-black uppercase tracking-wider text-primary mb-2">⚔️ 10 Passos · ataque rápido</h3>
                       <CaptureStepsGrid
@@ -179,30 +189,42 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                         onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
                       />
                     </div>
-                    <GameComposer
-                      instanceName={instanceName}
-                      isWhapi={isWhapi}
-                      phone={phone}
-                      onSent={(kind) => {
-                        const res = progress.registerMessage(kind);
-                        setXpToast(res.gainedXp);
-                        sfx.coin(sound);
-                        if (res.leveledUp) {
-                          setTimeout(() => { sfx.levelUp(sound); setLevelUp({ level: res.newLevel, label: progress.rank.label }); }, 500);
-                        }
-                      }}
+
+                    {/* Ficha + Achievements aparecem no fim do scroll em mobile (quando expandidos) */}
+                    <div className={`md:hidden ${showAside ? "block" : "hidden"} space-y-3`}>
+                      <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} embedded />
+                      <AchievementsRail progress={progress} />
+                    </div>
+                  </div>
+
+                  {/* Composer fixo no rodapé: atalhos /, templates, fluxos, anexos, áudio, AI suggest */}
+                  <div className="border-t border-border/60 bg-card/40">
+                    <MessageComposer
+                      onSend={sendText}
+                      onSendAudio={sendAudioB64}
+                      onSendAudioUrl={sendAudioUrl}
+                      onSendMedia={sendMedia}
+                      templates={templates}
+                      disabled={!instanceName || !phone}
+                      consultantId={consultantId}
+                      customerId={selectedId || undefined}
+                      customerJid={customerJid}
+                      customerName={customerName || undefined}
                     />
                   </div>
                 </>
               )}
             </main>
-            {selectedId ? (
-              <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />
-            ) : (
-              <aside className="w-72 border-l border-border/60 overflow-y-auto p-2">
-                <AchievementsRail progress={progress} />
-              </aside>
-            )}
+            {/* Desktop aside: ficha quando há lead, achievements quando não */}
+            <div className="hidden md:flex md:flex-col md:w-72 md:border-l border-border/60 overflow-hidden">
+              {selectedId ? (
+                <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />
+              ) : (
+                <aside className="overflow-y-auto p-2">
+                  <AchievementsRail progress={progress} />
+                </aside>
+              )}
+            </div>
           </div>
         </GameShell>
       ) : (
