@@ -396,6 +396,17 @@ Deno.serve(async (req) => {
       const alreadyConfirmed = isBill
         ? !!(customer as any).bill_data_confirmed_at
         : !!(customer as any).doc_data_confirmed_at;
+      if (alreadyConfirmed) {
+        return json({
+          ok: true,
+          sent: [],
+          skipped: "already_confirmed",
+          kind: isBill ? "bill" : "doc",
+          message: isBill
+            ? "Conta já confirmada — avance manualmente para o próximo passo."
+            : "Documento já confirmado — avance manualmente para o próximo passo.",
+        });
+      }
       const recentMedia = (customer as any).last_inbound_media_at
         ? (Date.now() - new Date((customer as any).last_inbound_media_at).getTime()) < 7 * 24 * 60 * 60 * 1000
         : false;
