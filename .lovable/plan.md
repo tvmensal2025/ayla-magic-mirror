@@ -1,120 +1,83 @@
-## Princípios (não-negociáveis)
+# Fase 4 — Itens Altos (pós Fases 0–3)
 
-1. **Aditivo, nunca destrutivo** — toda correção entra atrás de uma flag ou como camada nova (ex.: wrapper de botão, helper, util). Nada de reescrever componentes que já estão estáveis (`FlowQuickBar`, `paused.ts`, `flowStepResolver` core).
-2. **Lotes pequenos com verificação** — cada lote = 1 PR mental, com 1 checagem objetiva (log, console, network ou query) antes de seguir.
-3. **Sem mexer no fluxo do bot em produção sem feature flag** — F2/F6/F10 ficam atrás de `app_settings.bot_global_enabled` + flag específica por correção.
-4. **RLS antes de UI** — qualquer mudança que toque tabela passa por migration revisada (linter limpo).
-5. **Rollback em 1 clique** — toda mudança de comportamento de bot tem kill switch (a flag global `bot_global_enabled` já é o primeiro item).
+Phases 0–3 already validated. Now we tackle the **High** items from the audit — each behind a flag or with rollback, applied in 3 small batches with verification between each.
 
 ---
 
-## Fase 0 — Rede de segurança (1h, zero risco)
+## Lote 1 — Robustez de envio (1-2h, risco baixo)
 
-Antes de tocar em qualquer botão crítico, criar o que permite desligar tudo sem código:
+**B6 — Abort real em `runFromHere` / sequências longas**
 
-1. **Migration: `app_settings**` com `bot_global_enabled boolean default true` + RLS só leitura para authenticated, escrita só super_admin.
-2. **Helper `_shared/bot/global-flag.ts**` lido por: `whapi-webhook`, `evolution-webhook`, todos os crons (`bot-stuck-recovery`, `ai-followup-cron`, `bot-loop-watchdog`, `send-scheduled-messages`). Se `false` → early return sem erro.
-3. **Botão no SuperAdmin** "Pausar bot global" (toggle simples) — sem mexer em nada visual existente.
+- Em `FlowQuickBar` (`confirmSendFull`) e qualquer loop que envia múltiplas partes: checar `abortRef.current` no **início de cada iteração** e antes de cada `sendPart`.
+- Botão "Parar" já existe no `BulkSendPanel`; replicar o padrão no `SendSequenceDialog`/`FlowQuickBar` (botão "Parar envio" ao lado do progresso `Enviando N/M`).
+- Sem mudar a função de envio em si — só observar o flag.
 
-Verificação: virar a flag, mandar uma mensagem ao bot de teste, confirmar silêncio total. Religar.
+**F10 — Fallback de variant C (vídeo) → variant B (sem áudio)**
 
----
+- Em `whapi-webhook` no ponto onde envia vídeo inicial da variant C: `try/catch` no download/envio do vídeo. Em falha, marcar `customers.flow_variant='B'` para esse lead e re-disparar o welcome de B no mesmo turno.
+- Log: `console.warn('[variant-c] video failed, fallback to B', { customerId, error })`.
 
-## Fase 1 — Bloqueadores de UI (sem tocar em bot) (2-3h)
-
-Itens isolados ao frontend, risco mínimo.
-
-### B7 — Feedback de progresso no envio multi-parte
-
-- Em `FlowQuickBar` / `SendSequenceDialog`: adicionar estado `{ current, total }` no `confirmSendFull`.
-- Botão mostra `Enviando 2/5…` e fica `disabled` até terminar/abortar.
-- Não muda a lógica de envio — só observa o loop existente.
-
-### B13 — Confirmação no "Forçar reset conversa"
-
-- Trocar `onClick` direto por `AlertDialog` (componente já existe no projeto) com nome do cliente no corpo.
-- Botão destrutivo só habilita após o user digitar "RESETAR" ou clicar 2× no confirm (padrão shadcn).
-
-### B1 — Double-click protection em `sendStep`
-
-- Em `CaptureStepsGrid` o `sending` já é `string | null` mas só bloqueia o passo atual. Trocar para `Set<string>` e adicionar `disabled={sending.has(s.id)}` em cada card, mais `e.currentTarget.disabled = true` defensivo.
-
-### B10 — Confirmação no takeover + undo
-
-- No botão "Assumir": toast com action `Desfazer` (10s) que restaura `bot_paused=false` e `assigned_human_id=null`.
-
-Verificação: testar cada botão no preview, conferir console sem erro, network sem requests duplicados.
+**Verificação:** clicar "Parar" no meio de um envio de 5 partes → confirmar que para na próxima iteração. Forçar erro 404 no vídeo C (URL temporária inválida) → confirmar que cliente recebe fluxo B.
 
 ---
 
-## Fase 2 — Bloqueador de envio em massa (B8) (1-2h)
+## Lote 2 — Resolver + Watchdog (1-2h, risco médio)
 
-Único item desta fase porque mexe num caminho usado por todos os consultores.
+**F2 — Resolver custom sem fallback silencioso para welcome**
 
-- Em `BulkSendPanel`: introduzir helper `sendInChunks(items, chunkSize=5, delayMs=3000, perItemDelay=1500-2500)`.
-- **Não substituir** o sender atual — envolvê-lo. Se a flag `bulk_send_v2` (localStorage por enquanto, default ON em dev / OFF em prod até validar) estiver OFF, comportamento antigo.
-- UI: barra de progresso `X/Y enviados · Z falhas` + botão Cancelar que dá `break` no loop entre chunks.
+- Em `src/lib/flowStepResolver.ts` (e seu espelho na edge): quando custom step não tem mapeamento legacy, **retornar `null**` ao invés de cair em `welcome`.
+- No chamador (whapi-webhook bot-flow handler): se `resolved === null`, manter `conversation_step` atual e logar `console.warn('[resolver] no legacy mapping', { stepKey, customerId })`. Não enviar nada.
+- Atrás de feature flag `app_settings.resolver_strict_mode` (default OFF — liga só após validar em 1 consultor).
 
-Verificação: rodar contra 10 leads de teste, ver no log Evolution que respeitou 5×3s, sem 429.
+**F6 — Estender `recover-stuck-otp` para `finalizando**`
 
----
+- No cron existente, adicionar segunda query: leads com `conversation_step='finalizando'` parados > 10min sem mensagem nova → re-disparar `finalizando` step ou notificar `notification_phone` do consultor.
+- Sem deletar a lógica de OTP — só uma branch adicional.
 
-## Fase 3 — Compliance & Rollback (B7-equivalente para legal) (2h)
-
-Bloqueia GO mas não exige refactor.
-
-### 3.6 LGPD
-
-- Adicionar `<CookieBanner />` (componente novo, simples, opt-in para analytics) montado no layout das LPs do consultor.
-- Link "Política de Privacidade" no rodapé das LPs apontando para `/politica-privacidade` (página estática nova).
-
-### 3.6 Opt-out "SAIR"
-
-- Em `whapi-webhook/handlers/conversational/index.ts`, **antes** de qualquer roteamento, detectar `messageText.trim().toUpperCase() === "SAIR"` → set `bot_paused=true, bot_paused_reason='opt_out', do_not_contact=true` (coluna nova via migration), responder UMA confirmação, return.
-- Migration: adicionar `do_not_contact boolean default false` em `customers` + filtro em todos os crons/bulk send.
-
-### 3.1 Evolution capacity
-
-- Não é código: documentar em `LAUNCH_OPS.md` o requisito (RAM, plano Easypanel). Confirmar com user antes de abrir os 100.
-
-Verificação: mandar "SAIR" em conversa de teste, ver `do_not_contact=true`, conferir que cron não dispara.
+**Verificação:** criar lead de teste em step custom sem mapeamento, ligar flag, enviar mensagem → conferir que step não muda e log aparece. Lead em `finalizando` há 11min → cron dispara recuperação.
 
 ---
 
-## Fase 4 — Altos (pós soft-launch de 10 pilotos, 48h)
+## Lote 3 — Observabilidade & Capacidade (2h, risco zero)
 
-Só entra **depois** que os 10 pilotos rodaram estáveis. Mantém a opção de adiar sem bloquear o GO.
+**F12 — Worker `minio-quota-check**`
 
-- **B6** — Abort real em `runFromHere`: checar `abortRef.current` no início de cada iteração do loop e antes de cada `sendPart`.
-- **B12** — Confirmar `WITH CHECK` em RLS de `templates` rodando linter + teste UPDATE como consultor não-dono.
-- **F2** — Em `flowStepResolver`: quando custom não mapeia, em vez de cair no welcome, logar `console.warn('[resolver] no legacy mapping', stepKey)` e retornar `null` para que o handler mantenha o estado atual.
-- **F6** — Estender `recover-stuck-otp` para também cobrir `conversation_step='finalizando'` parado >10min.
-- **F10** — Try/catch em download de vídeo variant C; em falha, fallback para variant B no mesmo turno.
-- **F12** — Worker novo `minio-quota-check` (cron 15min) → grava em `system_health` → alerta no SuperAdmin >80%.
-- **3.1 worker-portal** — escalar para 3 réplicas no Easypanel (operacional, não código).
-- **3.5 alertas** — `instance-health-check` cron já existe; adicionar notificação ao `notification_phone` do super_admin quando >5min desconectado ou worker offline.
+- Nova edge function `minio-quota-check` (cron a cada 15min): consulta MinIO admin API → grava `used_bytes`, `total_bytes`, `pct` em `system_health` (tabela existente).
+- Widget no `SuperAdmin > Saúde do Sistema`: badge amarelo >70%, vermelho >85%.
+- Nenhum bloqueio automático — só alerta.
+
+**3.5 — Alertas para super_admin**
+
+- Estender `instance-health-check` (cron já existe): quando instância desconectada >5min OU worker-portal offline, enviar 1 mensagem WhatsApp ao `notification_phone` do super_admin (dedup de 30min para não spammar).
+
+**3.1 — Documentar capacidade (operacional, sem código)**
+
+- Atualizar `LAUNCH_OPS.md` com:
+  - RAM mínima Easypanel para 100 instâncias Evolution simultâneas
+  - 3 réplicas worker-portal recomendadas
+  - Limites Whapi/Evolution por canal
+- Checklist de "Antes de abrir 100 consultores".
+
+**Verificação:** rodar `minio-quota-check` manualmente → ver linha em `system_health`. Derrubar instância de teste por 6min → super_admin recebe alerta.
 
 ---
 
-## Ordem de execução proposta
+## Ordem & Rollback
 
 ```text
-Hoje:        Fase 0 → Fase 1 → Fase 2 → Fase 3        (bloqueadores resolvidos)
-Soft launch: 10 consultores piloto por 48h
-+48h:        Fase 4 em lotes de 2-3 itens             (altos)
-+1 semana:   Médios (B2, B3, B9, B14, F3, F7, F11)
+Hoje:   Lote 1 (B6 + F10)              → testar 24h
++24h:   Lote 2 (F2 + F6, F2 com flag)  → testar 48h
++48h:   Lote 3 (F12 + 3.5 + docs)      → release
 ```
 
-## Como garantir "não quebra nada"
+Cada lote é independente. Kill switch global da Fase 0 cobre qualquer regressão de bot. Flag `resolver_strict_mode` permite reverter F2 sem deploy.
 
-- **Cada lote tem 1 verificação obrigatória** antes de seguir (console limpo, network sem 4xx/5xx novos, ou query confirmando estado esperado).
-- **Nenhum arquivo `_shared/` é reescrito** — só ganha helpers novos.
-- **Nenhuma migration faz `DROP` ou `ALTER` destrutivo** — só `ADD COLUMN ... DEFAULT` e `CREATE TABLE/POLICY`.
-- **Flags onde houver dúvida** (`bulk_send_v2`, `bot_global_enabled`) permitem reverter sem deploy.
-- **Tudo que toca bot tem o kill switch da Fase 0** como rede de segurança.
+## Detalhes técnicos
 
-## Decisões que preciso de você antes de implementar
+- **Arquivos tocados Lote 1:** `FlowQuickBar.tsx`, `SendSequenceDialog.tsx` (se existir), `whapi-webhook/handlers/conversational/welcome.ts`
+- **Arquivos tocados Lote 2:** `src/lib/flowStepResolver.ts`, `supabase/functions/_shared/flow/resolver.ts`, `recover-stuck-otp/index.ts`, migration `app_settings.resolver_strict_mode boolean default false`
+- **Arquivos tocados Lote 3:** nova `supabase/functions/minio-quota-check/index.ts`, `SystemHealthPanel.tsx`, `instance-health-check/index.ts`, `LAUNCH_OPS.md`
 
-1. Posso começar pela **Fase 0 + Fase 1** já? (são as mais seguras e destravam o resto) sim
-2. Para o opt-out "SAIR": ok criar a coluna `do_not_contact` em `customers`? Sim
-3. Quer que o `CookieBanner` use design igual ao da LP atual (verde glassmorphism) ou mais discreto? Atual
+## Decisão
+
+Começo pelo **Lote 1 (B6 + F10)** sim

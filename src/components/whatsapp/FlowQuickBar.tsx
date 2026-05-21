@@ -175,10 +175,15 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
   const confirmSendFull = useCallback(async () => {
     if (!previewStep) return;
     const step = previewStep;
+    abortRef.current = false;
     setSendingId(step.id);
+    setSeq({ current: 1, total: 1 });
+    if (abortRef.current) { setSendingId(null); setSeq(null); setPreviewStep(null); toast({ title: "⏹️ Envio cancelado" }); return; }
     const res = await invokeStep(step.id);
     setSendingId(null);
+    setSeq(null);
     setPreviewStep(null);
+    if (abortRef.current) { toast({ title: "⏹️ Envio cancelado" }); return; }
     if (res.ok) toast({ title: `✅ Passo enviado`, description: step.title || step.step_key || `Passo ${step.position + 1}` });
   }, [previewStep, variant]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -188,9 +193,12 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
   async function runFromHere(fromIdx: number) {
     const step = steps[fromIdx];
     if (!step) return;
+    abortRef.current = false;
     setSeq({ current: 1, total: 1 });
     setOpen(false);
+    if (abortRef.current) { setSeq(null); toast({ title: "⏹️ Envio cancelado" }); return; }
     const res = await invokeStep(step.id);
+    if (abortRef.current) { setSeq(null); toast({ title: "⏹️ Envio cancelado" }); return; }
     if (res.ok) toast({ title: "✅ Passo enviado", description: `Aguarde o lead responder antes do próximo.` });
     setSeq(null);
   }
