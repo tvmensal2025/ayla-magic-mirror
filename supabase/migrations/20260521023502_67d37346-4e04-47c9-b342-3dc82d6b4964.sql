@@ -1,0 +1,2 @@
+ALTER TABLE public.customers DROP CONSTRAINT IF EXISTS customers_flow_variant_check;
+ALTER TABLE public.customers ADD CONSTRAINT customers_flow_variant_check CHECK (flow_variant IS NULL OR flow_variant = ANY (ARRAY['A','B','C']));
