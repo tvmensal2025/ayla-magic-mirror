@@ -100,7 +100,7 @@ export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, 
               }`}
             >
               <div className="flex items-start justify-between mb-1.5">
-                <span className={`text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded ${sent ? "bg-primary text-primary-foreground" : "bg-secondary text-primary"}`}>#{i + 1}</span>
+                <span className={`text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded ${sent ? "bg-primary text-primary-foreground" : "bg-secondary text-primary"}`}>Passo {s.position}</span>
                 {sent && <Check className="w-3.5 h-3.5 text-primary drop-shadow-[0_0_4px_hsl(var(--primary))]" />}
               </div>
               <p className="text-xs font-semibold leading-tight line-clamp-2 min-h-[2rem]">
