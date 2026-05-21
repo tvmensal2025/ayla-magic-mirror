@@ -31,6 +31,13 @@ const corsHeaders = {
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY") || "";
 
+function inferNameSource(name: string | null | undefined, currentSource: string | null | undefined): string {
+  const src = String(currentSource || "").toLowerCase();
+  if (src) return src;
+  const value = String(name || "").trim();
+  return value ? "whatsapp_profile" : "unknown";
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -77,16 +84,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (como se desconectado) ──
-    // Antes de outboundHuman, dedup, customer/notify/conversation: se o switch
-    // estiver OFF, simplesmente ignoramos a mensagem. Nada é criado, nada é
-    // notificado, nem mesmo dedup é consumido.
-    if (await isConsultantAIDisabled(supabase, superAdminConsultantId)) {
-      console.log(`🛑 [global-off-silent] IA desligada — ignorando inbound`);
-      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // IA global OFF deve silenciar apenas respostas automáticas. O inbound ainda
+    // precisa ser salvo e alimentar captura (ex.: cliente digitou o nome após "Pedir nome").
+    const globalAiDisabled = await isConsultantAIDisabled(supabase, superAdminConsultantId);
 
     // ─── Outbound humano (consultor digitou no WhatsApp Business/app) ─
     if ((parsed as any).outboundHuman) {
