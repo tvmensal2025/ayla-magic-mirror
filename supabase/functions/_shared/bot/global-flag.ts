@@ -27,3 +27,24 @@ export async function isBotGloballyEnabled(supabase: SupabaseClient): Promise<bo
 export function clearBotGlobalFlagCache() {
   _cache = null;
 }
+
+// F2 — resolver strict mode flag (default false). Quando true, o bot-flow
+// resolver NÃO reseta para aguardando_conta quando custom step não bate.
+let _strictCache: { enabled: boolean; t: number } | null = null;
+
+export async function isResolverStrictMode(supabase: SupabaseClient): Promise<boolean> {
+  if (_strictCache && Date.now() - _strictCache.t < TTL_MS) return _strictCache.enabled;
+  try {
+    const { data } = await supabase
+      .from("app_settings")
+      .select("resolver_strict_mode")
+      .eq("id", "global")
+      .maybeSingle();
+    const enabled = data ? !!(data as any).resolver_strict_mode : false;
+    _strictCache = { enabled, t: Date.now() };
+    return enabled;
+  } catch {
+    return false;
+  }
+}
+
