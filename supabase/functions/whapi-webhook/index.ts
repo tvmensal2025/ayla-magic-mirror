@@ -493,6 +493,60 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ─── ✅ Captação manual: cliente respondendo confirmação de dados ────
+    // Se consultor clicou "Pedir ao cliente" e marcou *_confirmation_by='awaiting_client',
+    // interpreta "SIM/OK/CORRETO" como confirmação e reage.
+    try {
+      if (messageText && (customer as any).capture_mode === "manual") {
+        const { data: confState } = await supabase
+          .from("customers")
+          .select("bill_data_confirmation_by, bill_data_confirmed_at, doc_data_confirmation_by, doc_data_confirmed_at")
+          .eq("id", customer.id).maybeSingle();
+        const awaitingBill = (confState as any)?.bill_data_confirmation_by === "awaiting_client" && !(confState as any)?.bill_data_confirmed_at;
+        const awaitingDoc = (confState as any)?.doc_data_confirmation_by === "awaiting_client" && !(confState as any)?.doc_data_confirmed_at;
+        if (awaitingBill || awaitingDoc) {
+          const norm = String(messageText).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+          const isYes = /^(sim|ok|certo|correto|confere|isso|isso mesmo|perfeito|tudo certo|s|👍|✅|confirmo|positivo|exato|tudo certinho)/i.test(norm);
+          const isNo = /^(nao|n|errado|incorreto|tem erro|corrige|corrigir)/i.test(norm);
+          if (isYes) {
+            const patch: Record<string, any> = {};
+            const now = new Date().toISOString();
+            if (awaitingBill) { patch.bill_data_confirmed_at = now; patch.bill_data_confirmation_by = "client"; }
+            if (awaitingDoc) { patch.doc_data_confirmed_at = now; patch.doc_data_confirmation_by = "client"; }
+            await supabase.from("customers").update(patch).eq("id", customer.id);
+            await supabase.from("conversations").insert({
+              customer_id: customer.id, message_direction: "inbound",
+              message_text: messageText, message_type: "text",
+              conversation_step: customer.conversation_step,
+            });
+            const reply = "✅ Obrigado pela confirmação! Vamos seguir com o cadastro 😉";
+            try { await sender.sendText(remoteJid, reply); } catch (_e) { /* ignore */ }
+            await supabase.from("conversations").insert({
+              customer_id: customer.id, message_direction: "outbound",
+              message_text: reply, message_type: "text",
+              conversation_step: customer.conversation_step,
+            });
+            console.log(`[capture-confirm] customer=${customer.id} confirmou: bill=${awaitingBill} doc=${awaitingDoc}`);
+            return new Response(JSON.stringify({ ok: true, msg: "capture_confirmed", bill: awaitingBill, doc: awaitingDoc }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          if (isNo) {
+            // Reset flag pra consultor agir manualmente
+            const patch: Record<string, any> = {};
+            if (awaitingBill) patch.bill_data_confirmation_by = null;
+            if (awaitingDoc) patch.doc_data_confirmation_by = null;
+            await supabase.from("customers").update(patch).eq("id", customer.id);
+            // Não envia reply aqui — deixa o fluxo/consultor decidir o que fazer com a correção.
+            console.log(`[capture-confirm] customer=${customer.id} disse NÃO/correção — flags resetadas`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[capture-confirm] err:", (e as Error).message);
+    }
+
+
     // ─── 🆘 HANDOFF: cliente pediu pra falar com humano ────────────────
     if (messageText && detectHandoffIntent(messageText)) {
       const pausedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
