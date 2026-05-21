@@ -852,15 +852,37 @@ Deno.serve(async (req) => {
 
       engineUsed = engine;
 
+      // 🤫 Em silentMode (IA manual + arquivo recebido), o pipeline precisa
+      // rodar (download, OCR, updates) mas NUNCA enviar texto/botões/mídia
+      // ao cliente. Wrap o sender com no-ops para envio outbound.
+      const engineSender = silentMode
+        ? {
+            sendText: async (_jid: string, _text: string) => {
+              console.log(`🤫 [silent-capture] sendText suprimido`);
+              return true;
+            },
+            sendButtons: async (_jid: string, _msg: string, _btns: any[]) => {
+              console.log(`🤫 [silent-capture] sendButtons suprimido`);
+              return true;
+            },
+            sendMedia: async (_jid: string, _url: string, _cap: string, _type: string) => {
+              console.log(`🤫 [silent-capture] sendMedia suprimido`);
+              return true;
+            },
+            sendPresence: async () => true,
+            downloadMedia: sender.downloadMedia,
+          }
+        : sender;
+
       const runEngine = async () => engine === "flow"
         ? await runConversationalFlow({
-            supabase, sender, customer, consultorId, nomeRepresentante,
+            supabase, sender: engineSender, customer, consultorId, nomeRepresentante,
             remoteJid, phone, messageText, buttonId, isFile, isButton,
             hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
           })
         : await runBotFlow({
-            supabase, sender, customer, consultorId, nomeRepresentante,
+            supabase, sender: engineSender, customer, consultorId, nomeRepresentante,
             remoteJid, phone, messageText, buttonId, isFile, isButton,
             hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
