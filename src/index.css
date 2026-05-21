@@ -388,8 +388,74 @@ html {
   background-size: 200% 200%;
 }
 .capture-card-flip { transform-style: preserve-3d; perspective: 800px; }
+
+/* ═══════════════ Game Mode ═══════════════ */
+@keyframes game-aurora {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(3%, -2%) scale(1.05); }
+}
+@keyframes game-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes game-glow {
+  0%, 100% { box-shadow: 0 0 24px hsl(var(--primary)/0.5); }
+  50% { box-shadow: 0 0 36px hsl(var(--primary)/0.8); }
+}
+@keyframes game-pop {
+  0% { transform: scale(0.6) rotate(-8deg); opacity: 0; }
+  60% { transform: scale(1.08) rotate(2deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+@keyframes game-rise {
+  0% { transform: translate(-50%, 20px); opacity: 0; }
+  20% { transform: translate(-50%, -8px); opacity: 1; }
+  100% { transform: translate(-50%, -80px); opacity: 0; }
+}
+@keyframes game-confetti {
+  0% { transform: translate(0, -20vh) rotate(0); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: translate(var(--cx, 0), 60vh) rotate(540deg); opacity: 0; }
+}
+@keyframes game-xp-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.animate-game-bounce { animation: game-bounce 1.4s ease-in-out infinite; }
+.animate-game-glow { animation: game-glow 2.2s ease-in-out infinite; }
+.animate-game-pop { animation: game-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.animate-game-rise { animation: game-rise 1.4s ease-out forwards; }
+.game-confetti {
+  animation: game-confetti 2.2s ease-out forwards;
+}
+.game-aurora {
+  background:
+    radial-gradient(ellipse 40% 30% at 20% 30%, hsl(var(--primary)/0.35), transparent 60%),
+    radial-gradient(ellipse 35% 35% at 80% 20%, hsl(160 90% 45%/0.25), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, hsl(45 95% 55%/0.18), transparent 60%);
+  filter: blur(40px);
+  animation: game-aurora 14s ease-in-out infinite;
+}
+.game-stars {
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, hsl(var(--primary)/0.7), transparent),
+    radial-gradient(1px 1px at 47% 73%, hsl(45 95% 70%/0.7), transparent),
+    radial-gradient(1.5px 1.5px at 78% 32%, hsl(160 90% 55%/0.7), transparent),
+    radial-gradient(1px 1px at 25% 88%, hsl(var(--primary)/0.6), transparent),
+    radial-gradient(1px 1px at 92% 64%, hsl(45 95% 70%/0.6), transparent),
+    radial-gradient(1.5px 1.5px at 65% 12%, hsl(160 90% 55%/0.6), transparent);
+}
+.game-xp-shimmer {
+  background: linear-gradient(90deg, transparent 0%, hsl(0 0% 100% / 0.35) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: game-xp-shimmer 2.4s linear infinite;
+  mix-blend-mode: overlay;
+}
 @media (prefers-reduced-motion: reduce) {
   .animate-xp-rise, .animate-combo-pop, .animate-shimmer-gold,
   .animate-card-flip, .animate-field-flash, .animate-bg-drift,
-  .animate-boss-pulse { animation: none !important; }
+  .animate-boss-pulse, .animate-game-bounce, .animate-game-glow,
+  .animate-game-pop, .animate-game-rise, .game-confetti,
+  .game-aurora, .game-xp-shimmer { animation: none !important; }
 }
+
