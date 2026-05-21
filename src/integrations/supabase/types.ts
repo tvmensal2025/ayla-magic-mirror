@@ -2308,6 +2308,7 @@ export type Database = {
           media_message_id: string | null
           media_storage: string | null
           name: string | null
+          name_ask_sent_at: string | null
           name_mismatch_acknowledged_at: string | null
           name_mismatch_flag: boolean
           name_mismatch_reason: string | null
@@ -2432,6 +2433,7 @@ export type Database = {
           media_message_id?: string | null
           media_storage?: string | null
           name?: string | null
+          name_ask_sent_at?: string | null
           name_mismatch_acknowledged_at?: string | null
           name_mismatch_flag?: boolean
           name_mismatch_reason?: string | null
@@ -2556,6 +2558,7 @@ export type Database = {
           media_message_id?: string | null
           media_storage?: string | null
           name?: string | null
+          name_ask_sent_at?: string | null
           name_mismatch_acknowledged_at?: string | null
           name_mismatch_flag?: boolean
           name_mismatch_reason?: string | null
