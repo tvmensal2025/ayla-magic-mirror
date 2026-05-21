@@ -2104,6 +2104,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             const _vars = {
               "{valor}": _fmtBRL(_valor),
               "{{valor}}": _fmtBRL(_valor),
+              "{valor_conta}": _fmtBRL(_valor),
+              "{{valor_conta}}": _fmtBRL(_valor),
+              "{conta}": _fmtBRL(_valor),
+              "{{conta}}": _fmtBRL(_valor),
               "{economia_mensal}": _fmtBRL(_valor * 0.20),
               "{{economia_mensal}}": _fmtBRL(_valor * 0.20),
               "{economia_anual}": _fmtBRL(_valor * 0.20 * 12),
