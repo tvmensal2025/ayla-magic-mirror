@@ -1,82 +1,120 @@
-## Objetivo
+## Princípios (não-negociáveis)
 
-Auditar o sistema em 3 frentes antes de abrir o produto para 100 novos consultores trabalhando em paralelo, gerando um relatório acionável (sem alterar código nesta fase) e, em seguida, executando as correções priorizadas.
-
----
-
-## Frente 1 — Auditoria de Botões (UI/UX)
-
-Varredura sistemática de cada CTA crítico em:
-
-1. **Captação** (`CaptacaoPanel`, `CaptureStepsGrid`, `CaptureSheet`, `SendSequenceDialog`)
-  - Botão "Devolver", "Gerar texto (IA)", "Enviar sequência", troca de passos custom/legacy
-  - Estados: loading, disabled, erro, sucesso, double-click protection
-2. **WhatsApp CRM** (`FlowQuickBar`, `ChatView`, `MessageComposer`, `KanbanBoard`, `BulkSendPanel`)
-  - Pré-visualização, envio individual, envio em massa, takeover humano, pausar bot
-  - Verificar se o footer dos dialogs nunca sai da tela em 360px–1920px
-3. **Modo Game** (`GameModeToggle`, `PlayerHud`, `QuestsBar`)
-  - Toggle persiste? XP soma corretamente em produção? Som mutado por padrão?
-4. **Admin / Super Admin** (templates, fluxos, captação intel, saúde do bot)
-  - Botões de salvar/duplicar/forçar reset, RLS em UPDATE de templates
-
-Checklist por botão: aria-label, contraste, tamanho mínimo (44x44 mobile), feedback visual, idempotência, tratamento de erro com toast, telemetria.
+1. **Aditivo, nunca destrutivo** — toda correção entra atrás de uma flag ou como camada nova (ex.: wrapper de botão, helper, util). Nada de reescrever componentes que já estão estáveis (`FlowQuickBar`, `paused.ts`, `flowStepResolver` core).
+2. **Lotes pequenos com verificação** — cada lote = 1 PR mental, com 1 checagem objetiva (log, console, network ou query) antes de seguir.
+3. **Sem mexer no fluxo do bot em produção sem feature flag** — F2/F6/F10 ficam atrás de `app_settings.bot_global_enabled` + flag específica por correção.
+4. **RLS antes de UI** — qualquer mudança que toque tabela passa por migration revisada (linter limpo).
+5. **Rollback em 1 clique** — toda mudança de comportamento de bot tem kill switch (a flag global `bot_global_enabled` já é o primeiro item).
 
 ---
 
-## Frente 2 — Auditoria do Fluxo (Bot WhatsApp)
+## Fase 0 — Rede de segurança (1h, zero risco)
 
-1. **Resolver de passos** (`flowStepResolver`, `whapi-webhook/handlers/bot-flow.ts`, `manual-step-send`)
-  - Passo certo na ordem certa (1→2→3…) em fluxos custom A/B/C
-  - Garantir que "Devolver" para passo manual não pula nem repete
-2. **Variantes A/B/C** — multi-variant lookup com filter por variant (regressão conhecida)
-3. **Takeover humano** — `bot_paused` + `assigned_human_id` silenciam TODOS os crons
-4. **Captação OCR → Portal Worker → OTP → Assinatura** — caminho feliz + 5 erros comuns
-5. **Notificações de novo lead e handoff** — `notification_phone`, re-entrada sem inbound 24h
-6. **Crons** (`bot-stuck-recovery`, `ai-followup-cron`, `bot-loop-watchdog`, `send-scheduled-messages`) — sem loops, sem envio duplicado, sem mensagem em lead pausado
+Antes de tocar em qualquer botão crítico, criar o que permite desligar tudo sem código:
 
-Validação por simulação (`flowSimulator`) cobrindo todos os 38 steps Evolution.
+1. **Migration: `app_settings**` com `bot_global_enabled boolean default true` + RLS só leitura para authenticated, escrita só super_admin.
+2. **Helper `_shared/bot/global-flag.ts**` lido por: `whapi-webhook`, `evolution-webhook`, todos os crons (`bot-stuck-recovery`, `ai-followup-cron`, `bot-loop-watchdog`, `send-scheduled-messages`). Se `false` → early return sem erro.
+3. **Botão no SuperAdmin** "Pausar bot global" (toggle simples) — sem mexer em nada visual existente.
+
+Verificação: virar a flag, mandar uma mensagem ao bot de teste, confirmar silêncio total. Religar.
 
 ---
 
-## Frente 3 — Prontidão para Lançamento (100 consultores)
+## Fase 1 — Bloqueadores de UI (sem tocar em bot) (2-3h)
 
-1. **Infra & escala**
-  - Tamanho da instância Supabase (ver "Cloud → Overview → Advanced settings")
-  - Capacidade do worker-portal (fila, paralelismo, retry)
-  - Compress-worker (vídeos) — fila + ffmpeg
-  - MinIO (espaço, buckets, política de retenção)
-2. **Secrets obrigatórios** — `EVOLUTION_API_URL/KEY`, `GEMINI_API_KEY`, `MINIO_*`, `WORKER_SECRET`, `FALLBACK_EMAIL/PHONE`
-3. **RLS multi-tenant** — `linter` + revisão manual de `customers`, `bot_flows`, `whatsapp_instances`, `templates`, `user_roles`
-4. **Onboarding de 100 consultores**
-  - Importação em massa (CSV/Excel) de consultores + instâncias Evolution deterministicamente nomeadas (`igreen-{slug}`)
-  - QR Code em batelada e monitoramento de conexão (`whatsapp-bot` health, 60s polling)
-  - Fluxo default A/B/C atribuído automaticamente
-5. **Observabilidade**
-  - Painel SuperAdmin (Captação Intel, Bot Health Intel, Stuck Leads, Worker Phase Timeline)
-  - Alertas: bot loop, OTP timeout, worker offline, instância desconectada
-6. **Legal / compliance** — LGPD na LP, política de privacidade, opt-out WhatsApp, termos do consultor
-7. **SEO + Pixels** — meta tags por consultor, GA4, Meta Pixel, CAPI server-side
-8. **Plano de rollback** — feature flag para desligar bot global, takeover em massa, backup do schema
+Itens isolados ao frontend, risco mínimo.
+
+### B7 — Feedback de progresso no envio multi-parte
+
+- Em `FlowQuickBar` / `SendSequenceDialog`: adicionar estado `{ current, total }` no `confirmSendFull`.
+- Botão mostra `Enviando 2/5…` e fica `disabled` até terminar/abortar.
+- Não muda a lógica de envio — só observa o loop existente.
+
+### B13 — Confirmação no "Forçar reset conversa"
+
+- Trocar `onClick` direto por `AlertDialog` (componente já existe no projeto) com nome do cliente no corpo.
+- Botão destrutivo só habilita após o user digitar "RESETAR" ou clicar 2× no confirm (padrão shadcn).
+
+### B1 — Double-click protection em `sendStep`
+
+- Em `CaptureStepsGrid` o `sending` já é `string | null` mas só bloqueia o passo atual. Trocar para `Set<string>` e adicionar `disabled={sending.has(s.id)}` em cada card, mais `e.currentTarget.disabled = true` defensivo.
+
+### B10 — Confirmação no takeover + undo
+
+- No botão "Assumir": toast com action `Desfazer` (10s) que restaura `bot_paused=false` e `assigned_human_id=null`.
+
+Verificação: testar cada botão no preview, conferir console sem erro, network sem requests duplicados.
 
 ---
 
-## Entregáveis desta auditoria
+## Fase 2 — Bloqueador de envio em massa (B8) (1-2h)
+
+Único item desta fase porque mexe num caminho usado por todos os consultores.
+
+- Em `BulkSendPanel`: introduzir helper `sendInChunks(items, chunkSize=5, delayMs=3000, perItemDelay=1500-2500)`.
+- **Não substituir** o sender atual — envolvê-lo. Se a flag `bulk_send_v2` (localStorage por enquanto, default ON em dev / OFF em prod até validar) estiver OFF, comportamento antigo.
+- UI: barra de progresso `X/Y enviados · Z falhas` + botão Cancelar que dá `break` no loop entre chunks.
+
+Verificação: rodar contra 10 leads de teste, ver no log Evolution que respeitou 5×3s, sem 429.
+
+---
+
+## Fase 3 — Compliance & Rollback (B7-equivalente para legal) (2h)
+
+Bloqueia GO mas não exige refactor.
+
+### 3.6 LGPD
+
+- Adicionar `<CookieBanner />` (componente novo, simples, opt-in para analytics) montado no layout das LPs do consultor.
+- Link "Política de Privacidade" no rodapé das LPs apontando para `/politica-privacidade` (página estática nova).
+
+### 3.6 Opt-out "SAIR"
+
+- Em `whapi-webhook/handlers/conversational/index.ts`, **antes** de qualquer roteamento, detectar `messageText.trim().toUpperCase() === "SAIR"` → set `bot_paused=true, bot_paused_reason='opt_out', do_not_contact=true` (coluna nova via migration), responder UMA confirmação, return.
+- Migration: adicionar `do_not_contact boolean default false` em `customers` + filtro em todos os crons/bulk send.
+
+### 3.1 Evolution capacity
+
+- Não é código: documentar em `LAUNCH_OPS.md` o requisito (RAM, plano Easypanel). Confirmar com user antes de abrir os 100.
+
+Verificação: mandar "SAIR" em conversa de teste, ver `do_not_contact=true`, conferir que cron não dispara.
+
+---
+
+## Fase 4 — Altos (pós soft-launch de 10 pilotos, 48h)
+
+Só entra **depois** que os 10 pilotos rodaram estáveis. Mantém a opção de adiar sem bloquear o GO.
+
+- **B6** — Abort real em `runFromHere`: checar `abortRef.current` no início de cada iteração do loop e antes de cada `sendPart`.
+- **B12** — Confirmar `WITH CHECK` em RLS de `templates` rodando linter + teste UPDATE como consultor não-dono.
+- **F2** — Em `flowStepResolver`: quando custom não mapeia, em vez de cair no welcome, logar `console.warn('[resolver] no legacy mapping', stepKey)` e retornar `null` para que o handler mantenha o estado atual.
+- **F6** — Estender `recover-stuck-otp` para também cobrir `conversation_step='finalizando'` parado >10min.
+- **F10** — Try/catch em download de vídeo variant C; em falha, fallback para variant B no mesmo turno.
+- **F12** — Worker novo `minio-quota-check` (cron 15min) → grava em `system_health` → alerta no SuperAdmin >80%.
+- **3.1 worker-portal** — escalar para 3 réplicas no Easypanel (operacional, não código).
+- **3.5 alertas** — `instance-health-check` cron já existe; adicionar notificação ao `notification_phone` do super_admin quando >5min desconectado ou worker offline.
+
+---
+
+## Ordem de execução proposta
 
 ```text
-1. Relatório AUDITORIA_LANCAMENTO.md com 3 seções (botões, fluxo, lançamento)
-   - Cada item classificado: CRÍTICO / ALTO / MÉDIO / BAIXO
-   - Para cada CRÍTICO: arquivo + linha + correção sugerida
-2. Checklist GO/NO-GO (bloqueadores vs. nice-to-have)
-3. Script de seed para os 100 consultores (consultores + instâncias)
-4. Painel "Launch Readiness" no SuperAdmin com semáforo por área
+Hoje:        Fase 0 → Fase 1 → Fase 2 → Fase 3        (bloqueadores resolvidos)
+Soft launch: 10 consultores piloto por 48h
++48h:        Fase 4 em lotes de 2-3 itens             (altos)
++1 semana:   Médios (B2, B3, B9, B14, F3, F7, F11)
 ```
 
-## Execução proposta (após aprovação)
+## Como garantir "não quebra nada"
 
-Fase A (1 passo): rodar a auditoria e gerar o relatório + checklist.
-Fase B: você revisa o relatório e me diz quais CRÍTICOS atacar primeiro.
-Fase C: implemento correções em lotes pequenos com verificação.
+- **Cada lote tem 1 verificação obrigatória** antes de seguir (console limpo, network sem 4xx/5xx novos, ou query confirmando estado esperado).
+- **Nenhum arquivo `_shared/` é reescrito** — só ganha helpers novos.
+- **Nenhuma migration faz `DROP` ou `ALTER` destrutivo** — só `ADD COLUMN ... DEFAULT` e `CREATE TABLE/POLICY`.
+- **Flags onde houver dúvida** (`bulk_send_v2`, `bot_global_enabled`) permitem reverter sem deploy.
+- **Tudo que toca bot tem o kill switch da Fase 0** como rede de segurança.
 
-### Pergunta antes de executar
+## Decisões que preciso de você antes de implementar
 
-Quer que eu já gere também o **script de onboarding em massa dos 100 consultores** (importação + criação de instâncias Evolution + atribuição A/B/C) na Fase A, ou prefere só o relatório nesta primeira rodada? Sim
+1. Posso começar pela **Fase 0 + Fase 1** já? (são as mais seguras e destravam o resto) sim
+2. Para o opt-out "SAIR": ok criar a coluna `do_not_contact` em `customers`? Sim
+3. Quer que o `CookieBanner` use design igual ao da LP atual (verde glassmorphism) ou mais discreto? Atual
