@@ -2323,6 +2323,8 @@ export type Database = {
           error_message: string | null
           facial_confirmed_at: string | null
           facial_link_sent_at: string | null
+          finalized_at: string | null
+          finalized_by: string | null
           flow_variant: string | null
           followup_count: number
           id: string
@@ -2458,6 +2460,8 @@ export type Database = {
           error_message?: string | null
           facial_confirmed_at?: string | null
           facial_link_sent_at?: string | null
+          finalized_at?: string | null
+          finalized_by?: string | null
           flow_variant?: string | null
           followup_count?: number
           id?: string
@@ -2593,6 +2597,8 @@ export type Database = {
           error_message?: string | null
           facial_confirmed_at?: string | null
           facial_link_sent_at?: string | null
+          finalized_at?: string | null
+          finalized_by?: string | null
           flow_variant?: string | null
           followup_count?: number
           id?: string
