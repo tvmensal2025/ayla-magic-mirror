@@ -215,8 +215,8 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
             )}
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" side="top" className="w-80 p-0">
-          <div className="px-3 py-2 border-b border-border flex items-center justify-between gap-2">
+        <PopoverContent align="start" side="top" className="w-[22rem] p-0">
+          <div className="px-3 py-2 border-b border-border flex items-center justify-between gap-2 bg-gradient-to-r from-primary/10 to-transparent">
             <div className="min-w-0">
               <p className="text-[11px] text-muted-foreground">Enviar passo do fluxo para</p>
               <p className="text-sm font-semibold truncate">{customerName || customerId}</p>
@@ -264,7 +264,7 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
             </div>
           )}
 
-          <div className="max-h-72 overflow-y-auto py-1">
+          <div className="max-h-[50vh] overflow-y-auto py-1">
             {loading ? (
               <div className="flex items-center justify-center py-6"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>
             ) : steps.length === 0 ? (
@@ -274,7 +274,7 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
                 const isSending = sendingId === s.id;
                 return (
                   <div key={s.id} className="flex items-center gap-1.5 px-2 py-1.5 hover:bg-secondary/40 rounded-md mx-1">
-                    <span className="text-[10px] font-mono text-muted-foreground w-5 shrink-0">{String(i + 1).padStart(2, "0")}</span>
+                    <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold shrink-0">{i + 1}</span>
                     <span className="text-xs text-foreground flex-1 truncate" title={s.title || s.step_key || ""}>
                       {s.title || s.step_key || `Passo ${i + 1}`}
                     </span>
@@ -302,11 +302,11 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
             )}
           </div>
 
-          <div className="border-t border-border px-3 py-2 flex items-center justify-between">
-            <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-              <span className="flex items-center gap-1"><Eye className="w-3 h-3" /> Completo</span>
-              <span className="flex items-center gap-1"><ListChecks className="w-3 h-3" /> 1 a 1</span>
-              <span className="flex items-center gap-1"><FastForward className="w-3 h-3" /> Daqui</span>
+          <div className="border-t border-border px-3 py-2 flex items-center justify-between bg-card">
+            <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 text-primary"><Eye className="w-3 h-3" /> Completo</span>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted"><ListChecks className="w-3 h-3" /> 1 a 1</span>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600"><FastForward className="w-3 h-3" /> Daqui</span>
             </div>
             <a href="/admin/fluxos" target="_blank" rel="noreferrer"
               className="text-[10px] text-primary hover:underline flex items-center gap-1">
