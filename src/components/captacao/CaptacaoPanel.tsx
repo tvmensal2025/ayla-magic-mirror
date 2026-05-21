@@ -41,6 +41,18 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const { today, week, streak, bump } = useCaptureScoreboard(consultantId);
   const { toast } = useToast();
   const { templates } = useTemplates(consultantId);
+  const session = useCaptureSession(selectedId);
+  const [autoMode, setAutoMode] = useState<boolean>(() => {
+    try { return localStorage.getItem("capture_auto_mode") === "1"; } catch { return false; }
+  });
+  const toggleAutoMode = () => {
+    setAutoMode((v) => {
+      const next = !v;
+      try { localStorage.setItem("capture_auto_mode", next ? "1" : "0"); } catch {}
+      sonnerToast.success(next ? "🤖 Auto-pilot ligado — o próximo passo dispara sozinho após o lead responder." : "👤 Modo manual — você dispara cada passo.");
+      return next;
+    });
+  };
 
   // Game mode state
   const { enabled: gameOn, toggle: toggleGame, sound, toggleSound } = useGameMode(consultantId);
