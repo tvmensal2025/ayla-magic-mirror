@@ -44,6 +44,8 @@ export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, 
 
 
   const sendStep = async (stepId: string, label: string, continueFlow = true) => {
+    // B1 — defesa anti double-click: ignora segundo clique enquanto qualquer envio rola.
+    if (sending) return;
     setSending(stepId);
     try {
       const { data, error } = await supabase.functions.invoke("manual-step-send", {
@@ -118,7 +120,8 @@ export function CaptureStepsGrid({ consultantId, customerId, sentSteps, onSent, 
                   variant={sent ? "outline" : "default"}
                   className="h-7 px-2 text-[11px] flex-1"
                   onClick={() => sendStep(s.id, s.title || s.step_key || `Passo ${s.position}`)}
-                  disabled={isSending}
+                  disabled={!!sending}
+                  aria-busy={isSending}
                 >
                   {isSending ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Send className="w-3 h-3 mr-1" /> Enviar</>}
                 </Button>
