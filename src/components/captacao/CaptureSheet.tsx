@@ -204,18 +204,18 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
 
         {/* Tabs */}
         <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className={`mx-2.5 grid grid-cols-2 ${expanded ? "mt-2 h-9" : "mt-1 h-7"}`}>
-            <TabsTrigger value="passos" className="gap-1 text-[11px]">
-              <ListChecks className="w-3 h-3" /> Passos
-              <span className="ml-0.5 text-[9px] bg-primary/15 px-1 py-px rounded-full font-bold">{sentSteps.size}</span>
+          <TabsList className={`mx-2 grid grid-cols-2 ${expanded ? "mt-2 h-9" : "mt-0.5 h-6"}`}>
+            <TabsTrigger value="passos" className={`gap-0.5 ${expanded ? "text-[11px]" : "text-[10px]"}`}>
+              <ListChecks className={expanded ? "w-3 h-3" : "w-2.5 h-2.5"} /> Passos
+              <span className={`ml-0.5 bg-primary/15 px-1 py-px rounded-full font-bold ${expanded ? "text-[9px]" : "text-[8px]"}`}>{sentSteps.size}</span>
             </TabsTrigger>
-            <TabsTrigger value="ficha" className="gap-1 text-[11px]">
-              <IdCard className="w-3 h-3" /> Ficha
-              <span className="ml-0.5 text-[9px] bg-primary/15 px-1 py-px rounded-full font-bold">{filledCount}/{totalFields}</span>
+            <TabsTrigger value="ficha" className={`gap-0.5 ${expanded ? "text-[11px]" : "text-[10px]"}`}>
+              <IdCard className={expanded ? "w-3 h-3" : "w-2.5 h-2.5"} /> Ficha
+              <span className={`ml-0.5 bg-primary/15 px-1 py-px rounded-full font-bold ${expanded ? "text-[9px]" : "text-[8px]"}`}>{filledCount}/{totalFields}</span>
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="passos" className={`flex-1 overflow-y-auto ${expanded ? "p-3 mt-2" : "p-2 mt-1"} mb-0 data-[state=inactive]:hidden`}>
+          <TabsContent value="passos" className={`flex-1 overflow-y-auto ${expanded ? "p-3 mt-2" : "px-1.5 py-1 mt-0.5"} mb-0 data-[state=inactive]:hidden`}>
             <CaptureStepsList
               consultantId={consultantId}
               customerId={customerId}
@@ -234,43 +234,38 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
           </TabsContent>
         </Tabs>
 
-        {/* Footer — compactado */}
+        {/* Footer — 1 linha só no compacto */}
         <footer
-          className={`border-t border-border/60 bg-card/80 backdrop-blur sticky bottom-0 z-20 ${expanded ? "p-3 space-y-2" : "px-2.5 pt-1.5 pb-1.5 space-y-1"}`}
-          style={{ paddingBottom: "max(0.375rem, env(safe-area-inset-bottom, 0px))" }}
+          className={`border-t border-border/60 bg-card/80 backdrop-blur sticky bottom-0 z-20 ${expanded ? "p-3 space-y-2" : "px-2 py-1"}`}
+          style={{ paddingBottom: "max(0.25rem, env(safe-area-inset-bottom, 0px))" }}
         >
           {customer?.conversation_step && ["finalizando", "portal_submitting", "aguardando_otp", "validando_otp"].includes(customer.conversation_step) && (
             <p className="text-[10px] text-center text-primary font-semibold animate-pulse">
               🚀 Portal: {customer.conversation_step.replace("_", " ")}…
             </p>
           )}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             <Button
               variant="outline"
               size="sm"
-              className={`shrink-0 gap-1 font-bold ${expanded ? "h-12 px-3 text-xs" : "h-9 px-2 text-[10px]"}`}
+              className={`shrink-0 gap-1 font-bold ${expanded ? "h-12 px-3 text-xs" : "h-7 px-1.5 text-[9px]"}`}
               onClick={() => setSeqOpen(true)}
               disabled={pendingSteps.length === 0 || needsName}
               title={needsName ? "Peça o nome do lead primeiro" : pendingSteps.length === 0 ? "Tudo enviado" : `Disparar ${pendingSteps.length} passos pendentes`}
             >
-              <Zap className={`${expanded ? "w-4 h-4" : "w-3 h-3"}`} /> Enviar tudo ({pendingSteps.length})
+              <Zap className={`${expanded ? "w-4 h-4" : "w-2.5 h-2.5"}`} /> Enviar tudo ({pendingSteps.length})
             </Button>
             <Button
               size="lg"
-              className={`flex-1 font-bold gap-1.5 ${expanded ? "h-12 text-base" : "h-9 text-xs"} ${canSubmit ? "animate-pulse" : ""}`}
+              className={`flex-1 font-bold gap-1 ${expanded ? "h-12 text-base" : "h-7 text-[10px]"} ${canSubmit ? "animate-pulse" : ""}`}
               onClick={handleSubmit}
               disabled={submitting || !customer?.name || !customer?.cpf}
               title={!customer?.name || !customer?.cpf ? "Precisa de nome e CPF" : "Enviar pro portal"}
             >
-              {submitting ? <Loader2 className={`${expanded ? "w-5 h-5" : "w-3.5 h-3.5"} animate-spin`} /> : <Trophy className={`${expanded ? "w-5 h-5" : "w-3.5 h-3.5"}`} />}
-              {canSubmit ? "CADASTRAR" : `${filledCount}/${totalFields}`}
+              {submitting ? <Loader2 className={`${expanded ? "w-5 h-5" : "w-3 h-3"} animate-spin`} /> : <Trophy className={`${expanded ? "w-5 h-5" : "w-3 h-3"}`} />}
+              {canSubmit ? "CADASTRAR" : `${filledCount}/${totalFields} · ${sentSteps.size}/10`}
             </Button>
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[9px] text-muted-foreground">
-              {filledCount}/{totalFields} · {sentSteps.size}/10
-            </span>
-            <Button variant="ghost" size="sm" className="text-[9px] text-muted-foreground h-5 px-1.5" onClick={disableCapture}>
+            <Button variant="ghost" size="sm" className={`shrink-0 text-muted-foreground ${expanded ? "h-12 text-xs px-2" : "h-7 px-1.5 text-[9px]"}`} onClick={disableCapture} title="Sair do modo captação">
               Sair
             </Button>
           </div>
