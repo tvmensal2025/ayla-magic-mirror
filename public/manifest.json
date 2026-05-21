@@ -1,12 +1,17 @@
 {
   "name": "IGREEN-SUPORTE",
-  "short_name": "IGREEN-SUPORTE",
+  "short_name": "iGreen",
   "description": "Suporte ao Licenciado iGreen Energy",
+  "id": "/admin",
   "start_url": "/admin",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#22c55e",
   "orientation": "portrait-primary",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "categories": ["business", "productivity"],
   "icons": [
     {
       "src": "/favicon.png",
@@ -18,6 +23,26 @@
       "src": "/apple-touch-icon.png",
       "sizes": "180x180",
       "type": "image/png"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "WhatsApp",
+      "short_name": "Chat",
+      "url": "/admin?tab=whatsapp",
+      "icons": [{ "src": "/apple-touch-icon.png", "sizes": "180x180" }]
+    },
+    {
+      "name": "CRM",
+      "short_name": "CRM",
+      "url": "/admin?tab=crm",
+      "icons": [{ "src": "/apple-touch-icon.png", "sizes": "180x180" }]
+    },
+    {
+      "name": "Captação",
+      "short_name": "Game",
+      "url": "/admin?tab=captacao",
+      "icons": [{ "src": "/apple-touch-icon.png", "sizes": "180x180" }]
     }
   ]
 }
