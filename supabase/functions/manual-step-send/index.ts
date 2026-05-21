@@ -109,12 +109,9 @@ Deno.serve(async (req) => {
       .eq("is_draft", false)
       .order("send_order", { ascending: true });
     let medias = ((mediaRows as any[]) || []).filter((m) => !!m?.url);
+    // Envio manual ignora a regra de variante (override humano).
     if (variant === "B") {
-      const before = medias.length;
-      medias = medias.filter((m) => String(m.kind).toLowerCase() !== "audio");
-      if (before !== medias.length) {
-        console.log(`[manual-step-send] variant=B: removed ${before - medias.length} audio media(s)`);
-      }
+      console.log(`[manual-step-send] variant=B detected but manual override — audios kept`);
     }
 
 
