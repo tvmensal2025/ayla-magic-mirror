@@ -1,11 +1,15 @@
 ---
-name: Lead name capture + auto gamification
-description: Bloqueio name_source=unknown no manual-step-send + botão "Pedir nome" + triggers que populam capture_field_events
+name: Lead Name & Gamification
+description: Captação ON por padrão em todo lead novo; painel ultra-compacto (36dvh) auto-abre minimizado; trigger BEFORE INSERT força capture_mode=manual; nome pedido via askLeadName.
 type: feature
 ---
-- `manual-step-send` retorna `name_not_captured_yet` (409) quando `customers.name_source='unknown'` e o passo escolhido não é "pedir nome". Bypass via `skipNameGuard:true`.
-- `isNameAskingStep`: detecta via captures[].field='name' ou regex em message_text.
-- Wrapper `src/lib/whatsapp/send.ts`: `sendStepWithFeedback` traduz `code` em toast PT-BR; `askLeadName` localiza o passo de nome no fluxo da variante e dispara com skipNameGuard.
-- `CaptureSheet`: botão "Pedir nome do lead" no header quando `name_source==='unknown'`.
-- Triggers `customers_gamify_on_insert/update` + `log_capture_event_if_new` populam `capture_field_events` automaticamente para `lead_entrou`, `name`, `electricity_bill_value`, `cadastro_finalizado` — não importa se a captura veio do bot, OCR ou consultor.
-- Códigos de erro padronizados em manual-step-send: `lead_sem_whatsapp`, `customer_no_phone`, `phone_invalid_format`, `no_active_flow`, `step_not_found`, `name_not_captured_yet`, `nothing_to_send`, `whapi_token_missing`, `phone_not_on_whatsapp`, `instance_disconnected`, `whapi_send_failed`, `partial_send`.
+
+**Captação automática**: trigger `customers_default_capture_mode` (BEFORE INSERT) seta `capture_mode='manual'` + `capture_started_at=now()` para todo lead novo, exceto quando já chega com `name` + `cpf` preenchidos. Vale para WhatsApp inbound, Excel import (`igreen_sync`/`sem_celular_`), criação manual.
+
+**Auto-abrir painel**: `ChatView` abre `CaptureSheet` automaticamente quando `capture_mode='manual'` e lead ainda não tem cadastro completo. Usa `sessionStorage["cap-auto-open-{customerId}"]` para não repetir na mesma sessão.
+
+**Painel ultra-compacto**: `CaptureSheet` modo padrão = `h-[36dvh] min-h-[240px]`. Header 1 linha (ícone 5×5 + nome + chip "Nome" + 3 ícones h-5). Footer 1 linha (Enviar tudo + CADASTRAR + Sair, todos h-7 text-[10px]). `TabsList h-6`. `CaptureStepsList`: linhas `py-0.5`, bola `w-5 h-5`, botão envio `w-6 h-6`. Barra de progresso só no `expanded`.
+
+**Nome do lead**: `customers.name_ask_sent_at` controla pedido único de nome. Botão "Nome" chama `askLeadName` (lib `@/lib/whatsapp/send`).
+
+**Envio**: `sendStepWithFeedback` com timeout 20s; `SendSequenceDialog` para disparar fila com delays humanos (2.5-4.5s).
