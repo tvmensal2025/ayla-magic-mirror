@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -14,8 +14,6 @@ interface Props {
   sentSteps: Set<string>;
   onSent: (stepId: string) => void;
   onEditTemplate?: (stepKey: string, text: string) => void;
-  /** Quando true, dispara o próximo tile sozinho ao detectar resposta inbound do lead */
-  autoMode?: boolean;
 }
 
 interface StepRow {
@@ -48,12 +46,10 @@ const SYNTHETIC_CONFIRM_PHONE: StepRow = {
   __synthetic: true,
 };
 
-export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sentSteps, onSent, onEditTemplate, autoMode = false }: Props) {
+export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sentSteps, onSent, onEditTemplate }: Props) {
   const { toast } = useToast();
   const [sending, setSending] = useState<string | null>(null);
   const [steps, setSteps] = useState<StepRow[]>([]);
-  const [autoCountdown, setAutoCountdown] = useState<{ stepId: string; secs: number } | null>(null);
-  const autoTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -117,45 +113,6 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
     const { data } = await supabase.from("bot_flow_steps").select("message_text").eq("id", stepId).maybeSingle();
     onEditTemplate?.(stepKey || stepId, (data as any)?.message_text || "");
   };
-
-  // Auto-pilot: dispara o próximo tile quando o lead responder no WhatsApp (inbound)
-  useEffect(() => {
-    if (!autoMode || !customerId || display.length === 0) return;
-    const ch = supabase
-      .channel(`autofire-${customerId}-${Math.random().toString(36).slice(2, 7)}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "conversations", filter: `customer_id=eq.${customerId}` },
-        (payload) => {
-          const row: any = payload.new;
-          if (String(row?.message_direction) !== "inbound") return;
-          const next = display.find((s) => !sentSteps.has(s.id));
-          if (!next) return;
-          // countdown visual 3..2..1
-          if (autoTimerRef.current) window.clearTimeout(autoTimerRef.current);
-          let secs = 3;
-          setAutoCountdown({ stepId: next.id, secs });
-          const tick = () => {
-            secs -= 1;
-            if (secs <= 0) {
-              setAutoCountdown(null);
-              void sendStep(next, next.title || next.step_key || `Passo ${next.position}`);
-            } else {
-              setAutoCountdown({ stepId: next.id, secs });
-              autoTimerRef.current = window.setTimeout(tick, 1000) as unknown as number;
-            }
-          };
-          autoTimerRef.current = window.setTimeout(tick, 1000) as unknown as number;
-        }
-      )
-      .subscribe();
-    return () => {
-      if (autoTimerRef.current) window.clearTimeout(autoTimerRef.current);
-      setAutoCountdown(null);
-      void supabase.removeChannel(ch);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoMode, customerId, display.length, sentSteps]);
 
   if (display.length === 0) {
     return (
