@@ -1164,21 +1164,30 @@ export type Database = {
         Row: {
           bot_global_enabled: boolean
           id: string
+          minio_alert_threshold_pct: number
           resolver_strict_mode: boolean
+          super_admin_instance_name: string | null
+          super_admin_phone: string | null
           updated_at: string
           updated_by: string | null
         }
         Insert: {
           bot_global_enabled?: boolean
           id?: string
+          minio_alert_threshold_pct?: number
           resolver_strict_mode?: boolean
+          super_admin_instance_name?: string | null
+          super_admin_phone?: string | null
           updated_at?: string
           updated_by?: string | null
         }
         Update: {
           bot_global_enabled?: boolean
           id?: string
+          minio_alert_threshold_pct?: number
           resolver_strict_mode?: boolean
+          super_admin_instance_name?: string | null
+          super_admin_phone?: string | null
           updated_at?: string
           updated_by?: string | null
         }
@@ -3099,6 +3108,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      infra_metrics: {
+        Row: {
+          created_at: string
+          id: string
+          meta: Json
+          metric_key: string
+          value_num: number | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          meta?: Json
+          metric_key: string
+          value_num?: number | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          meta?: Json
+          metric_key?: string
+          value_num?: number | null
+        }
+        Relationships: []
       }
       kanban_stages: {
         Row: {

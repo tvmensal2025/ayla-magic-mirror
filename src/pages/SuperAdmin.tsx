@@ -28,6 +28,7 @@ import { StuckLeadsWidget } from "@/components/superadmin/StuckLeadsWidget";
 import { SystemHealthPanel } from "@/components/superadmin/SystemHealthPanel";
 import { BotGlobalKillSwitch } from "@/components/superadmin/BotGlobalKillSwitch";
 import { ResolverStrictModeToggle } from "@/components/superadmin/ResolverStrictModeToggle";
+import { InfraHealthPanel } from "@/components/superadmin/InfraHealthPanel";
 import { PlatformFacebookCard } from "@/components/admin/super/PlatformFacebookCard";
 import { PlatformPnLCard } from "@/components/admin/super/PlatformPnLCard";
 import { NetworkHealthPanel } from "@/components/admin/super/NetworkHealthPanel";
@@ -361,6 +362,9 @@ const SuperAdmin = () => {
 
             {/* F2 — Resolver strict mode (atrás de flag, default OFF) */}
             <ResolverStrictModeToggle />
+
+            {/* Lote 3 — Infra: MinIO + alertas super_admin */}
+            <InfraHealthPanel />
 
             {/* Health Panel — saúde geral + religar bot global */}
             <SystemHealthPanel />
