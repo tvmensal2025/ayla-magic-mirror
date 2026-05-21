@@ -176,13 +176,13 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
     });
   }, [groups, query, onlyPending, sentSteps]);
 
-  const doSend = async (row: StepRow, groupKey: string) => {
+  const doSend = async (row: StepRow, groupKey: string, continueFlow: boolean) => {
     setSending(row.id);
     setErrorStep(null);
     try {
       const { sendStepWithFeedback } = await import("@/lib/whatsapp/send");
       const res = await sendStepWithFeedback({
-        consultantId, customerId, stepId: row.id, part: "all", continueFlow: false, variant: row.variant as "A" | "B" | "C",
+        consultantId, customerId, stepId: row.id, part: "all", continueFlow, variant: row.variant as "A" | "B" | "C",
       });
       if (res.ok) {
         onSent(groupKey);
@@ -325,7 +325,7 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
         variants={confirmStep?.group.variants}
         onVariantChange={changeVariant}
         sending={!!sending}
-        onSend={() => confirmStep && doSend(confirmStep.row, confirmStep.group.step_key)}
+        onSend={(opts) => confirmStep && doSend(confirmStep.row, confirmStep.group.step_key, opts?.continueFlow !== false)}
       />
     </div>
   );
