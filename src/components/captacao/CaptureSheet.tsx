@@ -188,6 +188,21 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
               Passo {sentSteps.size} de 10 enviado
             </p>
           )}
+          {needsName && (
+            <div className="mt-1.5 flex items-center justify-center">
+              <Button
+                size="sm"
+                variant="default"
+                className="h-7 text-[11px] gap-1.5 font-bold animate-pulse"
+                onClick={handleAskName}
+                disabled={askingName}
+                title="Lead ainda sem nome — manda a pergunta agora pra liberar o resto do fluxo"
+              >
+                {askingName ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />}
+                Pedir nome do lead
+              </Button>
+            </div>
+          )}
         </header>
 
         {/* Tabs */}
