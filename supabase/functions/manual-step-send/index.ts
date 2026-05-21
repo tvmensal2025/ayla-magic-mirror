@@ -280,6 +280,7 @@ Deno.serve(async (req) => {
       }
       return json({
         ok: false,
+        code: "nothing_to_send",
         error: "nothing_to_send",
         message: "Esse passo não tem mídia nem texto configurado para enviar.",
       }, 400);
@@ -289,31 +290,57 @@ Deno.serve(async (req) => {
     for (let i = 0; i < toSend.length; i++) {
       const it = toSend[i];
       const isLast = i === toSend.length - 1;
-      if (it.kind === "text" && it.text) {
-        await sender.sendText(remoteJid, it.text);
-        await supabase.from("conversations").insert({
-          customer_id: customer.id,
-          message_direction: "outbound",
-          message_text: it.text,
-          message_type: "text",
-          conversation_step: (step as any).step_key || null,
-        });
-        sentLog.push({ kind: "text" });
-      } else if (it.media?.url) {
-        const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
-        await sender.sendMedia(remoteJid, it.media.url, "", kind, Number(it.media.duration_sec || 0) || undefined);
-        await supabase.from("conversations").insert({
-          customer_id: customer.id,
-          message_direction: "outbound",
-          message_text: `[${kind}:${it.media.slot_key || slotKey}] (manual)`,
-          message_type: kind,
-          conversation_step: (step as any).step_key || null,
-        });
-        sentLog.push({ kind, mediaId: it.media.id });
+      try {
+        if (it.kind === "text" && it.text) {
+          await sender.sendText(remoteJid, it.text);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id,
+            message_direction: "outbound",
+            message_text: it.text,
+            message_type: "text",
+            conversation_step: (step as any).step_key || null,
+          });
+          sentLog.push({ kind: "text" });
+        } else if (it.media?.url) {
+          const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
+          await sender.sendMedia(remoteJid, it.media.url, "", kind, Number(it.media.duration_sec || 0) || undefined);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id,
+            message_direction: "outbound",
+            message_text: `[${kind}:${it.media.slot_key || slotKey}] (manual)`,
+            message_type: kind,
+            conversation_step: (step as any).step_key || null,
+          });
+          sentLog.push({ kind, mediaId: it.media.id });
+        }
+      } catch (sendErr) {
+        const msg = (sendErr as Error)?.message || "erro desconhecido";
+        console.error(`[manual-step-send] whapi send failed (kind=${it.kind}):`, msg);
+        // Se o primeiro item já falhou: erro fatal. Se já mandou algo, retorna parcial.
+        if (sentLog.length === 0) {
+          const lower = msg.toLowerCase();
+          const code = lower.includes("not on whatsapp") || lower.includes("phone not registered") || lower.includes("not a whatsapp")
+            ? "phone_not_on_whatsapp"
+            : lower.includes("instance") || lower.includes("disconnected") || lower.includes("not connected")
+              ? "instance_disconnected"
+              : "whapi_send_failed";
+          const friendly = code === "phone_not_on_whatsapp"
+            ? `Esse número (${rawPhone}) não tem WhatsApp ativo.`
+            : code === "instance_disconnected"
+              ? "WhatsApp do consultor desconectado. Reconecte em /admin/conexao e tente de novo."
+              : `Whapi recusou o envio: ${msg}`;
+          return json({ code, error: code, message: friendly, whapi_error: msg }, 502);
+        }
+        // Parcial: avisa mas mantém o que já foi.
+        return json({
+          ok: false,
+          code: "partial_send",
+          error: "partial_send",
+          message: `Mandei ${sentLog.length} de ${toSend.length} itens — o restante falhou: ${msg}`,
+          sent: sentLog,
+        }, 207);
       }
       if (!isLast) {
-        // Delay adaptativo: dá tempo do Whapi processar/despachar antes do próximo item,
-        // preservando a ordem real no celular do lead.
         const delayByKind: Record<string, number> = {
           audio: 4500,
           video: 5000,
@@ -335,10 +362,12 @@ Deno.serve(async (req) => {
 
     return json({ ok: true, sent: sentLog, continued: !!flowPatch, next_step: flowPatch?.conversation_step });
   } catch (e) {
-    console.error("[manual-step-send] error", (e as Error).message);
-    return json({ error: (e as Error).message }, 500);
+    const msg = (e as Error).message || "internal_error";
+    console.error("[manual-step-send] error", msg);
+    return json({ code: "internal_error", error: "internal_error", message: `Erro interno: ${msg}` }, 500);
   }
 });
+
 
 async function buildContinuationPatch(supabase: any, sender: any, remoteJid: string, consultantId: string, customer: any, step: any, vars: Record<string, string>, variant: string = "A") {
   const patch: any = {
