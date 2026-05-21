@@ -114,9 +114,12 @@ export async function sendStepWithFeedback(
       });
 
       if (error) {
-        const { code, message } = await parseErrorBody(error);
+        const parsed = await parseErrorBody(error);
+        const { code, message } = parsed.code === "internal_error"
+          ? normalizeSendStepError(error)
+          : { code: parsed.code, message: pickMessage(parsed.code, parsed.message) };
         if (code === "name_not_captured_yet" && opts?.onNameGuard) opts.onNameGuard();
-        if (!opts?.silent) toast.error(pickMessage(code, message));
+        if (!opts?.silent) toast.error(message);
         return { ok: false, code, message };
       }
 
