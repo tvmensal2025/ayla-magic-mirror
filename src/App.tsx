@@ -21,6 +21,8 @@ const SaudeBot = lazy(() => import("./pages/SaudeBot"));
 const AdminKnowledge = lazy(() => import("./pages/AdminKnowledge"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const PoliticaPrivacidade = lazy(() => import("./pages/PoliticaPrivacidade"));
+import { CookieBanner } from "@/components/CookieBanner";
 
 
 const queryClient = new QueryClient();
