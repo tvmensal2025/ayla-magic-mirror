@@ -162,23 +162,17 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
   const doSend = async (row: StepRow, groupKey: string) => {
     setSending(row.id);
     try {
-      const { data, error } = await supabase.functions.invoke("manual-step-send", {
-        body: { consultantId, customerId, stepId: row.id, part: "all", continueFlow: false },
+      const { sendStepWithFeedback } = await import("@/lib/whatsapp/send");
+      const res = await sendStepWithFeedback({
+        consultantId, customerId, stepId: row.id, part: "all", continueFlow: false,
       });
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).message || (data as any).error);
-      onSent(groupKey);
-      toast({
-        title: `Passo enviado ✓ (${row.variant})`,
-        description: row.title || row.step_key || "",
-      });
-    } catch (e: any) {
-      toast({ title: "Erro ao enviar", description: e?.message || String(e), variant: "destructive" });
+      if (res.ok) onSent(groupKey);
     } finally {
       setSending(null);
       setConfirmStep(null);
     }
   };
+
 
   if (groups.length === 0) {
     return (
