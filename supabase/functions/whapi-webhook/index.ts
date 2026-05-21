@@ -817,6 +817,22 @@ Deno.serve(async (req) => {
       }
     }
 
+    if ((customer as any).capture_mode === "manual" && hasAudio && messageText && !isFile) {
+      try {
+        const multi = extractMultiField(messageText);
+        const patch = buildMultiFieldPatch(customer as any, multi);
+        if (Object.keys(patch).length > 0) {
+          await supabase.from("customers").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", customer.id);
+          console.log(`[manual-capture-stop-audio] customer=${customer.id} campos_salvos=${Object.keys(patch).join(",")} step="${(customer as any).conversation_step || ""}"`);
+        }
+      } catch (e) {
+        console.warn("[manual-capture-stop-audio] extração falhou:", (e as Error).message);
+      }
+      return new Response(JSON.stringify({ ok: true, msg: "manual_capture_audio_saved_no_auto_flow" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // ─── Run bot flow ──────────────────────────────────────────────────
     // ─── 🔒 Lock per-customer: evita webhooks paralelos enviando msgs duplicadas
     // quando o lead manda 2+ mensagens em rajada. O fluxo pode enviar áudio/vídeo/
