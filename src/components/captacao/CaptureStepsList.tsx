@@ -209,28 +209,28 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
   const defaultV = (defaultVariant || "A").toUpperCase();
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5 sticky top-0 z-10 bg-background/95 backdrop-blur py-1.5 -mx-1 px-1">
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5 sticky top-0 z-10 bg-background/95 backdrop-blur py-1 -mx-1 px-1">
         <div className="relative flex-1">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
           <Input
             placeholder="Buscar passo…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="h-8 pl-7 text-xs"
+            className="h-7 pl-6 text-[11px]"
           />
         </div>
         <Button
           size="sm"
           variant={onlyPending ? "default" : "outline"}
-          className="h-8 px-2 text-[11px] whitespace-nowrap"
+          className="h-7 px-2 text-[10px] whitespace-nowrap"
           onClick={() => setOnlyPending((v) => !v)}
         >
           Pendentes
         </Button>
       </div>
 
-      <ul className="space-y-1.5">
+      <ul className="space-y-1">
         {filtered.map((g, idx) => {
           const num = idx + 1;
           const variantKeys = Object.keys(g.variants).sort();
@@ -238,6 +238,7 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
           const defaultRow = g.variants[defaultV] || g.variants[variantKeys[0]];
           const media = Array.isArray(defaultRow?.media_order) ? (defaultRow.media_order as string[]) : [];
           const isSending = sending === defaultRow?.id;
+          const isError = errorStep === defaultRow?.id;
           const isCurrent = !!currentStep && (
             currentStep === g.step_key ||
             Object.values(g.variants).some((v) => v.id === currentStep)
@@ -245,8 +246,10 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
           return (
             <li key={g.step_key}>
               <div
-                className={`rounded-lg border flex items-center gap-2 pl-2 pr-2 py-1.5 transition-all ${
-                  isCurrent
+                className={`rounded-md border flex items-center gap-1.5 pl-1.5 pr-1.5 py-1 transition-all ${
+                  isError
+                    ? "border-destructive/60 bg-destructive/10"
+                    : isCurrent
                     ? "border-amber-400/60 bg-amber-400/10 ring-1 ring-amber-400/40"
                     : anySent
                     ? "border-primary/30 bg-primary/5"
@@ -255,7 +258,7 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
               >
                 <div className="relative shrink-0">
                   <span
-                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold tabular-nums ${
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold tabular-nums ${
                       anySent
                         ? "bg-primary text-primary-foreground"
                         : isCurrent
@@ -263,14 +266,14 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
                         : "bg-muted text-muted-foreground"
                     }`}
                   >
-                    {anySent ? <Check className="w-3.5 h-3.5" /> : num}
+                    {anySent ? <Check className="w-3 h-3" /> : num}
                   </span>
                   <span className="absolute -bottom-0.5 -right-1 text-[8px] font-bold bg-background border border-border rounded-sm px-0.5 leading-none py-px text-foreground/80">
                     {defaultRow?.variant || defaultV}
                   </span>
                 </div>
-                <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                  <p className="text-[13px] font-semibold truncate leading-tight">
+                <div className="flex-1 min-w-0 flex items-center gap-1">
+                  <p className="text-[12px] font-semibold truncate leading-tight">
                     {g.title || g.step_key || `Passo ${num}`}
                   </p>
                   {isCurrent && (
@@ -279,28 +282,32 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
                     </span>
                   )}
                   <div className="flex items-center gap-0.5 shrink-0">
-                    {media.includes("audio") && <Mic className="w-3 h-3 text-emerald-500" />}
-                    {media.includes("image") && <ImageIcon className="w-3 h-3 text-amber-500" />}
-                    {media.includes("video") && <Video className="w-3 h-3 text-cyan-500" />}
+                    {media.includes("audio") && <Mic className="w-2.5 h-2.5 text-emerald-500" />}
+                    {media.includes("image") && <ImageIcon className="w-2.5 h-2.5 text-amber-500" />}
+                    {media.includes("video") && <Video className="w-2.5 h-2.5 text-cyan-500" />}
                   </div>
                 </div>
                 <button
                   type="button"
                   disabled={isSending || !defaultRow}
                   onClick={() => defaultRow && setConfirmStep({ group: g, row: defaultRow })}
-                  title="Ver prévia e enviar"
-                  className={`relative shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors disabled:opacity-50 before:absolute before:inset-[-6px] before:content-[''] ${
-                    anySent
+                  title={isError ? "Falhou — clique pra tentar de novo" : "Ver prévia e enviar"}
+                  className={`relative shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-colors disabled:opacity-50 ${
+                    isError
+                      ? "bg-destructive text-destructive-foreground"
+                      : anySent
                       ? "border border-primary/40 text-primary hover:bg-primary/10"
                       : "bg-primary text-primary-foreground hover:bg-primary/90"
                   }`}
                 >
                   {isSending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : isError ? (
+                    <span className="text-[10px] font-bold">!</span>
                   ) : anySent ? (
-                    <Check className="w-4 h-4" />
+                    <Check className="w-3.5 h-3.5" />
                   ) : (
-                    <Send className="w-4 h-4" />
+                    <Send className="w-3.5 h-3.5" />
                   )}
                 </button>
               </div>
