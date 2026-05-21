@@ -363,6 +363,9 @@ const SuperAdmin = () => {
             {/* F2 — Resolver strict mode (atrás de flag, default OFF) */}
             <ResolverStrictModeToggle />
 
+            {/* Lote 3 — Infra: MinIO + alertas super_admin */}
+            <InfraHealthPanel />
+
             {/* Health Panel — saúde geral + religar bot global */}
             <SystemHealthPanel />
 
