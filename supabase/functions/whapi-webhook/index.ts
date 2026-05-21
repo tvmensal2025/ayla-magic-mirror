@@ -671,6 +671,28 @@ Deno.serve(async (req) => {
       console.warn("[capture-extract] dispatch err:", (e as Error).message);
     }
 
+    // ─── Modo Captação manual: salvar resposta na ficha e PARAR ─────────
+    // O consultor controla o próximo tile. Texto livre do lead não deve rodar
+    // o motor conversacional nem avançar automaticamente para o próximo passo.
+    if ((customer as any).capture_mode === "manual" && !hasAudio && !isFile && messageText) {
+      try {
+        const multi = extractMultiField(messageText);
+        const patch = buildMultiFieldPatch(customer as any, multi);
+        if (Object.keys(patch).length > 0) {
+          await supabase.from("customers").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", customer.id);
+          Object.assign(customer as any, patch);
+          console.log(`[manual-capture-stop] customer=${customer.id} campos_salvos=${Object.keys(patch).join(",")} step="${(customer as any).conversation_step || ""}"`);
+        } else {
+          console.log(`[manual-capture-stop] customer=${customer.id} texto salvo sem avanço step="${(customer as any).conversation_step || ""}"`);
+        }
+      } catch (e) {
+        console.warn("[manual-capture-stop] extração falhou:", (e as Error).message);
+      }
+      return new Response(JSON.stringify({ ok: true, msg: "manual_capture_text_saved_no_auto_flow" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
 
 
 
