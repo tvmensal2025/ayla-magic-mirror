@@ -597,7 +597,14 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
 
     // Se tem regras de transição esperando resposta do cliente, para aqui.
     const hasTransitions = Array.isArray(next.transitions) && next.transitions.length > 0;
-    if (hasTransitions) break;
+    // Se o passo tem captures inline esperando input (ex: "Captura do nome"),
+    // também para a corrente — o cliente precisa responder antes do próximo.
+    const hasInlineCapture = Array.isArray(next.captures)
+      && next.captures.some((c: any) => c?.enabled === true);
+    // Heurística: texto que termina com "?" é pergunta — espera resposta.
+    const looksLikeQuestion = String(next.message_text || "").trim().endsWith("?");
+    if (hasInlineCapture || looksLikeQuestion) break;
+    if (hasTransitions && Array.isArray(next.transitions) && next.transitions.some((t: any) => Array.isArray(t?.trigger_phrases) && t.trigger_phrases.length > 0)) break;
 
     // Pequeno delay entre passos encadeados.
     await new Promise((r) => setTimeout(r, 2500));
