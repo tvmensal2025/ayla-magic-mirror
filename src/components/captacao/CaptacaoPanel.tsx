@@ -189,9 +189,9 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   };
 
   return (
-    <div className={`flex flex-col h-[calc(100vh-220px)] min-h-[640px] rounded-xl border ${gameOn ? "border-primary/30" : "border-border"} overflow-hidden bg-background/60 exec-ambient`}>
+    <div className={`flex flex-col h-[calc(100vh-150px)] min-h-[680px] rounded-lg border ${gameOn ? "border-primary/30" : "border-border"} overflow-hidden bg-background/60 exec-ambient`}>
       {/* Header */}
-      <header className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/60 backdrop-blur-sm gap-3 flex-wrap">
+      <header className="flex items-center justify-between px-3 py-2 border-b border-border bg-card/60 backdrop-blur-sm gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <ClipboardList className="w-5 h-5 text-primary" strokeWidth={1.5} />
           <div>
