@@ -312,50 +312,59 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
             : "h-[38dvh] min-h-[240px] max-h-[100dvh] rounded-t-2xl"
         }`}
       >
-        {/* Grabber */}
-        {!expanded && (
-          <div className="flex justify-center pt-0.5 pb-0 shrink-0">
-            <div className="w-8 h-0.5 rounded-full bg-muted-foreground/40" />
-          </div>
-        )}
+        {/* Grabber — swipe-down minimiza; tap também minimiza no mobile */}
+        <div
+          className="flex flex-col items-center pt-2 pb-1 shrink-0 cursor-grab active:cursor-grabbing touch-none"
+          onTouchStart={(e) => { (e.currentTarget as any)._startY = e.touches[0].clientY; }}
+          onTouchMove={(e) => {
+            const start = (e.currentTarget as any)._startY;
+            if (typeof start === "number") {
+              const dy = e.touches[0].clientY - start;
+              if (dy > 60) { setMinimized(true); (e.currentTarget as any)._startY = undefined; }
+            }
+          }}
+          onClick={() => { if (isMobile) setMinimized(true); }}
+          title="Arraste pra baixo pra minimizar"
+        >
+          <div className="w-12 h-1.5 rounded-full bg-muted-foreground/50" />
+        </div>
 
-        {/* Header — 1 linha só no compacto */}
-        <header className={`px-2 border-b border-border/60 bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20 ${expanded ? "pt-3 pb-2" : "py-1"}`}>
-          <div className={`flex items-center gap-1 ${expanded ? "mb-2" : ""}`}>
-            <div className={`rounded-full bg-primary/15 flex items-center justify-center shrink-0 ${expanded ? "w-9 h-9" : "w-5 h-5"}`}>
-              <Gamepad2 className={`text-primary ${expanded ? "w-4 h-4" : "w-2.5 h-2.5"}`} />
+        {/* Header */}
+        <header className={`px-3 border-b border-border/60 bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20 ${expanded ? "pt-2 pb-2" : "py-1"}`}>
+          <div className={`flex items-center gap-2 ${expanded ? "mb-2" : ""}`}>
+            <div className={`rounded-full bg-primary/15 flex items-center justify-center shrink-0 ${expanded ? "w-9 h-9" : "w-7 h-7"}`}>
+              <Gamepad2 className={`text-primary ${expanded ? "w-4 h-4" : "w-3.5 h-3.5"}`} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className={`font-bold truncate ${expanded ? "text-sm" : "text-[10px] leading-tight"}`}>
+              <p className={`font-bold truncate ${expanded ? "text-sm" : "text-xs leading-tight"}`}>
                 {customerName || phoneNumber || "Lead"}
-                {!expanded && phoneNumber && customerName && (
-                  <span className="ml-1 text-[9px] text-muted-foreground font-normal">· {phoneNumber}</span>
-                )}
               </p>
-              {expanded && <p className="text-[10px] text-muted-foreground truncate">{phoneNumber}</p>}
+              {phoneNumber && <p className="text-[10px] text-muted-foreground truncate">{phoneNumber}</p>}
             </div>
             {needsName && (
               <Button
                 size="sm"
                 variant="default"
-                className={`gap-0.5 font-bold animate-pulse shrink-0 ${expanded ? "h-7 px-2 text-[10px]" : "h-5 px-1.5 text-[9px]"}`}
+                className="gap-1 font-bold animate-pulse shrink-0 h-9 px-3 text-xs"
                 onClick={handleAskName}
                 disabled={askingName}
-                title="Lead sem nome — peça agora pra liberar o resto"
+                title="Lead sem nome — peça agora"
               >
-                {askingName ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <UserPlus className="w-2.5 h-2.5" />}
+                {askingName ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
                 Nome
               </Button>
             )}
-            <div className="flex items-center gap-0 shrink-0">
-              <Button size="icon" variant="ghost" className={expanded ? "h-6 w-6" : "h-5 w-5"} onClick={() => setExpanded((v) => !v)} title={expanded ? "Recolher" : "Expandir"}>
-                {expanded ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-2.5 h-2.5" />}
+            <div className="flex items-center gap-1 shrink-0">
+              {!isMobile && (
+                <Button size="icon" variant="ghost" className="h-9 w-9" onClick={() => setExpanded((v) => !v)} title={expanded ? "Recolher" : "Expandir"}>
+                  {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                </Button>
+              )}
+              <Button size="icon" variant="ghost" className="h-10 w-10" onClick={() => setMinimized(true)} title="Minimizar">
+                <ChevronDown className="w-5 h-5" />
               </Button>
-              <Button size="icon" variant="ghost" className={expanded ? "h-6 w-6" : "h-5 w-5"} onClick={() => setMinimized(true)} title="Minimizar">
-                <ChevronDown className={expanded ? "w-3 h-3" : "w-2.5 h-2.5"} />
-              </Button>
-              <Button size="icon" variant="ghost" className={expanded ? "h-6 w-6" : "h-5 w-5"} onClick={() => onOpenChange(false)} title="Fechar">
-                <X className={expanded ? "w-3 h-3" : "w-2.5 h-2.5"} />
+              <Button size="icon" variant="ghost" className="h-10 w-10" onClick={() => onOpenChange(false)} title="Fechar">
+                <X className="w-5 h-5" />
               </Button>
             </div>
           </div>
