@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { CaptureLeadList } from "@/components/captacao/CaptureLeadList";
 import { CaptureStepsGrid } from "@/components/captacao/CaptureStepsGrid";
+import { CaptureConversationFeed } from "@/components/captacao/CaptureConversationFeed";
 import { CaptureLeadCard } from "@/components/captacao/CaptureLeadCard";
 import { CaptureScoreboard } from "@/components/captacao/CaptureScoreboard";
 import { CaptureMissionsPanel, bumpMission } from "@/components/captacao/CaptureMissionsPanel";
@@ -301,6 +302,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                         onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
                       />
                     </div>
+                    <CaptureConversationFeed customerId={selectedId} />
 
                     {/* Ficha + Achievements aparecem no fim do scroll em mobile (quando expandidos) */}
                     <div className={`md:hidden ${showAside ? "block" : "hidden"} space-y-3`}>
@@ -401,6 +403,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       onSent={(stepId) => setSentSteps((s) => new Set(s).add(stepId))}
                     />
                   </div>
+                  <CaptureConversationFeed customerId={selectedId} />
                   <div className="rounded-lg border border-dashed border-border bg-secondary/20 p-3 text-[11px] text-muted-foreground space-y-1">
                     <p>💡 <span className="font-semibold">Como funciona:</span> envie os passos, conforme o cliente responde os campos vão sendo preenchidos automaticamente (OCR ativo). Capturas em sequência ativam <span className="font-bold text-primary">combos</span>!</p>
                     <p className="hidden md:block">Edite manualmente qualquer campo na ficha à direita.</p>
