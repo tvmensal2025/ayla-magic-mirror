@@ -83,6 +83,7 @@ export function VoiceTemplatesPanel({ consultantId }: Props) {
                             onUpdate={vt.updateTemplate}
                             onAddBlock={vt.addBlock}
                             onUpdateBlockAudio={vt.updateBlockAudio}
+                            onUpdateBlockVariableKey={vt.updateBlockVariableKey}
                             onDeleteBlock={vt.deleteBlock}
                             onMoveBlock={vt.moveBlock}
                             onRender={vt.renderTemplate}
