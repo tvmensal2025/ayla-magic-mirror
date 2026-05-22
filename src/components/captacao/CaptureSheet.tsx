@@ -53,15 +53,17 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<"passos" | "ficha">("passos");
   const [submitting, setSubmitting] = useState(false);
+  const isMobile = useIsMobile();
   const [minimized, setMinimized] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [allSteps, setAllSteps] = useState<SequenceStep[]>([]);
   const [seqOpen, setSeqOpen] = useState(false);
   const lastCountRef = useRef(0);
 
-  useEffect(() => { setSentSteps(new Set()); setMinimized(false); setExpanded(false); }, [customerId]);
+  // No mobile o painel abre minimizado (pílula no rodapé) pra não tampar o teclado/composer.
+  useEffect(() => { setSentSteps(new Set()); setMinimized(isMobile); setExpanded(false); }, [customerId, isMobile]);
   const pendingSteps = useMemo(() => allSteps.filter((s) => !sentSteps.has(s.step_key)), [allSteps, sentSteps]);
-  useEffect(() => { if (!open) { setMinimized(false); setExpanded(false); } }, [open]);
+  useEffect(() => { if (open) { setMinimized(isMobile); setExpanded(false); } else { setMinimized(false); setExpanded(false); } }, [open, isMobile]);
 
   // Garante modo manual ao abrir
   useEffect(() => {
