@@ -2213,7 +2213,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               // E que NÃO sejam perguntas (texto não termina em "?").
               let current = nextCustom;
               let dispatchedAny = false;
-              for (let hops = 0; hops < 8; hops++) {
+              for (let hops = 0; hops < 20; hops++) {
                 const ok = await dispatchStepFromFlow(current.step_key, _vars);
                 dispatchedAny = dispatchedAny || !!ok;
                 console.log(`[custom-step-resolver] chain-emit step=${current.step_key} pos=${current.position} dispatched=${ok}`);
