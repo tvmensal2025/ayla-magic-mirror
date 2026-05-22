@@ -214,6 +214,34 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
 
+  const forceScrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, []);
+
+  const scheduleScrollToBottom = useCallback((force = false) => {
+    if (!force && !stickToBottomRef.current) return;
+    const run = () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+    };
+    run();
+    requestAnimationFrame(() => {
+      run();
+      requestAnimationFrame(run);
+    });
+    window.setTimeout(run, 80);
+    window.setTimeout(run, 240);
+  }, []);
+
+  useEffect(() => {
+    stickToBottomRef.current = true;
+    forceScrollToBottom();
+    scheduleScrollToBottom(true);
+  }, [chat?.remoteJid, forceScrollToBottom, scheduleScrollToBottom]);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -230,15 +258,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
     const sentinel = bottomRef.current;
     if (!scroller || !sentinel) return;
 
-    const scrollToBottom = () => {
-      if (!stickToBottomRef.current) return;
-      // dois rAF garantem que o layout terminou (mídias, fonts, sheets)
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          sentinel.scrollIntoView({ block: "end" });
-        });
-      });
-    };
+    const scrollToBottom = () => scheduleScrollToBottom();
 
     scrollToBottom();
 
