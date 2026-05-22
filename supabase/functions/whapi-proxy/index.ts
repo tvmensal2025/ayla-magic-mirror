@@ -222,7 +222,14 @@ Deno.serve(async (req) => {
       case "list_chats": {
         const count = Math.min(Number(payload.count) || 100, 200);
         const r = await whapiFetch(whapiToken, `/chats?count=${count}`, { method: "GET" });
-        if (!r.ok) return json(r.status, { error: r.data });
+        if (!r.ok) {
+          const msg = JSON.stringify(r.data || "");
+          if (r.status === 404 || /channel not found|unauthorized|invalid token/i.test(msg)) {
+            console.warn("[whapi-proxy] list_chats: canal indisponível, retornando []");
+            return json(200, []);
+          }
+          return json(r.status, { error: r.data });
+        }
         const list = (r.data?.chats || []).map(mapChat);
         return json(200, list);
       }
@@ -236,7 +243,14 @@ Deno.serve(async (req) => {
           `/messages/list/${encodeURIComponent(chatId)}?count=${count}`,
           { method: "GET" },
         );
-        if (!r.ok) return json(r.status, { error: r.data });
+        if (!r.ok) {
+          const msg = JSON.stringify(r.data || "");
+          if (r.status === 404 || /channel not found|unauthorized|invalid token/i.test(msg)) {
+            console.warn("[whapi-proxy] list_messages: canal indisponível, retornando []");
+            return json(200, []);
+          }
+          return json(r.status, { error: r.data });
+        }
         const list = (r.data?.messages || []).map((m: any) => mapMessage(m, chatId));
         return json(200, list);
       }
