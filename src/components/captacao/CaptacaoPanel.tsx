@@ -189,9 +189,9 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   };
 
   return (
-    <div className={`flex flex-col h-[calc(100vh-220px)] min-h-[640px] rounded-xl border ${gameOn ? "border-primary/30" : "border-border"} overflow-hidden bg-background/60 exec-ambient`}>
+    <div className={`flex flex-col h-[calc(100vh-150px)] min-h-[680px] rounded-lg border ${gameOn ? "border-primary/30" : "border-border"} overflow-hidden bg-background/60 exec-ambient`}>
       {/* Header */}
-      <header className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/60 backdrop-blur-sm gap-3 flex-wrap">
+      <header className="flex items-center justify-between px-3 py-2 border-b border-border bg-card/60 backdrop-blur-sm gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <ClipboardList className="w-5 h-5 text-primary" strokeWidth={1.5} />
           <div>
@@ -214,13 +214,13 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
 
       {gameOn ? (
         <GameShell>
-          <div className="px-3 py-2 space-y-2">
+          <div className="px-2 py-1.5 space-y-1.5">
             <PlayerHud progress={progress} />
             <QuestsBar progress={progress} />
           </div>
-          <div className="flex-1 flex flex-col md:flex-row overflow-hidden md:h-[calc(100vh-340px)] md:min-h-[420px]">
+          <div className="flex-1 flex flex-col md:flex-row overflow-hidden md:h-[calc(100vh-280px)] md:min-h-[440px]">
             {/* Mobile: lead list visível só quando NÃO há lead selecionado. Desktop: sempre. */}
-            <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-72 md:shrink-0 md:border-r border-border overflow-hidden`}>
+            <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-64 md:shrink-0 md:border-r border-border overflow-hidden`}>
               <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
             </div>
             <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden`}>
@@ -291,7 +291,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       </div>
                     )}
                   </div>
-                  <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-4">
+                  <div className="flex-1 overflow-y-auto p-2 md:p-3 space-y-3">
                     <div>
                       <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">10 Passos · clique para enviar</h3>
                       <CaptureStepsGrid
@@ -344,7 +344,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
               )}
             </main>
             {/* Desktop aside: ficha quando há lead, achievements quando não */}
-            <div className="hidden md:flex md:flex-col md:w-72 md:border-l border-border/60 overflow-hidden">
+            <div className="hidden md:flex md:flex-col md:w-64 md:border-l border-border/60 overflow-hidden">
               {selectedId ? (
                 <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />
               ) : (
@@ -358,7 +358,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
       ) : (
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {/* Lista: full-width no mobile sem seleção; escondida no mobile com seleção; sidebar fixa em md+ */}
-          <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-72 md:shrink-0 overflow-hidden`}>
+          <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-64 md:shrink-0 overflow-hidden`}>
             <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
           </div>
 
@@ -393,7 +393,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                     <ChevronDown className={`w-4 h-4 transition-transform ${showAside ? "rotate-180" : ""}`} />
                   </Button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-4">
+                <div className="flex-1 overflow-y-auto p-2 md:p-3 space-y-3">
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-2">10 Passos · clique para enviar</h3>
                     <CaptureStepsGrid
