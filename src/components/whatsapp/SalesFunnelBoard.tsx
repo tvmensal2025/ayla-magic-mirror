@@ -74,13 +74,13 @@ export function SalesFunnelBoard({ consultantId, onOpenChat }: SalesFunnelBoardP
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 p-3 border-b border-border bg-background/50 sticky top-0 z-10">
-        <div className="relative flex-1 min-w-[200px]">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 p-2 sm:p-3 border-b border-border bg-background/50 sticky top-0 z-10">
+        <div className="relative flex-1 min-w-[160px] order-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nome, telefone ou cidade…"
+            placeholder="Buscar nome, telefone ou cidade…"
             className="pl-8 h-9 text-sm"
           />
         </div>
@@ -88,19 +88,20 @@ export function SalesFunnelBoard({ consultantId, onOpenChat }: SalesFunnelBoardP
           variant={hotOnly ? "default" : "outline"}
           size="sm"
           onClick={() => setHotOnly((v) => !v)}
-          className="gap-1.5"
+          className="gap-1 sm:gap-1.5 h-9 px-2.5 order-2"
         >
           <Flame className="w-3.5 h-3.5" />
-          Quentes
-          {totals.hot > 0 && <Badge variant="secondary" className="ml-1 h-5">{totals.hot}</Badge>}
+          <span className="text-xs sm:text-sm">Quentes</span>
+          {totals.hot > 0 && <Badge variant="secondary" className="ml-0.5 h-4 px-1 text-[10px]">{totals.hot}</Badge>}
         </Button>
-        <Button variant="outline" size="sm" onClick={() => fetchLeads()} disabled={loading}>
+        <Button variant="outline" size="sm" onClick={() => fetchLeads()} disabled={loading} className="h-9 w-9 p-0 shrink-0 order-3">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
         </Button>
-        <div className="text-xs text-muted-foreground ml-auto">
+        <div className="text-[11px] sm:text-xs text-muted-foreground basis-full sm:basis-auto sm:ml-auto order-4 tabular-nums">
           {filtered.length} de {totals.total} leads
         </div>
       </div>
+
 
       {/* Board */}
       <div className="flex-1 overflow-x-auto overflow-y-hidden">
