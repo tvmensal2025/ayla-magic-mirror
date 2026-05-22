@@ -50,7 +50,7 @@ export function LearningHealthPanel({ consultantId }: Props) {
 
   async function load() {
     setLoading(true);
-    const { data } = await supabase
+    const { data } = await (supabase as any)
       .from("v_ai_learned_patterns_summary")
       .select("*")
       .eq("consultant_id", consultantId)
