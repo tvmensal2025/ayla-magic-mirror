@@ -287,7 +287,7 @@ const SuperAdmin = () => {
 
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-2xl backdrop-saturate-150">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+        <div className="max-w-[1760px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-lg shadow-primary/20">
               <Shield className="w-5 h-5 text-primary-foreground" />
@@ -314,7 +314,7 @@ const SuperAdmin = () => {
 
       {/* Tab Navigation */}
       <nav className="border-b border-border/50 bg-background/60 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="max-w-[1760px] mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex gap-1">
             {tabs.map((tab) => {
               const Icon = tab.icon;
@@ -341,7 +341,7 @@ const SuperAdmin = () => {
         </div>
       </nav>
 
-      <main className="relative max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main className="relative max-w-[1760px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-6 space-y-6">
         {activeTab === "consultores" && (
           <>
             {/* Stats Grid */}
