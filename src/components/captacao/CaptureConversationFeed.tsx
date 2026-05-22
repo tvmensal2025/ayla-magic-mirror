@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { MessageCircle, Mic, ImageIcon, Video, FileText, Loader2 } from "lucide-react";
 
@@ -46,7 +46,7 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
 
-  const scheduleScrollToBottom = (force = false) => {
+  const scheduleScrollToBottom = useCallback((force = false) => {
     if (!force && !stickRef.current) return;
     const run = () => {
       const el = scrollRef.current;
@@ -60,12 +60,12 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
     });
     window.setTimeout(run, 80);
     window.setTimeout(run, 240);
-  };
+  }, []);
 
   useEffect(() => {
     stickRef.current = true;
     scheduleScrollToBottom(true);
-  }, [customerId]);
+  }, [customerId, scheduleScrollToBottom]);
 
   useEffect(() => {
     let mounted = true;
