@@ -172,20 +172,19 @@ export function useVoiceTemplates(consultantId: string | undefined) {
   }, [refetch]);
 
   /** Pede ao backend para costurar e retorna a URL final do áudio. */
-  const renderTemplate = useCallback(async (templateId: string, name?: string): Promise<{ url?: string; error?: string; missing_name?: string }> => {
+  const renderTemplate = useCallback(async (templateId: string, name?: string, variables?: Record<string, string>): Promise<{ url?: string; error?: string; missing_name?: string; missing_key?: string }> => {
     const { data, error } = await supabase.functions.invoke("voice-template-stitch", {
-      body: { action: "render", template_id: templateId, name: name || "" },
+      body: { action: "render", template_id: templateId, name: name || "", variables: variables || {} },
     });
     if (error) {
       const ctx: any = (error as any).context;
-      // Edge function devolve 409 com missing_name quando o nome não está gravado
       if (ctx?.error === "name_not_recorded") {
-        return { error: "name_not_recorded", missing_name: ctx.missing_name };
+        return { error: "name_not_recorded", missing_name: ctx.missing_name, missing_key: ctx.missing_key };
       }
       return { error: error.message };
     }
     if ((data as any)?.error === "name_not_recorded") {
-      return { error: "name_not_recorded", missing_name: (data as any).missing_name };
+      return { error: "name_not_recorded", missing_name: (data as any).missing_name, missing_key: (data as any).missing_key };
     }
     return { url: (data as any)?.url };
   }, []);
@@ -193,7 +192,7 @@ export function useVoiceTemplates(consultantId: string | undefined) {
   return {
     templates, clips, loading, refetch,
     createTemplate, updateTemplate, deleteTemplate,
-    addBlock, updateBlockAudio, deleteBlock, moveBlock,
+    addBlock, updateBlockAudio, updateBlockVariableKey, deleteBlock, moveBlock,
     upsertNameClip, deleteNameClip,
     renderTemplate,
   };
