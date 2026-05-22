@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { mediaIcon, mediaBadge, MEDIA_TYPES } from "./templateUtils";
 import { useUserRole } from "@/hooks/useUserRole";
 import { supabase } from "@/integrations/supabase/client";
+import { VoiceClipRecorder } from "@/components/whatsapp/voice/VoiceClipRecorder";
 
 interface Props {
   template: MessageTemplate;
