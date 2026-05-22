@@ -29,6 +29,13 @@ export interface ChatMessage {
   fileName?: string;
 }
 
+function normalizeMessageTimestamp(value: unknown): number {
+  const n = typeof value === "string" ? Number(value) : typeof value === "number" ? value : 0;
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  // Algumas APIs retornam segundos, outras milissegundos. A UI trabalha em segundos.
+  return n > 10_000_000_000 ? n / 1000 : n;
+}
+
 function mapMessage(msg: EvolutionMessage): ChatMessage {
   const m = msg.message;
   let text = "";
@@ -84,7 +91,7 @@ function mapMessage(msg: EvolutionMessage): ChatMessage {
     remoteJidAlt: msg.key.remoteJidAlt,
     fromMe: msg.key.fromMe,
     text,
-    timestamp: msg.messageTimestamp || 0,
+    timestamp: normalizeMessageTimestamp(msg.messageTimestamp),
     status: msg.status,
     mediaType,
     mediaUrl,
