@@ -3983,6 +3983,139 @@ export type Database = {
         }
         Relationships: []
       }
+      voice_name_clips: {
+        Row: {
+          audio_url: string
+          consultant_id: string
+          created_at: string
+          id: string
+          name_display: string
+          name_normalized: string
+          updated_at: string
+        }
+        Insert: {
+          audio_url: string
+          consultant_id: string
+          created_at?: string
+          id?: string
+          name_display: string
+          name_normalized: string
+          updated_at?: string
+        }
+        Update: {
+          audio_url?: string
+          consultant_id?: string
+          created_at?: string
+          id?: string
+          name_display?: string
+          name_normalized?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      voice_template_blocks: {
+        Row: {
+          audio_url: string | null
+          created_at: string
+          id: string
+          kind: string
+          label: string | null
+          position: number
+          template_id: string
+          variable_key: string | null
+        }
+        Insert: {
+          audio_url?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+          label?: string | null
+          position: number
+          template_id: string
+          variable_key?: string | null
+        }
+        Update: {
+          audio_url?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          label?: string | null
+          position?: number
+          template_id?: string
+          variable_key?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "voice_template_blocks_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "voice_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      voice_template_renders: {
+        Row: {
+          created_at: string
+          final_audio_url: string
+          id: string
+          name_normalized: string
+          template_id: string
+        }
+        Insert: {
+          created_at?: string
+          final_audio_url: string
+          id?: string
+          name_normalized: string
+          template_id: string
+        }
+        Update: {
+          created_at?: string
+          final_audio_url?: string
+          id?: string
+          name_normalized?: string
+          template_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "voice_template_renders_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "voice_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      voice_templates: {
+        Row: {
+          consultant_id: string
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          shortcut: string | null
+          updated_at: string
+        }
+        Insert: {
+          consultant_id: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          shortcut?: string | null
+          updated_at?: string
+        }
+        Update: {
+          consultant_id?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          shortcut?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       wallet_transactions: {
         Row: {
           amount_cents: number
