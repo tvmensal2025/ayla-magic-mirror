@@ -11,6 +11,7 @@ import {
   isValidEmailFormat,
   isSameContact,
 } from "../../_shared/validators.ts";
+import { isResolverStrictMode } from "../../_shared/bot/global-flag.ts";
 import {
   fetchWithTimeout,
   fetchInsecure,
@@ -352,7 +353,7 @@ function getReentryPromptForStep(step: string, customer: any): string {
     "ask_birth_date": `${v}qual sua *data de nascimento*? (DD/MM/AAAA)`,
     "ask_phone": `${v}me confirma seu *telefone* (com DDD)?`,
     "ask_phone_confirm": `${v}me confirma seu *telefone* (com DDD)?`,
-    "ask_email": `${v}me passa seu *e-mail* 📧`,
+    "ask_email": `${v}me passa seu *e-mail* 📧\n_É por ele que você vai acessar o app *iGreen Club* 📱 (cashback, faturas e indicações)._`,
     "ask_cep": `${v}qual o *CEP* da sua casa? (8 dígitos)`,
     "ask_number": `${v}qual o *número* da sua casa?`,
     "ask_complement": `${v}tem *complemento* no endereço? (apto, bloco) — ou *PULAR* / *NÃO TEM*.`,
@@ -950,6 +951,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       items.sort(makeKindComparator((it: Item) => it.kind, configuredOrder));
 
       let sent = false;
+      let videoFailed = false;
+      let hadVideo = false;
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
         const isLast = i === items.length - 1;
@@ -975,6 +978,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         const m = it.media;
         if (!m?.url) continue;
         const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
+        if (kind === "video") hadVideo = true;
 
         const canSend = await canSendMediaOnce(supabase, {
           consultantId: customer.consultant_id,
@@ -1003,9 +1007,33 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               conversation_step: stepKey,
             });
             if (!isLast) await sleepForMedia(kind, Number(m.duration_sec || 0) || null);
+          } else if (kind === "video") {
+            videoFailed = true;
           }
         } catch (e) {
+          if (kind === "video") videoFailed = true;
           console.warn(`[dispatch:${stepKey}] envio de ${kind} falhou:`, (e as any)?.message);
+        }
+      }
+
+      // F10 — Fallback variant C → B quando o vídeo inicial falha.
+      // Critério: variant=C, slot tinha vídeo, vídeo falhou e nada foi entregue.
+      // Promove o customer para B e re-dispara o mesmo step.
+      const _variant = (customer as any)?.flow_variant || "A";
+      if (_variant === "C" && hadVideo && videoFailed && !sent) {
+        console.warn(`[dispatch:${stepKey}] [variant-c] video failed, fallback to B`, {
+          customerId: customer.id,
+          stepKey,
+        });
+        try {
+          await supabase
+            .from("customers")
+            .update({ flow_variant: "B", updated_at: new Date().toISOString() })
+            .eq("id", customer.id);
+          (customer as any).flow_variant = "B";
+          return await dispatchStepFromFlow(stepKey, extraVars);
+        } catch (e) {
+          console.warn(`[dispatch:${stepKey}] fallback C→B falhou:`, (e as any)?.message);
         }
       }
       return sent;
@@ -2186,7 +2214,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               // E que NÃO sejam perguntas (texto não termina em "?").
               let current = nextCustom;
               let dispatchedAny = false;
-              for (let hops = 0; hops < 8; hops++) {
+              for (let hops = 0; hops < 20; hops++) {
                 const ok = await dispatchStepFromFlow(current.step_key, _vars);
                 dispatchedAny = dispatchedAny || !!ok;
                 console.log(`[custom-step-resolver] chain-emit step=${current.step_key} pos=${current.position} dispatched=${ok}`);
@@ -2203,7 +2231,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 );
                 if (!defTxn) break; // tem pergunta/objeção → aguarda resposta
                 let nxt: any = null;
-                if (defTxn.goto_step_id) nxt = await _loadStepById(String(defTxn.goto_step_id));
+                if (defTxn?.goto_step_id) nxt = await _loadStepById(String(defTxn.goto_step_id));
                 if (!nxt) {
                   nxt = await findNextActiveFlowStep(supabase, customer.consultant_id, {
                     afterPosition: Number(current.position) || 0,
@@ -3688,7 +3716,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const lower = txt.toLowerCase();
       // ⚠️ Email é OBRIGATÓRIO no portal iGreen. Não aceitar PULAR.
       if (["pular", "skip", "não tenho", "nao tenho", "sem email", "sem e-mail", "n", "não", "nao"].includes(lower)) {
-        reply = "📧 Preciso de um *e-mail seu* — é por ele que o portal manda o código.\n\nSe não tiver, crie um rapidinho em qualquer provedor.";
+        reply = "📧 Esse aqui é *importante*! É o login do seu app *iGreen Club* 📱\n\nMe passa um e-mail seu — pode criar rapidinho em qualquer provedor (Gmail, Outlook, iCloud…).";
         break;
       }
       if (!isValidEmailFormat(txt)) {
@@ -4026,9 +4054,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           (updates as any).__inline_sent = ok || true;
           reply = "";
         } else {
-          console.warn(`⚠️ Step desconhecido: ${step} — resetando para aguardando_conta`);
-          updates.conversation_step = "aguardando_conta";
-          reply = `👋 Olá! Eu sou o assistente de *${nomeRepresentante}* em parceria com a *iGreen Energy*!\n\n📸 *Envie uma FOTO ou PDF da sua conta de energia* para começarmos!\n\nFormatos aceitos: JPG, PNG ou PDF`;
+          // F2 — strict mode: não reseta para aguardando_conta nem manda welcome
+          // genérico. Mantém step atual; consultor deve cuidar manualmente.
+          const _strict = await isResolverStrictMode(supabase).catch(() => false);
+          if (_strict) {
+            console.warn(`[resolver:strict] step "${step}" sem mapeamento e sem custom flow — mantendo step, sem reply`);
+            (updates as any).__inline_sent = true;
+            reply = "";
+          } else {
+            console.warn(`⚠️ Step desconhecido: ${step} — resetando para aguardando_conta`);
+            updates.conversation_step = "aguardando_conta";
+            reply = `👋 Olá! Eu sou o assistente de *${nomeRepresentante}* em parceria com a *iGreen Energy*!\n\n📸 *Envie uma FOTO ou PDF da sua conta de energia* para começarmos!\n\nFormatos aceitos: JPG, PNG ou PDF`;
+          }
         }
       }
       break;
