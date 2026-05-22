@@ -56,7 +56,7 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
   const [oneByOneStepId, setOneByOneStepId] = useState<string | null>(null);
   const [variant, setVariant] = useState<"A" | "B" | "C">("A");
   const [variantsAvailable, setVariantsAvailable] = useState<Array<"A" | "B" | "C">>(["A"]);
-  const byVariantRef = useRef<Map<"A" | "B" | "C", string>>(new Map());
+  const [byVariant, setByVariant] = useState<Map<"A" | "B" | "C", string>>(new Map());
 
   // Efeito 1 — inicialização: roda quando o popover abre ou o cliente muda.
   // Define a variante default a partir de customers.flow_variant SEM ouvir mudanças
