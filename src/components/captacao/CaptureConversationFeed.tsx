@@ -46,6 +46,27 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
 
+  const scheduleScrollToBottom = (force = false) => {
+    if (!force && !stickRef.current) return;
+    const run = () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+    };
+    run();
+    requestAnimationFrame(() => {
+      run();
+      requestAnimationFrame(run);
+    });
+    window.setTimeout(run, 80);
+    window.setTimeout(run, 240);
+  };
+
+  useEffect(() => {
+    stickRef.current = true;
+    scheduleScrollToBottom(true);
+  }, [customerId]);
+
   useEffect(() => {
     let mounted = true;
     const load = async () => {
@@ -96,10 +117,7 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
     const scroller = scrollRef.current;
     const sentinel = bottomRef.current;
     if (!scroller || !sentinel) return;
-    const go = () => {
-      if (!stickRef.current) return;
-      requestAnimationFrame(() => sentinel.scrollIntoView({ block: "end" }));
-    };
+    const go = () => scheduleScrollToBottom();
     go();
     const ro = new ResizeObserver(go);
     ro.observe(scroller);
