@@ -95,7 +95,7 @@ export function AiFeedbackPanel({ consultantId }: Props) {
       setDecisions((data || []) as Decision[]);
 
       // Carrega estatísticas de saúde do aprendizado
-      const { data: statsData } = await supabase
+      const { data: statsData } = await (supabase as any)
         .from("v_ai_learning_health")
         .select("*")
         .eq("consultant_id", consultantId)
