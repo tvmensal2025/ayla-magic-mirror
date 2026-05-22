@@ -1194,7 +1194,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     // F: texto entra como item ordenável junto com mídias
     const baseText = qa.text_response
-      ? String(qa.text_response).replaceAll("{nome}", customer.name || "").replaceAll("{representante}", nomeRepresentante || "")
+      ? renderTemplateVars(String(qa.text_response), { name: customer.name || "", representante: nomeRepresentante || "" })
       : "";
     const nudgeStep = qa.is_closing ? "aguardando_conta" : (step || "qualificacao");
     const nudge = qa.is_closing ? "" : buildStepNudge(nudgeStep, customer.name || null);
@@ -1448,9 +1448,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             const openingText = (openingQa as any).text_response;
             if (openingText) {
               try {
-                await sendText(remoteJid, String(openingText)
-                  .replaceAll("{nome}", customer.name || "")
-                  .replaceAll("{representante}", nomeRepresentante || ""));
+                await sendText(remoteJid, renderTemplateVars(String(openingText), {
+                  name: customer.name || "",
+                  representante: nomeRepresentante || "",
+                }));
                 await supabase.from("conversations").insert({
                   customer_id: customer.id,
                   message_direction: "outbound",
@@ -2902,9 +2903,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             try {
               const rawText = (nextCustom.message_text || "").trim();
               const firstName = String(customer.name || "").trim().split(/\s+/)[0] || "";
-              const finalText = (rawText || FINAL_FALLBACK_TEXT)
-                .replaceAll("{{nome}}", firstName)
-                .replaceAll("{{representante}}", nomeRepresentante || "");
+              const finalText = renderTemplateVars(rawText || FINAL_FALLBACK_TEXT, {
+                name: customer.name || "",
+                representante: nomeRepresentante || "",
+              });
               await sendOptions(remoteJid, finalText, [
                 { id: "btn_finalizar", title: "✅ Finalizar" },
               ]);
@@ -4125,9 +4127,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             .limit(1).maybeSingle();
           const txt = (passo?.message_text || "").trim();
           if (txt) {
-            parabens = txt
-              .replaceAll("{{nome}}", (customer.name || "").split(/\s+/)[0] || "")
-              .replaceAll("{{representante}}", nomeRepresentante || "");
+          parabens = renderTemplateVars(txt, {
+            name: customer.name || "",
+            representante: nomeRepresentante || "",
+          });
           }
         }
       } catch (e) {
