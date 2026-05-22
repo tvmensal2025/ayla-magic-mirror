@@ -78,13 +78,13 @@ Deno.serve(async (req) => {
     const action = String(body?.action || "render");
     const templateId = String(body?.template_id || "");
     const rawName = String(body?.name || "");
+    const variables: Record<string, string> = (body?.variables && typeof body.variables === "object") ? body.variables : {};
     const force = Boolean(body?.force || false);
 
     if (!templateId) return json(400, { error: "template_id obrigatório" });
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    // Carrega template + blocos
     const { data: tpl, error: tplErr } = await admin
       .from("voice_templates")
       .select("id, consultant_id, name")
@@ -100,15 +100,20 @@ Deno.serve(async (req) => {
 
     if (!blocks?.length) return json(400, { error: "template sem blocos" });
 
-    // Detecta se há slot dinâmico (precisa do nome)
     const hasNameSlot = blocks.some((b) => b.kind === "name_slot");
+    const variableBlocks = blocks.filter((b) => b.kind === "variable_slot");
     const nameNorm = normalizeName(rawName);
 
     if (hasNameSlot && !rawName) return json(400, { error: "name obrigatório (template tem slot de nome)" });
 
-    const cacheKey = hasNameSlot ? nameNorm : "_static_";
+    // Cache key combina nome + variáveis ordenadas
+    const varEntries = variableBlocks
+      .map((b) => [b.variable_key || "", normalizeName(variables[b.variable_key || ""] || "")])
+      .filter(([k]) => k)
+      .sort(([a], [b]) => a.localeCompare(b));
+    const varSig = varEntries.map(([k, v]) => `${k}:${v}`).join("|");
+    const cacheKey = [hasNameSlot ? nameNorm : "_static_", varSig].filter(Boolean).join("||") || "_static_";
 
-    // Cache hit?
     if (!force) {
       const { data: cached } = await admin
         .from("voice_template_renders")
@@ -117,15 +122,20 @@ Deno.serve(async (req) => {
         .eq("name_normalized", cacheKey)
         .maybeSingle();
       if (cached?.final_audio_url) {
-        return json(200, { url: cached.final_audio_url, cached: true, matched_name: hasNameSlot ? nameNorm : null });
+        return json(200, { url: cached.final_audio_url, cached: true });
       }
     }
 
     if (action === "check") {
-      // Só verifica disponibilidade
       if (hasNameSlot) {
         const clip = await findNameClip(admin, tpl.consultant_id, nameNorm);
-        return json(200, { available: !!clip, matched_name: clip?.matched || null });
+        if (!clip) return json(200, { available: false });
+      }
+      for (const b of variableBlocks) {
+        const v = normalizeName(variables[b.variable_key || ""] || "");
+        if (!v) return json(200, { available: false });
+        const clip = await findNameClip(admin, tpl.consultant_id, v);
+        if (!clip) return json(200, { available: false });
       }
       return json(200, { available: true });
     }
@@ -142,8 +152,23 @@ Deno.serve(async (req) => {
           return json(409, {
             error: "name_not_recorded",
             missing_name: rawName,
-            missing_name_normalized: nameNorm,
+            missing_key: "nome",
             message: `Você ainda não gravou o nome "${rawName}".`,
+          });
+        }
+        urls.push(clip.audio_url);
+      } else if (b.kind === "variable_slot") {
+        const key = b.variable_key || "";
+        const rawVal = variables[key] || "";
+        if (!rawVal) return json(400, { error: `valor obrigatório para {{${key}}}` });
+        const valNorm = normalizeName(rawVal);
+        const clip = await findNameClip(admin, tpl.consultant_id, valNorm);
+        if (!clip) {
+          return json(409, {
+            error: "name_not_recorded",
+            missing_name: rawVal,
+            missing_key: key,
+            message: `Você ainda não gravou "${rawVal}" para {{${key}}}.`,
           });
         }
         urls.push(clip.audio_url);
