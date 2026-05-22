@@ -165,14 +165,18 @@ export function useMessages(
         return true;
       });
 
+      const firstTs = normalizeMessageTimestamp(unique[0]?.messageTimestamp);
+      const lastTs = normalizeMessageTimestamp(unique[unique.length - 1]?.messageTimestamp);
+      const newestFirst = firstTs >= lastTs;
+
       const mapped = unique
         .map((msg, sourceIndex) => ({ ...mapMessage(msg), sourceIndex }))
         .filter((m) => clearedAtMs === 0 || m.timestamp * 1000 >= clearedAtMs)
         .sort((a, b) => {
           if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
-          // Mesmo segundo: Whapi/Evolution geralmente retornam newest-first.
-          // Para renderizar oldest-first, inverte só o desempate dentro do empate.
-          return b.sourceIndex - a.sourceIndex;
+          // Mesmo segundo: render final é oldest-first, então o desempate respeita
+          // a direção em que o provedor entregou o feed bruto.
+          return newestFirst ? b.sourceIndex - a.sourceIndex : a.sourceIndex - b.sourceIndex;
         })
         .map(({ sourceIndex: _sourceIndex, ...m }) => m);
       setMessages(mapped);
