@@ -25,7 +25,7 @@ export function AudioRecorderInline({ onRecorded, disabled }: Props) {
 
   async function start() {
     try {
-      const Recorder = await loadRecorder();
+      const Recorder = await loadOpusRecorder();
       const recorder = new Recorder({
         encoderPath: "/opus/encoderWorker.min.js",
         encoderApplication: 2048,
