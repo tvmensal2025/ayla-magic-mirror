@@ -150,20 +150,21 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
           return (
             <div key={r.id} className={`flex ${out ? "justify-end" : "justify-start"}`}>
               <div
-                className={`max-w-[85%] rounded-lg px-2 py-1.5 shadow-sm ${
+                className={`max-w-[85%] rounded-lg px-3 py-2 shadow-sm ${
                   out
                     ? "bg-[#005c4b] text-white rounded-tr-sm"
                     : "bg-[#202c33] text-white rounded-tl-sm"
                 }`}
               >
-                <div className="flex items-center gap-1 text-[9px] opacity-70 mb-0.5">
+                <div className="flex items-center gap-1 text-[10px] opacity-70 mb-1">
                   {iconFor(r.message_type)}
                   <span className="uppercase font-semibold">{out ? "Você" : "Lead"}</span>
                   <span>·</span>
                   <span className="tabular-nums">{fmtTime(r.created_at)}</span>
                   {r.slot_key && <span className="ml-1 opacity-60">· {r.slot_key}</span>}
                 </div>
-                <p className="text-[11px] leading-snug whitespace-pre-wrap break-words">{text}</p>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{text}</p>
+
               </div>
             </div>
           );
