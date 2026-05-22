@@ -1,45 +1,46 @@
-# Templates com gravador inline + Slots livres na Voz Personalizada
+## Diagnóstico
 
-## 1. Templates (aba "Templates") — gravador ao lado do "selecionar arquivo"
+O painel `/admin` foi construído mobile-first com container `max-w-7xl mx-auto` (1280px). Em monitores grandes (1440, 1920, 2560px) sobra fundo preto nas laterais — por isso "parece que não foi feito pra PC". Além disso, em desktop o conteúdo continua empilhado verticalmente como no celular, desperdiçando a tela.
 
-**Onde:** `src/components/whatsapp/templates/TemplateListItem.tsx` (modo edição)
+Vou tratar isso de forma sistêmica, sem quebrar o mobile.
 
-Hoje, ao editar um template existente, só dá pra trocar o áudio via Upload. Vou colocar **dois botões lado a lado** (quando `editMediaType === "audio"`):
+## O que vou fazer
 
-- 📁 **Upload mídia** (já existe)
-- 🎤 **Gravar com minha voz** (novo — usando o mesmo recorder do `TemplateCreateForm`)
+### 1. Shell do /admin com largura total + sidebar fixa em desktop
 
-Resultado: o consultor abre um template padrão da iGreen (ou seu fork pessoal), clica em "Gravar com minha voz", grava ali mesmo, e o áudio sobe pro MinIO substituindo o `media_url`. O texto/legenda/imagem ficam iguais — só a voz muda.
+- Substituir o `max-w-7xl mx-auto` em `src/pages/Admin.tsx` por um shell de duas colunas:
+  - **Sidebar lateral fixa** (≥ `lg:`) com as abas atuais (Dashboard, WhatsApp, CRM, Templates, Fluxos, etc.) — usando o padrão Shadcn `Sidebar` (collapsible em ícone).
+  - **Área de conteúdo fluida** ocupando o resto da tela (`flex-1`, sem max-width travado).
+- No mobile (< `lg:`) mantém exatamente o layout atual (top bar + tabs horizontais) — zero regressão.
+- Header passa a ter `SidebarTrigger` para colapsar a barra.
 
-Também vou garantir que aparece um player de pré-escuta logo abaixo, para conferir antes de salvar. Cancelar/parar/timer iguais ao do form de criação (vou extrair em um pequeno hook compartilhado `useTemplateAudioRecorder` para não duplicar a lógica do opus-recorder).
+### 2. Container de conteúdo respira até telas grandes
 
-## 2. Voz Personalizada — slots de palavra-chave livres
+- Onde hoje tem `max-w-7xl`, troco por padding lateral generoso (`px-4 lg:px-8 xl:px-12`) e largura controlada por `max-w-screen-2xl` (1536px) com `mx-auto`, em vez de 1280px estreito.
+- Em telas ≥ 1920px, conteúdo respira sem barras pretas berrantes.
 
-**Onde:** `src/components/whatsapp/voice/VoiceTemplateEditor.tsx` + `useVoiceTemplates.ts`
+### 3. Densidade desktop nas telas-chave
 
-Hoje só existe **um tipo** de slot: `name_slot` (`{{nome}}`). A tabela `voice_template_blocks` já tem suporte a `kind: "variable_slot"` e coluna `variable_key`, então não precisa migration.
+Aumentar colunas onde hoje tudo empilha:
 
-Mudanças:
+- **DashboardTab** — KPIs em `grid-cols-2 md:grid-cols-3 xl:grid-cols-4`; gráficos lado-a-lado em `xl:grid-cols-2`.
+- **WhatsApp (chat)** — 3 colunas em desktop: lista de conversas | chat ativo | painel do cliente (CRM lateral). Hoje o painel do cliente vira modal mesmo em PC.
+- **CRM Kanban** — colunas com largura mínima maior em desktop (`xl:min-w-[320px]`) e scroll horizontal contido na área.
+- **Templates / Fluxos / Saúde Bot** — listagens passam de 1 coluna para `xl:grid-cols-2`.
 
-- Adicionar terceiro botão na timeline: **"+ Slot variável"** (além de "Áudio fixo" e "Slot do nome").
-- Ao criar um slot variável, abrir um inline-input pedindo a palavra-chave (ex: `cidade`, `valor_conta`, `produto`). Validação: minúsculas, sem espaços, sem `{{}}` (o sistema embrulha sozinho).
-- Cada bloco `variable_slot` exibe um card com a chave (ex: `{{cidade}}`) e um botão **"Editar palavra-chave"** + lixeira.
-- No pré-visualizar emendado, para cada `variable_slot` presente, mostrar um input para o consultor digitar um valor exemplo (ex: "São Paulo"). Esses valores vão como `variables: { cidade: "São Paulo" }` pro stitcher.
-- Lógica de match: o stitcher (`voice-template-stitch`) procura um `voice_name_clip` cujo `name_normalized` bate com o valor digitado. Ou seja, a biblioteca de "Nomes" passa a se chamar **"Biblioteca de áudios variáveis"** — pode guardar nomes de pessoas, cidades, números, qualquer palavra-chave reutilizável.
-- Se faltar gravação para a palavra → mesma UX de hoje: retorna `name_not_recorded` + missing key, e abre o recorder inline pra gravar na hora.
+### 4. Fundo do app
 
-## 3. Edge function `voice-template-stitch`
+- Substituir o preto puro pelo gradient sutil do design system (`bg-background` com leve textura verde glassmorphism que já existe na LP), pra que mesmo em ultrawide as laterais fiquem elegantes em vez de "vazio preto".
 
-Pequeno ajuste: aceitar `variables: Record<string,string>` (além do `name` legado) e resolver cada `variable_slot` pela `variable_key` do bloco → procura clip normalizado. Cache key passa a ser `template_id + sorted(JSON.stringify(variables))`.
+## Fora de escopo
 
-## Detalhes técnicos
+- Landing pages públicas (`/ayla-viana`, `/cadastro`) — já são responsivas e desenhadas para desktop. Só mexo se você confirmar problema específico ali.
+- Mudanças de funcionalidade — só CSS/layout.
 
-- Sem migration nova — schema já comporta `variable_slot` + `variable_key`.
-- Extrair recorder OGG/Opus 16kHz mono em hook compartilhado para reuso entre `TemplateCreateForm`, `TemplateListItem` (edição) e `VoiceClipRecorder`.
-- UI mantém o padrão atual (botões outline tracejados, ícones lucide, cores roxas/verdes do tema).
-- Sem mudanças de roles/RLS.
+## Validação
 
-## Fora de escopo (não vou tocar agora)
+Depois de aplicar, tiro screenshots em 1366, 1536, 1920 e 1191 (o seu atual) para confirmar zero overflow e zero faixa preta indevida.
 
-- Atalho `/voz-...` no compositor do chat (pendente da rodada anterior).
-- Múltiplas variáveis no `{{nome}}` legado dos templates regulares — só nas Vozes Personalizadas.
+---
+
+**Pergunta rápida antes de implementar:** confirma que quer começar pelo **/admin inteiro** (CRM + WhatsApp + Templates + Dashboard) ou prefere que eu faça primeiro só a tela do **WhatsApp** (que é a mais usada) e depois evoluo as outras?
