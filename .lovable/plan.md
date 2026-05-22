@@ -1,56 +1,94 @@
-## Objetivo
+## O que vamos construir
 
-Garantir que **todos os consultores que rodam na Evolution** tenham comportamento idêntico aos que rodam na Whapi — exceto botões interativos do WhatsApp (Evolution não suporta nativamente, então o texto da pergunta vai cru no chat, sem botão).
+Uma nova aba **"Templates de Voz"** dentro de WhatsApp → Templates, onde o consultor monta uma **mensagem de áudio personalizada** combinando vários trechos gravados por ele mesmo. Quando enviado para um lead, o sistema **junta os trechos na hora** colocando o nome certo da pessoa no meio do áudio — soa como se o consultor estivesse falando ao vivo com aquele lead específico.
 
-## Diagnóstico
+### Exemplo prático
 
-Comparando `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (4415 linhas) vs `evolution-webhook/handlers/bot-flow.ts` (4277 linhas), identifiquei **gaps reais** que afetam o comportamento textual dos consultores na Evolution:
+Consultor grava:
 
-### Gaps que precisam ser fechados (afetam texto)
+- Trecho 1 (fixo): *"Olá"*
+- Slot dinâmico: `{{nome}}` → biblioteca de nomes gravados (Ana, Lucas, Maria, Paula, Rafael…)
+- Trecho 2 (fixo): *"seja muito bem-vindo, eu sou o Rafael Ferreira Dias."*
 
-1. **F10 — Fallback de variante C → B quando vídeo inicial falha**
-   - Whapi: linhas 959–1038 (rastreia `hadVideo`/`videoFailed` e migra customer para variant B se o vídeo do welcome falhar)
-   - Evolution: **ausente** → consultor C com vídeo quebrado deixa lead sem mensagem
-2. **Quiet hours BRT** (`isQuietHourBRT`, `logQuietSkip`)
-   - Whapi importa de `_shared/quiet-hours.ts` e bloqueia envio fora do horário comercial
-   - Evolution: **não importa** → manda em qualquer horário
-3. **Resolver strict mode** (`isResolverStrictMode` de `_shared/bot/global-flag.ts`)
-   - Whapi: feature flag global para impedir fallback Gemini livre quando custom flow ativo
-   - Evolution: **não usa** → pode cair em welcome legacy
-4. **`notifyNewLead` no `index.ts`**
-   - Whapi notifica `superAdminConsultantId`; Evolution notifica `instanceData.consultant_id` — comportamento divergente em ambientes multi-tenant
-   - Validar qual está correto e padronizar
-5. **Possíveis outras divergências menores** em handlers de capture/transitions — varredura linha-a-linha pendente
+Lead "Ana" recebe: áudio único = "Olá" + "Ana" + "seja muito bem-vindo, eu sou o Rafael Ferreira Dias." — tudo costurado, soando contínuo.
 
-### Gaps que **NÃO** precisam ser portados (botões)
+## Telas
 
-- **Auto-buttons wrapper** (whapi linhas 4388–4408): converte `ask_phone_confirm` e `ask_complement` em botões interativos. Na Evolution o texto-base já é enviado normalmente como pergunta — **manter como está** (texto puro funciona, cliente responde digitando).
-- `sendButtons` da Evolution já tem fallback nativo: se a API rejeitar botões, cai para `"1. opção / 2. opção"` numerado via `sendText`. Não precisa mexer.
+### 1. WhatsApp → Templates → nova aba "Voz personalizada"
 
-## Plano de execução
+- Lista dos templates de voz do consultor (nome, prévia tocável já com um nome de exemplo, atalho `/voz-ola`, ações).
+- Botão **"Novo template de voz"**.
 
-1. **Diff completo lado-a-lado** dos dois `bot-flow.ts` (script tmp) para listar TODAS as divergências, classificar como "porta para evolution" vs "específico de botão".
-2. **Portar para evolution-webhook**:
-   - F10 variant C → B fallback (bloco `hadVideo`/`videoFailed`)
-   - Imports + chamadas de `isQuietHourBRT` / `logQuietSkip`
-   - Imports + uso de `isResolverStrictMode`
-   - Qualquer outro gap não-botão encontrado no diff
-3. **Normalizar `notifyNewLead`** no `evolution-webhook/index.ts` para usar a mesma lógica do whapi (super-admin notifier quando aplicável).
-4. **Adicionar testes** em `evolution-webhook/handlers/bot-flow_test.ts` (espelhando os do whapi) que cobrem: variant A/B/C, custom flow resolver, anti-rep prompt, transitions.
-5. **Deploy** apenas das funções afetadas: `evolution-webhook`.
-6. **Validação**:
-   - Rodar testes Deno em ambas as funções
-   - Curl simulado com payload Evolution de um consultor variant=B e variant=C, conferir nos logs que o conteúdo é o mesmo do whapi para a mesma `flow_variant`
+### 2. Editor do template de voz
 
-## Detalhes técnicos
+Linha do tempo horizontal de **blocos** na ordem em que vão tocar:
 
-- Tudo é mudança em edge functions (`supabase/functions/evolution-webhook/**` e mínima em `_shared/`). Zero alteração de frontend, schema, ou tabela.
-- Helpers compartilhados (`flow-router`, `step-media-order`, `notify-consultant`, `bot/paused`, `bot/global-flag`, `quiet-hours`) já existem em `_shared/` — só precisam ser importados/chamados na Evolution.
-- Auto-buttons wrapper fica deliberadamente **fora** do port — o reply textual já está pronto antes do wrapper, então omitir o bloco preserva o texto sem alterações.
-- Risco: durante o port pode aparecer divergência em assinatura de `BotContext` (ex: `sender.sendButtons` opcional). Vou validar pelos types antes de mover código.
+```text
+[ 🎤 Áudio fixo ] [ 👤 Nome do lead ] [ 🎤 Áudio fixo ] [ + Adicionar ]
+   "Olá"            {{nome}}            "seja bem-vindo…"
+```
 
-## Saída esperada
+- Botão **"+"** entre/depois de cada bloco abre menu: **Gravar áudio fixo** | **Inserir nome do lead** | **Inserir variável** ({{valor_conta}}, {{cidade}}…).
+- Cada bloco tem: play, regravar, excluir, arrastar para reordenar.
+- Cada gravação usa o gravador OGG/Opus que já existe (`useAudioRecorder` + `loadOpusRecorder`) — mesma qualidade dos áudios atuais.
+- Painel "**Pré-visualizar com nome**": campo de texto → escolhe um nome da biblioteca (ou digita) → toca o áudio costurado final.
+- Dica visível: *"⚡ Palavra-chave deste template: `{{nome}}` — o sistema busca a gravação correspondente na sua biblioteca de nomes."*
 
-- evolution-webhook se comporta **idêntico** ao whapi-webhook em: ordem de mídia, A/B/C, custom flow, anti-rep, quiet hours, fallback C→B, notificação de novo lead, takeover humano.
-- Diferença visual única: perguntas que viram botões na Whapi ficam como texto na Evolution (o `sendButtons` da Evolution já tem fallback numerado, mas o auto-wrapper do whapi não dispara).
-- Pronto para escalar nos outros consultores Evolution sem reescrever lógica.
+### 3. Biblioteca de nomes (mesma página, aba secundária)
+
+- Grid com cada nome gravado: Ana ▶, Bruno ▶, Lucas ▶, Maria ▶…
+- Botão **"+ Gravar nome"**: digita o nome → grava o áudio dele → salva.
+- Botão **"Gravar lista"** (modo rápido): consultor cola lista de nomes ("Ana, Bruno, Lucas…") e o sistema vai pedindo um a um para gravar — depois de cada gravação, próximo nome aparece automaticamente.
+- Busca + indicador "X nomes gravados / Y leads na base sem nome gravado" (avisa lacunas).
+
+### 4. Envio
+
+- No chat e no envio em massa, atalho `/voz-ola` aparece no menu de respostas rápidas (igual templates de texto).
+- Ao mandar, o sistema:
+  1. Pega o `customer.name` do lead.
+  2. Normaliza ("Maria José" → tenta `maria_jose`, depois `maria`).
+  3. Se achar o nome na biblioteca → costura e envia.
+  4. Se **não** achar → avisa o consultor: *"Você ainda não gravou o nome 'Fernanda'. Quer gravar agora?"* (abre o gravador inline).
+- Áudio final entregue como **um único OGG/Opus** (WhatsApp/Whapi exige), igual aos atuais.
+
+## Como o áudio é "juntado" (detalhes técnicos)
+
+- Cada gravação é salva separada no MinIO (mesma estratégia atual de templates).
+- Costura acontece numa **edge function nova** (`voice-template-stitch`):
+  1. Recebe `template_id` + `name`.
+  2. Baixa os OGGs dos blocos na ordem (fixo + nome + fixo…).
+  3. Concatena com `ffmpeg concat demuxer` (já temos `compress-worker` com ffmpeg — reusa a mesma imagem ou faz no worker e devolve URL).
+  4. Sobe o OGG final no MinIO (cache por `template_id+name` → segunda vez é instantâneo).
+  5. Retorna URL pública.
+- Frontend pede a URL costurada e manda via `whapi-proxy` `send_media` (audio) — fluxo idêntico ao envio normal.
+- Pré-visualização no editor usa o mesmo endpoint.
+
+## Banco de dados (novas tabelas)
+
+- **voice_templates** — por consultor: `name`, `shortcut` (opcional, ex `/voz-ola`), `description`.
+- **voice_template_blocks** — blocos ordenados de cada template: `template_id`, `position`, `kind` (`fixed_audio` | `name_slot` | `variable_slot`), `audio_url` (para fixed_audio), `variable_key` (para variable_slot, ex `{{nome}}`).
+- **voice_name_clips** — biblioteca de nomes do consultor: `consultant_id`, `name_normalized` (chave de busca: `ana`, `maria_jose`), `name_display`, `audio_url`.
+- **voice_template_renders** — cache de áudios já costurados: `template_id`, `name_normalized`, `final_audio_url`, `created_at`. Invalida quando algum bloco/clipe é regravado.
+
+Tudo com RLS por `consultant_id` (mesmo padrão dos `message_templates` atuais).
+
+## Ajudas para o consultor (durante a gravação)
+
+- No editor, quando o bloco é `name_slot`, mostra: **"🔑 Palavra-chave deste slot: nome do lead"** + sugestão *"Grave os trechos fixos com tom natural, terminando frase aberta antes do nome ('Olá…') e começando depois do nome ('… seja bem-vindo')."*
+- Medidor visual de volume durante a gravação (waveform simples).
+- Botão *"Tocar emendado"* dentro do editor para o consultor ouvir como vai soar antes de salvar.
+- Detector de silêncio nas pontas: corta automaticamente >300ms de silêncio no começo/fim de cada trecho para a costura ficar contínua.
+
+## Fora do escopo desta versão
+
+- Síntese TTS de nomes faltantes (consultor sempre grava os nomes ele mesmo — é o ponto da feature).
+- Múltiplas variáveis simultâneas além de `{{nome}}` na v1 — começamos só com nome; estrutura já suporta adicionar `{{cidade}}`, `{{valor_conta}}` depois sem mudar tabelas.
+
+## Entregáveis
+
+1. Migration: 4 tabelas novas + RLS.
+2. Edge function `voice-template-stitch` (ffmpeg concat + cache no MinIO).
+3. UI: aba "Voz personalizada" no `TemplateManager` + editor de blocos + biblioteca de nomes.
+4. Integração no chat e bulk send: atalho `/voz-*` resolve template de voz, costura e envia.
+5. Aviso/atalho de gravação quando o nome do lead não existe na biblioteca.  
+6. PODENDO SER PERSONALIZADO COM COMECO MEIO E FINAL COM PALAVRAS CHAVES  
