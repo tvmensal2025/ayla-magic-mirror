@@ -1,18 +1,9 @@
 import { useState, useRef, useCallback } from "react";
+import { loadOpusRecorder } from "@/lib/opusRecorderLoader";
 
 // Usa opus-recorder para gerar OGG/Opus de verdade (não webm).
 // Whapi/WhatsApp exige container OGG para messages/voice. Gravar direto em .ogg
 // resolve os erros 500 que aconteciam quando enviávamos .webm.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type OpusRecorderClass = any;
-
-let RecorderPromise: Promise<OpusRecorderClass> | null = null;
-async function loadRecorder(): Promise<OpusRecorderClass> {
-  if (!RecorderPromise) {
-    RecorderPromise = import("opus-recorder").then((m) => (m as { default: OpusRecorderClass }).default || m);
-  }
-  return RecorderPromise;
-}
 
 export function useAudioRecorder(onSendAudio?: (base64: string) => Promise<void>) {
   const [isRecording, setIsRecording] = useState(false);
@@ -27,7 +18,7 @@ export function useAudioRecorder(onSendAudio?: (base64: string) => Promise<void>
   const startRecording = useCallback(async () => {
     if (!onSendAudio) return;
     try {
-      const Recorder = await loadRecorder();
+      const Recorder = await loadOpusRecorder();
       const recorder = new Recorder({
         encoderPath: "/opus/encoderWorker.min.js",
         encoderApplication: 2048, // VOIP
