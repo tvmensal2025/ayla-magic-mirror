@@ -74,7 +74,7 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
         .from("conversations")
         .select("id, message_direction, message_text, message_type, created_at, slot_key")
         .eq("customer_id", customerId)
-        .order("created_at", { ascending: true })
+        .order("created_at", { ascending: false })
         .limit(limit);
       if (!mounted) return;
       setRows(sortRows((data as ConvRow[]) || [], limit));
