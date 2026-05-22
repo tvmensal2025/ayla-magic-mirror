@@ -1913,6 +1913,24 @@ export type Database = {
         }
         Relationships: []
       }
+      consultant_presence: {
+        Row: {
+          consultant_id: string
+          last_seen_at: string
+          updated_at: string
+        }
+        Insert: {
+          consultant_id: string
+          last_seen_at?: string
+          updated_at?: string
+        }
+        Update: {
+          consultant_id?: string
+          last_seen_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       consultant_wallet: {
         Row: {
           auto_pause_at_cents: number
@@ -2423,6 +2441,10 @@ export type Database = {
           ocr_conta_attempts: number
           ocr_doc_attempts: number
           ocr_done: boolean
+          ocr_review_decided_at: string | null
+          ocr_review_decided_by: string | null
+          ocr_review_pending: string | null
+          ocr_review_started_at: string | null
           otp_code: string | null
           otp_received_at: string | null
           pain_point: string | null
@@ -2560,6 +2582,10 @@ export type Database = {
           ocr_conta_attempts?: number
           ocr_doc_attempts?: number
           ocr_done?: boolean
+          ocr_review_decided_at?: string | null
+          ocr_review_decided_by?: string | null
+          ocr_review_pending?: string | null
+          ocr_review_started_at?: string | null
           otp_code?: string | null
           otp_received_at?: string | null
           pain_point?: string | null
@@ -2697,6 +2723,10 @@ export type Database = {
           ocr_conta_attempts?: number
           ocr_doc_attempts?: number
           ocr_done?: boolean
+          ocr_review_decided_at?: string | null
+          ocr_review_decided_by?: string | null
+          ocr_review_pending?: string | null
+          ocr_review_started_at?: string | null
           otp_code?: string | null
           otp_received_at?: string | null
           pain_point?: string | null
@@ -4428,6 +4458,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      is_consultant_online: { Args: { p_consultant: string }; Returns: boolean }
       is_super_admin: { Args: { _user_id: string }; Returns: boolean }
       is_team_member: {
         Args: { _leader: string; _member: string }
