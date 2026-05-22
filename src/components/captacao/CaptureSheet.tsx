@@ -62,9 +62,10 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
 
   // No mobile o painel abre minimizado (pílula no rodapé) pra não tampar o teclado/composer.
   // Mas quando o consultor expande, vai direto pra fullscreen (sem estado compacto intermediário).
-  useEffect(() => { setSentSteps(new Set()); setMinimized(isMobile); setExpanded(isMobile); }, [customerId, isMobile]);
+  // Mobile: começa minimizado (barra fina), abre em meia-tela. Grabber arrasta pra cima → fullscreen.
+  useEffect(() => { setSentSteps(new Set()); setMinimized(isMobile); setExpanded(false); }, [customerId, isMobile]);
   const pendingSteps = useMemo(() => allSteps.filter((s) => !sentSteps.has(s.step_key)), [allSteps, sentSteps]);
-  useEffect(() => { if (open) { setMinimized(isMobile); setExpanded(isMobile); } else { setMinimized(false); setExpanded(false); } }, [open, isMobile]);
+  useEffect(() => { if (open) { setMinimized(isMobile); setExpanded(false); } else { setMinimized(false); setExpanded(false); } }, [open, isMobile]);
 
   // Garante modo manual ao abrir
   useEffect(() => {
