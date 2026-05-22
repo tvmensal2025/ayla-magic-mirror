@@ -143,6 +143,7 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
             </div>
           );
         })}
+        <div ref={bottomRef} aria-hidden className="h-1" />
       </div>
     </div>
   );
