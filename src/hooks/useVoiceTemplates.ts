@@ -116,6 +116,13 @@ export function useVoiceTemplates(consultantId: string | undefined) {
     await refetch();
   }, [refetch]);
 
+  const updateBlockVariableKey = useCallback(async (blockId: string, templateId: string, variableKey: string) => {
+    const { error } = await supabase.from("voice_template_blocks").update({ variable_key: variableKey }).eq("id", blockId);
+    if (error) { toast.error(error.message); return; }
+    await supabase.from("voice_template_renders").delete().eq("template_id", templateId);
+    await refetch();
+  }, [refetch]);
+
   const deleteBlock = useCallback(async (blockId: string, templateId: string) => {
     const { error } = await supabase.from("voice_template_blocks").delete().eq("id", blockId);
     if (error) { toast.error(error.message); return; }
