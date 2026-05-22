@@ -249,7 +249,7 @@ Deno.serve(async (req) => {
     const customerJid = String(formData.get("customer_jid") || "").trim();
     const customerNameField = String(formData.get("customer_name") || "").trim();
     const slugHint = String(formData.get("slug") || "").trim();
-    const kindField = String(formData.get("kind") || inferKind(file.type)).trim();
+    const kindField = String(formData.get("kind") || inferKind(normalizedType)).trim();
 
     // ── Resolve consultor slug ────────────────────────────────────────
     let consultantSlug = "sem_consultor";
@@ -304,7 +304,7 @@ Deno.serve(async (req) => {
         bucket: minioBucket,
         objectKey,
         fileBytes,
-        contentType: file.type,
+        contentType: normalizedType,
       });
       publicUrl = `${minioUrl}/${minioBucket}/${objectKey}`;
     } catch (minioErr: any) {
@@ -316,7 +316,7 @@ Deno.serve(async (req) => {
       const { error: upErr } = await supabase.storage
         .from("whatsapp-media")
         .upload(fallbackKey, fileBytes, {
-          contentType: file.type,
+          contentType: normalizedType,
           upsert: false,
           cacheControl: "31536000",
         });
@@ -330,7 +330,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         url: publicUrl,
         key: objectKey,
-        type: file.type,
+        type: normalizedType,
         size: file.size,
         storage: storageBackend,
         visibility: userIsAdmin ? "public" : "private",
