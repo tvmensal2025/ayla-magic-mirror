@@ -217,14 +217,21 @@ Deno.serve(async (req) => {
     }
 
     const allowed = getAllowedTypes();
-    if (!allowed.includes(file.type)) {
+    // Normaliza MIME: navegadores enviam "audio/ogg; codecs=opus", "audio/webm;codecs=opus" etc.
+    const rawType = String(file.type || "").toLowerCase();
+    let normalizedType = rawType.split(";")[0].trim();
+    // Aliases comuns: webm/opus do MediaRecorder vira ogg para o WhatsApp.
+    if (normalizedType === "audio/webm" || normalizedType === "audio/x-opus+ogg") {
+      normalizedType = "audio/ogg";
+    }
+    if (!allowed.includes(normalizedType)) {
       return new Response(
         JSON.stringify({ error: `File type not allowed: ${file.type}` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const ext = getExtension(file.type);
+    const ext = getExtension(normalizedType);
     const fileBytes = new Uint8Array(await file.arrayBuffer());
 
     // ── Determine media kind from MIME ────────────────────────────────
