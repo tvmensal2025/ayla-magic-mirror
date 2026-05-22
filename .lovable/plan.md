@@ -1,54 +1,40 @@
 ## Problema
 
-Na aba **Captação** (modo normal, Game OFF — que é o caso do print), ao clicar em um lead nada acontece visualmente no celular. Motivo: o `CaptacaoPanel.tsx` (linhas 356–404) renderiza **lista + main + ficha em um único `flex` horizontal** sem breakpoints responsivos. No mobile, a lista ocupa a tela toda e o painel de passos/ficha fica fora da viewport — o `onSelect` dispara, mas o usuário não vê nada.
+Na aba **Captação** (`/admin`), os tiles de passos (Passo 2, Passo 3…) têm botão **Enviar** que dispara o envio direto, sem mostrar o que vai sair. Você quer ver o conteúdo (texto + áudio + imagem + vídeo, já com `{{nome}}`/`{{valor_conta}}` resolvidos) antes de confirmar, pra não se perder na ordem nem mandar o passo errado.
 
-O modo Game (linhas 220–353) já tem o tratamento mobile correto (lista esconde quando há lead selecionado, header com botão voltar, ficha colapsável). Falta replicar essa lógica no modo normal.
+Boa notícia: já existe um componente pronto chamado `CaptureStepPreview` (modal estilo WhatsApp com bolha verde, player de áudio/vídeo, thumbnail de imagem e botão "Seguir fluxo / Só este passo"). Ele só não está conectado ao grid atual.
 
-Também: o primeiro lead do print aparece sem nome (só `5511964079473`) — é um caso real do banco, não é bug; só vamos garantir que o telefone fique visível mesmo sem nome (já está, mas posso reforçar).
+## O que vou fazer
 
-## O que vai mudar
+1. **Wire do preview no clique do botão Enviar** em `src/components/captacao/CaptureStepsGrid.tsx`:
+  - Clique em **Enviar** abre o `CaptureStepPreview` em vez de mandar direto.
+  - O preview já busca `bot_flow_steps` + `ai_media_library`, aplica variáveis e mostra exatamente o que sai pro lead.
+  - Botão "Só este passo" dentro do modal dispara o `manual-step-send` (mesma lógica atual, `continueFlow: false`).
+  - Botão "Seguir fluxo (A/B/C)" mantém comportamento de encadear próximos passos automáticos.
+2. **Mini-preview inline no próprio tile** (sem precisar abrir modal):
+  - Mostrar as 2 primeiras linhas do `message_text` (com variáveis resolvidas) abaixo do título do passo.
+  - Ícones de mídia (🎤 🖼 🎥) ficam **acesos** (cor) quando o passo tem aquela mídia configurada, e apagados quando não tem — hoje todos aparecem em cinza, gerando confusão.
+3. **Atalho "👁 Ver"** ao lado do "Enviar" para abrir o preview sem disparar nada (caso queira só conferir).
+4. Garantir que o preview respeite a **variante A/B/C** atual do lead (já suportado pelo componente).
 
-Apenas `src/components/captacao/CaptacaoPanel.tsx`, no bloco `else` (Game OFF), linhas 356–404:
+## Escopo
 
-1. **Mobile (sem lead selecionado):** mostra só a lista de leads ocupando 100% da largura.
-2. **Mobile (com lead selecionado):** esconde a lista, mostra o painel de captura com:
-   - Header com botão **← Voltar** (volta para a lista)
-   - Nome/telefone do lead + botão "Abrir conversa"
-   - Grid dos 10 passos (clique para enviar)
-   - Toggle **"Ver ficha"** que expande/colapsa o `CaptureLeadCard` (mesma UX do modo Game)
-3. **Desktop (md+):** layout idêntico ao atual — lista à esquerda, passos no meio, ficha à direita, todos visíveis simultaneamente.
+- Só frontend, só no Modo Captação.
+- Não muda lógica de envio (`manual-step-send`), não muda banco, não mexe em fluxo automático.
+- Não afeta `/admin/whatsapp` nem envio em massa.
 
-Sem mexer em lógica de envio, hooks, RLS, banco ou no modo Game. Mudança puramente de layout/CSS responsivo + um `useState` para o toggle da ficha (que já existe: `showAside`).
+## Arquivos afetados
 
-## Detalhe técnico
+- `src/components/captacao/CaptureStepsGrid.tsx` — adicionar estado de "preview aberto", carregar mídias do passo selecionado, integrar `CaptureStepPreview`, mostrar mini-preview no tile.
+- (Opcional) leve ajuste de tipagem no `CaptureStepPreview` se precisar passar mais variantes.
 
-```text
-<div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-  {/* Lista: full-width no mobile sem seleção, escondida com seleção; sidebar fixa no desktop */}
-  <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-72 md:shrink-0`}>
-    <CaptureLeadList ... />
-  </div>
+## Resultado esperado
 
-  {/* Main: escondida no mobile sem seleção */}
-  <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col`}>
-    {selectedId && (
-      <header com ChevronLeft (md:hidden) + nome + Abrir conversa + ChevronDown ficha (md:hidden)>
-      <CaptureStepsGrid />
-      <div className={`md:hidden ${showAside ? "block" : "hidden"}`}>
-        <CaptureLeadCard embedded />
-      </div>
-    )}
-  </main>
+Quando você clicar **Enviar** num tile de passo, um modal abre mostrando:
 
-  {/* Ficha desktop: sempre visível em md+ */}
-  {selectedId && <div className="hidden md:flex"><CaptureLeadCard /></div>}
-</div>
-```
+- 🟢 Bolha verde com o texto que vai sair (`Oi João, vi que sua conta é R$ 450,00…`)
+- 🎤 Player do áudio que vai junto
+- 🖼/🎥 Preview da imagem/vídeo
+- Botões "Seguir fluxo" e "Só este passo" pra confirmar.
 
-Resetar `showAside` no `useEffect` que já roda em `[selectedId]` (linha 55) — já está incluído lá.
-
-## Fora de escopo
-
-- Não vou alterar o modo Game (já está OK no mobile).
-- Não vou alterar o `CaptureLeadList` nem o `CaptureLeadCard`.
-- Não vou mexer no fluxo de envio, captura ou no Portal Worker.
+Assim você confere antes de mandar e não se perde na ordem. E preciso ver a resposta 
