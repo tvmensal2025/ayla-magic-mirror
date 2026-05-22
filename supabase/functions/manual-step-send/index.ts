@@ -5,6 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { createWhapiSender } from "../_shared/whapi-api.ts";
+import { renderTemplateVars } from "../_shared/render-vars.ts";
 
 
 type Part = "text" | "audio" | "image" | "video" | "document" | "all";
@@ -371,23 +372,13 @@ Deno.serve(async (req) => {
     }
 
     // Build variables for text rendering
-    const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
-    const billValue = Number((customer as any).electricity_bill_value || 0);
-    const fmtBRL = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const vars: Record<string, string> = {
-      "{nome}": firstName,
-      "{{nome}}": firstName,
-      "{nome_completo}": String((customer as any).name || ""),
-      "{{nome_completo}}": String((customer as any).name || ""),
-      "{valor}": fmtBRL(billValue),
-      "{{valor}}": fmtBRL(billValue),
-      "{economia_mensal}": fmtBRL(billValue * 0.20),
-      "{{economia_mensal}}": fmtBRL(billValue * 0.20),
-      "{economia_anual}": fmtBRL(billValue * 0.20 * 12),
-      "{{economia_anual}}": fmtBRL(billValue * 0.20 * 12),
-    };
-    const applyVars = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
-    const renderedText = (step as any).message_text ? applyVars(String((step as any).message_text)) : "";
+    const renderedText = (step as any).message_text
+      ? renderTemplateVars(String((step as any).message_text), {
+          name: (customer as any).name || "",
+          phone: (customer as any).phone_whatsapp || "",
+          valor_conta: (customer as any).electricity_bill_value,
+        })
+      : "";
 
     // Build items list per part request
     type Item = { kind: string; text?: string; media?: any };
