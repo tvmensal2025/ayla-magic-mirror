@@ -1,41 +1,29 @@
 ## Problema
+No /admin (aba Captação, Performance ON) sobra muito espaço lateral e vertical: o `<main>` limita a 1760px com paddings grandes, o painel usa `h-[calc(100vh-220px)]` e o HUD/Quests ocupam altura demais.
 
-No `/admin` (Performance ON), o painel ocupa altura enorme e os passos seguem bloqueados em ordem sequencial mesmo quando o cliente já respondeu (ex.: nome capturado). O usuário deve poder enviar qualquer passo livremente, e o cabeçalho precisa caber sem rolar.
+## Mudanças (só layout, sem mexer em lógica)
 
-## Mudanças (UI apenas, sem mexer no backend)
+### 1. `src/pages/Admin.tsx`
+- Renderizar `CaptacaoPanel` fora do `<main>` com `max-w-[1760px]` quando `activeTab === "captacao"`. Estrutura: manter o header de tabs no container atual, mas fechar o container antes de renderizar a aba captação e renderizá-la em wrapper `w-full px-2 sm:px-4 py-2`.
+  - Implementação: mover só o bloco do `activeTab === "captacao"` para fora do `<main>` numa `<section className="px-2 sm:px-4 lg:px-6 pb-4">` full-width após o `</main>`, e esconder o `<main>` quando aba=captação (`activeTab === "captacao"` retorna null no main para evitar duplicar).
 
-### 1. `CaptureStepsGrid.tsx` — remover bloqueio de ordem
-- Apagar a regra `locked = !sent && !isNext`. Todos os passos não enviados ficam habilitados.
-- Remover ícone `Lock`, classes `opacity-50` e o `disabled={locked}` do botão "Ver e enviar".
-- Manter o destaque visual apenas no "próximo sugerido" (`isNext`) com `ring-primary/30`, mas sem desabilitar os outros.
-- Mostrar o preview inline em todos os tiles (não só nos desbloqueados).
-- Tooltip do botão passa a ser sempre "Ver e enviar".
+### 2. `src/components/captacao/CaptacaoPanel.tsx`
+- Container raiz: trocar `h-[calc(100vh-220px)] min-h-[640px] rounded-xl border` por `h-[calc(100vh-150px)] min-h-[680px] rounded-lg border` para usar mais altura.
+- Header interno: `px-4 py-3` → `px-3 py-2`.
+- Wrapper do gameOn (HUD/Quests): já está `px-3 py-2 space-y-2`; reduzir para `px-2 py-1.5 space-y-1.5`.
+- Altura interna do main: `md:h-[calc(100vh-340px)]` → `md:h-[calc(100vh-280px)]` para esticar a lista de leads + grid de passos.
+- Coluna lateral (lead list): `md:w-72` → `md:w-64` para liberar espaço ao grid.
+- Aside (Ficha do Cliente): `md:w-72` → `md:w-80` (mais espaço útil pros campos), ou manter `md:w-72` se preferir; padrão: `md:w-72`.
+- Área central de scroll: `p-3 md:p-4` → `p-2 md:p-3`.
 
-### 2. `PlayerHud.tsx` — reduzir altura
-- Trocar `p-4` por `px-3 py-2`, emblema de `w-14 h-14` para `w-10 h-10`, ícone `w-5 h-5`.
-- Tipografia: rank `text-xs`, chips com `py-1` e fontes `text-[10px]`.
-- Remover o parágrafo "Pontos de Performance" (já está implícito no contexto do header).
-- Reduzir `rounded-2xl` → `rounded-xl` e remover `animate-exec-card` para evitar layout-shift inicial.
-
-### 3. `QuestsBar.tsx` — compactar metas do dia
-- Diminuir gap e padding (`p-2`, `gap-2`), barras de progresso para `h-1`.
-- Esconder o subtítulo "+50 PTS / +100 PTS" em telas < `md` (mantém só o título + barra).
-- No desktop, manter 3 colunas mas com `text-[10px]`.
-
-### 4. `CaptacaoPanel.tsx`
-- O wrapper do gameOn (`<div className="px-4 py-3 space-y-3">` linhas 217-220) vira `px-3 py-2 space-y-2` para reduzir espaçamento total.
-- Ajustar a altura calculada do main: `md:h-[calc(100vh-380px)]` → `md:h-[calc(100vh-300px)]` já que o HUD ficou menor.
-
-### 5. `CaptureSheet.tsx` (atalho raio "Enviar tudo")
-- Verificar se o `pendingSteps` ainda respeita a ordem travada antiga; ajustar para enviar todos os pendentes em sequência sem depender do "isNext" (já é assim, mas confirmar sem regressão).
+### 3. `src/components/captacao/CaptureStepsGrid.tsx`
+- Grid: `grid-cols-2 md:grid-cols-5 gap-2` → `grid-cols-2 sm:grid-cols-3 md:grid-cols-5 xl:grid-cols-6 gap-1.5` para aproveitar largura em telas grandes (a tela atual mostra só 5 colunas com vazio à direita).
 
 ## Fora de escopo
-- Lógica de envio (`manual-step-send`), state machine do bot, captura de OCR.
-- Nenhum schema/edge function alterado.
+- Nenhuma mudança em backend, lógica de envio ou bot.
+- Modo Performance OFF mantém o layout atual.
 
 ## Arquivos editados
-- `src/components/captacao/CaptureStepsGrid.tsx`
-- `src/components/captacao/game/PlayerHud.tsx`
-- `src/components/captacao/game/QuestsBar.tsx`
+- `src/pages/Admin.tsx`
 - `src/components/captacao/CaptacaoPanel.tsx`
-- `src/components/captacao/CaptureSheet.tsx` (verificação)
+- `src/components/captacao/CaptureStepsGrid.tsx`
