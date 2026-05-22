@@ -197,7 +197,7 @@ export default function FluxoCamila() {
   const reload = useCallback(async (uid: string, variant: "A" | "B" | "C" = "A") => {
     const [{ data: cons }, { data: flows }, { count }, { data: flowB }, { data: flowC }, vAResp, vBResp, vCResp] = await Promise.all([
       supabase.from("consultants").select("conversational_flow_enabled, ab_test_enabled").eq("id", uid).maybeSingle(),
-      supabase.from("bot_flows").select("id, initial_delay_seconds").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
+      (supabase as any).from("bot_flows").select("id, initial_delay_seconds").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
       supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("conversational_flow_enabled", true),
       supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("variant", "B").limit(1),
       supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("variant", "C").limit(1),
