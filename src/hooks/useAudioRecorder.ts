@@ -18,7 +18,7 @@ export function useAudioRecorder(onSendAudio?: (base64: string) => Promise<void>
   const startRecording = useCallback(async () => {
     if (!onSendAudio) return;
     try {
-      const Recorder = await loadRecorder();
+      const Recorder = await loadOpusRecorder();
       const recorder = new Recorder({
         encoderPath: "/opus/encoderWorker.min.js",
         encoderApplication: 2048, // VOIP
