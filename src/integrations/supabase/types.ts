@@ -807,6 +807,24 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_cooldown_state: {
+        Row: {
+          cooldown_key: string
+          reason: string | null
+          until_at: string
+        }
+        Insert: {
+          cooldown_key: string
+          reason?: string | null
+          until_at: string
+        }
+        Update: {
+          cooldown_key?: string
+          reason?: string | null
+          until_at?: string
+        }
+        Relationships: []
+      }
       ai_decisions: {
         Row: {
           ai_output: Json | null
@@ -1075,34 +1093,43 @@ export type Database = {
       }
       ai_slot_dispatch_log: {
         Row: {
+          confirmed_at: string | null
           consultant_id: string
           customer_id: string | null
           dispatch_status: string
           id: string
           media_id: string | null
           reply_within_min: number | null
+          reservation_id: string | null
+          reserved_at: string | null
           sent_at: string
           slot_key: string
           variant: string
         }
         Insert: {
+          confirmed_at?: string | null
           consultant_id: string
           customer_id?: string | null
           dispatch_status?: string
           id?: string
           media_id?: string | null
           reply_within_min?: number | null
+          reservation_id?: string | null
+          reserved_at?: string | null
           sent_at?: string
           slot_key: string
           variant: string
         }
         Update: {
+          confirmed_at?: string | null
           consultant_id?: string
           customer_id?: string | null
           dispatch_status?: string
           id?: string
           media_id?: string | null
           reply_within_min?: number | null
+          reservation_id?: string | null
+          reserved_at?: string | null
           sent_at?: string
           slot_key?: string
           variant?: string
@@ -1932,6 +1959,7 @@ export type Database = {
           created_at: string | null
           facebook_label_id: string | null
           facebook_pixel_id: string | null
+          flow_reliability_v2: string
           flow_step_media_order: Json
           google_analytics_id: string | null
           id: string
@@ -1955,6 +1983,7 @@ export type Database = {
           created_at?: string | null
           facebook_label_id?: string | null
           facebook_pixel_id?: string | null
+          flow_reliability_v2?: string
           flow_step_media_order?: Json
           google_analytics_id?: string | null
           id: string
@@ -1978,6 +2007,7 @@ export type Database = {
           created_at?: string | null
           facebook_label_id?: string | null
           facebook_pixel_id?: string | null
+          flow_reliability_v2?: string
           flow_step_media_order?: Json
           google_analytics_id?: string | null
           id?: string
@@ -2018,6 +2048,7 @@ export type Database = {
           media_id: string | null
           message_direction: string
           message_text: string | null
+          message_text_hash: string | null
           message_type: string | null
           slot_key: string | null
         }
@@ -2029,6 +2060,7 @@ export type Database = {
           media_id?: string | null
           message_direction: string
           message_text?: string | null
+          message_text_hash?: string | null
           message_type?: string | null
           slot_key?: string | null
         }
@@ -2040,6 +2072,7 @@ export type Database = {
           media_id?: string | null
           message_direction?: string
           message_text?: string | null
+          message_text_hash?: string | null
           message_type?: string | null
           slot_key?: string | null
         }
@@ -2226,6 +2259,27 @@ export type Database = {
           source?: string
           updated_at?: string
           value?: string
+        }
+        Relationships: []
+      }
+      customer_processing_lock: {
+        Row: {
+          customer_id: string
+          lock_token: string
+          locked_at: string
+          locked_until: string
+        }
+        Insert: {
+          customer_id: string
+          lock_token: string
+          locked_at?: string
+          locked_until: string
+        }
+        Update: {
+          customer_id?: string
+          lock_token?: string
+          locked_at?: string
+          locked_until?: string
         }
         Relationships: []
       }
@@ -3115,6 +3169,105 @@ export type Database = {
           },
         ]
       }
+      gemini_quota_bucket: {
+        Row: {
+          capacity: number
+          consultant_id: string
+          refill_per_minute: number
+          refilled_at: string
+          tokens: number
+        }
+        Insert: {
+          capacity?: number
+          consultant_id: string
+          refill_per_minute?: number
+          refilled_at?: string
+          tokens?: number
+        }
+        Update: {
+          capacity?: number
+          consultant_id?: string
+          refill_per_minute?: number
+          refilled_at?: string
+          tokens?: number
+        }
+        Relationships: []
+      }
+      inbound_media_failures: {
+        Row: {
+          consultant_id: string
+          created_at: string
+          customer_id: string
+          id: number
+          message_id: string
+          raw_payload: Json | null
+          reason: string
+        }
+        Insert: {
+          consultant_id: string
+          created_at?: string
+          customer_id: string
+          id?: number
+          message_id: string
+          raw_payload?: Json | null
+          reason: string
+        }
+        Update: {
+          consultant_id?: string
+          created_at?: string
+          customer_id?: string
+          id?: number
+          message_id?: string
+          raw_payload?: Json | null
+          reason?: string
+        }
+        Relationships: []
+      }
+      inbound_media_retry: {
+        Row: {
+          attempts: number
+          base64: string
+          consultant_id: string
+          created_at: string
+          customer_id: string
+          expires_at: string
+          id: number
+          media_kind: string
+          message_id: string
+          mime_type: string | null
+          next_attempt_at: string
+          succeeded_at: string | null
+        }
+        Insert: {
+          attempts?: number
+          base64: string
+          consultant_id: string
+          created_at?: string
+          customer_id: string
+          expires_at?: string
+          id?: number
+          media_kind: string
+          message_id: string
+          mime_type?: string | null
+          next_attempt_at?: string
+          succeeded_at?: string | null
+        }
+        Update: {
+          attempts?: number
+          base64?: string
+          consultant_id?: string
+          created_at?: string
+          customer_id?: string
+          expires_at?: string
+          id?: number
+          media_kind?: string
+          message_id?: string
+          mime_type?: string | null
+          next_attempt_at?: string
+          succeeded_at?: string | null
+        }
+        Relationships: []
+      }
       infra_metrics: {
         Row: {
           created_at: string
@@ -3336,6 +3489,36 @@ export type Database = {
         }
         Relationships: []
       }
+      outbound_message_log: {
+        Row: {
+          consultant_id: string
+          created_at: string
+          customer_id: string
+          evolution_message_id: string | null
+          idempotency_key: string
+          payload_hash: string
+          result_status: string | null
+        }
+        Insert: {
+          consultant_id: string
+          created_at?: string
+          customer_id: string
+          evolution_message_id?: string | null
+          idempotency_key: string
+          payload_hash: string
+          result_status?: string | null
+        }
+        Update: {
+          consultant_id?: string
+          created_at?: string
+          customer_id?: string
+          evolution_message_id?: string | null
+          idempotency_key?: string
+          payload_hash?: string
+          result_status?: string | null
+        }
+        Relationships: []
+      }
       page_events: {
         Row: {
           consultant_id: string
@@ -3437,6 +3620,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      pending_outbound_media: {
+        Row: {
+          attempts: number
+          consultant_id: string
+          created_at: string
+          customer_id: string
+          id: number
+          payload: Json
+          scheduled_for: string
+          succeeded_at: string | null
+        }
+        Insert: {
+          attempts?: number
+          consultant_id: string
+          created_at?: string
+          customer_id: string
+          id?: number
+          payload: Json
+          scheduled_for?: string
+          succeeded_at?: string | null
+        }
+        Update: {
+          attempts?: number
+          consultant_id?: string
+          created_at?: string
+          customer_id?: string
+          id?: number
+          payload?: Json
+          scheduled_for?: string
+          succeeded_at?: string | null
+        }
+        Relationships: []
       }
       platform_facebook_account: {
         Row: {
@@ -3803,6 +4019,24 @@ export type Database = {
         }
         Relationships: []
       }
+      webhook_rate_limit: {
+        Row: {
+          count: number
+          phone: string
+          window_start: string
+        }
+        Insert: {
+          count?: number
+          phone: string
+          window_start: string
+        }
+        Update: {
+          count?: number
+          phone?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
       whatsapp_instances: {
         Row: {
           connected_phone: string | null
@@ -4064,6 +4298,10 @@ export type Database = {
     }
     Functions: {
       admin_unpause_global_bot: { Args: never; Returns: number }
+      ai_cooldown_check_and_set: {
+        Args: { p_key: string; p_reason: string; p_ttl_ms: number }
+        Returns: boolean
+      }
       assign_flow_variant: { Args: { _consultant_id: string }; Returns: string }
       can_view_consultant: {
         Args: { _consultant: string; _user: string }
@@ -4077,6 +4315,14 @@ export type Database = {
       }
       clone_bot_flow_as_b: { Args: { _consultant_id: string }; Returns: string }
       clone_bot_flow_as_c: { Args: { _consultant_id: string }; Returns: string }
+      confirm_media_send: {
+        Args: { p_ok: boolean; p_res_id: string }
+        Returns: undefined
+      }
+      consume_gemini_token: {
+        Args: { p_consultant: string; p_tokens?: number }
+        Returns: boolean
+      }
       credit_consultant_wallet:
         | {
             Args: {
@@ -4227,11 +4473,25 @@ export type Database = {
         }
         Returns: number
       }
+      release_customer_lock: {
+        Args: { p_customer: string; p_token: string }
+        Returns: boolean
+      }
       release_customer_processing_lock: {
         Args: { _customer_id: string }
         Returns: undefined
       }
       repair_bot_flow: { Args: { _flow_id: string }; Returns: Json }
+      reserve_media_send: {
+        Args: {
+          p_cons: string
+          p_cust: string
+          p_kind?: string
+          p_media: string
+          p_slot_key?: string
+        }
+        Returns: string
+      }
       reset_all_consultant_conversations: {
         Args: { _consultant_id: string }
         Returns: Json
@@ -4260,6 +4520,14 @@ export type Database = {
           _triggers: string[]
         }
         Returns: string
+      }
+      try_acquire_customer_lock: {
+        Args: { p_customer: string; p_ttl_ms: number }
+        Returns: string
+      }
+      try_acquire_rate_limit: {
+        Args: { p_max_count: number; p_phone: string; p_window_ms: number }
+        Returns: boolean
       }
       try_lock_customer_processing: {
         Args: { _customer_id: string; _seconds?: number }
