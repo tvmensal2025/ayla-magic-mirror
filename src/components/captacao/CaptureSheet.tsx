@@ -256,48 +256,34 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
     return () => window.removeEventListener("keydown", onKey);
   }, [open, canSubmit, submitting]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Barra minimizada — full-width no rodapé, área de toque generosa.
+  // Barra fina minimizada — h-11, tap em qualquer lugar abre meia-tela.
   if (open && minimized) {
     return (
-      <div
-        className="fixed bottom-0 left-0 right-0 z-50 flex items-stretch gap-2 px-3 py-2 bg-card/95 backdrop-blur border-t border-primary/40 shadow-[0_-8px_24px_-4px_hsl(var(--primary)/0.35)] animate-in slide-in-from-bottom-2"
-        style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom, 0px))" }}
+      <button
+        type="button"
+        onClick={() => setMinimized(false)}
+        className="fixed bottom-0 left-0 right-0 z-50 flex items-center gap-2 px-3 h-11 bg-card/95 backdrop-blur border-t border-primary/40 shadow-[0_-6px_20px_-6px_hsl(var(--primary)/0.35)] animate-in slide-in-from-bottom-2 active:bg-card"
+        style={{ paddingBottom: "max(0px, env(safe-area-inset-bottom, 0px))" }}
       >
-        <button
-          type="button"
-          onClick={() => setMinimized(false)}
-          className="flex-1 flex items-center gap-2 px-3 h-14 rounded-xl bg-primary/15 text-foreground active:bg-primary/25 transition"
-        >
-          <div className="w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center shrink-0">
-            <Gamepad2 className="w-5 h-5" />
-          </div>
-          <div className="flex-1 min-w-0 text-left">
-            <p className="text-sm font-bold leading-tight truncate">Captação {filledCount}/{totalFields}</p>
-            <p className="text-[11px] text-muted-foreground leading-tight">{sentSteps.size}/10 passos enviados</p>
-          </div>
-          {combo.isActive && (
-            <ComboTimer level={combo.level} secondsLeft={combo.secondsLeft} progressPct={combo.progressPct} bonusXp={combo.bonusXp} compact />
-          )}
-        </button>
-        <Button
-          size="lg"
-          onClick={() => setMinimized(false)}
-          className="h-14 px-4 rounded-xl bg-primary text-primary-foreground font-bold gap-1.5 shrink-0"
-        >
-          <Maximize2 className="w-4 h-4" /> Abrir
-        </Button>
-        <Button
-          size="icon"
-          variant="outline"
-          onClick={() => onOpenChange(false)}
-          className="h-14 w-12 rounded-xl shrink-0"
-          title="Fechar"
-        >
-          <X className="w-5 h-5" />
-        </Button>
-      </div>
+        <div className="w-7 h-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center shrink-0">
+          <Gamepad2 className="w-4 h-4" />
+        </div>
+        <div className="flex-1 min-w-0 text-left">
+          <p className="text-xs font-semibold leading-tight truncate">
+            Captação {filledCount}/{totalFields}
+            <span className="text-muted-foreground font-normal"> · {sentSteps.size}/10 passos</span>
+          </p>
+        </div>
+        {combo.isActive && (
+          <ComboTimer level={combo.level} secondsLeft={combo.secondsLeft} progressPct={combo.progressPct} bonusXp={combo.bonusXp} compact />
+        )}
+        <div className="w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center shrink-0">
+          <Maximize2 className="w-4 h-4" />
+        </div>
+      </button>
     );
   }
+
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
