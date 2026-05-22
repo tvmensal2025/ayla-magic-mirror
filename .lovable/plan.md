@@ -1,70 +1,56 @@
-# Ativar PWA para escalar
+## Objetivo
 
-Hoje o projeto já tem `manifest.json` + meta tags (`apple-mobile-web-app-capable`, theme-color, icons), então o app **já é instalável** ("Adicionar à tela inicial") em iOS e Android. O que falta para um PWA "de verdade" é o **service worker** (cache, carregamento offline, atualização automática).
+Garantir que **todos os consultores que rodam na Evolution** tenham comportamento idêntico aos que rodam na Whapi — exceto botões interativos do WhatsApp (Evolution não suporta nativamente, então o texto da pergunta vai cru no chat, sem botão).
 
-## ⚠️ Aviso importante (Lovable)
+## Diagnóstico
 
-PWA com service worker **não funciona no preview do editor** (iframe). Só vai funcionar:
-- Na URL publicada (`ayla-magic-mirror.lovable.app`)
-- No domínio customizado (`igreen.cloud`)
-- Em produção no celular do usuário
+Comparando `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (4415 linhas) vs `evolution-webhook/handlers/bot-flow.ts` (4277 linhas), identifiquei **gaps reais** que afetam o comportamento textual dos consultores na Evolution:
 
-No editor o SW será automaticamente desativado para não cachear builds antigos.
+### Gaps que precisam ser fechados (afetam texto)
 
-## O que vou fazer
+1. **F10 — Fallback de variante C → B quando vídeo inicial falha**
+   - Whapi: linhas 959–1038 (rastreia `hadVideo`/`videoFailed` e migra customer para variant B se o vídeo do welcome falhar)
+   - Evolution: **ausente** → consultor C com vídeo quebrado deixa lead sem mensagem
+2. **Quiet hours BRT** (`isQuietHourBRT`, `logQuietSkip`)
+   - Whapi importa de `_shared/quiet-hours.ts` e bloqueia envio fora do horário comercial
+   - Evolution: **não importa** → manda em qualquer horário
+3. **Resolver strict mode** (`isResolverStrictMode` de `_shared/bot/global-flag.ts`)
+   - Whapi: feature flag global para impedir fallback Gemini livre quando custom flow ativo
+   - Evolution: **não usa** → pode cair em welcome legacy
+4. **`notifyNewLead` no `index.ts`**
+   - Whapi notifica `superAdminConsultantId`; Evolution notifica `instanceData.consultant_id` — comportamento divergente em ambientes multi-tenant
+   - Validar qual está correto e padronizar
+5. **Possíveis outras divergências menores** em handlers de capture/transitions — varredura linha-a-linha pendente
 
-### 1. Instalar e configurar `vite-plugin-pwa`
-- `vite.config.ts`: adicionar `VitePWA` com:
-  - `registerType: "autoUpdate"` (atualiza sozinho quando sai deploy novo)
-  - `devOptions.enabled: false` (não roda em dev)
-  - `workbox.navigateFallbackDenylist: [/^\/~oauth/, /^\/api/]` (não cacheia rotas internas)
-  - `workbox.runtimeCaching` com `NetworkFirst` para HTML (evita travar em build velho) e `CacheFirst` para assets estáticos (`/assets/`, imagens MinIO)
-  - Reaproveita o `manifest.json` existente (não duplica)
+### Gaps que **NÃO** precisam ser portados (botões)
 
-### 2. Guard contra iframe/preview em `src/main.tsx`
-```ts
-const inIframe = (() => { try { return window.self !== window.top; } catch { return true; } })();
-const isPreview = location.hostname.includes("id-preview--") || location.hostname.includes("lovableproject.com");
-if (!inIframe && !isPreview) {
-  import("virtual:pwa-register").then(({ registerSW }) => registerSW({ immediate: true }));
-} else {
-  navigator.serviceWorker?.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
-}
-```
+- **Auto-buttons wrapper** (whapi linhas 4388–4408): converte `ask_phone_confirm` e `ask_complement` em botões interativos. Na Evolution o texto-base já é enviado normalmente como pergunta — **manter como está** (texto puro funciona, cliente responde digitando).
+- `sendButtons` da Evolution já tem fallback nativo: se a API rejeitar botões, cai para `"1. opção / 2. opção"` numerado via `sendText`. Não precisa mexer.
 
-### 3. Página `/install` (opcional, recomendada)
-Pequena tela com:
-- Detecção de plataforma (iOS/Android/Desktop)
-- Instruções "Compartilhar → Adicionar à Tela de Início" (iOS)
-- Botão `beforeinstallprompt` (Android/Chrome desktop)
-- Status "✅ Já instalado" quando rodando em standalone
+## Plano de execução
 
-Útil para mandar o link aos consultores: `igreen.cloud/install`.
-
-### 4. Ajustes no `manifest.json`
-- Trocar `start_url` de `/admin` para `/admin?source=pwa` (telemetria de uso instalado via GA4)
-- Manter `id: "/admin"` (não pode mudar, senão vira "novo app" pra quem já instalou)
-- Adicionar ícone 192x192 caso `favicon.png` não tenha (verifico na hora)
+1. **Diff completo lado-a-lado** dos dois `bot-flow.ts` (script tmp) para listar TODAS as divergências, classificar como "porta para evolution" vs "específico de botão".
+2. **Portar para evolution-webhook**:
+   - F10 variant C → B fallback (bloco `hadVideo`/`videoFailed`)
+   - Imports + chamadas de `isQuietHourBRT` / `logQuietSkip`
+   - Imports + uso de `isResolverStrictMode`
+   - Qualquer outro gap não-botão encontrado no diff
+3. **Normalizar `notifyNewLead`** no `evolution-webhook/index.ts` para usar a mesma lógica do whapi (super-admin notifier quando aplicável).
+4. **Adicionar testes** em `evolution-webhook/handlers/bot-flow_test.ts` (espelhando os do whapi) que cobrem: variant A/B/C, custom flow resolver, anti-rep prompt, transitions.
+5. **Deploy** apenas das funções afetadas: `evolution-webhook`.
+6. **Validação**:
+   - Rodar testes Deno em ambas as funções
+   - Curl simulado com payload Evolution de um consultor variant=B e variant=C, conferir nos logs que o conteúdo é o mesmo do whapi para a mesma `flow_variant`
 
 ## Detalhes técnicos
 
-- **Rotas excluídas do cache**: `/~oauth/*` (callback de auth), `/api/*` (edge functions Supabase), qualquer fetch para `supabase.co` e `minio` (esses vão direto pra rede, sem cache, pra não servir media velha do WhatsApp).
-- **Estratégia HTML**: NetworkFirst com timeout 3s → se a rede falhar serve do cache. Garante que deploy novo aparece sempre que tem internet.
-- **Update flow**: `autoUpdate` aplica novo SW na próxima navegação sem prompt. Sem `selfDestroying`.
-- **Sem mudar appID** do Capacitor / sem mexer no backend.
+- Tudo é mudança em edge functions (`supabase/functions/evolution-webhook/**` e mínima em `_shared/`). Zero alteração de frontend, schema, ou tabela.
+- Helpers compartilhados (`flow-router`, `step-media-order`, `notify-consultant`, `bot/paused`, `bot/global-flag`, `quiet-hours`) já existem em `_shared/` — só precisam ser importados/chamados na Evolution.
+- Auto-buttons wrapper fica deliberadamente **fora** do port — o reply textual já está pronto antes do wrapper, então omitir o bloco preserva o texto sem alterações.
+- Risco: durante o port pode aparecer divergência em assinatura de `BotContext` (ex: `sender.sendButtons` opcional). Vou validar pelos types antes de mover código.
 
-## Arquivos alterados
+## Saída esperada
 
-- `vite.config.ts` — adiciona `VitePWA`
-- `src/main.tsx` — guard de registro
-- `public/manifest.json` — pequenos ajustes
-- `src/pages/InstallPage.tsx` (novo) + rota em `src/App.tsx`
-- `package.json` — `vite-plugin-pwa` como devDep
-
-## O que NÃO vou fazer
-
-- Não vou habilitar SW no editor (cacheia builds velhos e quebra HMR).
-- Não vou mudar `id`/`scope`/`display` (PWAs já instalados perderiam continuidade).
-- Não vou virar Capacitor/app nativa — você pediu PWA.
-
-Posso seguir?
+- evolution-webhook se comporta **idêntico** ao whapi-webhook em: ordem de mídia, A/B/C, custom flow, anti-rep, quiet hours, fallback C→B, notificação de novo lead, takeover humano.
+- Diferença visual única: perguntas que viram botões na Whapi ficam como texto na Evolution (o `sendButtons` da Evolution já tem fallback numerado, mas o auto-wrapper do whapi não dispara).
+- Pronto para escalar nos outros consultores Evolution sem reescrever lógica.
