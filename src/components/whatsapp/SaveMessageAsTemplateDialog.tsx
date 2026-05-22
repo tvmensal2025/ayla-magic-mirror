@@ -132,10 +132,26 @@ export function SaveMessageAsTemplateDialog({ open, onOpenChange, message, consu
           setSaving(false);
           return;
         }
-        // Baixa a mídia (URL temporária ou já MinIO) e re-faz upload pro MinIO no scope=template
-        const res = await fetch(effectiveMediaUrl);
-        if (!res.ok) throw new Error(`Falha ao baixar mídia (${res.status})`);
-        const blob = await res.blob();
+        // Tenta baixar direto; se cair em CORS/Failed to fetch, usa proxy.
+        let blob: Blob;
+        try {
+          if (effectiveMediaUrl.startsWith("data:") || effectiveMediaUrl.startsWith("blob:")) {
+            const res = await fetch(effectiveMediaUrl);
+            blob = await res.blob();
+          } else {
+            // URL externa (Whapi/MinIO) → vai via proxy pra evitar CORS
+            const { data, error: dlErr } = await supabase.functions.invoke("whapi-proxy", {
+              body: { action: "download_media", payload: { url: effectiveMediaUrl } },
+            });
+            if (dlErr || !data?.base64) throw new Error(dlErr?.message || "Falha ao baixar mídia via proxy");
+            const bin = atob(data.base64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            blob = new Blob([bytes], { type: data.mimetype || message.mediaMimetype || "application/octet-stream" });
+          }
+        } catch (e: any) {
+          throw new Error(`Falha ao baixar mídia: ${e?.message || e}`);
+        }
         const mime = blob.type || message.mediaMimetype || "application/octet-stream";
         const ext = inferExt(mime, mt === "audio" ? "ogg" : mt === "video" ? "mp4" : "jpg");
         const safeName = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "template";
