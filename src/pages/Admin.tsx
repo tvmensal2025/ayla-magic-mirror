@@ -210,10 +210,16 @@ const AdminContent = () => {
   const effectivePhotoPreview = localPhotoPreview || photoPreview;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative overflow-x-hidden">
+      {/* Ambient gradient for ultrawide screens — evita fundo preto vazio nas laterais */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 opacity-60">
+        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-primary/10 blur-[120px]" />
+        <div className="absolute top-1/3 -right-40 w-[700px] h-[700px] rounded-full bg-emerald-500/[0.06] blur-[140px]" />
+        <div className="absolute bottom-0 left-1/4 w-[500px] h-[500px] rounded-full bg-green-500/[0.05] blur-[120px]" />
+      </div>
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border bg-card/80 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+        <div className="max-w-[1760px] mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src="/images/logo-colorida-igreen.png" alt="iGreen" className="w-20 sm:w-24" />
             <div className="hidden sm:block">
@@ -273,7 +279,7 @@ const AdminContent = () => {
 
       {/* Tab Navigation */}
       <nav className="border-b border-border bg-card/50 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-2 sm:px-6">
+        <div className="max-w-[1760px] mx-auto px-2 sm:px-6 lg:px-8">
           <div className="flex overflow-x-auto no-scrollbar -mx-2 sm:mx-0" style={{ WebkitOverflowScrolling: 'touch' }}>
             {tabs.map((tab) => {
               const Icon = tab.icon;
@@ -303,7 +309,7 @@ const AdminContent = () => {
       </nav>
 
       {/* Content */}
-      <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6 overflow-x-hidden">
+      <main className="max-w-[1760px] mx-auto px-3 sm:px-6 lg:px-8 xl:px-12 py-4 sm:py-6 space-y-6 overflow-x-hidden">
         {/* OCR Review Banner — aparece quando há leads aguardando o consultor
             decidir entre "Eu confirmo" / "Pedir ao cliente" os dados extraídos
             da conta de luz ou do documento. Sempre no topo, em qualquer aba. */}
