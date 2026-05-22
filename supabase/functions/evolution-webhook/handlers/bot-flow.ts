@@ -11,6 +11,7 @@ import {
   isValidEmailFormat,
   isSameContact,
 } from "../../_shared/validators.ts";
+import { isResolverStrictMode } from "../../_shared/bot/global-flag.ts";
 import {
   fetchWithTimeout,
   fetchInsecure,
