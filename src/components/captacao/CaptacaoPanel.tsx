@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { CaptureLeadList } from "@/components/captacao/CaptureLeadList";
 import { CaptureStepsGrid } from "@/components/captacao/CaptureStepsGrid";
+import { CaptureConversationFeed } from "@/components/captacao/CaptureConversationFeed";
 import { CaptureLeadCard } from "@/components/captacao/CaptureLeadCard";
 import { CaptureScoreboard } from "@/components/captacao/CaptureScoreboard";
 import { CaptureMissionsPanel, bumpMission } from "@/components/captacao/CaptureMissionsPanel";
