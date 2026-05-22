@@ -1,5 +1,7 @@
 // Sincroniza métricas das campanhas ativas. Roda via cron a cada 30 min.
-import { adminClient, FB_GRAPH, fbFetch, loadCampaignConnection } from "../_shared/fb-graph.ts";
+// Também aceita { consultant_id } no body pra sync on-demand de UM consultor
+// (botão "Sincronizar agora" na aba Performance).
+import { adminClient, authConsultant, FB_GRAPH, fbFetch, loadCampaignConnection } from "../_shared/fb-graph.ts";
 import { notifyConsultant } from "../_shared/notify-consultant.ts";
 
 const corsHeaders = {
@@ -10,17 +12,47 @@ const corsHeaders = {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
+    // Sync on-demand pode passar { consultant_id } pra filtrar só as campanhas
+    // daquele consultor. Sem body = sync global (cron).
+    let consultantFilter: string | null = null;
+    try {
+      const body = await req.json().catch(() => ({}));
+      if (body && typeof body.consultant_id === "string" && body.consultant_id.length > 0) {
+        consultantFilter = body.consultant_id;
+      }
+    } catch (_) { /* sem body, segue global */ }
+
+    // Auth: aceita SERVICE_ROLE (cron) OU consultor autenticado pedindo sync das próprias campanhas.
+    const authHeader = req.headers.get("Authorization") || "";
+    const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const isCron = authHeader === `Bearer ${serviceRole}`;
+    if (!isCron) {
+      const auth = await authConsultant(req);
+      if (!auth) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      // Força filtro pelo próprio consultor (a menos que seja super admin)
+      const adminCheck = adminClient();
+      const { data: role } = await adminCheck
+        .from("user_roles").select("role").eq("user_id", auth.id).eq("role", "admin").maybeSingle();
+      if (!role) {
+        consultantFilter = auth.id;
+      }
+    }
+
     const admin = adminClient();
     // Carrega config da plataforma (markup + min auto-pause)
     const { data: pSettings } = await admin
       .from("platform_settings").select("*").eq("id", true).maybeSingle();
     const feePct = Number(pSettings?.platform_fee_percent ?? 20) / 100; // 20% padrão
     const lowAlertCents = Number(pSettings?.low_balance_alert_cents ?? 2000);
-    const { data: campaigns } = await admin
+    let campaignsQuery = admin
       .from("facebook_campaigns")
       .select("id, consultant_id, fb_campaign_id, status, started_at")
       .in("status", ["active", "paused", "pending_review"]);
-    if (!campaigns?.length) return new Response(JSON.stringify({ synced: 0 }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (consultantFilter) campaignsQuery = campaignsQuery.eq("consultant_id", consultantFilter);
+    const { data: campaigns } = await campaignsQuery;
+    if (!campaigns?.length) return new Response(JSON.stringify({ synced: 0, errors: [], scope: consultantFilter ? "consultant" : "all" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
     // cache de tokens por consultor (agora vem da plataforma compartilhada)
     const tokenCache: Record<string, string> = {};
@@ -50,12 +82,16 @@ Deno.serve(async (req) => {
     }
     let synced = 0;
     let autoPaused = 0;
+    const errors: Array<{ campaign_id: string; fb_campaign_id: string | null; error: string }> = [];
 
     for (const c of campaigns) {
       try {
         if (!tokenCache[c.consultant_id]) {
           const conn = await loadCampaignConnection(c.consultant_id);
-          if (!conn) continue;
+          if (!conn) {
+            errors.push({ campaign_id: c.id, fb_campaign_id: c.fb_campaign_id, error: "Sem conexão Facebook ativa para a plataforma — reconecte em Super Admin." });
+            continue;
+          }
           tokenCache[c.consultant_id] = conn.token;
         }
         const token = tokenCache[c.consultant_id];
@@ -176,6 +212,33 @@ Deno.serve(async (req) => {
         }
         synced++;
 
+        // Reconcilia customers_acquired (clientes aprovados atribuídos ao Meta Ads)
+        // por dia, baseado no CRM real — não no que a Meta reporta. Isso garante que
+        // o "Viraram cliente" do dashboard reflita os fechamentos reais.
+        try {
+          const sinceIso = new Date(Date.now() - 7 * 86400_000).toISOString();
+          const { data: deals } = await admin
+            .from("crm_deals")
+            .select("created_at, customers!inner(lead_source, consultant_id)")
+            .eq("consultant_id", c.consultant_id)
+            .eq("stage", "aprovado")
+            .eq("customers.lead_source", "meta_ads")
+            .gte("created_at", sinceIso);
+          if (deals?.length) {
+            const byDate: Record<string, number> = {};
+            for (const d of deals as any[]) {
+              const dt = String(d.created_at).slice(0, 10);
+              byDate[dt] = (byDate[dt] || 0) + 1;
+            }
+            for (const [dt, count] of Object.entries(byDate)) {
+              await admin.from("facebook_metrics_daily")
+                .update({ customers_acquired: count, updated_at: new Date().toISOString() })
+                .eq("campaign_id", c.id)
+                .eq("date", dt);
+            }
+          }
+        } catch (re) { console.error("[fb-sync] customers_acquired reconcile failed", c.id, (re as Error).message); }
+
         // Persiste leads_count agregado (necessário pro CBO→ABO disparar)
         // Conta leads + conversas iniciadas como "sinal de lead" — ABO precisa de >=20.
         try {
@@ -232,11 +295,22 @@ Deno.serve(async (req) => {
           } catch (pe) { console.error("[fb-sync] auto-pause failed", c.fb_campaign_id, (pe as Error).message); }
         }
       } catch (e) {
-        console.error("[fb-sync]", c.fb_campaign_id, (e as Error).message);
+        const msg = (e as Error).message;
+        console.error("[fb-sync]", c.fb_campaign_id, msg);
+        errors.push({ campaign_id: c.id, fb_campaign_id: c.fb_campaign_id, error: msg });
       }
     }
 
-    return new Response(JSON.stringify({ synced, auto_paused: autoPaused }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(
+      JSON.stringify({
+        synced,
+        auto_paused: autoPaused,
+        total_campaigns: campaigns.length,
+        errors,
+        scope: consultantFilter ? "consultant" : "all",
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   } catch (err) {
     return new Response(JSON.stringify({ error: (err as Error).message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }

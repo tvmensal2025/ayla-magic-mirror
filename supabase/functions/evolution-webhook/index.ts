@@ -469,6 +469,109 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── 5.5) Auto-tag lead source (Meta Ads / CTWA) ─────────────────────
+    // Detecta a origem do lead na PRIMEIRA mensagem (source_campaign_id ainda null).
+    // Prioridade:
+    //   1. Sinal forte: payload Evolution com referral/context CTWA do Meta
+    //      (body.data.message.extendedTextMessage.contextInfo.externalAdReply
+    //       ou body.data.message.imageMessage.contextInfo.externalAdReply)
+    //   2. Match por initial_message: compara o texto recebido com
+    //      facebook_campaigns.initial_message do consultor (busca exata normalizada).
+    //   3. Fallback regex: frases típicas de anúncio no texto.
+    // Só roda quando source_campaign_id ainda não está preenchido.
+    try {
+      const alreadyTagged = !!(customer as any).source_campaign_id || !!(customer as any).lead_source;
+      if (!alreadyTagged) {
+        const msgData = body?.data?.message || {};
+        // Extrai contextInfo de qualquer tipo de mensagem (texto, imagem, etc.)
+        const ctxInfo =
+          msgData?.extendedTextMessage?.contextInfo ||
+          msgData?.imageMessage?.contextInfo ||
+          msgData?.documentMessage?.contextInfo ||
+          msgData?.videoMessage?.contextInfo ||
+          msgData?.audioMessage?.contextInfo ||
+          null;
+        const externalAdReply = ctxInfo?.externalAdReply || null;
+        const ctwaClid = body?.data?.ctwaClid || externalAdReply?.ctwaClid || null;
+        const hasReferral = !!(externalAdReply || ctwaClid);
+
+        // Payload completo do referral para auditoria
+        const referralPayload = externalAdReply
+          ? {
+              title: externalAdReply.title,
+              body: externalAdReply.body,
+              source_url: externalAdReply.sourceUrl,
+              media_url: externalAdReply.thumbnailUrl,
+              ctwa_clid: ctwaClid,
+            }
+          : ctwaClid
+          ? { ctwa_clid: ctwaClid }
+          : null;
+
+        let sourceCampaignId: string | null = null;
+
+        // 1) Match por initial_message (mais confiável — texto pré-preenchido da campanha)
+        if (messageText && messageText.trim().length > 5) {
+          try {
+            const normalizedMsg = messageText.trim().toLowerCase().replace(/\s+/g, " ");
+            const { data: campaigns } = await supabase
+              .from("facebook_campaigns")
+              .select("id, initial_message")
+              .eq("consultant_id", instanceData.consultant_id)
+              .not("initial_message", "is", null)
+              .limit(50);
+
+            if (campaigns && campaigns.length > 0) {
+              const matched = (campaigns as any[]).find((c) => {
+                const im = String(c.initial_message || "").trim().toLowerCase().replace(/\s+/g, " ");
+                return im.length > 5 && normalizedMsg.startsWith(im.slice(0, Math.min(im.length, 60)));
+              });
+              if (matched) {
+                sourceCampaignId = matched.id;
+                jsonLog("info", "lead_source_campaign_matched", {
+                  customer_id: customer.id,
+                  consultant_id: instanceData.consultant_id,
+                  campaign_id: matched.id,
+                  method: "initial_message",
+                });
+              }
+            }
+          } catch (e) {
+            console.warn("[lead-source] initial_message match falhou:", (e as Error).message);
+          }
+        }
+
+        // 2) Regex fallback para frases típicas de anúncio
+        const adsRegex = /(tenho interesse.*mais informa[çc][õo]es|gostaria de saber mais|quero saber mais|vi seu an[uú]ncio|vim do an[uú]ncio|do an[uú]ncio|pelo an[uú]ncio|vi o an[uú]ncio|facebook|instagram|\bfb ads?\b|\bmeta ads?\b|patrocinad|reels|stories|sponsored)/i;
+        const textMatch = !isFile && messageText && adsRegex.test(messageText);
+
+        if (hasReferral || textMatch || sourceCampaignId) {
+          const patch: Record<string, any> = { lead_source: "meta_ads" };
+          if (sourceCampaignId) patch.source_campaign_id = sourceCampaignId;
+          if (ctwaClid) patch.source_ctwa_clid = ctwaClid;
+          if (referralPayload) patch.source_referral = referralPayload;
+
+          await supabase.from("customers").update(patch).eq("id", customer.id);
+          Object.assign(customer, patch);
+
+          const reason = sourceCampaignId
+            ? `campaign_match id=${sourceCampaignId}`
+            : hasReferral
+            ? `referral ctwa=${ctwaClid}`
+            : `regex msg="${(messageText || "").slice(0, 60)}"`;
+          jsonLog("info", "lead_source_tagged", {
+            customer_id: customer.id,
+            consultant_id: instanceData.consultant_id,
+            reason,
+            source_campaign_id: sourceCampaignId,
+            ctwa_clid: ctwaClid,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("[lead-source] falha ao detectar:", (e as Error).message);
+    }
+
     // ─── 6) Log inbound ────────────────────────────────────────────────
     await supabase.from("conversations").insert({
       customer_id: customer.id,

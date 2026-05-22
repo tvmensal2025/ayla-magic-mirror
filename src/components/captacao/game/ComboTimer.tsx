@@ -1,12 +1,12 @@
-// Combo timer banner — shown when the consultor has an active combo running.
+// Sequence timer — shown when the consultant has an active performance streak.
 // Displays:
-//   - Combo level (x1, x2, x3...)
-//   - Countdown bar (filling DOWN from 100% to 0%)
-//   - Bonus XP available
+//   - Sequence level (×1, ×2, ×3...)
+//   - Countdown bar
+//   - Bonus points available
 //
 // Compact (mobile) and expanded (desktop) variants.
 
-import { Flame, Zap, Clock } from "lucide-react";
+import { Zap, Clock } from "lucide-react";
 
 interface Props {
   level: number;
@@ -25,59 +25,70 @@ function formatTime(s: number): string {
 export function ComboTimer({ level, secondsLeft, progressPct, bonusXp, compact }: Props) {
   if (level < 1) return null;
 
-  // Estilo dinâmico baseado no nível do combo.
-  const tier = level >= 4 ? "diamond" : level >= 3 ? "fire" : level >= 2 ? "amber" : "primary";
-  const ringClass = {
-    primary: "border-primary/40 from-primary/15 to-primary/5",
-    amber: "border-amber-400/60 from-amber-400/20 to-amber-500/5",
-    fire: "border-orange-500/70 from-orange-500/25 to-rose-500/10 animate-game-bounce",
-    diamond: "border-fuchsia-500/70 from-fuchsia-500/25 via-violet-500/15 to-cyan-500/10 animate-game-bounce",
+  // Visual tier based on sequence level
+  const tier = level >= 4 ? "elite" : level >= 3 ? "senior" : level >= 2 ? "specialist" : "base";
+
+  const containerClass = {
+    base:       "border-primary/30 from-primary/10 to-primary/3",
+    specialist: "border-amber-400/40 from-amber-400/12 to-amber-500/3",
+    senior:     "border-amber-400/60 from-amber-400/18 to-amber-500/5 animate-exec-energy",
+    elite:      "border-primary/60 from-primary/20 to-emerald-500/8 animate-exec-energy",
   }[tier];
 
-  const flameClass = {
-    primary: "text-primary",
-    amber: "text-amber-400",
-    fire: "text-orange-500",
-    diamond: "text-fuchsia-400",
+  const accentClass = {
+    base:       "text-primary",
+    specialist: "text-amber-400",
+    senior:     "text-amber-400",
+    elite:      "text-primary",
+  }[tier];
+
+  const barClass = {
+    base:       "bg-primary",
+    specialist: "bg-gradient-to-r from-amber-500 to-yellow-400",
+    senior:     "bg-gradient-to-r from-amber-400 to-amber-500",
+    elite:      "bg-gradient-to-r from-primary to-emerald-400",
   }[tier];
 
   if (compact) {
     return (
-      <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full border bg-gradient-to-r ${ringClass}`}>
-        <Flame className={`w-3 h-3 ${flameClass}`} />
-        <span className="text-[10px] font-black tabular-nums">x{level + 1}</span>
+      <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border bg-gradient-to-r ${containerClass}`}>
+        <Zap className={`w-3 h-3 ${accentClass}`} strokeWidth={2} />
+        <span className="text-[10px] font-black tabular-nums">×{level + 1}</span>
         <span className="text-[9px] tabular-nums text-muted-foreground">{formatTime(secondsLeft)}</span>
       </div>
     );
   }
 
   return (
-    <div className={`relative overflow-hidden rounded-xl border bg-gradient-to-br ${ringClass} p-2.5`}>
+    <div className={`relative overflow-hidden rounded-xl border bg-gradient-to-br ${containerClass} p-2.5`}>
+      {/* Top accent line */}
+      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-400/40 to-transparent" />
+
       <div className="flex items-center gap-2">
-        <Flame className={`w-5 h-5 ${flameClass} drop-shadow-[0_0_8px_currentColor]`} />
+        <div className={`w-8 h-8 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center shrink-0`}>
+          <Zap className={`w-4 h-4 ${accentClass}`} strokeWidth={1.5} />
+        </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-1.5">
-            <span className="text-base font-black tabular-nums">COMBO x{level + 1}</span>
+            <span className="text-sm font-black tabular-nums uppercase tracking-wide">
+              Sequência ×{level + 1}
+            </span>
             {bonusXp > 0 && (
-              <span className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-400">
-                <Zap className="w-3 h-3" /> +{bonusXp} XP no próximo
+              <span className={`text-[10px] font-bold ${accentClass}`}>
+                +{bonusXp} pts bônus
               </span>
             )}
           </div>
           <div className="flex items-center gap-1 text-[10px] text-muted-foreground tabular-nums">
-            <Clock className="w-3 h-3" />
+            <Clock className="w-3 h-3" strokeWidth={1.5} />
             <span>{formatTime(secondsLeft)} restantes</span>
           </div>
         </div>
       </div>
+
       <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
         <div
-          className={`h-full transition-[width] duration-1000 ease-linear ${
-            tier === "diamond" ? "bg-gradient-to-r from-fuchsia-400 via-violet-400 to-cyan-400" :
-            tier === "fire" ? "bg-gradient-to-r from-orange-500 to-rose-500" :
-            tier === "amber" ? "bg-gradient-to-r from-amber-400 to-amber-500" :
-            "bg-primary"
-          }`}
+          className={`h-full transition-[width] duration-1000 ease-linear rounded-full ${barClass}`}
           style={{ width: `${progressPct}%` }}
         />
       </div>

@@ -427,11 +427,13 @@ async function loadContext(supabase: any, customerId: string) {
     .order("last_confirmed_at", { ascending: false })
     .limit(15);
 
-  // FAQ oficial — respostas aprovadas (carrega do banco para o cérebro responder qualquer pergunta sem inventar)
+  // FAQ oficial — respostas aprovadas: seções do consultor + globais (sem inventar)
   const { data: knowledge } = await supabase
     .from("ai_knowledge_sections")
     .select("title, content")
     .eq("is_active", true)
+    .or(`consultant_id.is.null,consultant_id.eq.${customer.consultant_id}`)
+    .order("consultant_id", { ascending: false, nullsFirst: true }) // consultor-específico primeiro
     .order("position");
   const knowledgeBlock = (knowledge || [])
     .map((k: any) => `## ${k.title}\n${k.content}`)

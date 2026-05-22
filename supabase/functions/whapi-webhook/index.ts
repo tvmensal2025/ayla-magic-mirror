@@ -699,25 +699,70 @@ Deno.serve(async (req) => {
 
 
     // ─── Auto-tag lead source (Meta Ads) ─────────────────────────────────
-    // 1) Sinal forte: payload Whapi com referral/context (CTWA do Meta)
-    // 2) Fallback: regex no texto (frase pré-preenchida do CTWA ou menção a ad)
+    // Prioridade:
+    //   1. Sinal forte: payload Whapi com referral/context (CTWA do Meta)
+    //   2. Match por initial_message: compara texto recebido com
+    //      facebook_campaigns.initial_message do consultor.
+    //   3. Fallback regex: frases típicas de anúncio no texto.
+    // Só roda quando source_campaign_id ainda não está preenchido.
     try {
-      if (!(customer as any).lead_source) {
+      const alreadyTagged = !!(customer as any).source_campaign_id || !!(customer as any).lead_source;
+      if (!alreadyTagged) {
         const rawMsg: any = body?.messages?.[0] || {};
         const referral = rawMsg.referral || rawMsg.context?.referred_product || rawMsg.context?.referral || rawMsg.ad_reply || null;
         const ctwaClid = rawMsg.ctwa_clid || referral?.ctwa_clid || null;
         const hasReferral = !!(referral || ctwaClid);
 
+        const referralPayload = referral
+          ? { ...referral, ctwa_clid: ctwaClid }
+          : ctwaClid
+          ? { ctwa_clid: ctwaClid }
+          : null;
+
+        let sourceCampaignId: string | null = null;
+
+        // 1) Match por initial_message
+        if (messageText && messageText.trim().length > 5) {
+          try {
+            const normalizedMsg = messageText.trim().toLowerCase().replace(/\s+/g, " ");
+            const { data: campaigns } = await supabase
+              .from("facebook_campaigns")
+              .select("id, initial_message")
+              .eq("consultant_id", (customer as any).consultant_id)
+              .not("initial_message", "is", null)
+              .limit(50);
+            if (campaigns && campaigns.length > 0) {
+              const matched = (campaigns as any[]).find((c) => {
+                const im = String(c.initial_message || "").trim().toLowerCase().replace(/\s+/g, " ");
+                return im.length > 5 && normalizedMsg.startsWith(im.slice(0, Math.min(im.length, 60)));
+              });
+              if (matched) {
+                sourceCampaignId = matched.id;
+                console.log(`[lead-source] customer ${customer.id} matched campaign ${matched.id} via initial_message`);
+              }
+            }
+          } catch (e) {
+            console.warn("[lead-source] initial_message match falhou:", (e as Error).message);
+          }
+        }
+
         const adsRegex = /(tenho interesse.*mais informa[çc][õo]es|gostaria de saber mais|quero saber mais|vi seu an[uú]ncio|vim do an[uú]ncio|do an[uú]ncio|pelo an[uú]ncio|vi o an[uú]ncio|facebook|instagram|\bfb ads?\b|\bmeta ads?\b|patrocinad|reels|stories|sponsored)/i;
         const textMatch = !hasAudio && !isFile && messageText && adsRegex.test(messageText);
 
-        if (hasReferral || textMatch) {
-          await supabase.from("customers")
-            .update({ lead_source: "meta_ads" })
-            .eq("id", customer.id)
-            .is("lead_source", null);
-          (customer as any).lead_source = "meta_ads";
-          const reason = hasReferral ? `referral=${JSON.stringify(referral).slice(0,120)} ctwa=${ctwaClid}` : `regex msg="${(messageText||'').slice(0,80)}"`;
+        if (hasReferral || textMatch || sourceCampaignId) {
+          const patch: Record<string, any> = { lead_source: "meta_ads" };
+          if (sourceCampaignId) patch.source_campaign_id = sourceCampaignId;
+          if (ctwaClid) patch.source_ctwa_clid = ctwaClid;
+          if (referralPayload) patch.source_referral = referralPayload;
+
+          await supabase.from("customers").update(patch).eq("id", customer.id);
+          Object.assign(customer, patch);
+
+          const reason = sourceCampaignId
+            ? `campaign_match id=${sourceCampaignId}`
+            : hasReferral
+            ? `referral=${JSON.stringify(referral).slice(0, 120)} ctwa=${ctwaClid}`
+            : `regex msg="${(messageText || "").slice(0, 80)}"`;
           console.log(`[lead-source] customer ${customer.id} marcado como meta_ads (${reason})`);
         }
       }

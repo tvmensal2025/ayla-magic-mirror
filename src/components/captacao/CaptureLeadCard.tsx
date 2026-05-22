@@ -184,7 +184,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
               <div
                 key={f.key}
                 className={`group rounded-md border transition-all ${embedded ? "px-2 py-1" : "p-2"} ${
-                  isFlashing ? "animate-field-flash border-primary bg-primary/10" :
+                  isFlashing ? "animate-exec-card border-primary bg-primary/10" :
                   sugg ? "border-amber-400/60 bg-amber-400/5 ring-1 ring-amber-400/30 animate-pulse" :
                   filled ? "border-primary/30 bg-primary/5" : "border-border bg-background hover:border-primary/30"
                 }`}
@@ -256,16 +256,16 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
           <Button
             size="lg"
             className={`w-full gap-2 font-black text-base ${canSubmit
-              ? "bg-gradient-to-r from-emerald-500 via-amber-400 to-emerald-500 bg-[length:200%_100%] animate-shimmer-gold text-emerald-950 hover:opacity-95 animate-boss-pulse"
+              ? "bg-gradient-to-r from-primary via-emerald-400 to-primary bg-[length:200%_100%] text-primary-foreground hover:opacity-95 exec-bar-active shadow-[0_0_24px_hsl(var(--primary)/0.4)]"
               : ""}`}
             disabled={!canSubmit || submitting}
             onClick={() => void handleSubmit()}
           >
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trophy className="w-4 h-4" />}
-            {canSubmit ? "⚡ FINALIZAR CAPTURA · +100 XP" : "CADASTRAR TUDO"}
+            {canSubmit ? "FINALIZAR CADASTRO" : "CADASTRAR TUDO"}
           </Button>
           <p className="text-[10px] text-center text-muted-foreground">
-            {canSubmit ? "🏆 Boss-fight desbloqueada!" : `Faltam ${totalFields - filledCount} ${totalFields - filledCount === 1 ? "dado" : "dados"}.`}
+            {canSubmit ? "Cadastro completo — confirme para registrar." : `Faltam ${totalFields - filledCount} ${totalFields - filledCount === 1 ? "dado" : "dados"}.`}
           </p>
         </div>
       )}

@@ -21,6 +21,7 @@ async function loadKnowledge(supabaseUrl: string, supabaseKey: string): Promise<
       .from("ai_knowledge_sections")
       .select("title, content")
       .eq("is_active", true)
+      .is("consultant_id", null)  // apenas seções globais no chat interno
       .order("position", { ascending: true });
 
     if (sections && sections.length > 0) {

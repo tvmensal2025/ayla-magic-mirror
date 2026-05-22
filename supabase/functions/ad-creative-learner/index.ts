@@ -108,24 +108,58 @@ async function processConsultant(supabase: ReturnType<typeof adminClient>, consu
       copyVariations = Array.isArray(variants) ? variants : [];
     }
 
-    // distribui métricas total entre ads (proxy: igual)
+    // Tenta buscar métricas granulares por fb_ad_id (quando disponíveis)
+    // Fallback: distribui proporcionalmente pelo CTR estimado de cada variação
+    const perAdMetrics: Record<string, typeof tot> = {};
+    for (const adId of adIds) {
+      const { data: adMs } = await supabase
+        .from("facebook_metrics_daily")
+        .select("spend_cents, impressions, clicks, leads, complete_registrations")
+        .eq("fb_ad_id", adId)
+        .gte("date", since);
+      if (adMs && adMs.length > 0) {
+        perAdMetrics[adId] = (adMs).reduce(
+          (acc: typeof tot, m: any) => ({
+            spend_cents: acc.spend_cents + (m.spend_cents || 0),
+            impressions: acc.impressions + (m.impressions || 0),
+            clicks: acc.clicks + (m.clicks || 0),
+            leads: acc.leads + (m.leads || 0),
+            registrations: acc.registrations + (m.complete_registrations || 0),
+          }),
+          { spend_cents: 0, impressions: 0, clicks: 0, leads: 0, registrations: 0 }
+        );
+      }
+    }
+
+    // Verifica se temos dados granulares para todos os ads
+    const hasGranular = adIds.every(id => perAdMetrics[id] !== undefined);
+
     const perAd = adIds.length;
     for (let i = 0; i < adIds.length; i++) {
+      const adId = adIds[i];
       const cv = copyVariations[i % Math.max(copyVariations.length, 1)];
+      // Usa métricas granulares se disponíveis; senão divide igualmente
+      const m = hasGranular ? perAdMetrics[adId] : {
+        spend_cents: Math.floor(tot.spend_cents / perAd),
+        impressions: Math.floor(tot.impressions / perAd),
+        clicks: Math.floor(tot.clicks / perAd),
+        leads: Math.floor(tot.leads / perAd),
+        registrations: Math.floor(tot.registrations / perAd),
+      };
       rows.push({
         id: crypto.randomUUID(),
-        fb_ad_id: adIds[i],
+        fb_ad_id: adId,
         consultant_id: consultantId,
         campaign_id: camp.id,
         distribuidora: camp.distribuidora,
         headline: cv?.text || null,
         primary_text: null,
         framework: cv?.framework || null,
-        impressions: Math.floor(tot.impressions / perAd),
-        clicks: Math.floor(tot.clicks / perAd),
-        leads: Math.floor(tot.leads / perAd),
-        registrations: Math.floor(tot.registrations / perAd),
-        spend_cents: Math.floor(tot.spend_cents / perAd),
+        impressions: m.impressions,
+        clicks: m.clicks,
+        leads: m.leads,
+        registrations: m.registrations,
+        spend_cents: m.spend_cents,
         score: 0,
       });
     }
@@ -275,12 +309,13 @@ Deno.serve(async (req) => {
         best_image_traits: tally("best_image_traits"),
         consultants_in_sample: (allInsights || []).length,
       };
-      await supabase.from("ad_playbooks").insert({
+      await supabase.from("ad_playbooks").upsert({
         scope: "global",
         consultant_id: null,
         source_metric: "learner_daily_aggregate",
         payload,
-      });
+        generated_at: new Date().toISOString(),
+      }, { onConflict: "scope,source_metric" });
     } catch (e) {
       console.warn("global playbook falhou:", (e as Error).message);
     }

@@ -16,8 +16,15 @@ const SOURCE_LABELS: Record<string, { label: string; icon: string; color: string
   unknown: { label: "Não classificado", icon: "❓", color: "hsl(0, 0%, 45%)" },
 };
 
+interface CampaignBreakdown {
+  campaign_id: string;
+  campaign_name: string;
+  count: number;
+}
+
 export function LeadSourceCard({ consultantId, periodDays }: LeadSourceCardProps) {
   const [data, setData] = useState<{ source: string; count: number }[]>([]);
+  const [campaigns, setCampaigns] = useState<CampaignBreakdown[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,14 +32,27 @@ export function LeadSourceCard({ consultantId, periodDays }: LeadSourceCardProps
     const fetchData = async () => {
       setLoading(true);
       const since = new Date(Date.now() - periodDays * 24 * 3600 * 1000).toISOString();
-      const { data: rows } = await supabase
-        .from("customers")
-        .select("lead_source")
-        .eq("consultant_id", consultantId)
-        .eq("customer_origin", "whatsapp_lead")
-        .gte("created_at", since)
-        .limit(5000);
+
+      const [{ data: rows }, { data: campaignRows }] = await Promise.all([
+        supabase
+          .from("customers")
+          .select("lead_source")
+          .eq("consultant_id", consultantId)
+          .eq("customer_origin", "whatsapp_lead")
+          .gte("created_at", since)
+          .limit(5000),
+        // Leads com campanha específica identificada
+        supabase
+          .from("customers")
+          .select("source_campaign_id, facebook_campaigns(name)")
+          .eq("consultant_id", consultantId)
+          .not("source_campaign_id", "is", null)
+          .gte("created_at", since)
+          .limit(5000),
+      ]);
+
       if (cancelled) return;
+
       const counts: Record<string, number> = {};
       (rows || []).forEach((r: any) => {
         const k = r.lead_source || "unknown";
@@ -42,6 +62,17 @@ export function LeadSourceCard({ consultantId, periodDays }: LeadSourceCardProps
         .map(([source, count]) => ({ source, count }))
         .sort((a, b) => b.count - a.count);
       setData(arr);
+
+      // Agrupa por campanha
+      const campMap: Record<string, CampaignBreakdown> = {};
+      (campaignRows || []).forEach((r: any) => {
+        const cid = r.source_campaign_id;
+        const name = r.facebook_campaigns?.name || cid;
+        if (!campMap[cid]) campMap[cid] = { campaign_id: cid, campaign_name: name, count: 0 };
+        campMap[cid].count++;
+      });
+      setCampaigns(Object.values(campMap).sort((a, b) => b.count - a.count));
+
       setLoading(false);
     };
     fetchData();
@@ -59,7 +90,7 @@ export function LeadSourceCard({ consultantId, periodDays }: LeadSourceCardProps
           <h3 className="font-heading font-bold text-foreground flex items-center gap-2">
             <Megaphone className="w-4 h-4 text-primary" /> Origem dos Leads (WhatsApp)
           </h3>
-          <p className="text-xs text-muted-foreground">Últimos {periodDays} dias — atribuição automática por palavra-chave da 1ª mensagem</p>
+          <p className="text-xs text-muted-foreground">Últimos {periodDays} dias — atribuição automática por mensagem pré-preenchida do anúncio ou CTWA</p>
         </div>
         {total > 0 && (
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20">
@@ -105,14 +136,41 @@ export function LeadSourceCard({ consultantId, periodDays }: LeadSourceCardProps
               </div>
             );
           })}
-          {adsLeads > 0 && (
+
+          {/* Breakdown por campanha específica */}
+          {campaigns.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-border/50">
+              <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-primary" />
+                Leads por campanha identificada
+              </p>
+              <div className="space-y-2">
+                {campaigns.map((c) => {
+                  const pct = adsLeads > 0 ? Math.round((c.count / adsLeads) * 100) : 0;
+                  return (
+                    <div key={c.campaign_id}>
+                      <div className="flex justify-between text-xs mb-0.5">
+                        <span className="text-foreground truncate max-w-[70%]">📣 {c.campaign_name}</span>
+                        <span className="text-muted-foreground tabular-nums shrink-0">{c.count} lead{c.count !== 1 ? "s" : ""} ({pct}%)</span>
+                      </div>
+                      <div className="w-full bg-secondary rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="h-1.5 rounded-full transition-all duration-500 bg-primary/70"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {adsLeads > 0 && campaigns.length === 0 && (
             <div className="mt-4 pt-3 border-t border-border/50 flex items-start gap-2 text-xs text-muted-foreground">
               <TrendingUp className="w-3.5 h-3.5 text-primary flex-shrink-0 mt-0.5" />
               <span>
-                Dica: a tag <strong className="text-foreground">Anúncios Meta</strong> é detectada quando o
-                lead manda no WhatsApp termos como <em>"vim do anúncio"</em>, <em>"Facebook"</em>,
-                <em>"Instagram"</em>, <em>"reels"</em> ou <em>"patrocinado"</em>. Configure a mensagem
-                pré-preenchida do seu anúncio Click-to-WhatsApp começando com "Oi! Vim do anúncio…".
+                Dica: configure a <strong className="text-foreground">mensagem pré-preenchida</strong> do seu anúncio Click-to-WhatsApp com um texto único por campanha. O sistema identifica automaticamente de qual campanha veio cada lead.
               </span>
             </div>
           )}

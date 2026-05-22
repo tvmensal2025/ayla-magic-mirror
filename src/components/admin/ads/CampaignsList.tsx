@@ -81,6 +81,7 @@ function explainRejection(raw: string | null | undefined): { title: string; sugg
 export function CampaignsList({ consultantId, refreshKey }: { consultantId: string; refreshKey: number }) {
   const [items, setItems] = useState<Campaign[]>([]);
   const [metrics, setMetrics] = useState<Record<string, Metric>>({});
+  const [waLeads, setWaLeads] = useState<Record<string, number>>({});
   const [waNumber, setWaNumber] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reactivating, setReactivating] = useState<string | null>(null);
@@ -133,6 +134,19 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
         });
         Object.values(agg).forEach(m => { m.cost_per_lead_cents = m.leads > 0 ? Math.round(m.spend_cents / m.leads) : 0; });
         setMetrics(agg);
+
+        // ─── Leads reais do WhatsApp atribuídos por campanha ───────────
+        // Conta customers com source_campaign_id = cada campanha (últimos 30 dias).
+        const { data: waRows } = await supabase
+          .from("customers")
+          .select("source_campaign_id")
+          .in("source_campaign_id", list.map(c => c.id))
+          .gte("created_at", new Date(Date.now() - 30 * 86400_000).toISOString());
+        const waCounts: Record<string, number> = {};
+        (waRows || []).forEach((r: any) => {
+          if (r.source_campaign_id) waCounts[r.source_campaign_id] = (waCounts[r.source_campaign_id] || 0) + 1;
+        });
+        setWaLeads(waCounts);
       }
       setLoading(false);
     })();
@@ -210,6 +224,7 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
     <div className="grid gap-3">
       {items.map(c => {
         const m = metrics[c.id] || { impressions: 0, clicks: 0, spend_cents: 0, leads: 0, messaging_conversations_started: 0, cost_per_lead_cents: 0 };
+        const waCount = waLeads[c.id] || 0;
         return (
           <Card key={c.id} className="p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
@@ -293,11 +308,18 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs">
               <Stat icon={<TrendingUp className="w-3.5 h-3.5" />} label="Impressões" value={m.impressions.toLocaleString("pt-BR")} />
               <Stat icon={<Users className="w-3.5 h-3.5" />} label="Cliques" value={m.clicks.toLocaleString("pt-BR")} />
               <Stat icon={<MessageCircle className="w-3.5 h-3.5" />} label="Conversas" value={String(m.messaging_conversations_started)} />
-              <Stat icon={<Users className="w-3.5 h-3.5" />} label="Leads" value={String(m.leads)} />
+              <Stat icon={<Users className="w-3.5 h-3.5" />} label="Leads Meta" value={String(m.leads)} />
+              <Stat
+                icon={<MessageCircle className="w-3.5 h-3.5 text-green-500" />}
+                label="Leads WhatsApp"
+                value={String(waCount)}
+                highlight={waCount > 0}
+                tooltip="Leads que mandaram mensagem no WhatsApp e foram atribuídos a esta campanha (via mensagem pré-preenchida ou CTWA)"
+              />
               <Stat icon={<DollarSign className="w-3.5 h-3.5" />} label={m.leads > 0 ? "CPL" : "Gasto"} value={m.leads > 0 ? `R$ ${(m.cost_per_lead_cents / 100).toFixed(2)}` : `R$ ${(m.spend_cents / 100).toFixed(2)}`} highlight />
             </div>
             <CampaignHealthCheck campaignId={c.id} fbCampaignId={c.fb_campaign_id} whatsappNumber={waNumber} />
@@ -329,9 +351,9 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
   );
 }
 
-function Stat({ icon, label, value, highlight }: { icon: React.ReactNode; label: string; value: string; highlight?: boolean }) {
+function Stat({ icon, label, value, highlight, tooltip }: { icon: React.ReactNode; label: string; value: string; highlight?: boolean; tooltip?: string }) {
   return (
-    <div className={`rounded-lg p-2 ${highlight ? "bg-primary/10 border border-primary/20" : "bg-secondary/40"}`}>
+    <div className={`rounded-lg p-2 ${highlight ? "bg-primary/10 border border-primary/20" : "bg-secondary/40"}`} title={tooltip}>
       <div className="flex items-center gap-1 text-muted-foreground">{icon}{label}</div>
       <div className={`font-bold mt-0.5 ${highlight ? "text-primary" : "text-foreground"}`}>{value}</div>
     </div>

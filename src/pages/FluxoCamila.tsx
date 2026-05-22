@@ -175,6 +175,7 @@ export default function FluxoCamila() {
   const [userId, setUserId] = useState<string | null>(null);
   const [flowId, setFlowId] = useState<string | null>(null);
   const [globalAtivo, setGlobalAtivo] = useState(false);
+  const [initialDelaySec, setInitialDelaySec] = useState(0);
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(true);
   const [testOpen, setTestOpen] = useState(false);
@@ -196,7 +197,7 @@ export default function FluxoCamila() {
   const reload = useCallback(async (uid: string, variant: "A" | "B" | "C" = "A") => {
     const [{ data: cons }, { data: flows }, { count }, { data: flowB }, { data: flowC }, vAResp, vBResp, vCResp] = await Promise.all([
       supabase.from("consultants").select("conversational_flow_enabled, ab_test_enabled").eq("id", uid).maybeSingle(),
-      supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
+      supabase.from("bot_flows").select("id, initial_delay_seconds").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
       supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("conversational_flow_enabled", true),
       supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("variant", "B").limit(1),
       supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("variant", "C").limit(1),
@@ -218,6 +219,8 @@ export default function FluxoCamila() {
       fid = (data as string) ?? null;
     }
     setFlowId(fid);
+    // Carrega o delay inicial configurado no fluxo
+    setInitialDelaySec(Number((flows?.[0] as any)?.initial_delay_seconds ?? 0));
     if (fid) {
       const { data: rows } = await supabase
         .from("bot_flow_steps").select("*").eq("flow_id", fid).order("position");
@@ -387,6 +390,18 @@ export default function FluxoCamila() {
     else toast.success(v ? "Fluxo ativo para TODOS os seus leads" : "Fluxo desligado (só leads de teste)");
   }
 
+  async function saveInitialDelay(sec: number) {
+    if (!flowId) return;
+    const clamped = Math.max(0, Math.min(300, Math.round(sec)));
+    const { error } = await supabase
+      .from("bot_flows")
+      .update({ initial_delay_seconds: clamped } as any)
+      .eq("id", flowId);
+    if (error) { toast.error("Erro ao salvar delay: " + error.message); return; }
+    setInitialDelaySec(clamped);
+    toast.success(clamped === 0 ? "Delay removido — bot responde imediatamente" : `Bot aguarda ${clamped}s antes de responder ao lead`);
+  }
+
   async function addTestNumber() {
     if (!userId) return;
     const phone = testPhone.replace(/\D/g, "");
@@ -472,6 +487,42 @@ export default function FluxoCamila() {
             </div>
             <Switch id="global" checked={globalAtivo} onCheckedChange={toggleGlobal} />
           </div>
+
+          {/* Delay inicial antes de responder ao lead */}
+          <div className="mt-4 pt-4 border-t border-border/60">
+            <div className="flex items-center gap-2 mb-1">
+              <Label className="text-sm font-medium">⏱️ Tempo de espera antes de responder (segundos)</Label>
+            </div>
+            <p className="text-xs text-muted-foreground mb-2">
+              O bot aguarda esse tempo após a primeira mensagem do lead antes de iniciar o fluxo. Evita parecer robótico. 0 = responde imediatamente.
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                max={300}
+                step={1}
+                value={initialDelaySec}
+                onChange={(e) => setInitialDelaySec(Math.max(0, Math.min(300, Number(e.target.value) || 0)))}
+                className="w-20 h-8 px-2 text-sm rounded border border-border bg-background"
+              />
+              <span className="text-xs text-muted-foreground">seg (máx 300)</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => saveInitialDelay(initialDelaySec)}
+                disabled={!flowId}
+              >
+                Salvar
+              </Button>
+              {initialDelaySec > 0 && (
+                <span className="text-xs text-green-600 dark:text-green-400">
+                  ✓ Bot aguarda {initialDelaySec}s
+                </span>
+              )}
+            </div>
+          </div>
+
           <div className="mt-4 pt-4 border-t border-border/60 flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2">
               <FlaskConical className="h-4 w-4 text-muted-foreground" />

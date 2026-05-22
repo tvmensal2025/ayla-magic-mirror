@@ -50,14 +50,24 @@ export function useVoiceTemplates(consultantId: string | undefined) {
     if (!consultantId) return;
     setLoading(true);
     try {
-      const [{ data: tpls }, { data: blks }, { data: cls }] = await Promise.all([
+      const [{ data: tpls }, { data: cls }] = await Promise.all([
         supabase.from("voice_templates").select("*").eq("consultant_id", consultantId).order("created_at"),
-        supabase.from("voice_template_blocks").select("*").order("position"),
         supabase.from("voice_name_clips").select("*").eq("consultant_id", consultantId).order("name_display"),
       ]);
+      // Filtra blocos apenas dos templates deste consultor
+      const tplIds = (tpls || []).map((t: any) => t.id);
+      let blks: any[] = [];
+      if (tplIds.length > 0) {
+        const { data: blksData } = await supabase
+          .from("voice_template_blocks")
+          .select("*")
+          .in("template_id", tplIds)
+          .order("position");
+        blks = blksData || [];
+      }
       const tplsWithBlocks: VoiceTemplate[] = (tpls || []).map((t: any) => ({
         ...t,
-        blocks: (blks || []).filter((b: any) => b.template_id === t.id),
+        blocks: blks.filter((b: any) => b.template_id === t.id),
       }));
       setTemplates(tplsWithBlocks);
       setClips((cls as VoiceNameClip[]) || []);

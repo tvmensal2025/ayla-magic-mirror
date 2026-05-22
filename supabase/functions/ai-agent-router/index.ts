@@ -215,11 +215,13 @@ Deno.serve(async (req) => {
         return true;
       });
 
-    // 6) Conhecimento iGreen
+    // 6) Conhecimento iGreen: seções do consultor + globais
     const { data: knowledge } = await supabase
       .from("ai_knowledge_sections")
       .select("title, content")
       .eq("is_active", true)
+      .or(`consultant_id.is.null,consultant_id.eq.${consultantId}`)
+      .order("consultant_id", { ascending: false, nullsFirst: true })
       .order("position");
 
     // 6b) Slots de áudio (Camila)

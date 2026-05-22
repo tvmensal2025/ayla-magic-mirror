@@ -47,6 +47,7 @@ interface DbStep {
   step_key: string;
   step_type: string | null;
   message_text: string | null;
+  title?: string | null;
   wait_for: string | null;
   text_delay_ms: number | null;
   slot_key: string | null;
@@ -724,6 +725,46 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   const strictMode = loaded.strictMode || globalStrict;
   if (globalStrict) console.log(`[conversational/evo] 🛑 strict_script_mode=ON (kill switch global)`);
 
+  // ─── Delay inicial configurável (bot_flows.initial_delay_seconds) ────────
+  // Só aplica na PRIMEIRA mensagem do lead (step == null ou "welcome") para
+  // evitar que o bot responda instantaneamente, o que parece robótico.
+  // Cada step subsequente tem seu próprio text_delay_ms / delay_before_ms.
+  // Em modo teste o delay é zerado para não travar os testes.
+  const isFirstMessage =
+    !ctx.customer.conversation_step ||
+    ctx.customer.conversation_step === "welcome" ||
+    ctx.customer.conversation_step === "menu_inicial";
+  if (isFirstMessage && !isTestMode()) {
+    try {
+      const { data: flowRow } = await ctx.supabase
+        .from("bot_flows")
+        .select("initial_delay_seconds")
+        .eq("id", flowId)
+        .maybeSingle();
+      const delaySec = Math.min(Number((flowRow as any)?.initial_delay_seconds || 0), 300);
+      if (delaySec > 0) {
+        console.log(JSON.stringify({ level: "info", kind: "flow_initial_delay", customer_id: ctx.customer?.id, flow_id: flowId, delay_seconds: delaySec }));
+        // Envia "digitando..." durante o delay para parecer humano
+        try { await ctx.sender.sendPresence(ctx.remoteJid, "composing"); } catch (_) { /* ignora */ }
+        // Renova o indicador de digitação a cada 4s (WhatsApp some após ~5s)
+        const renewInterval = 4_000;
+        const totalMs = delaySec * 1000;
+        let elapsed = 0;
+        while (elapsed < totalMs) {
+          const chunk = Math.min(renewInterval, totalMs - elapsed);
+          await new Promise((r) => setTimeout(r, chunk));
+          elapsed += chunk;
+          if (elapsed < totalMs) {
+            try { await ctx.sender.sendPresence(ctx.remoteJid, "composing"); } catch (_) { /* ignora */ }
+          }
+        }
+        try { await ctx.sender.sendPresence(ctx.remoteJid, "paused"); } catch (_) { /* ignora */ }
+      }
+    } catch (e) {
+      console.warn("[conversational] initial_delay falhou (segue sem delay):", (e as Error).message);
+    }
+  }
+
   // Helper: encontra o primeiro step ativo de um determinado step_type
   // (usado para resolver goto_special='cadastro' — preferimos ir para o
   // passo configurado de captura de documento, em vez de pular pra conta).
@@ -910,9 +951,9 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       if (cursor.wait_for === "reply" || cursor.wait_for === "media") break;
       // Se este step já entregou conteúdo (texto OU mídia), só cascateia se
       // o próximo tipo for "none" sem espera — preserva a UX configurada.
-      const nextId = cursor.fallback?.mode === "goto" ? cursor.fallback?.goto_step_id : null;
+      const nextId: string | null = (cursor.fallback?.mode === "goto" ? cursor.fallback?.goto_step_id : null) ?? null;
       if (!nextId) break;
-      const next = dbSteps.find((s) => s.id === nextId && s.is_active);
+      const next: DbStep | undefined = dbSteps.find((s) => s.id === nextId && s.is_active);
       if (!next) break;
       // Continuamos cascateando enquanto não tivermos NADA para enviar OU
       // enquanto o consultor configurou cascata explícita (wait_for=none).
@@ -1161,6 +1202,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         question: ctx.messageText || "",
         leadName: ctx.customer.name,
         currentStepLabel: currentStep.step_key,
+        consultantId: ctx.customer.consultant_id,
       });
       if (ai.source === "ai" && ai.text && ai.confidence >= 0.6 && !ai.shouldHandoff) {
         console.log(`[ai-faq] hit step="${stepKey}" conf=${ai.confidence.toFixed(2)}`);
@@ -1245,9 +1287,9 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       }
       const stepHasContent = !!tpl || mediaSent === true || textSentInline;
       if (cursor.wait_for === "reply" || cursor.wait_for === "media") break;
-      const nextId = cursor.fallback?.mode === "goto" ? cursor.fallback?.goto_step_id : null;
+      const nextId: string | null = (cursor.fallback?.mode === "goto" ? cursor.fallback?.goto_step_id : null) ?? null;
       if (!nextId) break;
-      const next = dbSteps.find((s) => s.id === nextId && s.is_active);
+      const next: DbStep | undefined = dbSteps.find((s) => s.id === nextId && s.is_active);
       if (!next) break;
       if (stepHasContent && cursor.wait_for !== "none") break;
       cursor = next;
@@ -1738,7 +1780,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         "Me diz seu nome pra eu te chamar direitinho 🙏",
       ],
     };
-    const stepKeyLower = (currentStep.title || currentStep.step_key || "").toLowerCase();
+    const stepKeyLower = (currentStep.step_key || "").toLowerCase();
     const variantKey = /valor|conta/.test(stepKeyLower)
       ? "valor"
       : /nome|chama/.test(stepKeyLower)

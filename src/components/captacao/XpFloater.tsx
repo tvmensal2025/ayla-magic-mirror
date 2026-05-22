@@ -8,15 +8,15 @@ export function XpFloater({ events }: Props) {
       {events.map((e) => (
         <div
           key={e.id}
-          className={`px-3 py-1.5 rounded-full font-bold text-sm shadow-lg backdrop-blur-sm animate-xp-rise ${
-            e.source === "ai" ? "bg-amber-400/90 text-amber-950" :
-            e.source === "level" ? "bg-gradient-to-r from-amber-400 to-yellow-300 text-amber-950" :
-            e.source === "combo" ? "bg-fuchsia-500/90 text-white" :
-            e.source === "submit" ? "bg-emerald-500/90 text-white" :
-            "bg-emerald-500/90 text-white"
+          className={`px-3 py-1.5 rounded-lg font-bold text-xs shadow-lg backdrop-blur-sm border animate-exec-float ${
+            e.source === "level"
+              ? "bg-amber-400/95 text-amber-950 border-amber-300/60 shadow-[0_0_20px_hsl(45_85%_52%/0.4)]"
+              : e.source === "submit"
+              ? "bg-primary/95 text-primary-foreground border-primary/40 shadow-[0_0_16px_hsl(var(--primary)/0.4)]"
+              : "bg-card/95 text-foreground border-border/60"
           }`}
         >
-          {e.label || `+${e.amount} XP`}
+          {e.label || `+${e.amount} pts`}
         </div>
       ))}
     </div>

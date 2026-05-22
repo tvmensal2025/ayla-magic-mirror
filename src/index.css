@@ -377,104 +377,147 @@ html {
   filter: blur(6px);
 }
 
-/* ═══════════════ Capture Game ═══════════════ */
-.animate-shimmer-gold {
-  background-size: 200% 200%;
-}
-.capture-ambient {
-  background-image:
-    radial-gradient(ellipse 60% 40% at 20% 0%, hsl(var(--primary)/0.08), transparent 60%),
-    radial-gradient(ellipse 50% 50% at 100% 100%, hsl(45 95% 55%/0.06), transparent 60%);
-  background-size: 200% 200%;
-}
-.capture-card-flip { transform-style: preserve-3d; perspective: 800px; }
+/* ═══════════════ Executive Performance Animations ═══════════════ */
 
-/* ═══════════════ Game Mode ═══════════════ */
-@keyframes game-aurora {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(3%, -2%) scale(1.05); }
+/* --- Ambient background: slow premium gradient drift (war room feel) --- */
+@keyframes exec-ambient {
+  0%, 100% { background-position: 0% 50%; }
+  50%       { background-position: 100% 50%; }
 }
-@keyframes game-bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
+.exec-ambient {
+  background: linear-gradient(
+    135deg,
+    hsl(var(--background)) 0%,
+    hsl(var(--primary) / 0.04) 30%,
+    hsl(45 85% 52% / 0.03) 60%,
+    hsl(var(--background)) 100%
+  );
+  background-size: 300% 300%;
+  animation: exec-ambient 18s ease-in-out infinite;
 }
-@keyframes game-glow {
-  0%, 100% { box-shadow: 0 0 24px hsl(var(--primary)/0.5); }
-  50% { box-shadow: 0 0 36px hsl(var(--primary)/0.8); }
+
+/* --- Gold sweep: horizontal light sweep on level-up / milestone --- */
+@keyframes exec-gold-sweep {
+  0%   { transform: translateX(-100%) skewX(-12deg); opacity: 0; }
+  15%  { opacity: 1; }
+  100% { transform: translateX(200%) skewX(-12deg); opacity: 0; }
 }
-@keyframes game-pop {
-  0% { transform: scale(0.6) rotate(-8deg); opacity: 0; }
-  60% { transform: scale(1.08) rotate(2deg); opacity: 1; }
-  100% { transform: scale(1) rotate(0); opacity: 1; }
+.exec-gold-sweep::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, hsl(45 85% 65% / 0.35) 50%, transparent 100%);
+  animation: exec-gold-sweep 1.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: none;
 }
-@keyframes game-rise {
-  0% { transform: translate(-50%, 20px); opacity: 0; }
-  20% { transform: translate(-50%, -8px); opacity: 1; }
-  100% { transform: translate(-50%, -80px); opacity: 0; }
+
+/* --- Progress bar pulse: premium glow on active progress --- */
+@keyframes exec-bar-glow {
+  0%, 100% { box-shadow: 0 0 6px hsl(var(--primary) / 0.4); }
+  50%       { box-shadow: 0 0 18px hsl(var(--primary) / 0.7), 0 0 4px hsl(45 85% 52% / 0.3); }
 }
-@keyframes game-confetti {
-  0% { transform: translate(0, -20vh) rotate(0); opacity: 0; }
-  10% { opacity: 1; }
-  100% { transform: translate(var(--cx, 0), 60vh) rotate(540deg); opacity: 0; }
+.exec-bar-active {
+  animation: exec-bar-glow 2.4s ease-in-out infinite;
 }
-@keyframes game-xp-shimmer {
-  0% { background-position: -200% 0; }
+
+/* --- Ticker rise: number/value rises like a stock ticker --- */
+@keyframes exec-ticker-rise {
+  0%   { opacity: 0; transform: translateY(12px) scale(0.92); }
+  30%  { opacity: 1; transform: translateY(-4px) scale(1.04); }
+  60%  { transform: translateY(0) scale(1); }
+  80%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-28px) scale(0.96); }
+}
+.animate-exec-ticker { animation: exec-ticker-rise 1.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+/* --- Level-up reveal: cinematic entrance for milestone overlay --- */
+@keyframes exec-reveal {
+  0%   { opacity: 0; transform: scale(0.88) translateY(16px); }
+  60%  { opacity: 1; transform: scale(1.02) translateY(-2px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-exec-reveal { animation: exec-reveal 0.55s cubic-bezier(0.34, 1.4, 0.64, 1) forwards; }
+
+/* --- Rank badge pulse: subtle prestige pulse on new rank --- */
+@keyframes exec-rank-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(45 85% 52% / 0); }
+  50%       { box-shadow: 0 0 0 6px hsl(45 85% 52% / 0.2); }
+}
+.animate-exec-rank { animation: exec-rank-pulse 2s ease-in-out 3; }
+
+/* --- Streak/sequence indicator: upward energy pulse --- */
+@keyframes exec-energy {
+  0%   { transform: scaleY(1); opacity: 0.7; }
+  50%  { transform: scaleY(1.08); opacity: 1; }
+  100% { transform: scaleY(1); opacity: 0.7; }
+}
+.animate-exec-energy { animation: exec-energy 1.8s ease-in-out infinite; }
+
+/* --- Card entrance: premium slide-up for stat cards --- */
+@keyframes exec-card-in {
+  0%   { opacity: 0; transform: translateY(20px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate-exec-card { animation: exec-card-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* --- Milestone line: horizontal gold line that draws itself --- */
+@keyframes exec-line-draw {
+  0%   { width: 0; opacity: 0; }
+  20%  { opacity: 1; }
+  100% { width: 100%; opacity: 1; }
+}
+.exec-line-draw {
+  height: 1px;
+  background: linear-gradient(90deg, hsl(45 85% 52%), hsl(var(--primary)));
+  animation: exec-line-draw 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* --- Shimmer on gold elements (rank badge, milestone) --- */
+@keyframes exec-shimmer {
+  0%   { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
-.animate-game-bounce { animation: game-bounce 1.4s ease-in-out infinite; }
-.animate-game-glow { animation: game-glow 2.2s ease-in-out infinite; }
-.animate-game-pop { animation: game-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
-.animate-game-rise { animation: game-rise 1.4s ease-out forwards; }
-
-/* XP floater — sobe na vertical com fade. Usado pelo XpFloater. */
-@keyframes game-float-up {
-  0%   { transform: translateY(0); opacity: 0; }
-  15%  { opacity: 1; }
-  100% { transform: translateY(-90px); opacity: 0; }
-}
-.animate-game-float-up { animation: game-float-up 1.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-
-/* Botão "Cadastrar" pulsante intenso quando completa — substitui animate-pulse
-   nativo do Tailwind por algo mais perceptível em mobile. */
-@keyframes game-cta-shake {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 30px hsl(142 76% 45% / 0.6); }
-  25%      { transform: scale(1.04) rotate(-1deg); box-shadow: 0 0 50px hsl(142 76% 45% / 0.9); }
-  50%      { transform: scale(1.06); box-shadow: 0 0 60px hsl(142 76% 45% / 1); }
-  75%      { transform: scale(1.04) rotate(1deg); box-shadow: 0 0 50px hsl(142 76% 45% / 0.9); }
-}
-.animate-game-cta-shake { animation: game-cta-shake 1.6s ease-in-out infinite; }
-.game-confetti {
-  animation: game-confetti 2.2s ease-out forwards;
-}
-.game-aurora {
-  background:
-    radial-gradient(ellipse 40% 30% at 20% 30%, hsl(var(--primary)/0.35), transparent 60%),
-    radial-gradient(ellipse 35% 35% at 80% 20%, hsl(160 90% 45%/0.25), transparent 60%),
-    radial-gradient(ellipse 50% 40% at 60% 90%, hsl(45 95% 55%/0.18), transparent 60%);
-  filter: blur(40px);
-  animation: game-aurora 14s ease-in-out infinite;
-}
-.game-stars {
-  background-image:
-    radial-gradient(1px 1px at 12% 18%, hsl(var(--primary)/0.7), transparent),
-    radial-gradient(1px 1px at 47% 73%, hsl(45 95% 70%/0.7), transparent),
-    radial-gradient(1.5px 1.5px at 78% 32%, hsl(160 90% 55%/0.7), transparent),
-    radial-gradient(1px 1px at 25% 88%, hsl(var(--primary)/0.6), transparent),
-    radial-gradient(1px 1px at 92% 64%, hsl(45 95% 70%/0.6), transparent),
-    radial-gradient(1.5px 1.5px at 65% 12%, hsl(160 90% 55%/0.6), transparent);
-}
-.game-xp-shimmer {
-  background: linear-gradient(90deg, transparent 0%, hsl(0 0% 100% / 0.35) 50%, transparent 100%);
+.exec-shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(45 85% 52%) 0%,
+    hsl(45 95% 72%) 40%,
+    hsl(45 85% 52%) 60%,
+    hsl(38 80% 45%) 100%
+  );
   background-size: 200% 100%;
-  animation: game-xp-shimmer 2.4s linear infinite;
-  mix-blend-mode: overlay;
+  animation: exec-shimmer 3s linear infinite;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
+
+/* --- Floating metric: pts/value floats up like a Bloomberg alert --- */
+@keyframes exec-float-up {
+  0%   { opacity: 0; transform: translateY(8px); }
+  20%  { opacity: 1; transform: translateY(0); }
+  75%  { opacity: 1; transform: translateY(-20px); }
+  100% { opacity: 0; transform: translateY(-36px); }
+}
+.animate-exec-float { animation: exec-float-up 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+/* --- Capture card flip (kept for CaptureSheet) --- */
+.capture-card-flip { transform-style: preserve-3d; perspective: 800px; }
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-xp-rise, .animate-combo-pop, .animate-shimmer-gold,
-  .animate-card-flip, .animate-field-flash, .animate-bg-drift,
-  .animate-boss-pulse, .animate-game-bounce, .animate-game-glow,
-  .animate-game-float-up, .animate-game-cta-shake,
-  .animate-game-pop, .animate-game-rise, .game-confetti,
-  .game-aurora, .game-xp-shimmer { animation: none !important; }
+  .exec-ambient,
+  .exec-bar-active,
+  .animate-exec-ticker,
+  .animate-exec-reveal,
+  .animate-exec-rank,
+  .animate-exec-energy,
+  .animate-exec-card,
+  .exec-line-draw,
+  .exec-shimmer,
+  .animate-exec-float,
+  .animate-xp-rise,
+  .animate-fade-in-up,
+  .animate-scale-in,
+  .animate-fade-in { animation: none !important; }
 }
 

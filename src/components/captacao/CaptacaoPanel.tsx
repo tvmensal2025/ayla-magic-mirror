@@ -8,7 +8,7 @@ import { CaptureScoreboard } from "@/components/captacao/CaptureScoreboard";
 import { CaptureMissionsPanel, bumpMission } from "@/components/captacao/CaptureMissionsPanel";
 import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
 import { Button } from "@/components/ui/button";
-import { Gamepad2, ExternalLink, MessageCircle, ChevronLeft, ChevronDown } from "lucide-react";
+import { ClipboardList, ExternalLink, MessageCircle, ChevronLeft, ChevronDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { GameModeToggle } from "@/components/captacao/game/GameModeToggle";
 import { GameShell } from "@/components/captacao/game/GameShell";
@@ -184,20 +184,20 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
       }
       void progress.reload();
     } else {
-      toast({ title: "🏆 +1 cadastro no placar!", duration: 2000 });
+      toast({ title: "Cadastro registrado com sucesso.", duration: 2000 });
     }
   };
 
   return (
-    <div className={`flex flex-col h-[calc(100vh-220px)] min-h-[640px] rounded-xl border ${gameOn ? "border-primary/40" : "border-border"} overflow-hidden bg-background/60 capture-ambient animate-bg-drift`}>
+    <div className={`flex flex-col h-[calc(100vh-220px)] min-h-[640px] rounded-xl border ${gameOn ? "border-primary/30" : "border-border"} overflow-hidden bg-background/60 exec-ambient`}>
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/60 backdrop-blur-sm gap-3 flex-wrap">
         <div className="flex items-center gap-2">
-          <Gamepad2 className="w-5 h-5 text-primary" />
+          <ClipboardList className="w-5 h-5 text-primary" strokeWidth={1.5} />
           <div>
-            <h2 className="text-sm font-bold">Modo Captação</h2>
+            <h2 className="text-sm font-bold">Painel de Captação</h2>
             <p className="text-[11px] text-muted-foreground">
-              {gameOn ? "🎮 Game ON — capture, ganhe XP e suba de nível!" : "Capture, ganhe XP, suba de nível — e bate o placar do dia 🏆"}
+              {gameOn ? "Performance ativa — acompanhe seus indicadores em tempo real" : "Registre clientes e acompanhe seu desempenho"}
             </p>
           </div>
         </div>
@@ -226,10 +226,10 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
             <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden`}>
               {!selectedId ? (
                 <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
-                  <Gamepad2 className="w-14 h-14 text-primary/60 animate-game-bounce" />
-                  <h3 className="text-base font-black uppercase tracking-wide">Escolha um lead para começar a quest</h3>
+                  <ClipboardList className="w-14 h-14 text-primary/40" strokeWidth={1} />
+                  <h3 className="text-base font-semibold text-foreground">Selecione um lead para iniciar</h3>
                   <p className="text-sm text-muted-foreground max-w-md">
-                    Cada cadastro completo te dá XP e pode disparar combos, conquistas e level-up.
+                    Cada cadastro completo acumula pontos de performance e avança seu nível de carreira.
                   </p>
                 </div>
               ) : (
@@ -293,7 +293,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                   </div>
                   <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-4">
                     <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider text-primary mb-2">⚔️ 10 Passos · ataque rápido</h3>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">10 Passos · clique para enviar</h3>
                       <CaptureStepsGrid
                         consultantId={consultantId}
                         customerId={selectedId}
@@ -366,7 +366,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden`}>
             {!selectedId ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
-                <Gamepad2 className="w-12 h-12 text-muted-foreground/40 animate-float" />
+                <ClipboardList className="w-12 h-12 text-muted-foreground/30" strokeWidth={1} />
                 <h3 className="text-base font-semibold">Selecione um lead para começar</h3>
                 <p className="text-sm text-muted-foreground max-w-md">
                   Para adicionar um lead à captação, vá para o chat do WhatsApp, abra o cliente e marque "Capturar manualmente".
@@ -404,8 +404,8 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                     />
                   </div>
                   <CaptureConversationFeed customerId={selectedId} />
-                  <div className="rounded-lg border border-dashed border-border bg-secondary/20 p-3 text-[11px] text-muted-foreground space-y-1">
-                    <p>💡 <span className="font-semibold">Como funciona:</span> envie os passos, conforme o cliente responde os campos vão sendo preenchidos automaticamente (OCR ativo). Capturas em sequência ativam <span className="font-bold text-primary">combos</span>!</p>
+                  <div className="rounded-lg border border-border/40 bg-muted/20 p-3 text-[11px] text-muted-foreground space-y-1">
+                    <p><span className="font-semibold text-foreground/70">Como funciona:</span> envie os passos e, conforme o cliente responde, os campos são preenchidos automaticamente via OCR. Capturas em sequência acumulam bônus de pontos.</p>
                     <p className="hidden md:block">Edite manualmente qualquer campo na ficha à direita.</p>
                     <p className="md:hidden">Toque no <span className="font-bold">▾</span> acima para abrir a ficha e editar campos.</p>
                   </div>

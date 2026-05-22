@@ -4,11 +4,15 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Search, Phone, Mail, MapPin, FileText, Calendar, Download, Users, CheckCircle, AlertTriangle, Clock, ChevronDown, ChevronUp, MessageCircle, Briefcase } from "lucide-react";
+import { Loader2, Search, Phone, Mail, MapPin, FileText, Calendar, Download, Users, CheckCircle, AlertTriangle, Clock, ChevronDown, ChevronUp, MessageCircle, Briefcase, BadgeDollarSign, TrendingUp } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+const COMMISSION_RATES = [10, 20, 40, 50, 60, 70, 80, 100] as const;
+type CommissionRate = typeof COMMISSION_RATES[number];
+const RECURRING_RATE = 0.04;
 
 interface Customer {
   id: string;
@@ -37,6 +41,11 @@ interface Customer {
   igreen_code?: string | null;
   andamento_igreen?: string | null;
   devolutiva?: string | null;
+  // Conversão / comissão
+  is_converted?: boolean;
+  converted_at?: string | null;
+  commission_rate?: CommissionRate | null;
+  source_campaign_id?: string | null;
 }
 
 type OriginTab = "whatsapp_lead" | "igreen_sync";
@@ -81,6 +90,7 @@ export default function WhatsAppClientsPage() {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [originTab, setOriginTab] = useState<OriginTab>("whatsapp_lead");
+  const [convertingId, setConvertingId] = useState<string | null>(null);
 
   useEffect(() => { loadCustomers(); }, []);
 
@@ -102,7 +112,37 @@ export default function WhatsAppClientsPage() {
     }
   };
 
-  // Split by origin — never mix
+  // ─── Marcar/desmarcar conversão ──────────────────────────────────────
+  async function toggleConverted(c: Customer) {
+    setConvertingId(c.id);
+    const nowConverted = !c.is_converted;
+    const patch: any = {
+      is_converted: nowConverted,
+      converted_at: nowConverted ? new Date().toISOString() : null,
+    };
+    const { error } = await supabase.from("customers").update(patch).eq("id", c.id);
+    if (error) {
+      toast.error("Erro ao atualizar: " + error.message);
+    } else {
+      setCustomers((prev) => prev.map((x) => x.id === c.id ? { ...x, ...patch } : x));
+      toast.success(nowConverted ? "✅ Lead marcado como convertido!" : "Lead desmarcado");
+    }
+    setConvertingId(null);
+  }
+
+  async function saveCommissionRate(customerId: string, rate: CommissionRate | null) {
+    const { error } = await supabase
+      .from("customers")
+      .update({ commission_rate: rate } as any)
+      .eq("id", customerId);
+    if (error) {
+      toast.error("Erro ao salvar %: " + error.message);
+    } else {
+      setCustomers((prev) => prev.map((x) => x.id === customerId ? { ...x, commission_rate: rate } : x));
+      toast.success(rate ? `${rate}% salvo para este lead` : "% removido");
+    }
+  }
+
   const leadsWhatsapp = useMemo(
     () => customers.filter((c) => (c.customer_origin || "whatsapp_lead") === "whatsapp_lead" || c.customer_origin === "manual"),
     [customers],
@@ -173,11 +213,20 @@ export default function WhatsAppClientsPage() {
 
   const isLeadsTab = originTab === "whatsapp_lead";
 
+  // Mini-resumo de comissão para os leads WhatsApp convertidos
+  const convertedLeads = leadsWhatsapp.filter((c) => c.is_converted);
+  const totalBillConverted = convertedLeads.reduce((s, c) => s + Number(c.electricity_bill_value || 0), 0);
+  const totalFirstSale = convertedLeads.reduce((s, c) => {
+    const rate = (c.commission_rate ?? 0) / 100;
+    return s + Number(c.electricity_bill_value || 0) * rate;
+  }, 0);
+  const totalRecurring = totalBillConverted * RECURRING_RATE;
+
   const stats = isLeadsTab
     ? [
         { label: "Total leads", value: leadsWhatsapp.length, icon: Users, gradient: "from-violet-500/10 to-violet-600/5", iconColor: "text-violet-500" },
         { label: "Em conversa", value: leadsWhatsapp.filter(c => c.status === "pending" && c.conversation_step && c.conversation_step !== "welcome").length, icon: MessageCircle, gradient: "from-sky-500/10 to-sky-600/5", iconColor: "text-sky-500" },
-        { label: "Qualificados / Completos", value: leadsWhatsapp.filter(c => ["complete","approved","registered_igreen","data_complete"].includes(c.status)).length, icon: CheckCircle, gradient: "from-emerald-500/10 to-emerald-600/5", iconColor: "text-emerald-500" },
+        { label: "Convertidos", value: convertedLeads.length, icon: BadgeDollarSign, gradient: "from-emerald-500/10 to-emerald-600/5", iconColor: "text-emerald-500" },
         { label: "Falhas / Pausados", value: leadsWhatsapp.filter(c => c.status === "automation_failed" || c.status === "worker_offline").length, icon: AlertTriangle, gradient: "from-red-500/10 to-red-600/5", iconColor: "text-red-500" },
       ]
     : [
@@ -292,6 +341,32 @@ export default function WhatsAppClientsPage() {
       </div>
 
 
+      {/* Banner de comissão acumulada — só aparece quando há convertidos */}
+      {isLeadsTab && convertedLeads.length > 0 && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <BadgeDollarSign className="w-4 h-4 text-emerald-500" />
+            <span className="font-semibold text-foreground text-sm">Resumo de Comissões — {convertedLeads.length} lead{convertedLeads.length !== 1 ? "s" : ""} convertido{convertedLeads.length !== 1 ? "s" : ""}</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+            <div className="rounded-lg bg-background/60 border border-border/40 px-3 py-2.5">
+              <p className="text-muted-foreground">Soma das faturas</p>
+              <p className="font-bold text-foreground text-base">{totalBillConverted.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p>
+            </div>
+            <div className="rounded-lg bg-violet-500/10 border border-violet-500/20 px-3 py-2.5">
+              <p className="text-muted-foreground">Comissão 1ª venda</p>
+              <p className="font-bold text-violet-400 text-base">{totalFirstSale.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p>
+              <p className="text-muted-foreground/70 text-[10px]">% configurado × fatura</p>
+            </div>
+            <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2.5">
+              <p className="text-muted-foreground">Recorrente/mês (4%)</p>
+              <p className="font-bold text-amber-400 text-base">{totalRecurring.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p>
+              <p className="text-muted-foreground/70 text-[10px]">todo mês enquanto ativo</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Customer List */}
       <div className="space-y-2">
         {filteredCustomers.length === 0 ? (
@@ -319,12 +394,17 @@ export default function WhatsAppClientsPage() {
 
                   {/* Info */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
+                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                       <span className="font-semibold text-foreground truncate">{c.name || "Nome não informado"}</span>
                       <Badge className={`text-[10px] px-2 py-0 h-5 border ${sc.bg} ${sc.color} ${sc.border}`}>{sc.label}</Badge>
                       {c.conversation_step && c.conversation_step !== "complete" && (
                         <Badge variant="outline" className="text-[10px] px-2 py-0 h-5 border-border/50">
                           {stepLabels[c.conversation_step] || c.conversation_step}
+                        </Badge>
+                      )}
+                      {c.is_converted && (
+                        <Badge className="text-[10px] px-2 py-0 h-5 bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
+                          ✓ Convertido
                         </Badge>
                       )}
                     </div>
@@ -362,6 +442,72 @@ export default function WhatsAppClientsPage() {
                           {c.address_neighborhood && ` - ${c.address_neighborhood}`}
                           {c.cep && ` - CEP: ${c.cep.replace(/(\d{5})(\d{3})/, "$1-$2")}`}
                         </p>
+                      </div>
+                    )}
+
+                    {/* ─── Bloco de Conversão / Comissão ─── */}
+                    {isLeadsTab && (
+                      <div className="mt-3 pt-3 border-t border-border/20">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                          {/* Botão converter */}
+                          <Button
+                            size="sm"
+                            variant={c.is_converted ? "outline" : "default"}
+                            className={`gap-1.5 h-8 text-xs ${c.is_converted ? "border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10" : ""}`}
+                            onClick={(e) => { e.stopPropagation(); toggleConverted(c); }}
+                            disabled={convertingId === c.id}
+                          >
+                            {convertingId === c.id
+                              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              : c.is_converted
+                              ? <><CheckCircle className="w-3.5 h-3.5" /> Convertido — desfazer</>
+                              : <><BadgeDollarSign className="w-3.5 h-3.5" /> Marcar como convertido</>}
+                          </Button>
+
+                          {/* Seletor de % de comissão */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">% comissão:</span>
+                            <Select
+                              value={c.commission_rate ? String(c.commission_rate) : "none"}
+                              onValueChange={(v) => saveCommissionRate(c.id, v === "none" ? null : Number(v) as CommissionRate)}
+                            >
+                              <SelectTrigger className="w-24 h-8 text-xs" onClick={(e) => e.stopPropagation()}>
+                                <SelectValue placeholder="Definir" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">Não definido</SelectItem>
+                                {COMMISSION_RATES.map((r) => (
+                                  <SelectItem key={r} value={String(r)}>{r}%</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Preview do valor de comissão */}
+                          {c.is_converted && c.electricity_bill_value && c.commission_rate && (
+                            <div className="flex items-center gap-3 text-xs flex-wrap">
+                              <span className="rounded-lg bg-violet-500/10 border border-violet-500/20 px-2.5 py-1.5">
+                                <span className="text-muted-foreground">1ª venda: </span>
+                                <span className="font-bold text-violet-400">
+                                  {(c.electricity_bill_value * c.commission_rate / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                                </span>
+                              </span>
+                              <span className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5">
+                                <span className="text-muted-foreground">Recorrente/mês: </span>
+                                <span className="font-bold text-amber-400">
+                                  {(c.electricity_bill_value * RECURRING_RATE).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                                </span>
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Data de conversão */}
+                          {c.is_converted && c.converted_at && (
+                            <span className="text-[10px] text-muted-foreground ml-auto">
+                              Convertido em {format(new Date(c.converted_at), "dd/MM/yy HH:mm", { locale: ptBR })}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>

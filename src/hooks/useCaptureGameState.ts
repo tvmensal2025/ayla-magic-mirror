@@ -11,12 +11,12 @@ export interface LevelTier {
 }
 
 export const LEVEL_TIERS: LevelTier[] = [
-  { index: 0, name: "Iniciante",  emoji: "🌱", color: "text-slate-400",  ring: "ring-slate-400/40",  min: 0,  max: 2 },
-  { index: 1, name: "Bronze",     emoji: "🥉", color: "text-orange-400", ring: "ring-orange-400/40", min: 2,  max: 4 },
-  { index: 2, name: "Prata",      emoji: "🥈", color: "text-zinc-300",   ring: "ring-zinc-300/40",   min: 4,  max: 6 },
-  { index: 3, name: "Ouro",       emoji: "🥇", color: "text-amber-400",  ring: "ring-amber-400/50",  min: 6,  max: 8 },
-  { index: 4, name: "Platina",    emoji: "💎", color: "text-cyan-300",   ring: "ring-cyan-300/50",   min: 8,  max: 10 },
-  { index: 5, name: "PRONTO",     emoji: "⚡", color: "text-emerald-400",ring: "ring-emerald-400/60",min: 10, max: 99 },
+  { index: 0, name: "Associado",   emoji: "◈", color: "text-slate-400",  ring: "ring-slate-400/40",  min: 0,  max: 2 },
+  { index: 1, name: "Consultor",   emoji: "◆", color: "text-amber-600",  ring: "ring-amber-600/40",  min: 2,  max: 4 },
+  { index: 2, name: "Especialista",emoji: "◈", color: "text-zinc-300",   ring: "ring-zinc-300/40",   min: 4,  max: 6 },
+  { index: 3, name: "Sênior",      emoji: "◆", color: "text-amber-400",  ring: "ring-amber-400/50",  min: 6,  max: 8 },
+  { index: 4, name: "Diretor",     emoji: "◈", color: "text-cyan-300",   ring: "ring-cyan-300/50",   min: 8,  max: 10 },
+  { index: 5, name: "ELITE",       emoji: "◆", color: "text-emerald-400",ring: "ring-emerald-400/60",min: 10, max: 99 },
 ];
 
 export function tierFor(filled: number): LevelTier {
@@ -72,7 +72,7 @@ export function useCaptureGameState({ filledCount, totalFields, sentStepsCount }
       const base = 10 * delta;
       const mult = 1 + combo * 0.5;
       const total = Math.round(base * mult);
-      pushEvent({ amount: total, source: "field", label: combo > 0 ? `+${total} XP · combo x${combo + 1}` : `+${total} XP` });
+      pushEvent({ amount: total, source: "field", label: combo > 0 ? `+${total} pts · sequência ×${combo + 1}` : `+${total} pts` });
       bumpCombo();
     }
     prevFilled.current = filledCount;
@@ -81,7 +81,7 @@ export function useCaptureGameState({ filledCount, totalFields, sentStepsCount }
   // detect step sent
   useEffect(() => {
     if (sentStepsCount > prevSteps.current) {
-      pushEvent({ amount: 5, source: "step", label: "+5 XP passo" });
+      pushEvent({ amount: 5, source: "step", label: "+5 pts" });
     }
     prevSteps.current = sentStepsCount;
   }, [sentStepsCount]); // eslint-disable-line
@@ -89,7 +89,7 @@ export function useCaptureGameState({ filledCount, totalFields, sentStepsCount }
   // detect level up
   useEffect(() => {
     if (tier.index > prevTierRef.current) {
-      pushEvent({ amount: 25, source: "level", label: `LEVEL UP · ${tier.name}` });
+      pushEvent({ amount: 25, source: "level", label: `NOVO NÍVEL · ${tier.name}` });
     }
     prevTierRef.current = tier.index;
   }, [tier.index, tier.name]);
@@ -97,11 +97,11 @@ export function useCaptureGameState({ filledCount, totalFields, sentStepsCount }
   // suggest next missing field as "mission"
   const nextMissionLabel = useMemo(() => {
     const ratio = filledCount / totalFields;
-    if (ratio >= 1) return "Aperta CADASTRAR";
-    if (ratio < 0.3) return "Capture o nome e CPF";
+    if (ratio >= 1) return "Confirmar cadastro";
+    if (ratio < 0.3) return "Preencha nome e CPF";
     if (ratio < 0.6) return "Endereço + valor da conta";
-    if (ratio < 0.9) return "Falta pouco — documento!";
-    return "Última lapidada e bora";
+    if (ratio < 0.9) return "Quase completo — documento!";
+    return "Revisão final antes de confirmar";
   }, [filledCount, totalFields]);
 
   return { xp, combo, events, tier, nextMissionLabel, pushEvent };

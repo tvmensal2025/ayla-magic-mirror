@@ -39,6 +39,7 @@ export async function answerFaqWithAI(opts: {
   question: string;
   leadName?: string;
   currentStepLabel?: string;
+  consultantId?: string;
   signal?: AbortSignal;
 }): Promise<FaqAnswer> {
   const q = (opts.question || "").trim();
@@ -46,11 +47,12 @@ export async function answerFaqWithAI(opts: {
     return { text: "", confidence: 0, shouldHandoff: false, source: "skipped" };
   }
 
-  // Busca knowledge base (max ~6KB de contexto pra ficar barato)
+  // Busca knowledge base: seções do consultor + globais (max ~6KB de contexto pra ficar barato)
   const { data: sections } = await opts.supabase
     .from("ai_knowledge_sections")
     .select("title, content")
     .eq("is_active", true)
+    .or(`consultant_id.is.null${opts.consultantId ? `,consultant_id.eq.${opts.consultantId}` : ""}`)
     .order("position", { ascending: true })
     .limit(20);
 

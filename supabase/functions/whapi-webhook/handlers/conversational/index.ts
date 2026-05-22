@@ -800,6 +800,43 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   const strictMode = loaded.strictMode || globalStrict;
   if (globalStrict) console.log(`[conversational] 🛑 strict_script_mode=ON (kill switch global)`);
 
+  // ─── Delay inicial configurável (bot_flows.initial_delay_seconds) ────────
+  // Só aplica na PRIMEIRA mensagem do lead (step == null ou "welcome") para
+  // evitar que o bot responda instantaneamente, o que parece robótico.
+  const isFirstMessage =
+    !ctx.customer.conversation_step ||
+    ctx.customer.conversation_step === "welcome" ||
+    ctx.customer.conversation_step === "menu_inicial";
+  if (isFirstMessage && !isTestMode()) {
+    try {
+      const { data: flowRow } = await ctx.supabase
+        .from("bot_flows")
+        .select("initial_delay_seconds")
+        .eq("id", flowId)
+        .maybeSingle();
+      const delaySec = Math.min(Number((flowRow as any)?.initial_delay_seconds || 0), 300);
+      if (delaySec > 0) {
+        console.log(JSON.stringify({ level: "info", kind: "flow_initial_delay", customer_id: ctx.customer?.id, flow_id: flowId, delay_seconds: delaySec }));
+        // Envia "digitando..." durante o delay para parecer humano
+        try { await ctx.sender.sendPresence(ctx.remoteJid, "composing"); } catch (_) { /* ignora */ }
+        const renewInterval = 4_000;
+        const totalMs = delaySec * 1000;
+        let elapsed = 0;
+        while (elapsed < totalMs) {
+          const chunk = Math.min(renewInterval, totalMs - elapsed);
+          await new Promise((r) => setTimeout(r, chunk));
+          elapsed += chunk;
+          if (elapsed < totalMs) {
+            try { await ctx.sender.sendPresence(ctx.remoteJid, "composing"); } catch (_) { /* ignora */ }
+          }
+        }
+        try { await ctx.sender.sendPresence(ctx.remoteJid, "paused"); } catch (_) { /* ignora */ }
+      }
+    } catch (e) {
+      console.warn("[conversational] initial_delay falhou (segue sem delay):", (e as Error).message);
+    }
+  }
+
   // Helper: encontra o primeiro step ativo de um determinado step_type
   // (usado para resolver goto_special='cadastro' — preferimos ir para o
   // passo configurado de captura de documento, em vez de pular pra conta).
@@ -1240,6 +1277,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         question: ctx.messageText || "",
         leadName: ctx.customer.name,
         currentStepLabel: currentStep.step_key,
+        consultantId: ctx.customer.consultant_id,
       });
       if (ai.source === "ai" && ai.text && ai.confidence >= 0.6 && !ai.shouldHandoff) {
         console.log(`[ai-faq] hit step="${stepKey}" conf=${ai.confidence.toFixed(2)}`);

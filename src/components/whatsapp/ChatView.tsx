@@ -10,7 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import type { MessageTemplate } from "@/types/whatsapp";
 import type { ChatItem } from "@/hooks/useChats";
-import { Loader2, MessageSquareText, UserPlus, UserCheck, KanbanSquare, RotateCcw, Gamepad2 } from "lucide-react";
+import { Loader2, MessageSquareText, UserPlus, UserCheck, KanbanSquare, RotateCcw, ClipboardList } from "lucide-react";
 import { resetLeadConversation } from "@/services/resetConversation";
 import { CaptureSheet } from "@/components/captacao/CaptureSheet";
 import { useCaptureSession } from "@/hooks/useCaptureSession";
@@ -342,9 +342,9 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
                 : "border-primary/40 text-primary hover:bg-primary/10"
             }`}
             onClick={toggleCapture}
-            title="Abrir painel de captação (game)"
+            title="Abrir painel de captação"
           >
-            <Gamepad2 className="h-3.5 w-3.5" />
+            <ClipboardList className="h-3.5 w-3.5" />
             Captação {filledCount > 0 ? `${filledCount}/${totalFields}` : ""}
           </Button>
         )}

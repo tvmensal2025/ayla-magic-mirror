@@ -34,19 +34,19 @@ interface StepRow {
 
 const SYNTHETIC_EMAIL: StepRow = {
   id: "__synth_ask_email",
-  title: "📧 E-mail",
+  title: "E-mail do cliente",
   step_key: "ask_email",
   position: 98,
-  message_text: null,
+  message_text: "📧 Qual o seu melhor e-mail?\n\n_Para liberar o acesso ao app iGreen Club 📱_",
   step_type: "capture_email",
   __synthetic: true,
 };
 const SYNTHETIC_CONFIRM_PHONE: StepRow = {
   id: "__synth_confirm_phone",
-  title: "📱 Confirmar WhatsApp",
+  title: "Confirmar telefone",
   step_key: "ask_phone_confirm",
   position: 99,
-  message_text: null,
+  message_text: "📞 Esse é o seu telefone de contato? [botões: Sim / Outro número]",
   step_type: "confirm_phone",
   __synthetic: true,
 };
@@ -216,7 +216,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                 key={s.id}
                 className={`group relative rounded-lg border p-2.5 transition-all duration-300 ${
                   sent
-                    ? "border-primary/60 bg-gradient-to-br from-primary/15 to-emerald-500/5 shadow-[0_0_18px_hsl(var(--primary)/0.25)] animate-card-flip"
+                    ? "border-primary/60 bg-gradient-to-br from-primary/15 to-emerald-500/5 shadow-[0_0_14px_hsl(var(--primary)/0.2)] animate-exec-card"
                     : locked
                       ? "border-border/40 bg-muted/20 opacity-50"
                       : isNext

@@ -468,21 +468,85 @@ Deno.serve(async (req) => {
     }
 
     if (isCaptureStep && toSend.length === 0) {
+      const stepType2 = String((step as any).step_type || "");
+      const stepKey2  = String((step as any).step_key  || "").toLowerCase();
+      const isConfirmPhone = stepKey2 === "ask_phone_confirm" || stepType2 === "confirm_phone";
+
+      // ── confirm_phone: envia com botões (sim / outro número) ──────────────
+      if (isConfirmPhone) {
+        let p = String((customer as any).phone_whatsapp || "").replace(/\D/g, "");
+        if (p.startsWith("55") && p.length >= 12) p = p.substring(2);
+        const fmt = p.length >= 11
+          ? `(${p.slice(0, 2)}) ${p.slice(2, 7)}-${p.slice(7)}`
+          : p || "número não disponível";
+        const confirmMsg = `📞 Esse é o seu *telefone de contato*?\n\n*${fmt}*`;
+        const legacy = "ask_phone_confirm";
+
+        // Debounce
+        const lastPromptAt = (customer as any).last_custom_prompt_at
+          ? new Date((customer as any).last_custom_prompt_at).getTime()
+          : 0;
+        const sameStep = String((customer as any).conversation_step || "") === legacy;
+        if (sameStep && Date.now() - lastPromptAt < 20_000) {
+          return json({
+            ok: true, sent: [], skipped: "recent_prompt",
+            message: "Pergunta já enviada há poucos segundos — aguarde a resposta do cliente.",
+          });
+        }
+
+        // Tenta enviar com botões; fallback para texto numerado já está no sender
+        const sent = await sender.sendButtons(remoteJid, confirmMsg, [
+          { id: "sim_phone",    title: "✅ Sim, é esse" },
+          { id: "editar_phone", title: "📱 Outro número" },
+        ]);
+
+        const logText = sent
+          ? confirmMsg
+          : `${confirmMsg}\n\n1️⃣ Sim, é esse\n2️⃣ Outro número\n\n_Digite 1 ou 2:_`;
+
+        await supabase.from("conversations").insert({
+          customer_id: customer.id,
+          message_direction: "outbound",
+          message_text: logText,
+          message_type: "text",
+          conversation_step: legacy,
+        });
+        await supabase.from("customers").update({
+          conversation_step: legacy,
+          bot_paused: false,
+          bot_paused_reason: null,
+          bot_paused_at: null,
+          bot_paused_until: null,
+          assigned_human_id: null,
+          custom_step_retries: 0,
+          custom_step_retries_step: null,
+          last_custom_prompt_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", customer.id);
+
+        return json({
+          ok: true,
+          sent: [{ kind: "text", auto_prompt: true, buttons: true }],
+          continued: true,
+          next_step: legacy,
+        });
+      }
+
+      // ── outros capture steps: prompt de texto ─────────────────────────────
+      const applyVars2 = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
       const promptRaw = resolveCapturePrompt(step, renderedText);
       if (promptRaw) {
-        const prompt = applyVars(promptRaw);
-        const legacyStep = mapCaptureStepToLegacy(stepType, (step as any).id, (step as any).step_key);
+        const prompt = applyVars2(promptRaw);
+        const legacyStep = mapCaptureStepToLegacy(stepType2, (step as any).id, (step as any).step_key);
 
-        // Debounce: se prompt enviado recentemente e lead já está no destino, pula.
+        // Debounce
         const lastPromptAt = (customer as any).last_custom_prompt_at
           ? new Date((customer as any).last_custom_prompt_at).getTime()
           : 0;
         const sameStep = String((customer as any).conversation_step || "") === legacyStep;
         if (sameStep && Date.now() - lastPromptAt < 20_000) {
           return json({
-            ok: true,
-            sent: [],
-            skipped: "recent_prompt",
+            ok: true, sent: [], skipped: "recent_prompt",
             message: "Pergunta já enviada há poucos segundos — aguarde a resposta do cliente.",
           });
         }
@@ -709,6 +773,36 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
       patch.conversation_step = legacy;
       const applyVars = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
       const rendered = next.message_text ? applyVars(String(next.message_text)) : "";
+
+      // ── confirm_phone: envia com botões ──────────────────────────────────
+      const nextKey = String(next.step_key || "").toLowerCase();
+      if (nextKey === "ask_phone_confirm" || ntype === "confirm_phone") {
+        let p = String((customer as any).phone_whatsapp || "").replace(/\D/g, "");
+        if (p.startsWith("55") && p.length >= 12) p = p.substring(2);
+        const fmt = p.length >= 11
+          ? `(${p.slice(0, 2)}) ${p.slice(2, 7)}-${p.slice(7)}`
+          : p || "número não disponível";
+        const confirmMsg = `📞 Esse é o seu *telefone de contato*?\n\n*${fmt}*`;
+        try {
+          await sender.sendButtons(remoteJid, confirmMsg, [
+            { id: "sim_phone",    title: "✅ Sim, é esse" },
+            { id: "editar_phone", title: "📱 Outro número" },
+          ]);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id,
+            message_direction: "outbound",
+            message_text: confirmMsg,
+            message_type: "text",
+            conversation_step: legacy,
+          });
+          patch.last_custom_prompt_at = new Date().toISOString();
+        } catch (e) {
+          console.error(`[manual-step-send] falha ao enviar confirm_phone com botões:`, (e as Error).message);
+        }
+        break;
+      }
+
+      // ── outros capture steps: prompt de texto ────────────────────────────
       const promptRaw = resolveCapturePrompt(next, rendered);
       if (promptRaw) {
         const prompt = applyVars(promptRaw);
@@ -846,16 +940,29 @@ function resolveCapturePrompt(step: any, renderedText: string): string | null {
   }
 
   const stepType = String(step?.step_type || "");
+  const stepKey  = String(step?.step_key  || "").toLowerCase();
+
+  // step_key explícito tem prioridade para mensagens personalizadas
+  if (stepKey === "ask_email" || stepType === "capture_email") {
+    return (
+      "📧 *Qual o seu melhor e-mail?*\n\n" +
+      "_Vou usar pra liberar o seu acesso ao app *iGreen Club* 📱_\n" +
+      "_(onde você acompanha cashback, faturas e indicações)_\n\n" +
+      "Pode ser Gmail, Outlook, iCloud…"
+    );
+  }
+
+  // confirm_phone: retorna null aqui — tratado separadamente com botões
+  if (stepKey === "ask_phone_confirm" || stepType === "confirm_phone") {
+    return null; // handled via sendButtons below
+  }
+
   switch (stepType) {
     case "capture_conta":
       return "{{nome}}, me manda a foto *ou PDF* da sua conta de luz aqui pelo WhatsApp 📄";
     case "capture_documento":
     case "capture_doc":
       return "Agora me envia uma foto do seu documento (RG ou CNH, frente e verso) 📷";
-    case "capture_email":
-      return "Qual é o seu melhor e-mail? ✉️";
-    case "confirm_phone":
-      return "Esse número é o melhor pra falar com você no WhatsApp? Pode confirmar?";
     case "finalizar_cadastro":
       return "Tô finalizando seu cadastro, só um instante… ⏳";
     default:

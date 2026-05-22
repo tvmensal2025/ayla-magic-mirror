@@ -141,6 +141,38 @@ export default {
           "0%, 100%": { transform: "scale(1)", boxShadow: "0 0 24px hsl(var(--primary)/0.4)" },
           "50%":      { transform: "scale(1.025)", boxShadow: "0 0 48px hsl(45 95% 55%/0.5)" },
         },
+        // Executive performance keyframes
+        "exec-ticker-rise": {
+          "0%":   { opacity: "0", transform: "translateY(12px) scale(0.92)" },
+          "30%":  { opacity: "1", transform: "translateY(-4px) scale(1.04)" },
+          "60%":  { transform: "translateY(0) scale(1)" },
+          "80%":  { opacity: "1" },
+          "100%": { opacity: "0", transform: "translateY(-28px) scale(0.96)" },
+        },
+        "exec-reveal": {
+          "0%":   { opacity: "0", transform: "scale(0.88) translateY(16px)" },
+          "60%":  { opacity: "1", transform: "scale(1.02) translateY(-2px)" },
+          "100%": { opacity: "1", transform: "scale(1) translateY(0)" },
+        },
+        "exec-rank-pulse": {
+          "0%, 100%": { boxShadow: "0 0 0 0 hsl(45 85% 52% / 0)" },
+          "50%":      { boxShadow: "0 0 0 6px hsl(45 85% 52% / 0.2)" },
+        },
+        "exec-energy": {
+          "0%":   { transform: "scaleY(1)", opacity: "0.7" },
+          "50%":  { transform: "scaleY(1.08)", opacity: "1" },
+          "100%": { transform: "scaleY(1)", opacity: "0.7" },
+        },
+        "exec-card-in": {
+          "0%":   { opacity: "0", transform: "translateY(20px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        "exec-float-up": {
+          "0%":   { opacity: "0", transform: "translateY(8px)" },
+          "20%":  { opacity: "1", transform: "translateY(0)" },
+          "75%":  { opacity: "1", transform: "translateY(-20px)" },
+          "100%": { opacity: "0", transform: "translateY(-36px)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -160,6 +192,13 @@ export default {
         "field-flash": "field-flash 0.6s ease-out",
         "bg-drift": "bg-drift 14s ease-in-out infinite",
         "boss-pulse": "boss-pulse 1.8s ease-in-out infinite",
+        // Executive performance animations
+        "exec-ticker": "exec-ticker-rise 1.6s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+        "exec-reveal": "exec-reveal 0.55s cubic-bezier(0.34, 1.4, 0.64, 1) forwards",
+        "exec-rank": "exec-rank-pulse 2s ease-in-out 3",
+        "exec-energy": "exec-energy 1.8s ease-in-out infinite",
+        "exec-card": "exec-card-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both",
+        "exec-float": "exec-float-up 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards",
       },
     },
   },

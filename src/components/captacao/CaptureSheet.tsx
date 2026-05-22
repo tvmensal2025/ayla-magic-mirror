@@ -18,7 +18,7 @@ import { ComboTimer } from "@/components/captacao/game/ComboTimer";
 import { XpFloaterProvider, useXpFloater } from "@/components/captacao/game/XpFloater";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy, ChevronDown, ChevronUp, Maximize2, Minimize2, UserPlus, Zap } from "lucide-react";
+import { X, ClipboardList, ListChecks, IdCard, Loader2, Trophy, ChevronDown, ChevronUp, Maximize2, Minimize2, UserPlus, Zap } from "lucide-react";
 import { askLeadName } from "@/lib/whatsapp/send";
 
 interface Props {
@@ -266,7 +266,7 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
         style={{ paddingBottom: "max(0px, env(safe-area-inset-bottom, 0px))" }}
       >
         <div className="w-7 h-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center shrink-0">
-          <Gamepad2 className="w-4 h-4" />
+          <ClipboardList className="w-4 h-4" />
         </div>
         <div className="flex-1 min-w-0 text-left">
           <p className="text-xs font-semibold leading-tight truncate">
@@ -323,7 +323,7 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
         <header className={`px-3 border-b border-border/60 bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20 ${expanded ? "pt-2 pb-2" : "py-1"}`}>
           <div className={`flex items-center gap-2 ${expanded ? "mb-2" : ""}`}>
             <div className={`rounded-full bg-primary/15 flex items-center justify-center shrink-0 ${expanded ? "w-9 h-9" : "w-7 h-7"}`}>
-              <Gamepad2 className={`text-primary ${expanded ? "w-4 h-4" : "w-3.5 h-3.5"}`} />
+              <ClipboardList className={`text-primary ${expanded ? "w-4 h-4" : "w-3.5 h-3.5"}`} />
             </div>
             <div className="flex-1 min-w-0">
               <p className={`font-bold truncate ${expanded ? "text-sm" : "text-xs leading-tight"}`}>
@@ -443,7 +443,7 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
               size="lg"
               className={`flex-1 font-bold gap-1 ${expanded ? "h-12 text-base" : "h-7 text-[10px]"} ${
                 canSubmit
-                  ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:opacity-95 animate-game-cta-shake shadow-lg shadow-emerald-500/40"
+                  ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:opacity-95 animate-exec-energy shadow-lg shadow-emerald-500/30"
                   : "bg-muted text-muted-foreground opacity-60 cursor-not-allowed hover:bg-muted"
               }`}
               onClick={handleSubmit}

@@ -3,11 +3,11 @@ import { supabase } from "@/integrations/supabase/client";
 
 export interface RankInfo { key: string; label: string; emoji: string; minLevel: number; color: string; }
 const RANKS: RankInfo[] = [
-  { key: "aprendiz", label: "Aprendiz", emoji: "🌱", minLevel: 1, color: "text-emerald-400" },
-  { key: "captador", label: "Captador", emoji: "🎯", minLevel: 5, color: "text-cyan-400" },
-  { key: "cacador", label: "Caçador", emoji: "🏹", minLevel: 10, color: "text-violet-400" },
-  { key: "mestre", label: "Mestre", emoji: "👑", minLevel: 20, color: "text-amber-400" },
-  { key: "lenda", label: "Lenda", emoji: "🐉", minLevel: 35, color: "text-rose-400" },
+  { key: "associado",  label: "Associado",  emoji: "◈", minLevel: 1,  color: "text-slate-400" },
+  { key: "consultor",  label: "Consultor",  emoji: "◆", minLevel: 5,  color: "text-cyan-400" },
+  { key: "gerente",    label: "Gerente",    emoji: "◈", minLevel: 10, color: "text-violet-400" },
+  { key: "diretor",    label: "Diretor",    emoji: "◆", minLevel: 20, color: "text-amber-400" },
+  { key: "vp",         label: "VP",         emoji: "◈", minLevel: 35, color: "text-rose-400" },
 ];
 
 const XP_PER_LEAD = 10;

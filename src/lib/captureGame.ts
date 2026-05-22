@@ -139,31 +139,31 @@ export function fireRandomCelebration() {
 }
 
 export const MOTIVATIONAL_PHRASES: Record<number, string> = {
-  1: "Boa! Primeiro dado capturado 🔥",
-  2: "Tá no ritmo, segue 🎯",
-  3: "Tá fluindo, segue o jogo!",
-  4: "Quase metade 💪",
-  5: "Metade! Foco que tá saindo 🚀",
-  6: "Mais da metade, não para! ⚡",
-  7: "Reta final iniciada 🏁",
-  8: "Faltam só 2, não solta agora!",
-  9: "Próximo passo: vitória 🏆",
-  10: "CADASTRO COMPLETO ⚡ Aperta o botão!",
+  1: "Ótimo começo. Primeiro dado registrado.",
+  2: "Bom ritmo. Continue.",
+  3: "Progresso consistente.",
+  4: "Quase na metade.",
+  5: "Metade concluída. Foco total.",
+  6: "Mais da metade. Não pare agora.",
+  7: "Reta final iniciada.",
+  8: "Faltam apenas 2 campos.",
+  9: "Próximo passo: conclusão.",
+  10: "Cadastro completo. Confirme o registro.",
 };
 
 const EXTRA_PHRASES = [
-  "Show de bola! 🎯",
-  "Você tá voando 🚀",
-  "Isso! Mais um na conta 💚",
-  "Boa jogada, consultor! ⚡",
-  "Combo ativado 🔥",
-  "Tá inspirado hoje, hein? ✨",
-  "Mais um pedaço do quebra-cabeça 🧩",
-  "Velocidade Lewis Hamilton 🏎️",
-  "Caprichou! 👏",
-  "Tá no flow 💫",
-  "Mira certeira 🎯",
-  "É o ouro 🥇",
+  "Excelente execução.",
+  "Consistência gera resultados.",
+  "Mais um cliente no pipeline.",
+  "Alta performance em ação.",
+  "Ritmo de liderança.",
+  "Foco e disciplina.",
+  "Resultado concreto.",
+  "Velocidade e precisão.",
+  "Bem executado.",
+  "Fluxo de trabalho impecável.",
+  "Mira certeira.",
+  "Padrão de excelência.",
 ];
 
 export function pickRandomPhrase(): string {

@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { ResultsDashboard } from "./ResultsDashboard";
 import { WalletChip } from "./WalletChip";
+import { SyncMetricsButton } from "./SyncMetricsButton";
 import { TrendingUp } from "lucide-react";
 
 interface Props {
@@ -8,6 +10,9 @@ interface Props {
 }
 
 export function PerformanceTab({ consultantId, onGoToCentral }: Props) {
+  // Bumpa esse contador pra forçar o ResultsDashboard a recarregar tudo após sync.
+  const [refreshKey, setRefreshKey] = useState(0);
+
   return (
     <div className="space-y-5">
       <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
@@ -21,11 +26,16 @@ export function PerformanceTab({ consultantId, onGoToCentral }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
+          <SyncMetricsButton
+            consultantId={consultantId}
+            onSynced={() => setRefreshKey((k) => k + 1)}
+          />
           <WalletChip consultantId={consultantId} />
         </div>
       </header>
 
       <ResultsDashboard
+        key={refreshKey}
         consultantId={consultantId}
         onCreateClick={onGoToCentral}
       />

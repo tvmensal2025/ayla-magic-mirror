@@ -4,13 +4,15 @@ import { CampaignsList } from "./CampaignsList";
 import { WalletChip } from "./WalletChip";
 import { AdTemplatesGallery } from "./AdTemplatesGallery";
 import { CtwaConnectGuide } from "./CtwaConnectGuide";
+import { SyncMetricsButton } from "./SyncMetricsButton";
 
 import { IntelligenceTab } from "./IntelligenceTab";
 import { ResultsDashboard } from "./ResultsDashboard";
+import { CommissionPanel } from "./CommissionPanel";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Megaphone, Plus, ListChecks, LayoutGrid, Brain, Sparkles, LayoutDashboard, TrendingUp } from "lucide-react";
+import { Megaphone, Plus, ListChecks, LayoutGrid, Brain, Sparkles, LayoutDashboard, TrendingUp, BadgeDollarSign } from "lucide-react";
 import { useManagedConsultants } from "@/hooks/useManagedConsultants";
 import { AdMetricsCards } from "../dashboard/AdMetricsCards";
 import { AdMetricsCharts } from "../dashboard/AdMetricsCharts";
@@ -24,7 +26,7 @@ import { useAnalytics } from "@/hooks/useAnalytics";
 
 interface Props { consultantId: string }
 
-type View = "dashboard" | "gallery" | "campaigns" | "performance" | "intel";
+type View = "dashboard" | "gallery" | "campaigns" | "performance" | "intel" | "commissions";
 
 export function AdsCentralTab({ consultantId }: Props) {
   const { toast } = useToast();
@@ -59,6 +61,7 @@ export function AdsCentralTab({ consultantId }: Props) {
     { id: "campaigns", label: "Campanhas", icon: ListChecks },
     { id: "performance", label: "Performance", icon: TrendingUp },
     { id: "intel", label: "Inteligência", icon: Brain },
+    { id: "commissions", label: "Comissões", icon: BadgeDollarSign },
   ];
 
   return (
@@ -74,6 +77,10 @@ export function AdsCentralTab({ consultantId }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
+          <SyncMetricsButton
+            consultantId={consultantId}
+            onSynced={() => setRefreshKey((k) => k + 1)}
+          />
           <WalletChip consultantId={consultantId} />
           <Button size="sm" onClick={() => setWizardOpen(true)} className="gap-1.5 h-8">
             <Plus className="w-3.5 h-3.5" /> Criar do zero
@@ -136,11 +143,16 @@ export function AdsCentralTab({ consultantId }: Props) {
       )}
       {view === "campaigns" && <CampaignsList consultantId={consultantId} refreshKey={refreshKey} />}
       {view === "performance" && (
-        <ResultsDashboard consultantId={consultantId} onCreateClick={() => setView("gallery")} />
+        <ResultsDashboard
+          key={refreshKey}
+          consultantId={consultantId}
+          onCreateClick={() => setView("gallery")}
+        />
       )}
       {view === "intel" && <IntelligenceTab consultantId={consultantId} />}
+      {view === "commissions" && <CommissionPanel consultantId={consultantId} />}
 
-      {view !== "dashboard" && view !== "performance" && (
+      {view !== "dashboard" && view !== "performance" && view !== "commissions" && (
         <div className="rounded-xl border border-dashed border-border/50 bg-card/30 p-3 flex items-start gap-2 text-xs text-muted-foreground">
           <Sparkles className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" />
           <div>
