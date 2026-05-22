@@ -217,14 +217,21 @@ Deno.serve(async (req) => {
     }
 
     const allowed = getAllowedTypes();
-    if (!allowed.includes(file.type)) {
+    // Normaliza MIME: navegadores enviam "audio/ogg; codecs=opus", "audio/webm;codecs=opus" etc.
+    const rawType = String(file.type || "").toLowerCase();
+    let normalizedType = rawType.split(";")[0].trim();
+    // Aliases comuns: webm/opus do MediaRecorder vira ogg para o WhatsApp.
+    if (normalizedType === "audio/webm" || normalizedType === "audio/x-opus+ogg") {
+      normalizedType = "audio/ogg";
+    }
+    if (!allowed.includes(normalizedType)) {
       return new Response(
         JSON.stringify({ error: `File type not allowed: ${file.type}` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const ext = getExtension(file.type);
+    const ext = getExtension(normalizedType);
     const fileBytes = new Uint8Array(await file.arrayBuffer());
 
     // ── Determine media kind from MIME ────────────────────────────────
@@ -242,7 +249,7 @@ Deno.serve(async (req) => {
     const customerJid = String(formData.get("customer_jid") || "").trim();
     const customerNameField = String(formData.get("customer_name") || "").trim();
     const slugHint = String(formData.get("slug") || "").trim();
-    const kindField = String(formData.get("kind") || inferKind(file.type)).trim();
+    const kindField = String(formData.get("kind") || inferKind(normalizedType)).trim();
 
     // ── Resolve consultor slug ────────────────────────────────────────
     let consultantSlug = "sem_consultor";
@@ -297,7 +304,7 @@ Deno.serve(async (req) => {
         bucket: minioBucket,
         objectKey,
         fileBytes,
-        contentType: file.type,
+        contentType: normalizedType,
       });
       publicUrl = `${minioUrl}/${minioBucket}/${objectKey}`;
     } catch (minioErr: any) {
@@ -309,7 +316,7 @@ Deno.serve(async (req) => {
       const { error: upErr } = await supabase.storage
         .from("whatsapp-media")
         .upload(fallbackKey, fileBytes, {
-          contentType: file.type,
+          contentType: normalizedType,
           upsert: false,
           cacheControl: "31536000",
         });
@@ -323,7 +330,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         url: publicUrl,
         key: objectKey,
-        type: file.type,
+        type: normalizedType,
         size: file.size,
         storage: storageBackend,
         visibility: userIsAdmin ? "public" : "private",
