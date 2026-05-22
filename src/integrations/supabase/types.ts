@@ -907,7 +907,6 @@ export type Database = {
       }
       ai_knowledge_sections: {
         Row: {
-          consultant_id: string | null
           content: string
           created_at: string
           id: string
@@ -920,7 +919,6 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          consultant_id?: string | null
           content: string
           created_at?: string
           id?: string
@@ -933,7 +931,6 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          consultant_id?: string | null
           content?: string
           created_at?: string
           id?: string
@@ -4443,48 +4440,6 @@ export type Database = {
           phase: string | null
           selfcheck_blocks: number | null
           tool_called: string | null
-        }
-        Relationships: []
-      }
-      v_ai_learned_patterns_summary: {
-        Row: {
-          bad_count: number | null
-          consultant_id: string | null
-          good_count: number | null
-          intent: string | null
-          recent_uses_7d: number | null
-          sample_count: number | null
-          updated_at: string | null
-        }
-        Relationships: []
-      }
-      v_ai_learning_health: {
-        Row: {
-          auto_handoff_downs: number | null
-          avg_latency_ms: number | null
-          consultant_id: string | null
-          decisions_with_feedback: number | null
-          distinct_intents: number | null
-          feedback_rate_pct: number | null
-          handoff_rate_pct: number | null
-          handoffs_30d: number | null
-          last_decision_at: string | null
-          thumbs_down: number | null
-          thumbs_up: number | null
-          total_decisions_30d: number | null
-        }
-        Relationships: []
-      }
-      v_flow_step_funnel: {
-        Row: {
-          abandonment_rate_pct: number | null
-          avg_confidence: number | null
-          avg_duration_ms: number | null
-          consultant_id: string | null
-          entries: number | null
-          exits_without_advance: number | null
-          last_seen_at: string | null
-          step_key: string | null
         }
         Relationships: []
       }
