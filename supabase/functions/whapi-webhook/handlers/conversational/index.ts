@@ -441,9 +441,12 @@ async function sendStepMedia(
     const item = sequence[i];
 
     if (item.kind === "text") {
-      // ⏱️ Respeita text_delay_ms antes do texto
+      // ⏱️ Respeita text_delay_ms antes do texto.
+      // Teto duro de 12s para não estourar o limite de 60s da Edge Function
+      // quando uma sequência tem 4+ itens. Consultor que precisa de pausa
+      // maior deve quebrar em dois passos.
       if (!isTestMode()) {
-        const wait = Math.max(0, Math.min(item.delayMs, 120_000));
+        const wait = Math.max(0, Math.min(item.delayMs, 12_000));
         if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       }
       try {
@@ -497,16 +500,33 @@ async function sendStepMedia(
       }
     }
 
-    // ⏱️ Pausa antes da mídia (respeita delay_before_ms; senão, pausa curta baseada no item anterior)
+    // ⏱️ Pausa antes da mídia.
+    //
+    // Regra (ordem de precedência):
+    //   1. `delay_before_ms` configurado pelo consultor (teto 12s para não
+    //      estourar Edge Function timeout).
+    //   2. Pausa derivada do item anterior:
+    //      - texto → 800ms (humanização mínima);
+    //      - áudio/vídeo com duration_sec → 90% da duração + 600ms de buffer
+    //        (teto 12s). Isso garante que o cliente termina de escutar/ver
+    //        antes do próximo item chegar — sem essa folga, o WhatsApp
+    //        entregava 3-4 mensagens em rajada e a "sensação" era de bot.
+    //   3. Item anterior desconhecido → 800ms.
+    //
+    // O teto duro de 12s evita estourar o limite de 60s da Edge Function
+    // mesmo com 5+ mídias na sequência.
     const configuredDelay = Number(m.delay_before_ms || 0);
     if (!isTestMode()) {
       if (configuredDelay > 0) {
-        const wait = Math.min(configuredDelay, 10_000);
+        const wait = Math.min(configuredDelay, 12_000);
         await new Promise((r) => setTimeout(r, wait));
       } else if (prevForPause) {
-        let pause = 600;
+        let pause = 800;
         if ((prevForPause.kind === "audio" || prevForPause.kind === "video") && Number(prevForPause.duration_sec || 0) > 0) {
-          pause = Math.min(Number(prevForPause.duration_sec) * 1000, 8000);
+          pause = Math.min(
+            Math.round(Number(prevForPause.duration_sec) * 1000 * 0.9) + 600,
+            12_000,
+          );
         }
         await new Promise((r) => setTimeout(r, pause));
       }
@@ -537,7 +557,22 @@ async function sendStepMedia(
       prevForPause = { kind, duration_sec: m.duration_sec };
     } else {
       mediaFailed = true;
-      console.warn(`[conversational] mídia ${kind} falhou após retry (media_id=${m.id}); reserva mantida`);
+      console.warn(`[conversational] mídia ${kind} falhou após retry (media_id=${m.id}); LIBERANDO reserva para retry futuro`);
+      // 🔓 LIBERA a reserva quando o send falhou após retry. Sem isso, a
+      // linha em `ai_slot_dispatch_log` com `dispatch_status='sent'` ficava
+      // marcada como entregue mesmo sem o cliente ter recebido nada,
+      // bloqueando qualquer tentativa futura. A regra: o RPC
+      // `try_log_media_send` SÓ representa "entregue de fato" se o sender
+      // retornou ok. Falha → delete da reserva → próxima tentativa OK.
+      try {
+        await ctx.supabase
+          .from("ai_slot_dispatch_log")
+          .delete()
+          .eq("customer_id", ctx.customer.id)
+          .eq("media_id", m.id);
+      } catch (e) {
+        console.warn(`[conversational] falha ao liberar reserva ${m.id}:`, (e as Error)?.message);
+      }
       try {
         await ctx.supabase.from("conversations").insert({
           customer_id: ctx.customer.id,

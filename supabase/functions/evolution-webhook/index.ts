@@ -481,6 +481,73 @@ Deno.serve(async (req) => {
     // (Gate global de IA desligada foi movido para o topo — antes mesmo de
     // criar customer ou notificar. Veja "global-off-silent" no início.)
 
+    // ─── 6.0) Captação manual: cliente confirmando dados (SIM/OK/CORRETO) ──
+    // Em modo `capture_mode='manual'` (Captação Game/Pro), uma resposta de
+    // confirmação só marca os timestamps `bill_data_confirmed_at` /
+    // `doc_data_confirmed_at` e PARA. Não deixa o bot-flow seguir sozinho
+    // pro próximo tile — o consultor que decide. Espelha o bloco
+    // equivalente em `whapi-webhook/index.ts` (linha ~555).
+    //
+    // Sem esse gate, o cliente respondia "SIM" e o bot avançava o passo
+    // automaticamente, gerando duplicação de mídia e descompasso com o
+    // painel do consultor (reclamação recorrente §3 do bugfix).
+    try {
+      if (messageText && (customer as any).capture_mode === "manual") {
+        const { data: confState } = await supabase
+          .from("customers")
+          .select("bill_data_confirmation_by, bill_data_confirmed_at, doc_data_confirmation_by, doc_data_confirmed_at")
+          .eq("id", customer.id)
+          .maybeSingle();
+        const awaitingBill = (confState as any)?.bill_data_confirmation_by === "awaiting_client" && !(confState as any)?.bill_data_confirmed_at;
+        const awaitingDoc = (confState as any)?.doc_data_confirmation_by === "awaiting_client" && !(confState as any)?.doc_data_confirmed_at;
+        const currentConfirmStep = stripPrefix(String((customer as any).conversation_step || ""));
+        const confirmingBill = currentConfirmStep === "confirmando_dados_conta" && !(confState as any)?.bill_data_confirmed_at;
+        const confirmingDoc = currentConfirmStep === "confirmando_dados_doc" && !(confState as any)?.doc_data_confirmed_at;
+        if (awaitingBill || awaitingDoc || confirmingBill || confirmingDoc) {
+          const norm = String(messageText).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+          const isYes = /^(sim|ok|certo|correto|confere|isso|isso mesmo|perfeito|tudo certo|s|👍|✅|confirmo|positivo|exato|tudo certinho)/i.test(norm);
+          const isNo = /^(nao|n|errado|incorreto|tem erro|corrige|corrigir)/i.test(norm);
+          if (isYes) {
+            const patch: Record<string, any> = {};
+            const now = new Date().toISOString();
+            if (awaitingBill || confirmingBill) { patch.bill_data_confirmed_at = now; patch.bill_data_confirmation_by = "client"; }
+            if (awaitingDoc || confirmingDoc) { patch.doc_data_confirmed_at = now; patch.doc_data_confirmation_by = "client"; }
+            await supabase.from("customers").update(patch).eq("id", customer.id);
+            const reply = "✅ Dados confirmados.";
+            try { await sender.sendText(remoteJid, reply); } catch (_e) { /* ignore */ }
+            await supabase.from("conversations").insert({
+              customer_id: customer.id, message_direction: "outbound",
+              message_text: reply, message_type: "text",
+              conversation_step: customer.conversation_step,
+            });
+            jsonLog("info", "capture_confirmed_manual_stop", {
+              customer_id: customer.id,
+              consultant_id: instanceData.consultant_id,
+              bill: awaitingBill || confirmingBill,
+              doc: awaitingDoc || confirmingDoc,
+            });
+            return new Response(JSON.stringify({ ok: true, msg: "capture_confirmed_manual_stop" }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          if (isNo) {
+            // Cliente disse não/correção — limpa as flags pra consultor agir manualmente.
+            // Bot fica calado: a correção é decisão humana.
+            const patch: Record<string, any> = {};
+            if (awaitingBill) patch.bill_data_confirmation_by = null;
+            if (awaitingDoc) patch.doc_data_confirmation_by = null;
+            await supabase.from("customers").update(patch).eq("id", customer.id);
+            jsonLog("info", "capture_confirm_rejected", {
+              customer_id: customer.id,
+              consultant_id: instanceData.consultant_id,
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[capture-confirm] err:", (e as Error).message);
+    }
+
 
     // ─── 6.1) BOT PAUSED — handoff humano ativo ────────────────────────
     // Se um humano assumiu, NÃO responder. Apenas registrar inbound (acima) e sair.

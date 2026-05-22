@@ -16,7 +16,7 @@
 // }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { geminiGenerate } from "../_shared/gemini.ts";
+import { geminiGenerate, GeminiQuotaExhausted } from "../_shared/gemini.ts";
 import { createEvolutionSender } from "../_shared/evolution-api.ts";
 import {
   checkPreconditions,
@@ -315,7 +315,31 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
       decision = result.text ? JSON.parse(result.text) : null;
     } catch (e: any) {
       llmError = e?.message || String(e);
-      console.error("LLM error:", llmError);
+      // Quota exhausted → deterministic fallback path. We log the event
+      // (so saude-bot/observability can spot consultants hitting the
+      // ceiling) and then fall through to the same "no decision" branch
+      // that handles a generic LLM error. The deterministicFallback
+      // helper below produces a safe REPEAT-style decision that keeps
+      // the customer on the current step rather than inventing a
+      // hallucinated reply.
+      if (e instanceof GeminiQuotaExhausted) {
+        try {
+          await supabase.from("ai_agent_logs").insert({
+            consultant_id: consultantId,
+            customer_id,
+            phone: customer.phone_whatsapp,
+            step_before: stepBefore,
+            step_after: stepBefore,
+            error: "gemini_quota_exhausted",
+            llm_output: { violation_kind: "gemini_quota_exhausted" },
+            handoff: false,
+            latency_ms: Date.now() - t0,
+          });
+        } catch (_) { /* never fail the request because of telemetry */ }
+        console.warn("LLM degraded → deterministicFallback (quota exhausted)");
+      } else {
+        console.error("LLM error:", llmError);
+      }
     }
 
     // 9) Fallback se LLM quebrou

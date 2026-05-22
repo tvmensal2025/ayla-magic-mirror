@@ -4,6 +4,28 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
+/**
+ * GeminiQuotaExhausted — sentinel error type. Thrown by `geminiGenerate`
+ * when the consultant's per-minute Gemini token bucket
+ * (`gemini_quota_bucket` table, RPC `consume_gemini_token`) is empty.
+ *
+ * Callers in `ai-agent-router` and `_shared/ai-faq-answerer` MUST catch
+ * this and fall back to a deterministic decision (template text or
+ * "REPEAT" choice) rather than retrying. Default capacity is 60 tokens
+ * per consultant per minute (see migration §4.6) — large enough for a
+ * normal conversation (≤ 1 LLM call per inbound), small enough to
+ * prevent a runaway loop from burning the whole quota.
+ *
+ * This implements bugfix.md §2.38 / Task 35 of the WhatsApp Flow
+ * Reliability v2 spec.
+ */
+export class GeminiQuotaExhausted extends Error {
+  constructor(public readonly consultantId: string | undefined) {
+    super(`Gemini quota exhausted for consultant ${consultantId || "(none)"}`);
+    this.name = "GeminiQuotaExhausted";
+  }
+}
+
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 // Pricing (USD per 1M tokens) — updated 2025. Conservative estimates.
@@ -118,6 +140,64 @@ export async function geminiGenerate(opts: GeminiGenerateOpts): Promise<GeminiRe
   let degraded = false;
   let modelToUse = opts.model;
   let lastErr: any = null;
+
+  // ── Per-consultant quota bucket (bugfix.md §2.38 / Task 35) ──
+  // The RPC `consume_gemini_token` decrements the consultant's bucket
+  // atomically and returns FALSE when empty. We only consult it when a
+  // `consultantId` was provided — utility callers that don't pass one
+  // (one-off scripts, system health checks) bypass the bucket. The
+  // bucket refills at 60 tokens/minute by default; that's enough headroom
+  // for a normal lead conversation (≤ 1 LLM call per inbound) but cheap
+  // to throttle a runaway prompt loop. On RPC error (network blip,
+  // bucket row not yet seeded) we fail-open (let the call through)
+  // because the alternative — silencing the bot for a real lead because
+  // of a quota subsystem hiccup — is strictly worse than burning a few
+  // extra tokens.
+  if (opts.consultantId) {
+    try {
+      const supaUrl = Deno.env.get("SUPABASE_URL");
+      const supaKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      if (supaUrl && supaKey) {
+        const supa = createClient(supaUrl, supaKey);
+        const { data: ok, error } = await supa.rpc("consume_gemini_token", {
+          p_consultant: opts.consultantId,
+          p_tokens: 1,
+        });
+        if (!error && ok === false) {
+          // Bucket empty → throw the sentinel for the caller to handle.
+          if (opts.functionName) {
+            logUsage({
+              function_name: opts.functionName,
+              model: opts.model,
+              tokens_in: 0,
+              tokens_out: 0,
+              thinking_tokens: 0,
+              latency_ms: Date.now() - start,
+              cost_estimate_cents: 0,
+              outcome: "quota_exhausted",
+              degraded: true,
+              consultant_id: opts.consultantId || null,
+              customer_id: opts.customerId || null,
+              metadata: { reason: "gemini_quota_exhausted" },
+            });
+          }
+          console.warn(
+            `[gemini] quota exhausted for consultant=${opts.consultantId}; throwing GeminiQuotaExhausted`,
+          );
+          throw new GeminiQuotaExhausted(opts.consultantId);
+        }
+      }
+    } catch (e) {
+      // Re-throw the sentinel so the caller can downgrade deterministically.
+      if (e instanceof GeminiQuotaExhausted) throw e;
+      // Any other failure (RPC missing, network error) → fail-open with a
+      // single-line warning so we can spot quota subsystem outages in logs.
+      console.warn(
+        `[gemini] consume_gemini_token failed (fail-open):`,
+        (e as Error)?.message,
+      );
+    }
+  }
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
