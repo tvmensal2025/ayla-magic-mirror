@@ -363,6 +363,28 @@ Deno.serve(async (req) => {
         return json(200, { url: r.data?.profile_pic_full || r.data?.icon_full || r.data?.profile_pic || null });
       }
 
+      case "download_media": {
+        // Proxy de download de mídia (contorna CORS do CDN do Whapi)
+        // necessário para re-uploadar a mídia como template.
+        const url = String(payload.url || "");
+        if (!url) return json(400, { error: "url obrigatória" });
+        try {
+          const r = await fetch(url, { signal: AbortSignal.timeout(45_000) });
+          if (!r.ok) return json(502, { error: `download falhou (${r.status})` });
+          const buf = new Uint8Array(await r.arrayBuffer());
+          let bin = "";
+          const chunk = 0x8000;
+          for (let i = 0; i < buf.length; i += chunk) {
+            bin += String.fromCharCode(...buf.subarray(i, i + chunk));
+          }
+          const b64 = btoa(bin);
+          const mime = r.headers.get("content-type") || "application/octet-stream";
+          return json(200, { base64: b64, mimetype: mime });
+        } catch (e: any) {
+          return json(502, { error: e?.message || "download error" });
+        }
+      }
+
       default:
         return json(400, { error: `Ação desconhecida: ${action}` });
     }
