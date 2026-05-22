@@ -1,35 +1,41 @@
-# Plano: Deixar o app abrir mais rápido
+## Problema
 
-Objetivo: reduzir o tempo de abertura do app (especialmente `/admin` e `/super-admin`) sem mudar nenhuma funcionalidade ou visual.
+No `/admin` (Performance ON), o painel ocupa altura enorme e os passos seguem bloqueados em ordem sequencial mesmo quando o cliente já respondeu (ex.: nome capturado). O usuário deve poder enviar qualquer passo livremente, e o cabeçalho precisa caber sem rolar.
 
-## 1. Lazy loading de rotas em `src/App.tsx`
-Converter todas as páginas pesadas para `React.lazy()` + `Suspense`:
-- `Admin`, `SuperAdmin`, `WhatsAppClientsPage`, `FluxoCamila`, páginas de relatórios, captação, saúde-bot, install, etc.
-- Manter rotas leves (landing `/ayla-viana`, `/cadastro`, `NotFound`) com import normal para não atrasar o first paint público.
-- Adicionar um `<Suspense fallback={<LoadingScreen />}>` global com um spinner usando o design system (verde primário).
+## Mudanças (UI apenas, sem mexer no backend)
 
-## 2. Lazy loading de tabs/painéis dentro do Admin e SuperAdmin
-Os painéis mais pesados (Ads, IA, Captação, Saúde Bot, Templates WhatsApp, Fluxos, Kanban) serão carregados via `lazy()` somente quando a aba for aberta. Hoje todos entram no bundle inicial mesmo sem o usuário abrir.
+### 1. `CaptureStepsGrid.tsx` — remover bloqueio de ordem
+- Apagar a regra `locked = !sent && !isNext`. Todos os passos não enviados ficam habilitados.
+- Remover ícone `Lock`, classes `opacity-50` e o `disabled={locked}` do botão "Ver e enviar".
+- Manter o destaque visual apenas no "próximo sugerido" (`isNext`) com `ring-primary/30`, mas sem desabilitar os outros.
+- Mostrar o preview inline em todos os tiles (não só nos desbloqueados).
+- Tooltip do botão passa a ser sempre "Ver e enviar".
 
-## 3. Split de chunks no `vite.config.ts`
-Adicionar `build.rollupOptions.output.manualChunks` separando:
-- `react-vendor`: react, react-dom, react-router-dom
-- `supabase`: @supabase/supabase-js
-- `ui-vendor`: radix-ui, lucide-react
-- `charts`: recharts (se usado)
-- `motion`: framer-motion (se usado)
+### 2. `PlayerHud.tsx` — reduzir altura
+- Trocar `p-4` por `px-3 py-2`, emblema de `w-14 h-14` para `w-10 h-10`, ícone `w-5 h-5`.
+- Tipografia: rank `text-xs`, chips com `py-1` e fontes `text-[10px]`.
+- Remover o parágrafo "Pontos de Performance" (já está implícito no contexto do header).
+- Reduzir `rounded-2xl` → `rounded-xl` e remover `animate-exec-card` para evitar layout-shift inicial.
 
-Isso reduz o bundle principal e permite cache melhor entre deploys.
+### 3. `QuestsBar.tsx` — compactar metas do dia
+- Diminuir gap e padding (`p-2`, `gap-2`), barras de progresso para `h-1`.
+- Esconder o subtítulo "+50 PTS / +100 PTS" em telas < `md` (mantém só o título + barra).
+- No desktop, manter 3 colunas mas com `text-[10px]`.
 
-## 4. Pré-carregar rotas críticas após o idle
-Usar `requestIdleCallback` para pré-buscar o chunk do `/admin` depois que o login renderiza, evitando "tela branca" ao clicar para entrar.
+### 4. `CaptacaoPanel.tsx`
+- O wrapper do gameOn (`<div className="px-4 py-3 space-y-3">` linhas 217-220) vira `px-3 py-2 space-y-2` para reduzir espaçamento total.
+- Ajustar a altura calculada do main: `md:h-[calc(100vh-380px)]` → `md:h-[calc(100vh-300px)]` já que o HUD ficou menor.
 
-## 5. Fora de escopo
-- Nenhuma mudança em lógica de negócio, edge functions, banco, RLS, WhatsApp, CRM ou IA.
-- Nenhuma mudança visual além do spinner do Suspense.
-- Landing pages públicas continuam como estão.
+### 5. `CaptureSheet.tsx` (atalho raio "Enviar tudo")
+- Verificar se o `pendingSteps` ainda respeita a ordem travada antiga; ajustar para enviar todos os pendentes em sequência sem depender do "isNext" (já é assim, mas confirmar sem regressão).
 
-## Detalhes técnicos
-- Arquivos tocados: `src/App.tsx`, `vite.config.ts`, `src/pages/Admin.tsx`, `src/pages/SuperAdmin.tsx` (somente para lazy nos tabs).
-- Sem novas dependências.
-- Build do Vite vai gerar vários chunks pequenos em `dist/assets/` — primeiro load do `/admin` cai significativamente porque só baixa o chunk da aba ativa.
+## Fora de escopo
+- Lógica de envio (`manual-step-send`), state machine do bot, captura de OCR.
+- Nenhum schema/edge function alterado.
+
+## Arquivos editados
+- `src/components/captacao/CaptureStepsGrid.tsx`
+- `src/components/captacao/game/PlayerHud.tsx`
+- `src/components/captacao/game/QuestsBar.tsx`
+- `src/components/captacao/CaptacaoPanel.tsx`
+- `src/components/captacao/CaptureSheet.tsx` (verificação)
