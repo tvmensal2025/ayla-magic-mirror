@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Send, Loader2, Check, MessageCircle, Mic, ImageIcon, Video, Edit3, Lock, Eye } from "lucide-react";
+import { Send, Loader2, Check, MessageCircle, Mic, ImageIcon, Video, Edit3, Eye } from "lucide-react";
 import { normalizeSendStepError } from "@/lib/whatsapp/send";
 import { CaptureStepPreview } from "./CaptureStepPreview";
 
