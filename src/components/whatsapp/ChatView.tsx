@@ -407,7 +407,11 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
 
       {/* Composer */}
       <MessageComposer
-        onSend={sendMessage}
+        onSend={async (text) => {
+          stickToBottomRef.current = true;
+          await sendMessage(text);
+          scheduleScrollToBottom(true);
+        }}
         initialMessage={initialMessage}
         consultantId={consultantId}
         customerId={customerId || undefined}
