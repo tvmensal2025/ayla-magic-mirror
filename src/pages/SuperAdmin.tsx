@@ -1,5 +1,5 @@
 // v2 cache-bust
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useUserRole } from "@/hooks/useUserRole";
@@ -14,28 +14,28 @@ import {
   ChevronRight, BarChart3, Megaphone, Target,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { AIKnowledgePanel } from "@/components/superadmin/AIKnowledgePanel";
-import { AIControlPanel } from "@/components/superadmin/AIControlPanel";
-import { AIAuditPanel } from "@/components/superadmin/AIAuditPanel";
-import { ABResultsPanel } from "@/components/superadmin/ABResultsPanel";
-import { LearnedPatternsPanel } from "@/components/superadmin/LearnedPatternsPanel";
-import { CrmAnalyticsTab } from "@/components/superadmin/CrmAnalyticsTab";
-import { AuditLogPanel } from "@/components/superadmin/AuditLogPanel";
-import { BotFunnelPanel } from "@/components/superadmin/BotFunnelPanel";
-
-import { WorkerPhaseTimeline } from "@/components/superadmin/WorkerPhaseTimeline";
-import { StuckLeadsWidget } from "@/components/superadmin/StuckLeadsWidget";
-import { SystemHealthPanel } from "@/components/superadmin/SystemHealthPanel";
-import { BotGlobalKillSwitch } from "@/components/superadmin/BotGlobalKillSwitch";
-import { ResolverStrictModeToggle } from "@/components/superadmin/ResolverStrictModeToggle";
-import { InfraHealthPanel } from "@/components/superadmin/InfraHealthPanel";
-import { PlatformFacebookCard } from "@/components/admin/super/PlatformFacebookCard";
-import { PlatformPnLCard } from "@/components/admin/super/PlatformPnLCard";
-import { NetworkHealthPanel } from "@/components/admin/super/NetworkHealthPanel";
-import { AdTemplatesPanel } from "@/components/superadmin/AdTemplatesPanel";
-import { AILearningHealthPanel } from "@/components/admin/super/AILearningHealthPanel";
-import { CaptacaoTab } from "@/components/superadmin/CaptacaoTab";
-import { AdManagersTab } from "@/components/superadmin/AdManagersTab";
+// Heavy panels — lazy load on demand to shrink initial bundle
+const AIKnowledgePanel = lazy(() => import("@/components/superadmin/AIKnowledgePanel").then(m => ({ default: m.AIKnowledgePanel })));
+const AIControlPanel = lazy(() => import("@/components/superadmin/AIControlPanel").then(m => ({ default: m.AIControlPanel })));
+const AIAuditPanel = lazy(() => import("@/components/superadmin/AIAuditPanel").then(m => ({ default: m.AIAuditPanel })));
+const ABResultsPanel = lazy(() => import("@/components/superadmin/ABResultsPanel").then(m => ({ default: m.ABResultsPanel })));
+const LearnedPatternsPanel = lazy(() => import("@/components/superadmin/LearnedPatternsPanel").then(m => ({ default: m.LearnedPatternsPanel })));
+const CrmAnalyticsTab = lazy(() => import("@/components/superadmin/CrmAnalyticsTab").then(m => ({ default: m.CrmAnalyticsTab })));
+const AuditLogPanel = lazy(() => import("@/components/superadmin/AuditLogPanel").then(m => ({ default: m.AuditLogPanel })));
+const BotFunnelPanel = lazy(() => import("@/components/superadmin/BotFunnelPanel").then(m => ({ default: m.BotFunnelPanel })));
+const WorkerPhaseTimeline = lazy(() => import("@/components/superadmin/WorkerPhaseTimeline").then(m => ({ default: m.WorkerPhaseTimeline })));
+const StuckLeadsWidget = lazy(() => import("@/components/superadmin/StuckLeadsWidget").then(m => ({ default: m.StuckLeadsWidget })));
+const SystemHealthPanel = lazy(() => import("@/components/superadmin/SystemHealthPanel").then(m => ({ default: m.SystemHealthPanel })));
+const BotGlobalKillSwitch = lazy(() => import("@/components/superadmin/BotGlobalKillSwitch").then(m => ({ default: m.BotGlobalKillSwitch })));
+const ResolverStrictModeToggle = lazy(() => import("@/components/superadmin/ResolverStrictModeToggle").then(m => ({ default: m.ResolverStrictModeToggle })));
+const InfraHealthPanel = lazy(() => import("@/components/superadmin/InfraHealthPanel").then(m => ({ default: m.InfraHealthPanel })));
+const PlatformFacebookCard = lazy(() => import("@/components/admin/super/PlatformFacebookCard").then(m => ({ default: m.PlatformFacebookCard })));
+const PlatformPnLCard = lazy(() => import("@/components/admin/super/PlatformPnLCard").then(m => ({ default: m.PlatformPnLCard })));
+const NetworkHealthPanel = lazy(() => import("@/components/admin/super/NetworkHealthPanel").then(m => ({ default: m.NetworkHealthPanel })));
+const AdTemplatesPanel = lazy(() => import("@/components/superadmin/AdTemplatesPanel").then(m => ({ default: m.AdTemplatesPanel })));
+const AILearningHealthPanel = lazy(() => import("@/components/admin/super/AILearningHealthPanel").then(m => ({ default: m.AILearningHealthPanel })));
+const CaptacaoTab = lazy(() => import("@/components/superadmin/CaptacaoTab").then(m => ({ default: m.CaptacaoTab })));
+const AdManagersTab = lazy(() => import("@/components/superadmin/AdManagersTab").then(m => ({ default: m.AdManagersTab })));
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { logAdminAction } from "@/hooks/useAdminAudit";
 
@@ -342,6 +342,7 @@ const SuperAdmin = () => {
       </nav>
 
       <main className="relative max-w-[1760px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-6 space-y-6">
+        <Suspense fallback={<div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>}>
         {activeTab === "consultores" && (
           <>
             {/* Stats Grid */}
@@ -543,6 +544,7 @@ const SuperAdmin = () => {
         {activeTab === "financeiro" && <PlatformPnLCard />}
         {activeTab === "saude_rede" && <NetworkHealthPanel />}
         {activeTab === "ia_aprendendo" && <AILearningHealthPanel />}
+        </Suspense>
       </main>
     </div>
   );
