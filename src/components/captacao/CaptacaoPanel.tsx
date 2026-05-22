@@ -302,6 +302,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                         onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
                       />
                     </div>
+                    <CaptureConversationFeed customerId={selectedId} />
 
                     {/* Ficha + Achievements aparecem no fim do scroll em mobile (quando expandidos) */}
                     <div className={`md:hidden ${showAside ? "block" : "hidden"} space-y-3`}>
