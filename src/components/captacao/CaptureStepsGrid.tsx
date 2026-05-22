@@ -196,8 +196,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
   return (
     <>
       <div className="space-y-2">
-        <div className="flex items-center justify-between text-[11px]">
-          <span className="font-bold uppercase tracking-wide text-muted-foreground">Passos enviados (ordem travada)</span>
+          <span className="font-bold uppercase tracking-wide text-muted-foreground">Passos do fluxo</span>
           <span className="tabular-nums font-bold text-primary">{sentSteps.size}/{display.length}</span>
         </div>
         <div className="h-1 rounded-full bg-secondary overflow-hidden">
