@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { MessageCircle, Mic, ImageIcon, Video, FileText, Loader2 } from "lucide-react";
 
@@ -33,12 +33,39 @@ function fmtTime(iso: string) {
   } catch { return ""; }
 }
 
+function sortRows(rows: ConvRow[], limit: number) {
+  return [...rows]
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .slice(-limit);
+}
+
 export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
   const [rows, setRows] = useState<ConvRow[]>([]);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+
+  const scheduleScrollToBottom = useCallback((force = false) => {
+    if (!force && !stickRef.current) return;
+    const run = () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+    };
+    run();
+    requestAnimationFrame(() => {
+      run();
+      requestAnimationFrame(run);
+    });
+    window.setTimeout(run, 80);
+    window.setTimeout(run, 240);
+  }, []);
+
+  useEffect(() => {
+    stickRef.current = true;
+    scheduleScrollToBottom(true);
+  }, [customerId, scheduleScrollToBottom]);
 
   useEffect(() => {
     let mounted = true;
@@ -50,7 +77,7 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
         .order("created_at", { ascending: false })
         .limit(limit);
       if (!mounted) return;
-      setRows(((data as ConvRow[]) || []).reverse());
+      setRows(sortRows((data as ConvRow[]) || [], limit));
       setLoading(false);
     };
     void load();
@@ -61,7 +88,7 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "conversations", filter: `customer_id=eq.${customerId}` },
         (payload) => {
-          setRows((prev) => [...prev.slice(-(limit - 1)), payload.new as ConvRow]);
+          setRows((prev) => sortRows([...prev, payload.new as ConvRow], limit));
         }
       )
       .subscribe();
@@ -90,15 +117,12 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
     const scroller = scrollRef.current;
     const sentinel = bottomRef.current;
     if (!scroller || !sentinel) return;
-    const go = () => {
-      if (!stickRef.current) return;
-      requestAnimationFrame(() => sentinel.scrollIntoView({ block: "end" }));
-    };
+    const go = () => scheduleScrollToBottom();
     go();
     const ro = new ResizeObserver(go);
     ro.observe(scroller);
     return () => ro.disconnect();
-  }, [rows.length]);
+  }, [rows.length, scheduleScrollToBottom]);
 
   return (
     <div className="rounded-lg border border-border bg-card/30 overflow-hidden">

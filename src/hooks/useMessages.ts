@@ -29,6 +29,13 @@ export interface ChatMessage {
   fileName?: string;
 }
 
+function normalizeMessageTimestamp(value: unknown): number {
+  const n = typeof value === "string" ? Number(value) : typeof value === "number" ? value : 0;
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  // Algumas APIs retornam segundos, outras milissegundos. A UI trabalha em segundos.
+  return n > 10_000_000_000 ? n / 1000 : n;
+}
+
 function mapMessage(msg: EvolutionMessage): ChatMessage {
   const m = msg.message;
   let text = "";
@@ -84,7 +91,7 @@ function mapMessage(msg: EvolutionMessage): ChatMessage {
     remoteJidAlt: msg.key.remoteJidAlt,
     fromMe: msg.key.fromMe,
     text,
-    timestamp: msg.messageTimestamp || 0,
+    timestamp: normalizeMessageTimestamp(msg.messageTimestamp),
     status: msg.status,
     mediaType,
     mediaUrl,
@@ -158,28 +165,18 @@ export function useMessages(
         return true;
       });
 
-      // Detect feed direction: some endpoints return newest-first, others oldest-first.
-      // We need this to tie-break messages that share the same `messageTimestamp` (1s
-      // resolution → áudio/imagem/texto enviados em sequência costumam empatar).
-      const first = unique[0];
-      const last = unique[unique.length - 1];
-      const descSource =
-        first && last
-          ? (first.messageTimestamp || 0) >= (last.messageTimestamp || 0)
-          : true;
+      const firstTs = normalizeMessageTimestamp(unique[0]?.messageTimestamp);
+      const lastTs = normalizeMessageTimestamp(unique[unique.length - 1]?.messageTimestamp);
+      const newestFirst = firstTs >= lastTs;
 
       const mapped = unique
         .map((msg, sourceIndex) => ({ ...mapMessage(msg), sourceIndex }))
         .filter((m) => clearedAtMs === 0 || m.timestamp * 1000 >= clearedAtMs)
         .sort((a, b) => {
           if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
-          // Mesmo segundo → mantém ordem cronológica do feed bruto.
-          const idxCmp = descSource
-            ? b.sourceIndex - a.sourceIndex
-            : a.sourceIndex - b.sourceIndex;
-          if (idxCmp !== 0) return idxCmp;
-          // Último critério: id lexicográfico (Whapi/Evolution costumam ser monotônicos).
-          return (a.id || "").localeCompare(b.id || "");
+          // Mesmo segundo: render final é oldest-first, então o desempate respeita
+          // a direção em que o provedor entregou o feed bruto.
+          return newestFirst ? b.sourceIndex - a.sourceIndex : a.sourceIndex - b.sourceIndex;
         })
         .map(({ sourceIndex: _sourceIndex, ...m }) => m);
       setMessages(mapped);
