@@ -354,10 +354,14 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           </div>
         </GameShell>
       ) : (
-        <div className="flex-1 flex overflow-hidden">
-          <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+          {/* Lista: full-width no mobile sem seleção; escondida no mobile com seleção; sidebar fixa em md+ */}
+          <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-72 md:shrink-0 overflow-hidden`}>
+            <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
+          </div>
 
-          <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Main: escondida no mobile sem seleção */}
+          <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden`}>
             {!selectedId ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
                 <Gamepad2 className="w-12 h-12 text-muted-foreground/40 animate-float" />
@@ -368,19 +372,26 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
               </div>
             ) : (
               <>
-                <div className="px-4 py-3 border-b border-border bg-card/40 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Conversando com</p>
-                    <p className="text-sm font-semibold">{phone || "—"}</p>
+                <div className="px-3 md:px-4 py-2 md:py-3 border-b border-border bg-card/40 flex items-center justify-between gap-2">
+                  <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setSelectedId(null)} title="Voltar">
+                    <ChevronLeft className="w-4 h-4" />
+                  </Button>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] md:text-xs text-muted-foreground">Conversando com</p>
+                    <p className="text-sm font-semibold truncate">{customerName || phone || "—"}</p>
                   </div>
                   {phone && onOpenChat && (
-                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onOpenChat(phone)}>
-                      <MessageCircle className="w-3.5 h-3.5" /> Abrir conversa
+                    <Button size="sm" variant="outline" className="gap-1.5 shrink-0" onClick={() => onOpenChat(phone)}>
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Abrir conversa</span>
                       <ExternalLink className="w-3 h-3" />
                     </Button>
                   )}
+                  <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setShowAside((s) => !s)} title="Ficha do lead">
+                    <ChevronDown className={`w-4 h-4 transition-transform ${showAside ? "rotate-180" : ""}`} />
+                  </Button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-4">
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-2">10 Passos · clique para enviar</h3>
                     <CaptureStepsGrid
@@ -392,14 +403,25 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                   </div>
                   <div className="rounded-lg border border-dashed border-border bg-secondary/20 p-3 text-[11px] text-muted-foreground space-y-1">
                     <p>💡 <span className="font-semibold">Como funciona:</span> envie os passos, conforme o cliente responde os campos vão sendo preenchidos automaticamente (OCR ativo). Capturas em sequência ativam <span className="font-bold text-primary">combos</span>!</p>
-                    <p>Edite manualmente qualquer campo na ficha à direita.</p>
+                    <p className="hidden md:block">Edite manualmente qualquer campo na ficha à direita.</p>
+                    <p className="md:hidden">Toque no <span className="font-bold">▾</span> acima para abrir a ficha e editar campos.</p>
+                  </div>
+
+                  {/* Ficha colapsável só no mobile */}
+                  <div className={`md:hidden ${showAside ? "block" : "hidden"}`}>
+                    <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} embedded />
                   </div>
                 </div>
               </>
             )}
           </main>
 
-          {selectedId && <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />}
+          {/* Ficha desktop fixa à direita */}
+          {selectedId && (
+            <div className="hidden md:flex">
+              <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />
+            </div>
+          )}
         </div>
       )}
 
