@@ -125,14 +125,15 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
   }, [rows.length, scheduleScrollToBottom]);
 
   return (
-    <div className="rounded-lg border border-border bg-card/30 overflow-hidden">
-      <div className="px-2.5 py-1.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
+    <div className="rounded-lg border border-border bg-card/30 overflow-hidden flex flex-col min-h-0 flex-1">
+      <div className="px-2.5 py-1.5 border-b border-border/60 bg-muted/30 flex items-center justify-between shrink-0">
         <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
           <MessageCircle className="w-3 h-3 text-primary" /> Conversa ao vivo
         </span>
         <span className="text-[9px] text-muted-foreground tabular-nums">{rows.length}</span>
       </div>
-      <div ref={scrollRef} className="max-h-56 overflow-y-auto p-2 space-y-1.5 bg-[#0b141a]/40">
+      <div ref={scrollRef} className="flex-1 min-h-[280px] md:min-h-[360px] overflow-y-auto p-3 space-y-2 bg-[#0b141a]/40">
+
         {loading && (
           <div className="flex items-center justify-center py-4 text-muted-foreground text-[10px] gap-1.5">
             <Loader2 className="w-3 h-3 animate-spin" /> carregando…
