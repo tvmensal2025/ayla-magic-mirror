@@ -12,54 +12,47 @@ export function QuestsBar({ progress }: { progress: GameProgress }) {
   ];
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card/50 backdrop-blur-sm p-3">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+    <div className="rounded-lg border border-border/60 bg-card/50 backdrop-blur-sm p-2">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
           Metas do Dia
         </span>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-        {goals.map((g, i) => {
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+        {goals.map((g) => {
           const pct = Math.min(100, Math.round((g.current / g.target) * 100));
           const done = g.current >= g.target;
           return (
             <div
               key={g.id}
-              className={`relative overflow-hidden rounded-lg border p-3 transition-all animate-exec-card ${
+              className={`relative overflow-hidden rounded-md border px-2 py-1.5 ${
                 done
                   ? "border-amber-400/40 bg-gradient-to-br from-amber-400/8 to-transparent"
                   : "border-border/60 bg-background/40"
               }`}
-              style={{ animationDelay: `${i * 0.08}s` }}
             >
-              {/* Gold sweep when done */}
               {done && <div className="absolute inset-0 exec-gold-sweep pointer-events-none" />}
-
-              <div className="relative flex items-center justify-between mb-2">
-                <span className="text-[11px] font-semibold text-foreground/80 flex-1 pr-2 leading-tight">
+              <div className="relative flex items-center justify-between mb-1 gap-2">
+                <span className="text-[10px] font-semibold text-foreground/80 flex-1 leading-tight truncate">
                   {g.label}
                 </span>
                 {done ? (
-                  <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+                  <CheckCircle2 className="w-3 h-3 text-amber-400 shrink-0" />
                 ) : (
-                  <span className="text-[10px] font-mono text-muted-foreground tabular-nums shrink-0">
+                  <span className="text-[9px] font-mono text-muted-foreground tabular-nums shrink-0">
                     {Math.min(g.current, g.target)}/{g.target}
                   </span>
                 )}
               </div>
-
-              <div className="relative h-1.5 rounded-full bg-secondary overflow-hidden">
+              <div className="relative h-1 rounded-full bg-secondary overflow-hidden">
                 <div
                   className={`h-full transition-all duration-700 rounded-full ${
-                    done
-                      ? "bg-gradient-to-r from-amber-500 to-yellow-400 exec-bar-active"
-                      : "bg-primary"
+                    done ? "bg-gradient-to-r from-amber-500 to-yellow-400 exec-bar-active" : "bg-primary"
                   }`}
                   style={{ width: `${pct}%` }}
                 />
               </div>
-
-              <span className={`text-[9px] font-bold mt-1.5 inline-block uppercase tracking-wider ${
+              <span className={`hidden md:inline text-[8px] font-bold mt-1 uppercase tracking-wider ${
                 done ? "exec-shimmer" : "text-muted-foreground"
               }`}>
                 +{g.pts} pts

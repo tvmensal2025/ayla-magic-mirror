@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Send, Loader2, Check, MessageCircle, Mic, ImageIcon, Video, Edit3, Lock, Eye } from "lucide-react";
+import { Send, Loader2, Check, MessageCircle, Mic, ImageIcon, Video, Edit3, Eye } from "lucide-react";
 import { normalizeSendStepError } from "@/lib/whatsapp/send";
 import { CaptureStepPreview } from "./CaptureStepPreview";
 
@@ -197,7 +197,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
     <>
       <div className="space-y-2">
         <div className="flex items-center justify-between text-[11px]">
-          <span className="font-bold uppercase tracking-wide text-muted-foreground">Passos enviados (ordem travada)</span>
+          <span className="font-bold uppercase tracking-wide text-muted-foreground">Passos do fluxo</span>
           <span className="tabular-nums font-bold text-primary">{sentSteps.size}/{display.length}</span>
         </div>
         <div className="h-1 rounded-full bg-secondary overflow-hidden">
@@ -209,7 +209,6 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
             const sent = sentSteps.has(s.id);
             const isSending = sending === s.id;
             const isNext = i === nextUnsentIdx;
-            const locked = !sent && !isNext;
             const inlinePreview = renderVars(s.message_text).trim();
             return (
               <div
@@ -217,25 +216,21 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                 className={`group relative rounded-lg border p-2.5 transition-all duration-300 ${
                   sent
                     ? "border-primary/60 bg-gradient-to-br from-primary/15 to-emerald-500/5 shadow-[0_0_14px_hsl(var(--primary)/0.2)] animate-exec-card"
-                    : locked
-                      ? "border-border/40 bg-muted/20 opacity-50"
-                      : isNext
-                          ? "border-primary bg-card hover:border-primary/80 hover:shadow-lg hover:-translate-y-0.5 ring-1 ring-primary/30"
-                          : "border-border bg-card"
+                    : isNext
+                        ? "border-primary bg-card hover:border-primary/80 hover:shadow-lg hover:-translate-y-0.5 ring-1 ring-primary/30"
+                        : "border-border bg-card hover:border-primary/40"
                 }`}
               >
                 <div className="flex items-start justify-between mb-1.5">
-                  <span className={`text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded ${sent ? "bg-primary text-primary-foreground" : locked ? "bg-secondary/40 text-muted-foreground" : "bg-secondary text-primary"}`}>Passo {s.position}</span>
+                  <span className={`text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded ${sent ? "bg-primary text-primary-foreground" : "bg-secondary text-primary"}`}>Passo {s.position}</span>
                   {sent ? (
                     <Check className="w-3.5 h-3.5 text-primary drop-shadow-[0_0_4px_hsl(var(--primary))]" />
-                  ) : locked ? (
-                    <Lock className="w-3 h-3 text-muted-foreground" />
                   ) : null}
                 </div>
-                <p className={`text-xs font-semibold leading-tight line-clamp-2 min-h-[2rem] ${locked ? "text-muted-foreground" : ""}`}>
+                <p className="text-xs font-semibold leading-tight line-clamp-2 min-h-[2rem]">
                   {s.title || s.step_key || "Passo"}
                 </p>
-                {!locked && inlinePreview && (
+                {inlinePreview && (
                   <p className="mt-1 text-[10px] leading-snug text-muted-foreground line-clamp-2 italic">
                     “{inlinePreview}”
                   </p>
@@ -252,13 +247,13 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                     variant={sent ? "outline" : "default"}
                     className="h-8 px-2 text-[11px] flex-1 min-h-[40px] md:min-h-[32px]"
                     onClick={() => setPreviewStep(s)}
-                    disabled={!!sending || locked}
+                    disabled={!!sending}
                     aria-busy={isSending}
-                    title={locked ? "Conclua o passo anterior" : "Ver e enviar"}
+                    title="Ver e enviar"
                   >
-                    {isSending ? <Loader2 className="w-3 h-3 animate-spin" /> : locked ? <Lock className="w-3 h-3" /> : <><Eye className="w-3 h-3 mr-1" /> {sent ? "Reenviar" : "Ver e enviar"}</>}
+                    {isSending ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Eye className="w-3 h-3 mr-1" /> {sent ? "Reenviar" : "Ver e enviar"}</>}
                   </Button>
-                  {onEditTemplate && !locked && (
+                  {onEditTemplate && (
                     <Button
                       size="sm"
                       variant="ghost"
