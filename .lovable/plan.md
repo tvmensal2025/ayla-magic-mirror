@@ -1,51 +1,44 @@
-# Captação mobile — fácil de mexer
+## Captação mobile — barra fina e meia-tela
 
-Problema relatado: no celular a pílula "Captação 2/10 · 0/10 passos" é pequena, não dá pra arrastar pra baixo, e não acha o botão de expandir. Tem que ser óbvio e grande.
+Arquivo único: `src/components/captacao/CaptureSheet.tsx`.
 
-## O que muda
+### 1. Barra minimizada (substitui a barra grande atual)
 
-### 1. Pílula minimizada vira barra grande (mobile)
-- Hoje: pílula pequena (h-11) centralizada, ícone minúsculo de chevron.
-- Novo: **barra full-width fixa no rodapé**, altura confortável (h-14), com:
-  - À esquerda: ícone Gamepad + "Captação 2/10 · 0/10 passos" (texto maior, legível)
-  - À direita: **dois botões grandes lado a lado**:
-    - `⤢ Abrir` (expande pra tela cheia)
-    - `✕` (fecha)
-  - Toque em qualquer lugar da barra também abre (igual hoje)
-- Respeita `safe-area-inset-bottom` pra não colar no gesto do Android.
+Altura `h-11` (≈44px) full-width no rodapé, respeitando `safe-area-inset-bottom`.
 
-### 2. Painel aberto: sempre fullscreen no mobile
-- Hoje no mobile abre em `38dvh` (compacto) e pra ver tudo precisa achar o botão Maximize2 minúsculo no header.
-- Novo: no **mobile, abrir = fullscreen direto** (`expanded=true`). Sem estado intermediário confuso.
-- Desktop continua com compacto + expandir (não muda).
+Layout em 1 linha:
+- Esquerda: bolinha verde pequena (`w-7 h-7`) com ícone Gamepad
+- Centro: texto compacto numa linha só → `Captação 2/10 · 0/10 passos` (font `text-xs`, truncate)
+- Direita: botão circular verde (`w-9 h-9 rounded-full`) com ícone `Maximize2` (abre)
+- Sem botão "Sair/X" na barra (evita toque acidental; fechar usa o X do header expandido)
 
-### 3. Header com handle (drag) visível e botões grandes
-- Handle (grabber) maior e clicável: toque nele → minimiza.
-- Botões do header (minimizar/fechar) com área de toque ≥40px no mobile (hoje são w-5 h-5 = 20px, abaixo do mínimo recomendado).
-- Remove o botão Maximize/Minimize do header no mobile (não faz sentido com fullscreen-only).
+Toque em qualquer parte da barra abre o sheet. Visual: `bg-card/95 backdrop-blur`, borda superior verde fina, sombra suave.
 
-### 4. Gesto de arrastar pra baixo pra minimizar
-- Adicionar swipe-down no handle do topo: arrastar pra baixo > 60px minimiza o painel.
-- Usar listener simples de `touchstart`/`touchmove`/`touchend` no grabber — sem dependência nova.
+### 2. Abertura em meia tela
 
-### 5. Footer mobile compacto mas tocável
-- Botão "CADASTRAR" continua dominante (já é grande).
-- "Enviar tudo" e "Sair" com altura mínima h-10 no mobile (hoje h-7 = 28px, difícil de acertar).
+Ao expandir no mobile, o sheet sobe até **50dvh** (não fullscreen). Chat continua visível em cima.
 
-## Arquivos afetados
+- `expanded=false` por padrão no mobile → altura `h-[50dvh]`
+- Grabber arrasta pra **cima** (>60px) → vira fullscreen (`expanded=true`, `h-[100dvh]`)
+- Grabber arrasta pra **baixo** (>60px) → minimiza pra barra fina
+- Overlay continua transparente e sem bloquear o chat enquanto não estiver fullscreen
 
-- `src/components/captacao/CaptureSheet.tsx` — toda a mudança fica aqui:
-  - Reescrever bloco da pílula minimizada (full-width bar com botões claros)
-  - Forçar `expanded=true` quando `isMobile` ao abrir
-  - Aumentar áreas de toque do header/footer no mobile
-  - Adicionar handlers de swipe-down no grabber
+### 3. Header/footer compactos no modo meia-tela
 
-Nenhuma outra parte do sistema é tocada (sem mudar chat, sem mudar lógica de captação, sem mudar backend).
+Mantém o layout compacto já existente (header `py-1`, footer `px-2 py-1`) quando `expanded=false`. Quando vira fullscreen, usa o layout grande já presente.
 
-## Verificação
+Botões do header com área de toque mínima 40px (`h-10 w-10`) — apenas X (fechar) e ChevronDown (minimizar) no mobile; desktop mantém Minimize/Maximize.
 
-- Viewport 429x853 (o atual do usuário):
-  1. Abrir captação → deve abrir fullscreen direto
-  2. Tocar no grabber ou no botão ✕/minimize → minimiza pra barra grande no rodapé
-  3. Barra minimizada deve mostrar texto legível + botão "Abrir" óbvio
-  4. Arrastar pílula/header pra baixo → minimiza
+### 4. Não muda
+
+- Lógica de captura, passos, envio, scoreboard, combo, XP — intocado
+- Desktop continua igual (sheet `38dvh` compacto / fullscreen via M)
+- Chat, useMessages, scroll — intocado
+
+### Verificação
+
+Preview 429x853:
+- Abre lead → barra fina de 44px no rodapé com "Captação 2/10 · 0/10 passos" + botão redondo Abrir
+- Toca barra → sheet sobe a 50dvh, chat continua visível acima
+- Arrasta grabber pra cima → fullscreen
+- Arrasta grabber pra baixo → volta pra barra fina
