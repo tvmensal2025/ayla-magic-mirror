@@ -268,7 +268,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
     const children = scroller.querySelectorAll<HTMLElement>("[data-msg-bubble]");
     children.forEach((c) => ro.observe(c));
     return () => ro.disconnect();
-  }, [messages]);
+  }, [messages, scheduleScrollToBottom]);
 
   // Unified helper to resolve JID for media/audio/document sends
   const getResolvedPhone = useCallback(async (): Promise<string | null> => {

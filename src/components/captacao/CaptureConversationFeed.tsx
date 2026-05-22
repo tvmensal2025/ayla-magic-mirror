@@ -122,7 +122,7 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
     const ro = new ResizeObserver(go);
     ro.observe(scroller);
     return () => ro.disconnect();
-  }, [rows.length]);
+  }, [rows.length, scheduleScrollToBottom]);
 
   return (
     <div className="rounded-lg border border-border bg-card/30 overflow-hidden">
