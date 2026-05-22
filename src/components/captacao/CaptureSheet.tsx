@@ -296,10 +296,12 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
         className={`w-full p-0 flex flex-col gap-0 border-0 bg-background sm:max-w-none shadow-[0_-12px_40px_-12px_hsl(var(--primary)/0.35)] ${
           expanded
             ? "h-[100dvh] rounded-none"
-            : "h-[38dvh] min-h-[240px] max-h-[100dvh] rounded-t-2xl"
+            : isMobile
+              ? "h-[50dvh] min-h-[280px] max-h-[100dvh] rounded-t-2xl"
+              : "h-[38dvh] min-h-[240px] max-h-[100dvh] rounded-t-2xl"
         }`}
       >
-        {/* Grabber — swipe-down minimiza; tap também minimiza no mobile */}
+        {/* Grabber — arraste pra cima vira fullscreen, pra baixo minimiza */}
         <div
           className="flex flex-col items-center pt-2 pb-1 shrink-0 cursor-grab active:cursor-grabbing touch-none"
           onTouchStart={(e) => { (e.currentTarget as any)._startY = e.touches[0].clientY; }}
@@ -308,13 +310,14 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
             if (typeof start === "number") {
               const dy = e.touches[0].clientY - start;
               if (dy > 60) { setMinimized(true); (e.currentTarget as any)._startY = undefined; }
+              else if (dy < -60) { setExpanded(true); (e.currentTarget as any)._startY = undefined; }
             }
           }}
-          onClick={() => { if (isMobile) setMinimized(true); }}
-          title="Arraste pra baixo pra minimizar"
+          title="Arraste pra cima pra expandir, pra baixo pra minimizar"
         >
           <div className="w-12 h-1.5 rounded-full bg-muted-foreground/50" />
         </div>
+
 
         {/* Header */}
         <header className={`px-3 border-b border-border/60 bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20 ${expanded ? "pt-2 pb-2" : "py-1"}`}>
