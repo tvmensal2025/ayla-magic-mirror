@@ -3,7 +3,7 @@
   "short_name": "iGreen",
   "description": "Suporte ao Licenciado iGreen Energy",
   "id": "/admin",
-  "start_url": "/admin",
+  "start_url": "/admin?source=pwa",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",

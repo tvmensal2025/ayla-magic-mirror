@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
   server: {
@@ -10,7 +11,78 @@ export default defineConfig({
       overlay: false,
     },
   },
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: "autoUpdate",
+      injectRegister: null, // registramos manualmente em main.tsx (com guards)
+      strategies: "generateSW",
+      devOptions: { enabled: false },
+      includeAssets: [
+        "favicon.png",
+        "favicon-16.png",
+        "favicon-32.png",
+        "apple-touch-icon.png",
+      ],
+      manifest: false, // usamos o /public/manifest.json existente
+      workbox: {
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
+        navigateFallback: "/index.html",
+        navigateFallbackDenylist: [
+          /^\/~oauth/,
+          /^\/api/,
+          /^\/functions/,
+        ],
+        // Não tente precachear o manifest manual nem assets gigantes.
+        globIgnores: ["**/manifest.json"],
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        runtimeCaching: [
+          {
+            // HTML — sempre tenta rede antes (3s) para pegar deploy novo.
+            urlPattern: ({ request }) => request.mode === "navigate",
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "html-cache",
+              networkTimeoutSeconds: 3,
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 },
+            },
+          },
+          {
+            // Supabase / edge functions / WhatsApp media — NUNCA cachear.
+            urlPattern: /^https:\/\/[^/]*supabase\.(co|in)\//i,
+            handler: "NetworkOnly",
+          },
+          {
+            // MinIO / mídia dinâmica — sempre rede.
+            urlPattern: /minio|igreen\.cloud\/(media|whatsapp)/i,
+            handler: "NetworkOnly",
+          },
+          {
+            // Fontes Google.
+            urlPattern: /^https:\/\/fonts\.(gstatic|googleapis)\.com\//,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "google-fonts",
+              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Imagens estáticas do app.
+            urlPattern: ({ request }) => request.destination === "image",
+            handler: "CacheFirst",
+            options: {
+              cacheName: "img-cache",
+              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
+      },
+    }),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
