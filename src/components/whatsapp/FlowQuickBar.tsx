@@ -86,7 +86,7 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
         const v = String(f.variant || "A").toUpperCase() as "A" | "B" | "C";
         if (["A", "B", "C"].includes(v) && !byVariant.has(v)) byVariant.set(v, f.id);
       });
-      byVariantRef.current = byVariant;
+      setByVariant(byVariant);
       const available = (["A", "B", "C"] as const).filter((v) => byVariant.has(v));
       if (!mounted) return;
       setVariantsAvailable(available.length > 0 ? available : ["A"]);
