@@ -1,16 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Mic, Square, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type OpusRecorderClass = any;
-let RecorderPromise: Promise<OpusRecorderClass> | null = null;
-async function loadRecorder(): Promise<OpusRecorderClass> {
-  if (!RecorderPromise) {
-    RecorderPromise = import("opus-recorder").then((m) => (m as { default: OpusRecorderClass }).default || m);
-  }
-  return RecorderPromise;
-}
+import { loadOpusRecorder } from "@/lib/opusRecorderLoader";
 
 type Props = {
   onRecorded: (blob: Blob, durationSec: number) => Promise<void> | void;
