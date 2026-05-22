@@ -35,6 +35,14 @@ export interface BotContext {
   message: any;
   key: any;
   messageId: string;
+  /**
+   * Nome da instância Evolution (ex.: "ayla-igreen-prod"). Repassado para
+   * `checkAndMarkProcessed` em handlers internos para garantir que a chave
+   * de dedupe seja `(message_id, instance_name)` e não apenas `message_id`
+   * (multi-tenant: o mesmo message_id pode aparecer em duas instâncias
+   * diferentes sem que uma derrube a outra).
+   */
+  instanceName: string;
 
   // Media (resolved before bot flow)
   fileUrl: string | null;

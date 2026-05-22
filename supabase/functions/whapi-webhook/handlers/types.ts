@@ -35,6 +35,12 @@ export interface BotContext {
   message: any;
   key: any;
   messageId: string;
+  /**
+   * Nome da instância Whapi (ex.: "whapi-superadmin"). Repassado para
+   * `checkAndMarkProcessed` em handlers internos para garantir que a chave
+   * de dedupe seja `(message_id, instance_name)` e não apenas `message_id`.
+   */
+  instanceName: string;
 
   // Media (resolved before bot flow)
   fileUrl: string | null;

@@ -1,0 +1,346 @@
+// Tests for `_shared/flow-router.ts` — bugfix `whatsapp-flow-reliability-fix`,
+// tasks 18 (cláusula 2.12) e 20 (cláusula 2.15).
+//
+// Cobre:
+//   - routeEngine preserva `conversation_step` para qualquer
+//     CADASTRO_STEP, mesmo quando a flag muda (PBT + casos unitários);
+//   - matchTransition prioriza buttonId sobre messageText na ordem
+//     definida no design §3.3.
+
+import {
+  assert,
+  assertEquals,
+} from "https://deno.land/std@0.224.0/assert/mod.ts";
+import fc from "https://esm.sh/fast-check@3.23.2";
+
+import {
+  CADASTRO_STEPS,
+  type FlowTransition,
+  matchTransition,
+  routeEngine,
+  SPECIAL_GOTO_VALUES,
+} from "./flow-router.ts";
+
+// ─── routeEngine: unit ──────────────────────────────────────────────────
+
+Deno.test("routeEngine preserves cadastro step when consultant flag flips on", () => {
+  const r = routeEngine({
+    currentStep: "aguardando_conta",
+    conversationalFlowEnabled: true,
+    customerOverride: null,
+  });
+  assertEquals(r, { engine: "sys", step: "aguardando_conta" });
+});
+
+Deno.test("routeEngine preserves cadastro step when consultant flag is off", () => {
+  const r = routeEngine({
+    currentStep: "aguardando_doc_frente",
+    conversationalFlowEnabled: false,
+    customerOverride: null,
+  });
+  assertEquals(r, { engine: "sys", step: "aguardando_doc_frente" });
+});
+
+Deno.test("routeEngine preserves cadastro step when customer override is false", () => {
+  const r = routeEngine({
+    currentStep: "aguardando_otp",
+    conversationalFlowEnabled: true,
+    customerOverride: false,
+  });
+  assertEquals(r, { engine: "sys", step: "aguardando_otp" });
+});
+
+Deno.test("routeEngine preserves cadastro step even when stored with flow: prefix", () => {
+  // Pathological case: someone wrote a cadastro step with the flow:
+  // prefix. routeEngine should still recognise it as cadastro and pin
+  // engine=sys.
+  const r = routeEngine({
+    currentStep: "flow:aguardando_conta",
+    conversationalFlowEnabled: true,
+    customerOverride: null,
+  });
+  assertEquals(r, { engine: "sys", step: "aguardando_conta" });
+});
+
+Deno.test("routeEngine routes flow: prefix to flow when flag is on", () => {
+  const r = routeEngine({
+    currentStep: "flow:passo_abertura",
+    conversationalFlowEnabled: true,
+    customerOverride: null,
+  });
+  assertEquals(r, { engine: "flow", step: "passo_abertura" });
+});
+
+Deno.test("routeEngine resets to welcome when flow step but consultant flag off", () => {
+  const r = routeEngine({
+    currentStep: "flow:passo_abertura",
+    conversationalFlowEnabled: false,
+    customerOverride: null,
+  });
+  assertEquals(r, { engine: "sys", step: "welcome" });
+});
+
+Deno.test("routeEngine resets to welcome when flow step but customer override false", () => {
+  const r = routeEngine({
+    currentStep: "flow:passo_abertura",
+    conversationalFlowEnabled: true,
+    customerOverride: false,
+  });
+  assertEquals(r, { engine: "sys", step: "welcome" });
+});
+
+Deno.test("routeEngine treats UUID without prefix as flow step", () => {
+  const r = routeEngine({
+    currentStep: "12345678-1234-1234-1234-123456789abc",
+    conversationalFlowEnabled: true,
+    customerOverride: null,
+  });
+  assertEquals(r.engine, "flow");
+});
+
+Deno.test("routeEngine returns sys/null for fresh customer", () => {
+  const r = routeEngine({
+    currentStep: null,
+    conversationalFlowEnabled: true,
+    customerOverride: null,
+  });
+  assertEquals(r, { engine: "sys", step: null });
+});
+
+Deno.test("routeEngine routes welcome step to sys regardless of flag", () => {
+  for (const flag of [true, false]) {
+    const r = routeEngine({
+      currentStep: "welcome",
+      conversationalFlowEnabled: flag,
+      customerOverride: null,
+    });
+    assertEquals(r, { engine: "sys", step: "welcome" });
+  }
+});
+
+// ─── routeEngine: PBT (cláusula 2.12) ──────────────────────────────────
+//
+// Validates: Requirements 2.12
+//
+// Para qualquer (currentStep ∈ CADASTRO_STEPS, flag, override), o step
+// retornado por routeEngine é exatamente igual ao step de entrada e o
+// engine é 'sys'. Garante que toggling a flag mid-conversa nunca derruba
+// um cliente em cadastro.
+
+Deno.test("PBT: routeEngine preserves CADASTRO step under any flag transition", () => {
+  const cadastroSteps = [...CADASTRO_STEPS];
+  fc.assert(
+    fc.property(
+      fc.constantFrom(...cadastroSteps),
+      fc.boolean(),
+      fc.option(fc.boolean(), { nil: null }),
+      (step, consultantFlag, override) => {
+        const r = routeEngine({
+          currentStep: step,
+          conversationalFlowEnabled: consultantFlag,
+          customerOverride: override,
+        });
+        return r.engine === "sys" && r.step === step;
+      },
+    ),
+    { numRuns: 200 },
+  );
+});
+
+Deno.test("PBT: routeEngine preserves CADASTRO step even when stored with flow: prefix", () => {
+  const cadastroSteps = [...CADASTRO_STEPS];
+  fc.assert(
+    fc.property(
+      fc.constantFrom(...cadastroSteps),
+      fc.boolean(),
+      fc.option(fc.boolean(), { nil: null }),
+      (step, consultantFlag, override) => {
+        const r = routeEngine({
+          currentStep: `flow:${step}`,
+          conversationalFlowEnabled: consultantFlag,
+          customerOverride: override,
+        });
+        return r.engine === "sys" && r.step === step;
+      },
+    ),
+    { numRuns: 200 },
+  );
+});
+
+// ─── matchTransition: unit (cláusula 2.15) ─────────────────────────────
+
+const cadastroBtn: FlowTransition = {
+  trigger_phrases: ["btn_cadastro", "Quero cadastro"],
+  goto_step_id: "step-cadastro",
+};
+const humanoSpecial: FlowTransition = {
+  trigger_phrases: [],
+  goto_special: "humano",
+};
+const textOnly: FlowTransition = {
+  trigger_phrases: ["preço", "quanto custa"],
+  goto_step_id: "step-preco",
+};
+const intentOnly: FlowTransition = {
+  trigger_intent: "interesse_alto",
+  goto_step_id: "step-fechamento",
+};
+
+Deno.test("matchTransition: buttonId matches trigger_phrase (case-insensitive trim)", () => {
+  const t = matchTransition({
+    transitions: [cadastroBtn, textOnly],
+    buttonId: "  BTN_CADASTRO  ",
+    messageText: "preço",
+  });
+  assertEquals(t?.goto_step_id, "step-cadastro");
+});
+
+Deno.test("matchTransition: buttonId matches goto_special", () => {
+  const t = matchTransition({
+    transitions: [textOnly, humanoSpecial],
+    buttonId: "humano",
+    messageText: "",
+  });
+  assertEquals(t?.goto_special, "humano");
+});
+
+Deno.test("matchTransition: buttonId beats messageText when both could match", () => {
+  // messageText "preço" would match `textOnly`, but buttonId points at
+  // a different transition — buttonId wins.
+  const t = matchTransition({
+    transitions: [textOnly, cadastroBtn],
+    buttonId: "btn_cadastro",
+    messageText: "quanto custa o preço",
+  });
+  assertEquals(t?.goto_step_id, "step-cadastro");
+});
+
+Deno.test("matchTransition: falls back to messageText when buttonId is empty", () => {
+  const t = matchTransition({
+    transitions: [textOnly, cadastroBtn],
+    buttonId: "",
+    messageText: "qual o preço?",
+  });
+  assertEquals(t?.goto_step_id, "step-preco");
+});
+
+Deno.test("matchTransition: falls back to messageText when buttonId doesn't match anything", () => {
+  const t = matchTransition({
+    transitions: [textOnly, cadastroBtn],
+    buttonId: "btn_inexistente",
+    messageText: "quero saber o preço",
+  });
+  assertEquals(t?.goto_step_id, "step-preco");
+});
+
+Deno.test("matchTransition: intent match still works as middle priority", () => {
+  const t = matchTransition({
+    transitions: [textOnly, intentOnly],
+    buttonId: "",
+    messageText: "",
+    intents: ["interesse_alto"],
+  });
+  assertEquals(t?.goto_step_id, "step-fechamento");
+});
+
+Deno.test("matchTransition: returns null when nothing matches", () => {
+  const t = matchTransition({
+    transitions: [textOnly, intentOnly],
+    buttonId: "",
+    messageText: "olá",
+    intents: ["intent_qualquer"],
+  });
+  assertEquals(t, null);
+});
+
+Deno.test("matchTransition: returns null for empty / nullish transitions", () => {
+  assertEquals(
+    matchTransition({ transitions: null, buttonId: "x", messageText: "y" }),
+    null,
+  );
+  assertEquals(
+    matchTransition({ transitions: [], buttonId: "x", messageText: "y" }),
+    null,
+  );
+});
+
+Deno.test("matchTransition: buttonId 'menu' / 'cadastro' / 'humano' / 'repeat' route via goto_special", () => {
+  for (const sp of SPECIAL_GOTO_VALUES) {
+    const t = matchTransition({
+      transitions: [{ goto_special: sp }],
+      buttonId: sp,
+      messageText: "",
+    });
+    assertEquals(t?.goto_special, sp);
+  }
+});
+
+Deno.test("matchTransition: buttonId only routes via goto_special when value is recognised", () => {
+  // 'desconhecido' is NOT in SPECIAL_GOTO_VALUES; should not match even
+  // though goto_special equals buttonId.
+  const t = matchTransition({
+    transitions: [{ goto_special: "desconhecido" }],
+    buttonId: "desconhecido",
+    messageText: "",
+  });
+  assertEquals(t, null);
+});
+
+// ─── matchTransition: PBT (cláusula 2.15) ──────────────────────────────
+//
+// Validates: Requirements 2.15
+//
+// Quando há uma transição cuja `trigger_phrases` contém o `buttonId`,
+// matchTransition retorna ESSA transição (e não a que casa apenas com
+// messageText). Garante que a prioridade de buttonId é estável para
+// qualquer arranjo de phrases/text.
+
+Deno.test("PBT: when buttonId is in trigger_phrases, matchTransition picks that transition over messageText-only matches", () => {
+  fc.assert(
+    fc.property(
+      // gera buttonId "BTN_x" e messageText distinto
+      fc.string({ minLength: 1, maxLength: 12 }).filter((s) => /^[A-Za-z0-9_]+$/.test(s)),
+      fc.string({ minLength: 1, maxLength: 12 }).filter((s) => /^[a-z]+$/.test(s)),
+      (rawBtn, rawText) => {
+        const btnId = `BTN_${rawBtn}`;
+        const textPhrase = `txt_${rawText}`;
+        if (btnId.toLowerCase() === textPhrase.toLowerCase()) return true; // skip rare collision
+
+        const buttonTrans: FlowTransition = {
+          trigger_phrases: [btnId],
+          goto_step_id: "BUTTON",
+        };
+        const textTrans: FlowTransition = {
+          trigger_phrases: [textPhrase],
+          goto_step_id: "TEXT",
+        };
+
+        const t = matchTransition({
+          transitions: [textTrans, buttonTrans], // intentionally text first
+          buttonId: btnId,
+          messageText: textPhrase,
+        });
+        return t?.goto_step_id === "BUTTON";
+      },
+    ),
+    { numRuns: 200 },
+  );
+});
+
+// ─── Sanity: CADASTRO_STEPS keeps the canonical entries ────────────────
+
+Deno.test("CADASTRO_STEPS contains the canonical pipeline entries", () => {
+  for (
+    const expected of [
+      "aguardando_conta",
+      "ask_cpf",
+      "aguardando_doc_frente",
+      "aguardando_doc_verso",
+      "aguardando_otp",
+      "aguardando_facial",
+      "complete",
+    ]
+  ) {
+    assert(CADASTRO_STEPS.has(expected), `missing ${expected} from CADASTRO_STEPS`);
+  }
+});

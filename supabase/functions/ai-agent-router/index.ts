@@ -18,6 +18,21 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { geminiGenerate } from "../_shared/gemini.ts";
 import { createEvolutionSender } from "../_shared/evolution-api.ts";
+import {
+  checkPreconditions,
+  deterministicFallback,
+  filterMediaIds,
+  type GroundingContext,
+  sanitizeHumanReply as groundedSanitizeHumanReply,
+  validateAudioSlot,
+  validateNextStep,
+} from "../_shared/grounding.ts";
+import {
+  type FlowReliabilityV2Flag,
+  getFlowReliabilityV2,
+  isV2Active,
+  isV2Enabled,
+} from "../_shared/feature-flag.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -34,6 +49,30 @@ const FUNNEL_STEPS = [
   "cadastro_portal", "aguardando_otp", "aguardando_facial",
   "complete", "handoff_humano",
 ] as const;
+
+// Mirror of CADASTRO_STEPS from evolution-webhook/handlers/conversational/index.ts
+// Kept here to avoid cross-function imports between Edge Functions and to
+// support the validateNextStep gate per design §6 / bugfix 2.18.
+const CADASTRO_STEPS: ReadonlySet<string> = new Set([
+  "aguardando_conta", "processando_ocr_conta", "confirmando_dados_conta",
+  "ask_tipo_documento", "aguardando_doc_auto", "aguardando_doc_frente", "aguardando_doc_verso",
+  "confirmando_dados_doc", "confirmar_titularidade", "ask_name", "ask_cpf", "ask_rg", "ask_birth_date",
+  "ask_phone_confirm", "ask_phone", "ask_email", "ask_cep", "ask_number",
+  "ask_complement", "ask_installation_number", "ask_bill_value",
+  "ask_doc_frente_manual", "ask_doc_verso_manual", "ask_finalizar",
+  "finalizando", "portal_submitting", "aguardando_otp", "validando_otp",
+  "aguardando_facial", "aguardando_assinatura", "cadastro_em_analise", "complete", "aguardando_humano",
+  "editing_conta_menu", "editing_conta_nome", "editing_conta_endereco",
+  "editing_conta_cep", "editing_conta_distribuidora", "editing_conta_instalacao", "editing_conta_valor",
+  "editing_doc_menu", "editing_doc_nome", "editing_doc_cpf", "editing_doc_rg",
+  "editing_doc_nascimento", "editing_doc_pai", "editing_doc_mae",
+]);
+
+const ALLOWED_LINK_DOMAINS = [
+  "igreen.energy",
+  "igreenenergybrasil.site",
+  "igreenenergybrasil.com",
+];
 
 const INTENTS = [
   "saudacao","duvida","objecao","aceite","recusa",
@@ -335,6 +374,189 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
     if (decision.detected_intent === "pediu_humano") {
       decision.handoff = true;
       decision.handoff_reason = decision.handoff_reason || "pediu_humano";
+    }
+
+    // ─── 9e) Pipeline de validação (Tasks 22 + 29 — bugfix 2.18, 2.27..2.31) ───
+    //
+    // Ordem (design §6):
+    //   validateNextStep → filterMediaIds → validateAudioSlot
+    //   → sanitizeHumanReply (grounded) → checkPreconditions → deterministicFallback
+    //
+    // Gate por feature flag `consultants.flow_reliability_v2`:
+    //   'off'           → caminho legado, sem validação.
+    //   'dark'          → validação + log, mas emite a decisão original.
+    //   'canary' / 'on' → emite a decisão validada (finalDecision).
+    //
+    // Toda violação é registrada em `ai_agent_logs` via logAiViolation. Insert
+    // failures são engolidas para nunca quebrar o caminho do cliente.
+    const flowFlag: FlowReliabilityV2Flag = await getFlowReliabilityV2(
+      supabase,
+      consultantId,
+    );
+
+    /** Insere uma linha de violação em `ai_agent_logs`. Nunca lança. */
+    async function logAiViolation(
+      kind: string,
+      payload: Record<string, unknown>,
+    ): Promise<void> {
+      try {
+        await supabase.from("ai_agent_logs").insert({
+          consultant_id: consultantId,
+          customer_id,
+          phone: customer.phone_whatsapp,
+          step_before: stepBefore,
+          step_after: stepBefore,
+          // `ai_agent_logs` não tem coluna `kind` dedicada — ancoramos a tag
+          // dentro de `error` (já indexada para read-only inspection) e
+          // anexamos o payload em `llm_output` para inspeção rica.
+          error: kind,
+          llm_output: { violation_kind: kind, ...payload },
+          handoff: false,
+          latency_ms: Date.now() - t0,
+        });
+      } catch (e) {
+        console.warn(`logAiViolation(${kind}) falhou:`, (e as any)?.message);
+      }
+    }
+
+    let finalDecision = decision;
+    if (isV2Enabled(flowFlag)) {
+      // (1) Conjunto de steps válidos: CADASTRO_STEPS ∪ FUNNEL_STEPS ∪ steps ativos
+      // do consultor em `bot_flow_steps` (referenciados via `bot_flows`).
+      const validSteps = new Set<string>([...CADASTRO_STEPS, ...FUNNEL_STEPS]);
+      const stepTemplates: Record<string, string> = {};
+      try {
+        const { data: consultantFlows } = await supabase
+          .from("bot_flows")
+          .select("id")
+          .eq("consultant_id", consultantId)
+          .eq("is_active", true);
+        const flowIds = ((consultantFlows as any[]) || [])
+          .map((f) => f?.id)
+          .filter((id) => !!id);
+        if (flowIds.length > 0) {
+          const { data: stepRows } = await supabase
+            .from("bot_flow_steps")
+            .select("step_key, message_text")
+            .in("flow_id", flowIds)
+            .eq("is_active", true);
+          for (const row of (stepRows as any[]) || []) {
+            const key = row?.step_key ? String(row.step_key) : "";
+            if (key) {
+              validSteps.add(key);
+              if (typeof row.message_text === "string" && row.message_text.trim()) {
+                stepTemplates[key] = row.message_text;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("validation: failed to load consultant steps:", (e as any)?.message);
+      }
+
+      // (2) IDs de mídia relevantes — `relevantMedia` já foi computado em §5.
+      const relevantMediaIds = new Set<string>(
+        (relevantMedia || [])
+          .map((m: any) => m?.id ? String(m.id) : "")
+          .filter((s: string) => s.length > 0),
+      );
+
+      // (3) Contexto de grounding: knowledge + customer + allowedDomains.
+      const groundingCtx: GroundingContext = {
+        knowledgeSections: ((knowledge as any[]) || []).map((k) => ({
+          title: k?.title,
+          body: String(k?.content || ""),
+        })),
+        customer,
+        allowedDomains: ALLOWED_LINK_DOMAINS,
+      };
+
+      // (4) validateNextStep — atende 2.18.
+      const proposedNextStep = String(decision.next_step || "");
+      const safeNextStep = validateNextStep(proposedNextStep, validSteps, stepBefore);
+      if (safeNextStep !== proposedNextStep) {
+        await logAiViolation("ai_invalid_next_step", {
+          proposed: proposedNextStep,
+          current: stepBefore,
+          chosen: safeNextStep,
+        });
+      }
+
+      // (5) filterMediaIds — atende 2.28.
+      const { kept: keptMediaIds, dropped: droppedMediaIds } = filterMediaIds(
+        Array.isArray(decision.media_to_send_ids) ? decision.media_to_send_ids : [],
+        relevantMediaIds,
+      );
+      if (droppedMediaIds.length > 0) {
+        await logAiViolation("ai_hallucinated_media_id", {
+          dropped: droppedMediaIds,
+          relevant_count: relevantMediaIds.size,
+        });
+      }
+
+      // (6) validateAudioSlot — atende 2.29.
+      const proposedSlot = String(decision.audio_slot_key || "");
+      const safeAudioSlot = validateAudioSlot(proposedSlot, validSlotKeys, stepBefore);
+      if (proposedSlot && safeAudioSlot !== proposedSlot) {
+        await logAiViolation("ai_invalid_audio_slot", {
+          proposed: proposedSlot,
+          chosen: safeAudioSlot,
+          current_step: stepBefore,
+        });
+      }
+
+      // (7) sanitizeHumanReply (grounded) — atende 2.27.
+      const originalReply = String(decision.reply_text || "");
+      const safeReply = groundedSanitizeHumanReply(originalReply, groundingCtx);
+      if (originalReply.trim() && !safeReply) {
+        await logAiViolation("ai_reply_scrubbed", {
+          original: originalReply.slice(0, 200),
+        });
+      }
+
+      // (8) checkPreconditions — atende 2.31.
+      const pre = checkPreconditions(safeNextStep, customer);
+      const finalNextStep = pre.ok ? safeNextStep : stepBefore;
+      if (!pre.ok) {
+        await logAiViolation("ai_precondition_failed", {
+          step: safeNextStep,
+          reason: pre.reason,
+        });
+      }
+
+      // (9) deterministicFallback se tudo esvaziou — atende 2.30.
+      const everythingEmpty = !safeReply && !safeAudioSlot && keptMediaIds.length === 0;
+      if (everythingEmpty) {
+        const fb = deterministicFallback(stepBefore, stepTemplates);
+        await logAiViolation("ai_deterministic_fallback", {
+          reason: "all_outputs_empty",
+          template_used: !!stepTemplates[stepBefore],
+        });
+        finalDecision = {
+          ...decision,
+          reply_text: fb.reply_text,
+          next_step: fb.next_step,
+          media_to_send_ids: fb.media_to_send_ids,
+          audio_slot_key: fb.audio_slot_key,
+          should_pause_seconds: fb.should_pause_seconds,
+        };
+      } else {
+        finalDecision = {
+          ...decision,
+          reply_text: safeReply,
+          next_step: finalNextStep,
+          media_to_send_ids: keptMediaIds,
+          audio_slot_key: safeAudioSlot,
+        };
+      }
+    }
+
+    // Aplicação do resultado: em 'canary'/'on', a decisão validada vira a
+    // decisão emitida. Em 'dark', as violações foram logadas mas o caminho
+    // legado segue inalterado (decisão original). Em 'off', `finalDecision`
+    // === `decision` (atribuição inicial), nada muda.
+    if (isV2Active(flowFlag)) {
+      decision = finalDecision;
     }
 
     // 10) Executar ações

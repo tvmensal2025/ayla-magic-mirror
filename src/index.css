@@ -425,6 +425,24 @@ html {
 .animate-game-glow { animation: game-glow 2.2s ease-in-out infinite; }
 .animate-game-pop { animation: game-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 .animate-game-rise { animation: game-rise 1.4s ease-out forwards; }
+
+/* XP floater — sobe na vertical com fade. Usado pelo XpFloater. */
+@keyframes game-float-up {
+  0%   { transform: translateY(0); opacity: 0; }
+  15%  { opacity: 1; }
+  100% { transform: translateY(-90px); opacity: 0; }
+}
+.animate-game-float-up { animation: game-float-up 1.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+/* Botão "Cadastrar" pulsante intenso quando completa — substitui animate-pulse
+   nativo do Tailwind por algo mais perceptível em mobile. */
+@keyframes game-cta-shake {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 30px hsl(142 76% 45% / 0.6); }
+  25%      { transform: scale(1.04) rotate(-1deg); box-shadow: 0 0 50px hsl(142 76% 45% / 0.9); }
+  50%      { transform: scale(1.06); box-shadow: 0 0 60px hsl(142 76% 45% / 1); }
+  75%      { transform: scale(1.04) rotate(1deg); box-shadow: 0 0 50px hsl(142 76% 45% / 0.9); }
+}
+.animate-game-cta-shake { animation: game-cta-shake 1.6s ease-in-out infinite; }
 .game-confetti {
   animation: game-confetti 2.2s ease-out forwards;
 }
@@ -455,6 +473,7 @@ html {
   .animate-xp-rise, .animate-combo-pop, .animate-shimmer-gold,
   .animate-card-flip, .animate-field-flash, .animate-bg-drift,
   .animate-boss-pulse, .animate-game-bounce, .animate-game-glow,
+  .animate-game-float-up, .animate-game-cta-shake,
   .animate-game-pop, .animate-game-rise, .game-confetti,
   .game-aurora, .game-xp-shimmer { animation: none !important; }
 }

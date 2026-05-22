@@ -115,7 +115,12 @@ export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMed
   }
 
   return (
-    <div className="relative border-t border-border bg-card p-2">
+    <div
+      className="relative border-t border-border bg-card p-2"
+      // Garante que o composer respeite o safe-area do iOS (notch/home bar)
+      // e fique acima do teclado virtual em mobile.
+      style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom, 0px))" }}
+    >
       {showQuickReply && <QuickReplyMenu templates={templates} search={quickSearch} onSelect={handleTemplateSelect} onClose={() => setShowQuickReply(false)} onExactShortcut={setExactShortcut} />}
 
       {file.pendingImageUrl && (
@@ -145,11 +150,45 @@ export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMed
         <input ref={file.fileInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,audio/ogg,audio/mp4,audio/wav,.ogg,.mp3,.m4a,.wav,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={file.handleFileSelect} className="hidden" />
         <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-primary" disabled={disabled || file.isUploading} onClick={() => file.fileInputRef.current?.click()} title="Anexar arquivo"><Paperclip className="h-4 w-4" /></Button>
         <AiSuggestReplies customerId={customerId} disabled={disabled} onPick={(t) => { setText(t); textareaRef.current?.focus(); }} />
-        <textarea ref={textareaRef} value={text} onChange={handleChange} onKeyDown={handleKeyDown} placeholder={file.attachedFile ? "Legenda (opcional)..." : 'Mensagem (use "/" para respostas rápidas)'} disabled={disabled} rows={1} className="flex-1 resize-none bg-secondary rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring min-h-[36px] max-h-[120px]" style={{ overflow: "auto" }} />
-        {text.trim() || file.attachedFile ? (
-          <Button onClick={handleSend} disabled={sending || disabled || file.isUploading} size="icon" className="h-8 w-8 shrink-0 bg-primary hover:bg-primary/90">{sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</Button>
-        ) : (
-          <Button onClick={audio.startRecording} disabled={disabled || !onSendAudio} size="icon" variant="ghost" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-primary" title="Gravar áudio"><Mic className="h-4 w-4" /></Button>
+        <textarea
+          ref={textareaRef}
+          value={text}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          placeholder={file.attachedFile ? "Legenda (opcional)..." : 'Mensagem (use "/" para respostas rápidas)'}
+          disabled={disabled}
+          rows={1}
+          // Hint pro teclado virtual mostrar a tecla "enviar" no Enter
+          // (iOS/Android). Sem isso o Enter no mobile vira "nova linha" e o
+          // usuário não tem como mandar a mensagem.
+          enterKeyHint="send"
+          inputMode="text"
+          autoCapitalize="sentences"
+          className="flex-1 resize-none bg-secondary rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring min-h-[36px] max-h-[120px]"
+          style={{ overflow: "auto" }}
+        />
+        {/* Botão Send sempre visível em mobile pra evitar caso onde o teclado
+            virtual esconde o botão por causa do "text.trim() || attached" gate. */}
+        <Button
+          onClick={handleSend}
+          disabled={sending || disabled || file.isUploading || (!text.trim() && !file.attachedFile)}
+          size="icon"
+          className="h-8 w-8 shrink-0 bg-primary hover:bg-primary/90 disabled:opacity-50"
+          title="Enviar mensagem (Enter)"
+        >
+          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+        </Button>
+        {!text.trim() && !file.attachedFile && (
+          <Button
+            onClick={audio.startRecording}
+            disabled={disabled || !onSendAudio}
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-primary"
+            title="Gravar áudio"
+          >
+            <Mic className="h-4 w-4" />
+          </Button>
         )}
       </div>
     </div>

@@ -373,6 +373,7 @@ export function MessageBubble({ message, onLoadMedia, consultantId, onTemplateSa
           message={message}
           consultantId={consultantId}
           loadedMediaUrl={loadedUrl}
+          onLoadMedia={onLoadMedia}
           focus={dialogFocus}
           onSaved={onTemplateSaved}
         />

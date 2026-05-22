@@ -15,7 +15,8 @@ import { createWhapiSender, parseWhapiMessage } from "../_shared/whapi-api.ts";
 import { checkAndMarkProcessed, logStepTransition, jsonLog } from "../_shared/audit.ts";
 import { runBotFlow } from "./handlers/bot-flow.ts";
 import { runConversationalFlow, CADASTRO_STEPS } from "./handlers/conversational/index.ts";
-import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
+import { normalizeOutgoing, stripPrefix } from "./handlers/step-namespace.ts";
+import { routeEngine as routeEngineV2 } from "../_shared/flow-router.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { detectHandoffIntent } from "../_shared/captureExtractors.ts";
 import { extractMultiField, buildMultiFieldPatch } from "../_shared/multi-field-extractor.ts";
@@ -884,12 +885,17 @@ Deno.serve(async (req) => {
       const customerOverride = (customer as any).conversational_flow_enabled;
       const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
 
-      let engine = routeEngine(rawStep);
+      const routed = routeEngineV2({
+        currentStep: rawStep,
+        conversationalFlowEnabled: consultantFlag,
+        customerOverride: customerOverride === false ? false : null,
+      });
+      let engine = routed.engine;
       // Se o consultor não habilitou o motor novo, ou o cliente desligou explicitamente,
       // qualquer step "flow:" é rebaixado para sys (cai no welcome canônico).
-      if (engine === "flow" && (!consultantFlag || customerOverride === false)) {
-        engine = "sys";
-        (customer as any).conversation_step = "welcome";
+      if (routed.step !== null && routed.step !== stripPrefix(rawStep ?? "")) {
+        // routeEngineV2 forced a reset (e.g. flow→welcome when flag flipped off).
+        (customer as any).conversation_step = routed.step;
       }
 
       // 🚀 FONTE ÚNICA DE VERDADE: Fluxo da Camila (DB) controla TODO step
@@ -970,12 +976,14 @@ Deno.serve(async (req) => {
             supabase, sender: engineSender, customer, consultorId, nomeRepresentante,
             remoteJid, phone, messageText, buttonId, isFile, isButton,
             hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
+            instanceName: "whapi-superadmin",
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
           })
         : await runBotFlow({
             supabase, sender: engineSender, customer, consultorId, nomeRepresentante,
             remoteJid, phone, messageText, buttonId, isFile, isButton,
             hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
+            instanceName: "whapi-superadmin",
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
           });
       const result = testMode && testRunId

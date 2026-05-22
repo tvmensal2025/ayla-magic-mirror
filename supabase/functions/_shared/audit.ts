@@ -4,43 +4,10 @@
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ─── Dedup persistente ──────────────────────────────────────────────
-/**
- * Verifica e registra uma mensagem como processada de forma atômica.
- * Retorna `true` se a mensagem é duplicada (já foi vista), `false` se é nova.
- *
- * Usa INSERT com ON CONFLICT para garantir atomicidade entre múltiplas
- * execuções concorrentes da edge function.
- */
-export async function checkAndMarkProcessed(
-  supabase: SupabaseClient,
-  messageId: string,
-  instanceName: string,
-): Promise<boolean> {
-  if (!messageId) return false;
-
-  try {
-    // upsert + ignoreDuplicates: gera `ON CONFLICT DO NOTHING`,
-    // não levanta exceção 23505 (que poluía o Postgres log) e nos diz
-    // se a linha foi de fato inserida (via .select() retornando 0 ou 1 row).
-    const { data, error } = await supabase
-      .from("webhook_message_dedup")
-      .upsert(
-        { message_id: messageId, instance_name: instanceName },
-        { onConflict: "message_id", ignoreDuplicates: true },
-      )
-      .select("message_id");
-
-    if (error) {
-      console.warn(`[dedup] erro upsert: ${error.code} ${error.message}`);
-      return false; // fail-open
-    }
-    // data vazio → conflito (duplicado); data com 1 row → primeira vez
-    return Array.isArray(data) && data.length === 0;
-  } catch (e: any) {
-    console.warn(`[dedup] exception: ${e?.message}`);
-    return false;
-  }
-}
+// A implementação canônica vive em `_shared/bot/dedupe.ts` (UNIQUE composto
+// `(message_id, instance_name)`, fail-open). Reexportamos daqui para
+// preservar a interface histórica `import { checkAndMarkProcessed } from "_shared/audit.ts"`.
+export { checkAndMarkProcessed } from "./bot/dedupe.ts";
 
 
 // ─── Bot step transitions (analytics) ────────────────────────────────

@@ -326,14 +326,49 @@ Deno.serve(async (req) => {
     }
 
 
-    // Whapi token
+    // ── Roteamento de envio: Whapi (super admin) ou Evolution (demais) ──
+    // Bug crítico anterior: o manual-step-send SEMPRE usava Whapi, mesmo
+    // quando o consultor era um licenciado Evolution. Resultado: o ⚡ no
+    // composer mandava a mensagem do número do super admin, não do número
+    // do consultor.
+    //
+    // Agora identifica o canal a partir de `settings.superadmin_consultant_id`
+    // e da existência de `whatsapp_instances` para o consultor. Fallback
+    // para Whapi mantém compatibilidade com a fase em que tudo era Whapi.
     const { data: settingsRows } = await supabase.from("settings").select("key,value");
     const settings: Record<string, string> = {};
     (settingsRows || []).forEach((s: any) => { settings[s.key] = s.value; });
-    const whapiToken = settings.whapi_token || Deno.env.get("WHAPI_TOKEN") || "";
-    if (!whapiToken) return json({ code: "whapi_token_missing", error: "whapi_token_missing", message: "Token do WhatsApp (Whapi) não configurado no sistema. Avise o admin." }, 500);
+    const superAdminId = String(settings.superadmin_consultant_id || "").trim();
+    const isSuperAdmin = !!superAdminId && superAdminId === String(body.consultantId);
 
-    const sender = createWhapiSender(whapiToken);
+    let sender: any;
+    if (isSuperAdmin) {
+      const whapiToken = settings.whapi_token || Deno.env.get("WHAPI_TOKEN") || "";
+      if (!whapiToken) return json({ code: "whapi_token_missing", error: "whapi_token_missing", message: "Token do WhatsApp (Whapi) não configurado no sistema. Avise o admin." }, 500);
+      sender = createWhapiSender(whapiToken);
+    } else {
+      // Evolution sender — busca a instância do consultor.
+      const { data: inst } = await supabase
+        .from("whatsapp_instances")
+        .select("instance_name, status")
+        .eq("consultant_id", body.consultantId)
+        .maybeSingle();
+      const instanceName = (inst as any)?.instance_name;
+      if (!instanceName) {
+        return json({
+          code: "instance_disconnected",
+          error: "instance_disconnected",
+          message: "Sua instância de WhatsApp não está configurada. Reconecte em /admin/conexao e tente de novo.",
+        }, 502);
+      }
+      const evolutionUrl = Deno.env.get("EVOLUTION_API_URL") || "";
+      const evolutionKey = Deno.env.get("EVOLUTION_API_KEY") || "";
+      if (!evolutionUrl || !evolutionKey) {
+        return json({ code: "evolution_not_configured", error: "evolution_not_configured", message: "Evolution API não configurada no servidor. Avise o admin." }, 500);
+      }
+      const { createEvolutionSender } = await import("../_shared/evolution-api.ts");
+      sender = createEvolutionSender(evolutionUrl, evolutionKey, instanceName);
+    }
 
     // Build variables for text rendering
     const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";

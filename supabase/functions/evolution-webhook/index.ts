@@ -12,6 +12,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { normalizePhone } from "../_shared/utils.ts";
 import { createEvolutionSender, parseEvolutionMessage, extractMediaUrl } from "../_shared/evolution-api.ts";
+import { computeIdempotencyKey } from "../_shared/idempotency.ts";
+import { computeMessageTextHash } from "../_shared/text-hash.ts";
 import { checkAndMarkProcessed, logStepTransition, jsonLog } from "../_shared/audit.ts";
 import {
   isRateLimited,
@@ -22,11 +24,18 @@ import { handleConnectionUpdate } from "./handlers/connection.ts";
 import { tryInterceptOtp } from "./handlers/otp-intercept.ts";
 import { runBotFlow } from "./handlers/bot-flow.ts";
 import { runConversationalFlow, CADASTRO_STEPS } from "./handlers/conversational/index.ts";
-import { normalizeOutgoing, routeEngine, stripPrefix } from "./handlers/step-namespace.ts";
+import { normalizeOutgoing, stripPrefix } from "./handlers/step-namespace.ts";
+import { routeEngine as routeEngineV2 } from "../_shared/flow-router.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { notifyNewLead } from "../_shared/notify-consultant.ts";
 import { syncDealStageFromStep } from "../_shared/crm-stage-sync.ts";
 import { isConsultantAIDisabled } from "../_shared/bot/paused.ts";
+import {
+  getFlowReliabilityV2,
+  isV2Active,
+  isV2Dark,
+  isV2Enabled,
+} from "../_shared/feature-flag.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -42,11 +51,24 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Lock state hoisted to function scope so the outer `finally` can guarantee
+  // a release on every exit path (early-return, exception, normal completion).
+  // `customer-lock.ts` intentionally lives behind direct RPC calls here
+  // (instead of `withCustomerLock`) so we can release the lock *before* the
+  // slow outbound Evolution HTTP call without restructuring the whole
+  // function into a closure. The semantics are identical: the v2 RPC pair
+  // `try_acquire_customer_lock` / `release_customer_lock` enforces TTL safety
+  // (the holder cannot block forever — see migration §4.12 for the contract).
+  let lockSupabaseRef: any = null;
+  let lockToken: string | null = null;
+  let lockCustomerId: string | null = null;
+
   try {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
+    lockSupabaseRef = supabase;
 
     const body = await req.json();
     console.log("Evolution webhook received:", JSON.stringify(body).substring(0, 500));
@@ -107,6 +129,15 @@ Deno.serve(async (req) => {
 
     const sender = createEvolutionSender(EVOLUTION_API_URL, EVOLUTION_API_KEY, instanceName);
 
+    // ─── Feature flag: WhatsApp Flow Reliability v2 (per-consultant) ───
+    // Controls the new dedup/rate-limit/customer-lock ordering described in
+    // bugfix.md §2.6/§2.11/§2.33/§2.37 and design.md §5. Values:
+    //   - 'off'   : legacy path runs unchanged.
+    //   - 'dark'  : v2 code runs in parallel for logging, legacy still drives.
+    //   - 'canary'/'on' : v2 path is the source of truth.
+    // Read fails closed to 'off'. The cached value lives ~30 s per instance.
+    const v2Flag = await getFlowReliabilityV2(supabase, instanceData.consultant_id);
+
     // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (antes de tudo) ──
     // Antes do parse/dedup/customer: se o switch está OFF, ignora e retorna ok.
     if (await isConsultantAIDisabled(supabase, instanceData.consultant_id)) {
@@ -126,12 +157,21 @@ Deno.serve(async (req) => {
     }
 
     const messageId = body.data?.key?.id || "";
-    if (await checkAndMarkProcessed(supabase, messageId, instanceName)) {
+    // Type cast: dedupe.ts pins @supabase/supabase-js@2.49.4 while this file
+    // pins @2; the runtime is identical but TS sees two protected-property
+    // shapes. Same workaround used elsewhere in this file (line 141).
+    if (await checkAndMarkProcessed(supabase as any, messageId, instanceName)) {
       jsonLog("info", "duplicate message ignored", { instance_name: instanceName, message_id: messageId });
       return new Response(JSON.stringify({ ok: true, msg: "duplicate" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    jsonLog("debug", "dedup_checked", {
+      instance_name: instanceName,
+      consultant_id: instanceData.consultant_id,
+      message_id: messageId,
+      v2_flag: v2Flag,
+    });
 
     const {
       remoteJid, messageText, buttonId, hasImage, hasDocument, isFile, isButton,
@@ -147,13 +187,165 @@ Deno.serve(async (req) => {
 
     const phone = normalizePhone(remoteJid.replace("@s.whatsapp.net", ""));
 
-    if (isRateLimited(phone)) {
+    // ─── Rate limit (legacy in-memory + v2 persistent RPC, gated by flag) ──
+    // Legacy: per-instance Map → known to leak at multi-container scale (2.33).
+    // v2 path: try_acquire_rate_limit RPC backs all containers with the same
+    // (phone, window_start) bucket. Under 'dark', we compute both and log the
+    // disagreement but defer to the legacy outcome. Under 'canary'/'on', the
+    // RPC is authoritative and the in-memory map is bypassed.
+    const legacyRateLimited = isRateLimited(phone);
+    let rateLimited = legacyRateLimited;
+    if (isV2Enabled(v2Flag)) {
+      try {
+        const { data: rpcOk, error: rpcErr } = await supabase.rpc(
+          "try_acquire_rate_limit",
+          {
+            p_phone: phone,
+            p_window_ms: RATE_LIMIT_WINDOW_MS,
+            p_max_count: RATE_LIMIT_MAX,
+          },
+        );
+        if (rpcErr) {
+          jsonLog("warn", "rate_limit_rpc_failed", {
+            phone, v2_flag: v2Flag, error: rpcErr.message,
+          });
+          // Fail open to legacy decision so a Postgres hiccup never silences
+          // the customer.
+        } else {
+          const rpcRateLimited = rpcOk === false;
+          if (rpcRateLimited !== legacyRateLimited) {
+            jsonLog("info", "rate_limit_disagreement", {
+              phone, v2_flag: v2Flag,
+              legacy_rate_limited: legacyRateLimited,
+              v2_rate_limited: rpcRateLimited,
+            });
+          }
+          if (isV2Active(v2Flag)) {
+            rateLimited = rpcRateLimited;
+          }
+          // 'dark': keep the legacy outcome (rateLimited already set).
+        }
+      } catch (e) {
+        jsonLog("warn", "rate_limit_rpc_exception", {
+          phone, v2_flag: v2Flag,
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    if (rateLimited) {
       console.warn(`🚫 Rate limited: ${phone} (>${RATE_LIMIT_MAX} msgs em ${RATE_LIMIT_WINDOW_MS}ms)`);
+      jsonLog("warn", "rate_limit_checked", {
+        phone, v2_flag: v2Flag, rate_limited: true,
+      });
       return new Response(JSON.stringify({ ok: true, msg: "rate_limited" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    jsonLog("debug", "rate_limit_checked", {
+      phone, v2_flag: v2Flag, rate_limited: false,
+    });
 
+
+
+    // ─── Customer lock (v2: serialize webhooks per customer_id) ────────
+    // Bugfix conditions 2.11 + 2.37: two concurrent webhooks for the same
+    // customer must not race on `customers.conversation_step`. We hold a
+    // row-based lock (see migration §4.12) for the duration of the load /
+    // handler / persist phase, releasing **before** the slow outbound send
+    // (Evolution HTTP retries have their own idempotency from Task 8).
+    //
+    // We can only lock by an *existing* customer_id. The first message from
+    // a new lead has no row yet; the customers UNIQUE on
+    // (phone_whatsapp, consultant_id) makes that case naturally race-free
+    // (only one INSERT can win), so skipping the lock is safe.
+    //
+    // Under 'dark' mode we acquire-and-release immediately, only to populate
+    // logs that surface lock contention before flipping the flag to 'on'.
+    if (isV2Enabled(v2Flag)) {
+      try {
+        const { data: existing } = await supabase
+          .from("customers")
+          .select("id")
+          .eq("phone_whatsapp", phone)
+          .eq("consultant_id", instanceData.consultant_id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const existingId = (existing as any)?.id ?? null;
+        if (existingId) {
+          const ttlMs = 8000;
+          const maxWaitMs = isV2Active(v2Flag) ? 4000 : 0;
+          const pollIntervalMs = 50;
+          const startedAt = Date.now();
+          while (true) {
+            const { data: token, error: lockErr } = await supabase.rpc(
+              "try_acquire_customer_lock",
+              { p_customer: existingId, p_ttl_ms: ttlMs },
+            );
+            if (lockErr) {
+              jsonLog("warn", "customer_lock_error", {
+                customer_id: existingId,
+                stage: "acquire",
+                v2_flag: v2Flag,
+                message: lockErr.message,
+              });
+              break;
+            }
+            if (typeof token === "string" && token.length > 0) {
+              lockToken = token;
+              lockCustomerId = existingId;
+              jsonLog("info", "customer_lock_acquired", {
+                customer_id: existingId,
+                v2_flag: v2Flag,
+                waited_ms: Date.now() - startedAt,
+                ttl_ms: ttlMs,
+              });
+              break;
+            }
+            const waited = Date.now() - startedAt;
+            if (waited >= maxWaitMs) {
+              jsonLog("warn", "customer_lock_timeout", {
+                customer_id: existingId,
+                v2_flag: v2Flag,
+                waited_ms: waited,
+                ttl_ms: ttlMs,
+                max_wait_ms: maxWaitMs,
+              });
+              if (isV2Active(v2Flag)) {
+                // Caller short-circuits to a neutral 200 — no side effects.
+                // The other webhook holding the lock will respond.
+                return new Response(
+                  JSON.stringify({ ok: true, mode: "customer_lock_timeout" }),
+                  { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                );
+              }
+              break;
+            }
+            await new Promise((r) => setTimeout(r, Math.min(pollIntervalMs, maxWaitMs - waited)));
+          }
+          // Dark mode: drop the lock immediately so we don't change behaviour.
+          if (isV2Dark(v2Flag) && lockToken && lockCustomerId) {
+            try {
+              await supabase.rpc("release_customer_lock", {
+                p_customer: lockCustomerId, p_token: lockToken,
+              });
+            } catch (_) { /* noop */ }
+            lockToken = null;
+            lockCustomerId = null;
+          }
+        } else {
+          jsonLog("debug", "customer_lock_skipped_new_lead", {
+            phone, v2_flag: v2Flag,
+          });
+        }
+      } catch (e) {
+        jsonLog("warn", "customer_lock_setup_failed", {
+          phone,
+          v2_flag: v2Flag,
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
 
 
     // ─── 4) OTP intercept (handled before bot flow) ────────────────────
@@ -391,12 +583,113 @@ Deno.serve(async (req) => {
       aiCfg = aiCfgGlobal;
     }
 
+    // ─── 7.1.a) Consultant opening-step detection (bugfix §2.17) ──────
+    // Se o consultor tem um passo de abertura configurado (primeiro
+    // `bot_flow_steps` ativo OU `bot_flow_qa.is_opening=true`), a configuração
+    // explícita do consultor PRECEDE a abertura genérica do `ai-agent-router`
+    // — caso contrário a Camila tomaria conta do welcome ignorando o roteiro
+    // que o consultor escreveu na UI do Flow Builder. Gate é aplicado apenas
+    // nos passos de abertura (welcome/menu_inicial/sem step), não nos demais
+    // passos conversacionais (qualificacao, apresentacao, objecoes, etc.),
+    // que continuam delegados à IA quando habilitada.
+    //
+    // Observação importante: `bot_flow_steps` NÃO tem coluna `is_opening`
+    // (apenas `bot_flow_qa`). Para steps, "abertura" = primeiro step ativo
+    // ordenado por `position`. Para QA, `is_opening=true` cobre o caso legado
+    // (consultor que ainda não migrou para o Flow Builder dinâmico).
+    let consultantHasOpeningStep = false;
+    const isOpeningTurn =
+      currentStep === "welcome" || currentStep === "menu_inicial" || !customer.conversation_step;
+    if (isOpeningTurn) {
+      try {
+        const { data: activeFlow } = await supabase
+          .from("bot_flows")
+          .select("id")
+          .eq("consultant_id", instanceData.consultant_id)
+          .eq("is_active", true)
+          .maybeSingle();
+        const flowId = (activeFlow as any)?.id ?? null;
+        if (flowId) {
+          // (a) primeiro step ativo da sequência (`bot_flow_steps`)
+          const { data: firstStep } = await supabase
+            .from("bot_flow_steps")
+            .select("id, step_key, position")
+            .eq("flow_id", flowId)
+            .eq("is_active", true)
+            .order("position", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          if ((firstStep as any)?.id) {
+            consultantHasOpeningStep = true;
+            jsonLog("info", "consultant_opening_step_detected", {
+              consultant_id: instanceData.consultant_id,
+              customer_id: customer.id,
+              source: "bot_flow_steps",
+              step_key: (firstStep as any).step_key,
+              position: (firstStep as any).position,
+              v2_flag: v2Flag,
+            });
+          } else {
+            // (b) fallback legado: `bot_flow_qa.is_opening=true`
+            const { data: openingQa } = await supabase
+              .from("bot_flow_qa")
+              .select("id")
+              .eq("flow_id", flowId)
+              .eq("is_opening", true)
+              .maybeSingle();
+            if ((openingQa as any)?.id) {
+              consultantHasOpeningStep = true;
+              jsonLog("info", "consultant_opening_step_detected", {
+                consultant_id: instanceData.consultant_id,
+                customer_id: customer.id,
+                source: "bot_flow_qa",
+                v2_flag: v2Flag,
+              });
+            }
+          }
+        }
+      } catch (e) {
+        jsonLog("warn", "consultant_opening_step_check_failed", {
+          consultant_id: instanceData.consultant_id,
+          customer_id: customer.id,
+          v2_flag: v2Flag,
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    // ─── 7.1.b) AI vs Flow exclusivity gate (bugfix §2.10 + §2.17) ────
     // Em aguardando_conta, se o cliente mandou MÍDIA (foto da conta), NÃO chamar IA;
     // o bot hardcoded faz OCR + envia botões SIM/NÃO/EDITAR.
+    //
+    // §2.17: quando o consultor tem passo de abertura E a flag v2 está ativa
+    // (`canary`/`on`), o roteiro do consultor vence — `aiShouldHandle=false` e
+    // o motor cai no caminho de `runConversationalFlow` abaixo. Sob `dark`, a
+    // detecção é apenas logada e o caminho legado (IA) prossegue para não
+    // alterar comportamento em produção. Sob `off`, comportamento legado puro.
+    //
+    // §2.10: o `if (aiShouldHandle)` abaixo retorna 200 imediatamente após
+    // disparar o `ai-agent-router`. Como `runConversationalFlow`/`runBotFlow`
+    // só rodam APÓS esse return (no bloco "8) Run bot flow"), a exclusividade
+    // é estrutural — `aiShouldHandle=true` ⇒ apenas o `ai-agent-router` envia
+    // a resposta neste turno; nenhum motor determinístico é invocado em
+    // paralelo. O fallback determinístico só dispara se o router retornar
+    // erro/`skipped`, o que é tratado dentro da própria Edge Function
+    // `ai-agent-router` (não aqui).
     const aiShouldHandle =
       aiCfg?.enabled === true &&
       CONVERSATIONAL_STEPS.has(currentStep) &&
-      !(currentStep === "aguardando_conta" && isFile);
+      !(currentStep === "aguardando_conta" && isFile) &&
+      !(consultantHasOpeningStep && isV2Active(v2Flag));
+
+    if (consultantHasOpeningStep && !isV2Active(v2Flag)) {
+      jsonLog("info", "consultant_opening_step_dark_skip", {
+        consultant_id: instanceData.consultant_id,
+        customer_id: customer.id,
+        v2_flag: v2Flag,
+        ai_should_handle: aiShouldHandle,
+      });
+    }
 
     if (aiShouldHandle) {
       let aiInput = messageText || "";
@@ -458,10 +751,15 @@ Deno.serve(async (req) => {
       const customerOverride = (customer as any).conversational_flow_enabled;
       const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
 
-      let engine = routeEngine(rawStep);
-      if (engine === "flow" && (!consultantFlag || customerOverride === false)) {
-        engine = "sys";
-        (customer as any).conversation_step = "welcome";
+      const routed = routeEngineV2({
+        currentStep: rawStep,
+        conversationalFlowEnabled: consultantFlag,
+        customerOverride: customerOverride === false ? false : null,
+      });
+      let engine = routed.engine;
+      if (routed.step !== null && routed.step !== stripPrefix(rawStep ?? "")) {
+        // routeEngineV2 forced a reset (e.g. flow→welcome when flag flipped off).
+        (customer as any).conversation_step = routed.step;
       }
 
       // 🚀 FONTE ÚNICA DE VERDADE: Fluxo da Camila (DB) controla TODO step
@@ -500,12 +798,14 @@ Deno.serve(async (req) => {
             supabase, sender, customer, consultorId, nomeRepresentante,
             remoteJid, phone, messageText, buttonId, isFile, isButton,
             hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
+            instanceName,
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
           })
         : await runBotFlow({
             supabase, sender, customer, consultorId, nomeRepresentante,
             remoteJid, phone, messageText, buttonId, isFile, isButton,
             hasImage, hasDocument, imageMessage, documentMessage, message, key, messageId,
+            instanceName,
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
           });
       reply = result.reply;
@@ -593,11 +893,102 @@ Deno.serve(async (req) => {
       }
     }
 
+    jsonLog("info", "handler_done", {
+      customer_id: customer.id,
+      consultant_id: instanceData.consultant_id,
+      engine: engineUsed,
+      step_before: stepBefore,
+      step_after: updates.conversation_step ? stripPrefix(updates.conversation_step) : stepBefore,
+      has_reply: !!reply,
+      v2_flag: v2Flag,
+    });
+
+    // Release the customer lock *before* the outbound HTTP call. Evolution
+    // sends are slow (typing presence + retry backoff) and the lock only
+    // protects the read/write of customer state; sendWithRetry has its own
+    // idempotency via outbound_message_log (Task 8). Holding the lock here
+    // would only force concurrent webhooks for the same customer to wait
+    // for an HTTP round-trip with no correctness benefit.
+    if (lockToken && lockCustomerId) {
+      try {
+        await supabase.rpc("release_customer_lock", {
+          p_customer: lockCustomerId,
+          p_token: lockToken,
+        });
+        jsonLog("debug", "customer_lock_released", {
+          customer_id: lockCustomerId, stage: "before_outbound",
+        });
+      } catch (releaseErr) {
+        jsonLog("warn", "customer_lock_release_failed", {
+          customer_id: lockCustomerId,
+          stage: "before_outbound",
+          message: releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
+        });
+      } finally {
+        lockToken = null;
+        lockCustomerId = null;
+      }
+    }
+
     // ─── 10) Send reply ────────────────────────────────────────────────
     const stepToSend = updates.conversation_step || stepBefore;
+
+    // Single contract: if the handler explicitly marked __inline_sent, the
+    // outbound has already been emitted by the handler (sendStepMedia /
+    // direct sender.sendText). Skip ALL further send logic to prevent
+    // double-sends. This handles the case where handler returns reply !== ""
+    // AND __inline_sent === true simultaneously (which can happen when a
+    // step has inline media + a textual fallback that was already emitted).
+    //
+    // Task 10 of whatsapp-flow-reliability-fix (bugfix.md 2.9 / 3.26):
+    // before this change the block had two parallel branches —
+    // `handlerSentInline` (only triggered when reply === "") and the
+    // anti-dup + send path (triggered when reply !== ""). A handler that
+    // emitted media inline AND returned a non-empty reply (e.g. the
+    // restart-cascade landing in conversational/index.ts:875, the QA hit
+    // at :1006, or the auto-cascade at :1517) ended up double-emitting
+    // because __inline_sent was only honored on the empty-reply branch.
+    // The new contract is universal: __inline_sent === true means the
+    // handler took full responsibility for this turn's outbound, period.
+    if (__inline_sent_flag) {
+      jsonLog("info", "inline_sent_skipped", {
+        customer_id: customer.id,
+        consultant_id: instanceData.consultant_id,
+        step: stepToSend ? stripPrefix(String(stepToSend)) : undefined,
+        reply_was_set: reply !== "",
+        v2_flag: v2Flag,
+      });
+      // Persist a single outbound row so the analytics view of the
+      // conversation reflects this turn. The handler's own inline
+      // sendMedia / sendText paths already insert their own rows
+      // (`[image:slot]`, `[audio:slot]`, etc.), so this row captures
+      // either the textual reply that was emitted inline OR a marker
+      // when the handler only sent media.
+      try {
+        await supabase.from("conversations").insert({
+          customer_id: customer.id,
+          message_direction: "outbound",
+          message_text: reply || "[inline-sent]",
+          message_type: "text",
+          conversation_step: updates.conversation_step || stepBefore,
+        });
+      } catch (logErr) {
+        jsonLog("warn", "inline_sent_log_failed", {
+          customer_id: customer.id,
+          message: logErr instanceof Error ? logErr.message : String(logErr),
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, mode: "inline_sent" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // GARANTIA: nunca deixar o cliente sem resposta. Se reply vazio E nenhum botão foi enviado dentro do handler,
     // injeta uma mensagem padrão de "continue" para evitar bot em silêncio.
-    const handlerSentInline = reply === "" && (Object.keys(updates).length > 0 || __inline_sent_flag);
+    // Note: __inline_sent_flag === true is now handled by the gate above,
+    // so this branch only fires for the legacy "handler made non-__inline_sent
+    // updates but returned empty reply" pattern (e.g. step transition only).
+    const handlerSentInline = reply === "" && Object.keys(updates).length > 0;
     let finalReply = reply;
     if (!finalReply && !handlerSentInline) {
       // Sem resposta do bot E nada inline foi enviado.
@@ -630,23 +1021,124 @@ Deno.serve(async (req) => {
     let isDuplicate = false;
     if (finalReply) {
       // 🛡️ Anti-duplicação universal: mesmo texto enviado nos últimos 60s → skip.
+      //
+      // Task 9 of whatsapp-flow-reliability-fix: the legacy comparison is an
+      // exact-string match against the most recent outbound row, so two
+      // replies that differ only in whitespace / case / leading-trailing
+      // whitespace would BOTH be sent. The v2 path probes
+      // `conversations.message_text_hash` (a GENERATED STORED column on
+      // the same normalization the JS-side `computeMessageTextHash`
+      // uses — see migration §4.10 and supabase/functions/_shared/text-hash.ts)
+      // for any outbound row in the last 60 s with the same `(customer_id,
+      // conversation_step)` and the same hash.
+      //
+      // Rollout (design.md §8):
+      //   - 'off'                 : legacy exact-text comparison (unchanged).
+      //   - 'dark'                : both paths run; disagreements are logged
+      //                             via `evolution_dedup_short_circuit` so we
+      //                             can validate the new path before flipping.
+      //                             The legacy result still drives the skip.
+      //   - 'canary' / 'on'       : the v2 hash result drives the skip.
       try {
         const sinceIso = new Date(Date.now() - 60_000).toISOString();
-        const { data: lastOut } = await supabase
-          .from("conversations")
-          .select("message_text, created_at")
-          .eq("customer_id", customer.id)
-          .eq("message_direction", "outbound")
-          .gte("created_at", sinceIso)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (lastOut && String((lastOut as any).message_text || "").trim() === String(finalReply).trim()) {
-          const ageMs = Date.now() - new Date((lastOut as any).created_at).getTime();
-          console.warn(`🛡️ [anti-dup] skip — mesma msg enviada há ${Math.round(ageMs/1000)}s para customer=${customer.id}`);
-          isDuplicate = true;
+        const stepKey = stepToSend ? stripPrefix(String(stepToSend)) : null;
+
+        // Legacy probe — keep running on every flag value so the 'dark'
+        // mode can compare them and so 'off' stays byte-identical.
+        let legacyDup = false;
+        try {
+          const { data: lastOut } = await supabase
+            .from("conversations")
+            .select("message_text, created_at")
+            .eq("customer_id", customer.id)
+            .eq("message_direction", "outbound")
+            .gte("created_at", sinceIso)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (lastOut && String((lastOut as any).message_text || "").trim() === String(finalReply).trim()) {
+            const ageMs = Date.now() - new Date((lastOut as any).created_at).getTime();
+            console.warn(`🛡️ [anti-dup] skip — mesma msg enviada há ${Math.round(ageMs/1000)}s para customer=${customer.id}`);
+            legacyDup = true;
+          }
+        } catch (_) { /* best-effort */ }
+
+        let v2Dup: boolean | null = null;
+        if (isV2Enabled(v2Flag)) {
+          try {
+            const hash = await computeMessageTextHash(finalReply);
+            // Match the conversation_step the row will be saved with: the
+            // outer code stores `updates.conversation_step || stepBefore`,
+            // which can be prefixed ("flow:foo") or stripped. We probe
+            // both forms via OR so the new path doesn't miss a recent
+            // outbound stored under the alternate prefix.
+            const variants = stepKey
+              ? Array.from(new Set([stepKey, `flow:${stepKey}`]))
+              : [];
+            let q = supabase
+              .from("conversations")
+              .select("created_at, conversation_step")
+              .eq("customer_id", customer.id)
+              .eq("message_direction", "outbound")
+              .eq("message_text_hash", hash)
+              .gte("created_at", sinceIso);
+            if (variants.length > 0) {
+              q = q.in("conversation_step", variants);
+            }
+            const { data: hashHit, error: hashErr } = await q
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (hashErr) {
+              jsonLog("warn", "evolution_dedup_hash_query_failed", {
+                customer_id: customer.id,
+                v2_flag: v2Flag,
+                error: hashErr.message,
+              });
+              v2Dup = null; // unknown — fall back to legacy decision
+            } else {
+              v2Dup = !!hashHit;
+              if (v2Dup) {
+                const ageMs = hashHit
+                  ? Date.now() - new Date((hashHit as any).created_at).getTime()
+                  : 0;
+                jsonLog("info", "evolution_dedup_short_circuit", {
+                  customer_id: customer.id,
+                  v2_flag: v2Flag,
+                  step: stepKey ?? undefined,
+                  age_ms: Math.round(ageMs),
+                });
+              }
+            }
+          } catch (e) {
+            jsonLog("warn", "evolution_dedup_hash_exception", {
+              customer_id: customer.id,
+              v2_flag: v2Flag,
+              message: e instanceof Error ? e.message : String(e),
+            });
+            v2Dup = null;
+          }
         }
-      } catch (_) { /* best-effort */ }
+
+        // Decide which result drives the skip per the rollout flag.
+        if (isV2Active(v2Flag) && v2Dup !== null) {
+          isDuplicate = v2Dup;
+        } else {
+          isDuplicate = legacyDup;
+        }
+
+        // Dark-mode disagreement log so we can validate the v2 path
+        // before flipping `flow_reliability_v2='on'`.
+        if (isV2Dark(v2Flag) && v2Dup !== null && v2Dup !== legacyDup) {
+          jsonLog("info", "evolution_dedup_disagreement", {
+            customer_id: customer.id,
+            v2_flag: v2Flag,
+            step: stepKey ?? undefined,
+            legacy_dup: legacyDup,
+            v2_dup: v2Dup,
+          });
+        }
+      } catch (_) { /* best-effort: never block sending on a dedup error */ }
     }
 
     if (finalReply && !isDuplicate) {
@@ -666,8 +1158,32 @@ Deno.serve(async (req) => {
             try { await (sender as any).sendPresence?.(remoteJid, "composing", humanDelayMs - waited); } catch (_) { /* noop */ }
           }
         }
-        // Envia sempre como texto (botões não funcionam na Evolution API atual)
-        await sender.sendText(remoteJid, finalReply);
+        // Envia sempre como texto (botões não funcionam na Evolution API atual).
+        // Smoke test of Task 8: pass idempotency context so duplicate
+        // webhook redeliveries with the same content + step short-circuit
+        // in `outbound_message_log` instead of re-sending.
+        let idemKey = "";
+        let payloadHash = "";
+        try {
+          idemKey = await computeIdempotencyKey({
+            customerId: customer.id,
+            step: stepToSend || "",
+            content: finalReply,
+          });
+          payloadHash = await computeIdempotencyKey({
+            customerId: customer.id,
+            step: "payload",
+            content: finalReply,
+            minuteBucket: 0,
+          });
+        } catch (_) { /* fail-open: send without idempotency */ }
+        await sender.sendText(remoteJid, finalReply, {
+          idempotencyKey: idemKey,
+          customerId: customer.id,
+          consultantId: instanceData.consultant_id,
+          payloadHash,
+          supabase,
+        });
       } catch (e: any) {
         console.error("Erro enviar:", e);
       }
@@ -684,6 +1200,15 @@ Deno.serve(async (req) => {
       });
     }
 
+    jsonLog("info", "outbound_done", {
+      customer_id: customer.id,
+      consultant_id: instanceData.consultant_id,
+      step: updates.conversation_step ? stripPrefix(updates.conversation_step) : stepBefore,
+      sent: !!finalReply && !isDuplicate,
+      duplicate: isDuplicate,
+      v2_flag: v2Flag,
+    });
+
     return new Response(JSON.stringify({ ok: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -693,5 +1218,22 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: String(err) }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  } finally {
+    // Best-effort lock release. Reaching here without a token is normal
+    // (legacy path, customer not yet known, lock not acquired). The RPC
+    // requires the token to match, so a stale token is a no-op.
+    if (lockSupabaseRef && lockCustomerId && lockToken) {
+      try {
+        await lockSupabaseRef.rpc("release_customer_lock", {
+          p_customer: lockCustomerId,
+          p_token: lockToken,
+        });
+      } catch (releaseErr) {
+        jsonLog("warn", "customer_lock_release_failed", {
+          customer_id: lockCustomerId,
+          message: releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
+        });
+      }
+    }
   }
 });

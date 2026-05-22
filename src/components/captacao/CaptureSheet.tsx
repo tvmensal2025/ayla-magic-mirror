@@ -8,7 +8,13 @@ import { CaptureProgressBar } from "./CaptureProgressBar";
 import { SendSequenceDialog, type SequenceStep } from "./SendSequenceDialog";
 import { useCaptureSession, CAPTURE_FIELDS } from "@/hooks/useCaptureSession";
 import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
+import { useCaptureCombo } from "@/hooks/useCaptureCombo";
 import { fireRandomCelebration, MOTIVATIONAL_PHRASES } from "@/lib/captureGame";
+import { haptics } from "@/lib/haptics";
+import { sfx } from "@/components/captacao/game/sfx";
+import { useGameMode } from "@/components/captacao/game/useGameMode";
+import { ComboTimer } from "@/components/captacao/game/ComboTimer";
+import { XpFloaterProvider, useXpFloater } from "@/components/captacao/game/XpFloater";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { X, Gamepad2, ListChecks, IdCard, Loader2, Trophy, ChevronDown, ChevronUp, Maximize2, Minimize2, UserPlus, Zap } from "lucide-react";
@@ -23,9 +29,25 @@ interface Props {
   phoneNumber?: string | null;
 }
 
-export function CaptureSheet({ open, onOpenChange, consultantId, customerId, customerName, phoneNumber }: Props) {
+export function CaptureSheet(props: Props) {
+  // Wrap everything in the XP floater provider so child components can
+  // call `useXpFloater().show(amount)` whenever a field is captured or a
+  // combo bonus fires. Mounting it here (instead of at App root) keeps
+  // the floater scoped to the captação modal — when the sheet closes,
+  // pending floats are cleaned up too.
+  return (
+    <XpFloaterProvider>
+      <CaptureSheetInner {...props} />
+    </XpFloaterProvider>
+  );
+}
+
+function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, customerName, phoneNumber }: Props) {
   const { customer, filledCount, totalFields, progress } = useCaptureSession(customerId);
   const { bump } = useCaptureScoreboard(consultantId);
+  const combo = useCaptureCombo();
+  const xpFloater = useXpFloater();
+  const { sound } = useGameMode(consultantId);
   const { toast } = useToast();
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<"passos" | "ficha">("passos");
@@ -55,9 +77,30 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
     if (filledCount > lastCountRef.current) {
       const phrase = MOTIVATIONAL_PHRASES[filledCount];
       if (phrase) toast({ title: phrase, duration: 1800 });
+
+      // 🎮 Game feedback layer — dispara em cada CAPTURA de campo:
+      //   1. Haptic feedback (mobile) — vibração curta de 40ms
+      //   2. SFX ding (se som ligado pelo consultor)
+      //   3. XP floater: número subindo da barra ("+10 XP")
+      //   4. Combo: se já passou do 1º campo, soma multiplicador (visual)
+      //
+      // Em milestones (5, 8, 10) eleva o feedback: success haptic + coin SFX.
+      const isMilestone = filledCount === 5 || filledCount === 8 || filledCount === totalFields;
+      if (isMilestone) {
+        haptics.success();
+        sfx.coin(sound);
+      } else {
+        haptics.tap();
+        sfx.ding(sound);
+      }
+
+      // XP floater visível para o consultor — incentiva o "vício" do XP
+      // que vai crescendo a cada toque.
+      const xpGain = isMilestone ? 25 : 10;
+      xpFloater.show(xpGain);
     }
     lastCountRef.current = filledCount;
-  }, [filledCount, customer, toast]);
+  }, [filledCount, customer, toast, totalFields, sound, xpFloater]);
 
   const billHasData = !!(customer as any)?.numero_instalacao || !!(customer as any)?.address_street || !!(customer as any)?.bill_holder_name;
   const docHasData = !!(customer as any)?.cpf || !!(customer as any)?.rg;
@@ -74,6 +117,24 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
     return false;
   });
 
+  // Lista descritiva do que falta (texto mostrado no tooltip do botão final).
+  // Antes só dizia "N campos", o que confundia o consultor — agora aponta os
+  // labels exatos pra ele localizar na ficha.
+  const missingFieldLabels = CAPTURE_FIELDS.filter((f) => {
+    const v = (customer as any)?.[f.key];
+    if (v === null || v === undefined) return true;
+    if (typeof v === "string" && !v.trim()) return true;
+    if (f.key === "electricity_bill_value" && Number(v) <= 0) return true;
+    return false;
+  }).map((f) => f.label);
+  const submitTooltip = canSubmit
+    ? "Enviar pro portal (VPS + OTP)"
+    : [
+        missingFieldLabels.length > 0 ? `Faltam: ${missingFieldLabels.join(", ")}` : "",
+        !billConfirmed ? "Confirmar dados da conta de luz" : "",
+        !docConfirmed ? "Confirmar dados do documento" : "",
+      ].filter(Boolean).join(" · ");
+
   const handleSubmit = async () => {
     if (!customer || !canSubmit) return;
     setSubmitting(true);
@@ -82,11 +143,25 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
       await supabase.from("customers").update({
         conversation_step: "finalizando",
       }).eq("id", customer.id);
+
+      // 🏆 Cadastro completo — 5 efeitos combinados:
+      //   1. Confetti aleatório (já existia)
+      //   2. Bump scoreboard
+      //   3. Triple-vibration (victory haptic) no celular
+      //   4. SFX level-up
+      //   5. Combo bumped — premia o próximo cadastro
+      //   6. XP floater grande (+100 XP CADASTRO!)
       fireRandomCelebration();
+      haptics.victory();
+      sfx.levelUp(sound);
+      const c = combo.onCapture();
+      xpFloater.show(100 + c.bonusXp, c.level >= 2 ? `COMBO x${c.level}` : undefined);
       await bump();
+
       toast({ title: "🎉 Cadastro enviado!", description: "Portal Worker concluindo…", duration: 3500 });
       onOpenChange(false);
     } catch (e: any) {
+      haptics.error();
       toast({ title: "Erro", description: e?.message || String(e), variant: "destructive" });
     } finally {
       setSubmitting(false);
@@ -113,6 +188,69 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
     }
   };
 
+  // ⌨️ Atalhos de teclado (desktop only — mobile virtual keyboard ignora):
+  //   Esc        → minimiza painel
+  //   1..9, 0    → seleciona campo correspondente da ficha (vai pra tab "ficha")
+  //   E          → vai pra tab "passos"
+  //   C          → cadastrar (se canSubmit)
+  //   M          → maximiza/minimiza
+  //
+  // Sem isso, no PC a navegação é 100% mouse — perde-se velocidade contra
+  // o ritmo do bot/atendimento.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      // Não bloqueia se usuário está digitando em input/textarea/contenteditable.
+      const target = e.target as HTMLElement | null;
+      const isTyping = target && (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      );
+      if (isTyping) return;
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMinimized(true);
+        return;
+      }
+      if (e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        setExpanded((v) => !v);
+        return;
+      }
+      if (e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        setTab("passos");
+        return;
+      }
+      if (e.key.toLowerCase() === "c" && canSubmit && !submitting) {
+        e.preventDefault();
+        void handleSubmit();
+        return;
+      }
+      // 1..9 / 0 → ficha + scrollar pro campo correspondente
+      if (/^[0-9]$/.test(e.key)) {
+        const idx = e.key === "0" ? 9 : parseInt(e.key, 10) - 1;
+        const field = CAPTURE_FIELDS[idx];
+        if (field) {
+          e.preventDefault();
+          setTab("ficha");
+          setTimeout(() => {
+            const el = document.querySelector(`[data-capture-field="${field.key}"]`) as HTMLElement | null;
+            if (el) {
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+              const focusable = el.querySelector<HTMLElement>("input, textarea, button");
+              focusable?.focus();
+            }
+          }, 100);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, canSubmit, submitting]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Barra minimizada — flutua no rodapé sem bloquear o input do chat
   if (open && minimized) {
     return (
@@ -127,6 +265,17 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
           Captação {filledCount}/{totalFields}
         </span>
         <span className="text-[10px] opacity-80">· {sentSteps.size}/10 passos</span>
+        {/* Combo visível na pílula minimizada — consultor não perde o timer
+            mesmo quando fecha o painel pra ler o chat. */}
+        {combo.isActive && (
+          <ComboTimer
+            level={combo.level}
+            secondsLeft={combo.secondsLeft}
+            progressPct={combo.progressPct}
+            bonusXp={combo.bonusXp}
+            compact
+          />
+        )}
         <ChevronUp className="w-4 h-4" />
       </button>
     );
@@ -205,6 +354,18 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
               <p className="text-[10px] text-center mt-0.5 text-muted-foreground">
                 Passo {sentSteps.size} de 10 enviado
               </p>
+              {/* 🔥 Combo timer — só aparece quando combo ativo. Mostra
+                  multiplicador, countdown e bonus XP do próximo cadastro. */}
+              {combo.isActive && (
+                <div className="mt-2">
+                  <ComboTimer
+                    level={combo.level}
+                    secondsLeft={combo.secondsLeft}
+                    progressPct={combo.progressPct}
+                    bonusXp={combo.bonusXp}
+                  />
+                </div>
+              )}
             </>
           )}
         </header>
@@ -266,16 +427,12 @@ export function CaptureSheet({ open, onOpenChange, consultantId, customerId, cus
               size="lg"
               className={`flex-1 font-bold gap-1 ${expanded ? "h-12 text-base" : "h-7 text-[10px]"} ${
                 canSubmit
-                  ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:opacity-95 animate-pulse shadow-lg shadow-emerald-500/40"
+                  ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:opacity-95 animate-game-cta-shake shadow-lg shadow-emerald-500/40"
                   : "bg-muted text-muted-foreground opacity-60 cursor-not-allowed hover:bg-muted"
               }`}
               onClick={handleSubmit}
               disabled={submitting || !canSubmit}
-              title={
-                !canSubmit
-                  ? `Faltam: ${filledCount < totalFields ? `${totalFields - filledCount} campo(s)` : ""}${!billConfirmed ? " · confirmar conta" : ""}${!docConfirmed ? " · confirmar doc" : ""}`
-                  : "Enviar pro portal (VPS + OTP)"
-              }
+              title={submitTooltip}
             >
               {submitting ? <Loader2 className={`${expanded ? "w-5 h-5" : "w-3 h-3"} animate-spin`} /> : <Trophy className={`${expanded ? "w-5 h-5" : "w-3 h-3"}`} />}
               {canSubmit ? "CADASTRAR" : `${filledCount}/${totalFields}${!billConfirmed ? " ·📄" : ""}${!docConfirmed ? " ·🪪" : ""}`}

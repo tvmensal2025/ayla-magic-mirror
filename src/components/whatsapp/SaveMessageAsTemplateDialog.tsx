@@ -16,6 +16,12 @@ interface Props {
   message: ChatMessage;
   consultantId: string;
   loadedMediaUrl: string | null;
+  /**
+   * Callback opcional que dispara o download da mídia quando o dialog abre
+   * sem `loadedMediaUrl`. Permite que o consultor toque em "Salvar como
+   * template" SEM precisar abrir o player primeiro — o dialog auto-carrega.
+   */
+  onLoadMedia?: (messageId: string) => Promise<string | null>;
   /** Foco inicial: nome ou atalho */
   focus?: "name" | "shortcut";
   onSaved?: () => void;
@@ -39,17 +45,52 @@ function inferExt(mime: string | undefined, fallback: string): string {
   return fallback;
 }
 
-export function SaveMessageAsTemplateDialog({ open, onOpenChange, message, consultantId, loadedMediaUrl, focus = "name", onSaved }: Props) {
+export function SaveMessageAsTemplateDialog({ open, onOpenChange, message, consultantId, loadedMediaUrl, onLoadMedia, focus = "name", onSaved }: Props) {
   const [name, setName] = useState("");
   const [shortcutRaw, setShortcutRaw] = useState("");
   const [caption, setCaption] = useState(message.mediaCaption || message.text || "");
   const [saving, setSaving] = useState(false);
+  // Mídia carregada localmente pelo dialog quando o pai não trouxe ainda.
+  // Resolve o bug onde o consultor abre o dropdown ANTES do player montar
+  // e fica preso em "aguarde a mídia carregar".
+  const [autoLoadedUrl, setAutoLoadedUrl] = useState<string | null>(null);
+  const [autoLoading, setAutoLoading] = useState(false);
+  const [autoLoadFailed, setAutoLoadFailed] = useState(false);
+
+  const effectiveMediaUrl = loadedMediaUrl || autoLoadedUrl;
+
+  // Se o dialog abriu sem mídia carregada e há mídia esperada, dispara o
+  // carregamento automaticamente via `onLoadMedia`. Sem isso, no mobile o
+  // consultor toca em "Salvar com atalho", o dialog abre, e ele fica olhando
+  // pro aviso "toque no player primeiro" sem entender o que fazer.
+  useEffect(() => {
+    if (!open) return;
+    if (loadedMediaUrl) return; // já veio do pai
+    if (autoLoadedUrl) return;  // já carregamos
+    const mt = message.mediaType;
+    if (mt !== "audio" && mt !== "video" && mt !== "image") return;
+    if (!onLoadMedia) return;
+    let cancelled = false;
+    setAutoLoading(true);
+    setAutoLoadFailed(false);
+    onLoadMedia(message.id)
+      .then((url) => {
+        if (cancelled) return;
+        if (url) setAutoLoadedUrl(url);
+        else setAutoLoadFailed(true);
+      })
+      .catch(() => { if (!cancelled) setAutoLoadFailed(true); })
+      .finally(() => { if (!cancelled) setAutoLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, loadedMediaUrl, autoLoadedUrl, message.id, message.mediaType, onLoadMedia]);
 
   useEffect(() => {
     if (open) {
       setName("");
       setShortcutRaw("");
       setCaption(message.mediaCaption || message.text || "");
+      setAutoLoadedUrl(null);
+      setAutoLoadFailed(false);
     }
   }, [open, message]);
 
@@ -68,7 +109,7 @@ export function SaveMessageAsTemplateDialog({ open, onOpenChange, message, consu
   const canSave =
     !!name.trim() &&
     !shortcutInvalid &&
-    (isTextOnly ? !!caption.trim() : !!loadedMediaUrl && hasMedia);
+    (isTextOnly ? !!caption.trim() : !!effectiveMediaUrl && hasMedia);
 
   const disabledReason = !name.trim()
     ? "Dê um nome ao template"
@@ -76,8 +117,8 @@ export function SaveMessageAsTemplateDialog({ open, onOpenChange, message, consu
       ? "Atalho precisa ter pelo menos 2 letras/números após a /"
       : isTextOnly && !caption.trim()
         ? "Digite o texto do template"
-        : !isTextOnly && !loadedMediaUrl
-          ? "Aguarde a mídia carregar (toque no player da mensagem)"
+        : !isTextOnly && !effectiveMediaUrl
+          ? (autoLoading ? "Baixando mídia, aguarde..." : autoLoadFailed ? "Mídia não pôde ser baixada — toque no player na conversa e tente novamente" : "Aguarde a mídia carregar (toque no player da mensagem)")
           : "";
 
   const handleSave = async () => {
@@ -86,12 +127,13 @@ export function SaveMessageAsTemplateDialog({ open, onOpenChange, message, consu
       let mediaUrl: string | null = null;
 
       if (hasMedia) {
-        if (!loadedMediaUrl) {
+        if (!effectiveMediaUrl) {
           toast.error("Mídia ainda não carregou — aguarde o player exibir o conteúdo e tente de novo.");
+          setSaving(false);
           return;
         }
         // Baixa a mídia (URL temporária ou já MinIO) e re-faz upload pro MinIO no scope=template
-        const res = await fetch(loadedMediaUrl);
+        const res = await fetch(effectiveMediaUrl);
         if (!res.ok) throw new Error(`Falha ao baixar mídia (${res.status})`);
         const blob = await res.blob();
         const mime = blob.type || message.mediaMimetype || "application/octet-stream";
@@ -149,18 +191,27 @@ export function SaveMessageAsTemplateDialog({ open, onOpenChange, message, consu
 
         <div className="space-y-3">
           {/* Preview */}
-          {loadedMediaUrl && mt === "image" && (
-            <img src={loadedMediaUrl} alt="" className="max-h-40 rounded mx-auto" />
+          {effectiveMediaUrl && mt === "image" && (
+            <img src={effectiveMediaUrl} alt="" className="max-h-40 rounded mx-auto" />
           )}
-          {loadedMediaUrl && mt === "audio" && (
-            <audio controls src={loadedMediaUrl} className="w-full" />
+          {effectiveMediaUrl && mt === "audio" && (
+            <audio controls src={effectiveMediaUrl} className="w-full" />
           )}
-          {loadedMediaUrl && mt === "video" && (
-            <video controls src={loadedMediaUrl} className="max-h-40 w-full rounded" />
+          {effectiveMediaUrl && mt === "video" && (
+            <video controls src={effectiveMediaUrl} className="max-h-40 w-full rounded" />
           )}
-          {!loadedMediaUrl && (
-            <div className="text-xs text-muted-foreground bg-secondary/40 rounded p-2 text-center">
-              Carregando mídia... toque no player da mensagem antes de salvar.
+          {!effectiveMediaUrl && hasMedia && (
+            <div className="text-xs text-muted-foreground bg-secondary/40 rounded p-2 text-center flex items-center justify-center gap-2">
+              {autoLoading ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Baixando mídia automaticamente…
+                </>
+              ) : autoLoadFailed ? (
+                <span className="text-amber-500">⚠️ Não consegui baixar a mídia. Toque no player da mensagem na conversa e tente de novo.</span>
+              ) : (
+                "Carregando mídia..."
+              )}
             </div>
           )}
 

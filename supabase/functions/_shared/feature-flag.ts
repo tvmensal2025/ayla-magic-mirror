@@ -1,0 +1,106 @@
+// Feature flag helper for the WhatsApp Flow Reliability v2 rollout.
+//
+// Reads the `consultants.flow_reliability_v2` column and exposes simple
+// helpers for gating new behavior. The value is cached in-process for 30s
+// so the new code paths can call it on hot paths (every webhook turn) without
+// hammering Postgres. Cache is keyed by consultant_id; all callers within
+// the same Edge Function instance share it.
+//
+// Rollout values:
+//   - 'off'    → legacy path; v2 code must not run.
+//   - 'dark'   → v2 path computed in parallel for logging only; legacy path emits.
+//   - 'canary' → v2 path is the source of truth (small whitelist of consultants).
+//   - 'on'     → v2 path is the source of truth (full rollout).
+//
+// Rollback is `UPDATE consultants SET flow_reliability_v2='off' WHERE id=...`.
+// The 30s cache means it can take up to 30s for an instance to pick up the
+// new value, which is acceptable per design §8 (rollout plan).
+
+import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+export type FlowReliabilityV2Flag = "off" | "dark" | "canary" | "on";
+
+const VALID_FLAGS: ReadonlySet<FlowReliabilityV2Flag> = new Set([
+  "off",
+  "dark",
+  "canary",
+  "on",
+]);
+
+const DEFAULT_FLAG: FlowReliabilityV2Flag = "off";
+
+/** Cache TTL in milliseconds. Exported for documentation / tests. */
+export const FEATURE_FLAG_CACHE_TTL_MS = 30_000;
+
+interface CacheEntry {
+  value: FlowReliabilityV2Flag;
+  expiresAt: number;
+}
+
+const cache = new Map<string, CacheEntry>();
+
+function isFlowReliabilityV2Flag(v: unknown): v is FlowReliabilityV2Flag {
+  return typeof v === "string" && VALID_FLAGS.has(v as FlowReliabilityV2Flag);
+}
+
+/**
+ * Returns the rollout flag for a consultant, caching the value in-process
+ * for 30 seconds. Any error (missing row, RPC failure, invalid enum value)
+ * collapses to the safe default `'off'`, which means the legacy path runs.
+ *
+ * The function never throws.
+ */
+export async function getFlowReliabilityV2(
+  supabase: SupabaseClient,
+  consultantId: string,
+): Promise<FlowReliabilityV2Flag> {
+  if (!consultantId) return DEFAULT_FLAG;
+
+  const now = Date.now();
+  const cached = cache.get(consultantId);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  let resolved: FlowReliabilityV2Flag = DEFAULT_FLAG;
+  try {
+    const { data, error } = await supabase
+      .from("consultants")
+      .select("flow_reliability_v2")
+      .eq("id", consultantId)
+      .single();
+
+    if (!error && data && isFlowReliabilityV2Flag((data as any).flow_reliability_v2)) {
+      resolved = (data as any).flow_reliability_v2 as FlowReliabilityV2Flag;
+    }
+  } catch {
+    // fail-closed to 'off'; never propagate
+    resolved = DEFAULT_FLAG;
+  }
+
+  cache.set(consultantId, {
+    value: resolved,
+    expiresAt: now + FEATURE_FLAG_CACHE_TTL_MS,
+  });
+  return resolved;
+}
+
+/** True when the new path should be the source of truth (canary or on). */
+export function isV2Active(flag: FlowReliabilityV2Flag): boolean {
+  return flag === "canary" || flag === "on";
+}
+
+/** True when the new path should compute-but-not-emit (dark launch). */
+export function isV2Dark(flag: FlowReliabilityV2Flag): boolean {
+  return flag === "dark";
+}
+
+/** True when the new path should run at all (dark, canary, or on). */
+export function isV2Enabled(flag: FlowReliabilityV2Flag): boolean {
+  return flag === "dark" || flag === "canary" || flag === "on";
+}
+
+/** Test helper: drops the in-memory cache so tests start clean. */
+export function clearFeatureFlagCache(): void {
+  cache.clear();
+}

@@ -74,7 +74,11 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
   } = useTemplates(userId);
 
   const { chats, isLoading: chatsLoading } = useChats(
-    connectionStatus === "connected" ? instanceName : null,
+    // Mostra o histórico sempre que houver `instanceName` carregado, mesmo
+    // durante reconexão. Antes só passávamos quando `connectionStatus === "connected"`,
+    // o que fazia a aba "Conversas" abrir o QR Code em vez do histórico
+    // sempre que a Evolution API estivesse lenta/intermitente.
+    instanceName || null,
     isWhapi,
   );
 
@@ -230,8 +234,30 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
         )}
 
         {activeSubTab === "conversas" && (
-          isConnected && instanceName ? (
-            <div className="flex h-full">
+          // 🟢 Sempre exibir o histórico quando há `instanceName`, mesmo se
+          // o `connectionStatus` ainda estiver `"connecting"` ou `"disconnected"`
+          // (Evolution API lenta / instabilidade). O painel de QR Code só aparece
+          // quando NÃO existe instância configurada (consultor novo).
+          instanceName ? (
+            <div className="flex flex-col h-full">
+              {!isConnected && (
+                <div className="px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-[11px] text-amber-200 flex items-center gap-2">
+                  <div className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  <span>
+                    {connectionStatus === "connecting"
+                      ? "Reconectando ao WhatsApp — você ainda pode ver o histórico, novos envios podem demorar"
+                      : "WhatsApp desconectado — histórico disponível, mas envios podem falhar até reconectar"}
+                  </span>
+                  <button
+                    onClick={() => createAndConnect()}
+                    disabled={isLoading}
+                    className="ml-auto text-amber-100 hover:underline font-medium"
+                  >
+                    {isLoading ? "..." : "Reconectar"}
+                  </button>
+                </div>
+              )}
+              <div className="flex flex-1 min-h-0">
               {/* Mobile: show sidebar OR chat, not both */}
               {isMobile ? (
                 selectedChatJid ? (
@@ -287,6 +313,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
                   />
                 </>
               )}
+              </div>
             </div>
           ) : (
             <div className="p-4 overflow-auto h-full">

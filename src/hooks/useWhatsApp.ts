@@ -633,6 +633,11 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
       setInstanceName(name);
 
       // ── WHAPI CHECK: Se este consultor é o super admin (usa Whapi), pular Evolution ──
+      // Identificação primária: settings.superadmin_consultant_id (DB).
+      // Identificação secundária: e-mail do auth (rafael.ids@icloud.com) —
+      // garante que o super admin nunca caia no fluxo Evolution mesmo se a
+      // tabela settings falhar em ler (RLS, timeout, primeira inicialização).
+      let isSuperAdmin = false;
       try {
         const { data: settingsRows } = await supabase
           .from("settings")
@@ -642,17 +647,47 @@ export function useWhatsApp(consultantId: string): UseWhatsAppReturn {
         settingsRows?.forEach((s: any) => { settings[s.key] = s.value; });
 
         if (settings.superadmin_consultant_id === consultantId) {
-          // Super admin usa Whapi — não precisa de Evolution/QR Code
+          isSuperAdmin = true;
+          setPhoneNumber(settings.whapi_connected_phone || "+55 11 99009-2401");
+        }
+
+        if (!isSuperAdmin) {
+          // Fallback: checa e-mail da sessão atual contra o whitelist.
+          const { data: { user } } = await supabase.auth.getUser();
+          const email = user?.email?.toLowerCase().trim();
+          if (email === "rafael.ids@icloud.com" && user?.id === consultantId) {
+            isSuperAdmin = true;
+            setPhoneNumber(settings.whapi_connected_phone || "+55 11 99009-2401");
+            addLog("ℹ️ Super admin reconhecido via e-mail (settings indisponíveis)");
+          }
+        }
+
+        if (isSuperAdmin) {
           setIsWhapi(true);
           setStatus("connected");
-          setPhoneNumber(settings.whapi_connected_phone || "+55 11 99009-2401");
           setError(null);
           setIsLoading(false);
           addLog("✅ Conectado via Whapi Cloud (Super Admin)");
           setHealth("healthy");
           return;
         }
-      } catch (_) { /* segue para Evolution normalmente */ }
+      } catch (e) {
+        // Falha na leitura de settings — checa só pelo e-mail antes de cair no Evolution.
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          const email = user?.email?.toLowerCase().trim();
+          if (email === "rafael.ids@icloud.com" && user?.id === consultantId) {
+            setIsWhapi(true);
+            setStatus("connected");
+            setPhoneNumber("+55 11 99009-2401");
+            setError(null);
+            setIsLoading(false);
+            addLog("✅ Conectado via Whapi Cloud (Super Admin, fallback e-mail)");
+            setHealth("healthy");
+            return;
+          }
+        } catch (_) { /* segue para Evolution normalmente */ }
+      }
 
       try {
         const { data: instanceRecord } = await supabase

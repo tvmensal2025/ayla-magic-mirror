@@ -17,9 +17,11 @@ import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
 import { ensureAudioTranscript } from "../../../_shared/audio-transcript.ts";
 import { isQuietHourBRT, logQuietSkip } from "../../../_shared/quiet-hours.ts";
 import { isStrictScriptMode } from "../../../_shared/ai-decisions.ts";
+import { validateAiFallbackChoice } from "../../../_shared/grounding.ts";
 // Sprint 2.6 — helpers compartilhados (cooldown e dedupe)
 import { aiInCooldown, setAiCooldown } from "../../../_shared/bot/ai-cooldown.ts";
 import { checkAndMarkWebhookDedupe } from "../../../_shared/bot/dedupe.ts";
+import { matchTransition as matchTransitionShared } from "../../../_shared/flow-router.ts";
 
 export { CONVERSATIONAL_STEPS };
 
@@ -235,25 +237,6 @@ function extractCaptures(messageText: string, configured: DbCapture[]): Extracte
     if (n) out.name = n;
   }
   return out;
-}
-
-function matchTransition(step: DbStep, intents: string[], messageText: string): DbTransition | null {
-  const transitions = Array.isArray(step.transitions) ? step.transitions : [];
-  const text = (messageText || "").toLowerCase();
-  // 1) match against any of the candidate intents (regex-derived + classifier-derived)
-  for (const t of transitions) {
-    if (!t.trigger_intent || t.trigger_intent === "default" || t.trigger_intent === "palavra_chave") continue;
-    if (intents.includes(t.trigger_intent)) return t;
-  }
-  // 2) keyword match (palavra_chave OR any rule with phrases)
-  for (const t of transitions) {
-    const phrases = Array.isArray(t.trigger_phrases) ? t.trigger_phrases : [];
-    for (const p of phrases) {
-      const needle = (p || "").toLowerCase().trim();
-      if (needle && text.includes(needle)) return t;
-    }
-  }
-  return null;
 }
 
 async function aiDecideFallback(
@@ -913,7 +896,6 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       cpf: (ctx.customer as any).cpf,
     };
 
-    const parts: string[] = [];
     let anyMediaSent = false;
     let cursor: DbStep | undefined = firstActive;
     const visited = new Set<string>();
@@ -930,12 +912,39 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       visited.add(cursor.id);
       landingStepId = cursor.id;
 
-      const { mediaSent } = await sendStepMedia(ctx, cursor, consultantId, true);
-      if (mediaSent === true) anyMediaSent = true;
+      // 🔁 Honra `flow_step_media_order` por step: passa o texto pra sendStepMedia
+      // emitir tudo (mídia + texto) no slot configurado pelo consultor. Sem isso,
+      // todo o cascade vinha como mídia primeiro e os textos colados no fim.
       const tpl = (cursor.message_text || "").trim();
-      if (tpl) parts.push(renderTemplate(tpl, vars));
+      const renderedText = tpl ? renderTemplate(tpl, vars) : "";
+      const textDelay = Math.max(0, Number((cursor as any).text_delay_ms || 0));
+      const { mediaSent, textSentInline } = await sendStepMedia(
+        ctx, cursor, consultantId, true,
+        renderedText ? { text: renderedText, delayMs: textDelay } : null,
+      );
+      if (mediaSent === true) anyMediaSent = true;
+      // Fallback: step sem mídia E sem ordem configurada → manda como texto puro.
+      if (renderedText && !textSentInline && !mediaSent) {
+        try {
+          await ctx.sender.sendText(ctx.remoteJid, renderedText);
+          if (ctx.customer?.id) {
+            await ctx.supabase.from("conversations").insert({
+              customer_id: ctx.customer.id,
+              message_direction: "outbound",
+              message_text: renderedText,
+              message_type: "text",
+              conversation_step: cursor.step_key,
+            });
+          }
+          anyMediaSent = true;
+        } catch (e) {
+          console.error(`[restart-cascade] sendText fallback falhou step=${cursor.step_key}:`, (e as Error)?.message || e);
+        }
+      } else if (renderedText && textSentInline) {
+        anyMediaSent = true;
+      }
 
-      const stepHasContent = !!tpl || mediaSent === true;
+      const stepHasContent = !!tpl || mediaSent === true || textSentInline;
       // Para se o step espera resposta do cliente.
       if (cursor.wait_for === "reply" || cursor.wait_for === "media") break;
       // Se este step já entregou conteúdo (texto OU mídia), só cascateia se
@@ -950,12 +959,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       cursor = next;
     }
 
-    const reply = parts.filter((p) => p && p.trim()).join("\n\n");
-    if (!reply && !anyMediaSent) {
+    if (!anyMediaSent) {
       console.warn(`[conversational] restart sem conteúdo — step ${landingStepId} sem text/mídia válidos. Mantendo lead no step sem resposta para não inventar texto.`);
     }
     return {
-      reply,
+      reply: "",
       updates: { conversation_step: landingStepId, __inline_sent: anyMediaSent || undefined },
     };
   }
@@ -1062,31 +1070,98 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   const qaHit = hasCapture ? null : await matchQA(ctx.supabase, flowId, consultantId, ctx.messageText || "");
   if (qaHit) {
     console.log(`[conversational] QA hit at step="${stepKey}"`);
-    for (const m of qaHit.mediaUrls) {
-      if ((m.kind === "audio" || m.kind === "video" || m.kind === "image") && m.mediaId) {
+    const qaText = renderTemplate(qaHit.text || "", {
+      nome: ctx.customer.name,
+      representante: ctx.nomeRepresentante,
+      valor_conta: (ctx.customer as any).electricity_bill_value,
+      telefone: ctx.customer.phone_whatsapp,
+      cpf: (ctx.customer as any).cpf,
+    });
+    // 🔁 Honra `flow_step_media_order` para o slot virtual __qa__. Se o
+    // consultor configurou ordem (ex.: text→audio), respeita; caso contrário,
+    // mantém o legado (mídia primeiro, texto depois).
+    const order = await getStepMediaOrder(ctx.supabase, consultantId, "__qa__");
+
+    type QaItem =
+      | { kind: "text"; text: string }
+      | { kind: "audio" | "video" | "image" | "document"; m: { url: string; kind: string; mediaId: string | null } };
+    const sequence: QaItem[] = [];
+
+    if (order && order.length > 0) {
+      const remaining = [...qaHit.mediaUrls];
+      let textInjected = false;
+      for (const slot of order) {
+        const s = String(slot).toLowerCase();
+        if (s === "text") {
+          if (qaText && !textInjected) { sequence.push({ kind: "text", text: qaText }); textInjected = true; }
+          continue;
+        }
+        const taken = remaining.filter((m) => String(m.kind).toLowerCase() === s);
+        for (const m of taken) {
+          const idx = remaining.indexOf(m);
+          if (idx >= 0) remaining.splice(idx, 1);
+          const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
+          sequence.push({ kind: k, m: m as any });
+        }
+      }
+      // Mídias com kind não listado vão ao fim (preserva ordem original).
+      for (const m of remaining) {
+        const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
+        sequence.push({ kind: k, m: m as any });
+      }
+      if (qaText && !textInjected) sequence.push({ kind: "text", text: qaText });
+    } else {
+      // Legado: mídia primeiro, texto depois.
+      for (const m of qaHit.mediaUrls) {
+        const k = ["audio", "video", "image"].includes(String(m.kind)) ? String(m.kind) as any : "document";
+        sequence.push({ kind: k, m: m as any });
+      }
+      if (qaText) sequence.push({ kind: "text", text: qaText });
+    }
+
+    let anyEmitted = false;
+    for (const item of sequence) {
+      if (item.kind === "text") {
+        try {
+          await ctx.sender.sendText(ctx.remoteJid, item.text);
+          anyEmitted = true;
+          if (ctx.customer?.id) {
+            await ctx.supabase.from("conversations").insert({
+              customer_id: ctx.customer.id,
+              message_direction: "outbound",
+              message_text: item.text,
+              message_type: "text",
+              conversation_step: stepKey,
+            });
+          }
+        } catch (e) {
+          console.error(`[qa] sendText falhou:`, (e as Error)?.message || e);
+        }
+        continue;
+      }
+      const m = item.m;
+      if ((item.kind === "audio" || item.kind === "video" || item.kind === "image") && m.mediaId) {
         const { data: canSend } = await ctx.supabase.rpc("try_log_media_send", {
           _consultant_id: consultantId,
           _customer_id: ctx.customer.id,
           _media_id: m.mediaId,
           _slot_key: "__qa__",
-          _kind: m.kind,
+          _kind: item.kind,
         });
         if (canSend === false) {
-          console.log(`[conversational] ⏭️ QA: pulando ${m.kind} já enviado (media_id=${m.mediaId})`);
+          console.log(`[conversational] ⏭️ QA: pulando ${item.kind} já enviado (media_id=${m.mediaId})`);
           continue;
         }
       }
-      try { await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", m.kind, Number((m as any).duration_sec || 0) || undefined); } catch (_) {}
+      try {
+        await ctx.sender.sendMedia(ctx.remoteJid, m.url, "", item.kind, Number((m as any).duration_sec || 0) || undefined);
+        anyEmitted = true;
+      } catch (_) {}
     }
+
     return _finalize(stepKey, {
-      reply: renderTemplate(qaHit.text || "", {
-        nome: ctx.customer.name,
-        representante: ctx.nomeRepresentante,
-        valor_conta: (ctx.customer as any).electricity_bill_value,
-        telefone: ctx.customer.phone_whatsapp,
-        cpf: (ctx.customer as any).cpf,
-      }),
-      updates: { conversation_step: stepKey, __inline_sent: qaHit.mediaUrls.length > 0 || undefined, ...restoreDetourUpdates },
+      reply: "",
+      updates: { conversation_step: stepKey, __inline_sent: anyEmitted || undefined, ...restoreDetourUpdates },
     });
   }
 
@@ -1184,7 +1259,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
 
   // Build candidate intent list: classifier intent + regex-derived intents + capture intents
   const candidateIntents = [cls.intent, ...detectRegexIntents(ctx.messageText || ""), ...captureIntents];
-  const transition = matchTransition(currentStep, candidateIntents, ctx.messageText);
+  const transition = matchTransitionShared({
+    transitions: currentStep.transitions ?? [],
+    buttonId: ctx.buttonId,
+    messageText: ctx.messageText,
+    intents: candidateIntents,
+  });
 
   const vars = {
     nome: captureUpdates.name || ctx.customer.name,
@@ -1820,11 +1900,41 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     const candidates = dbSteps.filter(s => s.is_active && s.id !== currentStep.id).map(s => ({ id: s.id, step_key: s.step_key }));
     const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey, consultantId || "global");
     if (choice) {
-      const upper = choice.toUpperCase();
+      // Cláusula 2.19 + 2.31: rebaixar para REPEAT se a escolha do LLM
+      // não for alcançável a partir do passo atual (transitions + goto_special)
+      // OU se violar precondição conhecida (ex.: cadastro_portal exige
+      // bill+document; aguardando_facial exige OTP validado).
+      const reachableTransitions = (currentStep.transitions ?? []).map((t) => ({
+        next_step_key: t?.goto_step_id
+          ? (dbSteps.find((s) => s.id === t.goto_step_id)?.step_key ?? null)
+          : null,
+        goto_special: t?.goto_special ?? null,
+      }));
+      const validation = validateAiFallbackChoice(
+        choice,
+        currentStep.step_key,
+        reachableTransitions,
+        ctx.customer,
+        ["cadastro", "humano", "menu", "repeat"],
+      );
+      if (validation.downgradeReason === "unreachable") {
+        console.warn(JSON.stringify({
+          kind: "ai_unreachable_step",
+          proposed: validation.failedStep,
+          currentStep: currentStep.step_key,
+        }));
+      } else if (validation.downgradeReason === "precondition_failed") {
+        console.warn(JSON.stringify({
+          kind: "ai_precondition_failed_fallback",
+          proposed: validation.failedStep,
+          reason: validation.preconditionReason,
+        }));
+      }
+      const upper = validation.choice.toUpperCase();
       if (upper === "REPEAT") return _finalize(stepKey, await repeatCurrent());
       if (upper === "HUMANO") return _finalize(stepKey, await resolveTransition({ goto_special: "humano" } as DbTransition));
       if (upper === "CADASTRO") return _finalize(stepKey, await resolveTransition({ goto_special: "cadastro" } as DbTransition));
-      const nextStep = dbSteps.find(s => s.step_key === choice);
+      const nextStep = dbSteps.find(s => s.step_key === validation.choice);
       if (nextStep && nextStep.is_active) return _finalize(stepKey, await goToStep(nextStep, restoreDetourUpdates));
     }
   } else if (fb.mode === "ai" && strictMode) {

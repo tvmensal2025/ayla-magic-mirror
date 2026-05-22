@@ -13,6 +13,8 @@ import { useWhatsApp } from "@/hooks/useWhatsApp";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { useConsultantForm } from "@/hooks/useConsultantForm";
+import { useConsultantPresence } from "@/hooks/useConsultantPresence";
+import { OcrReviewBanner } from "@/components/captacao/OcrReviewBanner";
 
 // Heavy panels — lazy load on demand
 const QRCodeSVG = lazy(() => import("qrcode.react").then(m => ({ default: m.QRCodeSVG })));
@@ -62,6 +64,11 @@ const AdminContent = () => {
   const [periodDays, setPeriodDays] = useState(30);
 
   const { instanceName, isWhapi } = useWhatsApp(userId || "");
+
+  // Presença do consultor: mantém heartbeat na tabela `consultant_presence`
+  // a cada 25s. O bot consulta antes de mandar dados de OCR pro cliente —
+  // se o consultor está aqui olhando, pausa pra ele decidir no painel.
+  useConsultantPresence(userId);
   // Hidrata a partir do sessionStorage para nunca mostrar 0 ao abrir/F5.
   // O refetch acontece em background logo a seguir.
   const [customers, setCustomers] = useState<Record<string, unknown>[]>(() => {
@@ -297,6 +304,11 @@ const AdminContent = () => {
 
       {/* Content */}
       <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-6 overflow-x-hidden">
+        {/* OCR Review Banner — aparece quando há leads aguardando o consultor
+            decidir entre "Eu confirmo" / "Pedir ao cliente" os dados extraídos
+            da conta de luz ou do documento. Sempre no topo, em qualquer aba. */}
+        <OcrReviewBanner consultantId={userId} />
+
         <Suspense fallback={<div className="flex justify-center py-12"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>}>
           {activeTab === "dashboard" && userId && (
             <DashboardTab userId={userId} form={form} onFormUpdate={handleFormChange} periodDays={periodDays} onPeriodChange={setPeriodDays} />
