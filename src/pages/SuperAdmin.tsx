@@ -342,6 +342,7 @@ const SuperAdmin = () => {
       </nav>
 
       <main className="relative max-w-[1760px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-6 space-y-6">
+        <Suspense fallback={<div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>}>
         {activeTab === "consultores" && (
           <>
             {/* Stats Grid */}
@@ -543,6 +544,7 @@ const SuperAdmin = () => {
         {activeTab === "financeiro" && <PlatformPnLCard />}
         {activeTab === "saude_rede" && <NetworkHealthPanel />}
         {activeTab === "ia_aprendendo" && <AILearningHealthPanel />}
+        </Suspense>
       </main>
     </div>
   );
