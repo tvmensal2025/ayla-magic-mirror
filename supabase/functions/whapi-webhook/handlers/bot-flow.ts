@@ -919,6 +919,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       }
 
       const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
+      // Normaliza extraVars: callers passam chaves como "{conta}" / "{{conta}}".
+      // Convertemos para chaves nuas ("conta") para o helper compartilhado.
+      const normalizedExtras: Record<string, string> = {};
+      for (const [k, v] of Object.entries(extraVars || {})) {
+        const bare = String(k).replace(/^\{+\s*/, "").replace(/\s*\}+$/, "").toLowerCase();
+        if (bare) normalizedExtras[bare] = String(v ?? "");
+      }
+      normalizedExtras.first_name = firstName;
       // Helper case-insensitive + tolerante a {nome}, {{nome}}, {NOME}, {{ nome }}.
       const applyVars = (s: string) =>
         renderTemplateVars(s, {
@@ -926,11 +934,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           phone: (customer as any).phone_whatsapp || "",
           representante: nomeRepresentante || "",
           valor_conta: (customer as any).electricity_bill_value,
-          extra: {
-            ...extraVars,
-            // mantém compatibilidade com chaves legadas usadas em alguns passos
-            first_name: firstName,
-          },
+          extra: normalizedExtras,
         });
 
       type Item = { kind: string; text?: string; media?: any };
