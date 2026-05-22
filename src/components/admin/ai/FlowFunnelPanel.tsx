@@ -69,7 +69,7 @@ export function FlowFunnelPanel({ consultantId }: Props) {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { data } = await supabase
+      const { data } = await (supabase as any)
         .from("v_flow_step_funnel")
         .select("*")
         .eq("consultant_id", consultantId)

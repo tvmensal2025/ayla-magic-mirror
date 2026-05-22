@@ -137,7 +137,7 @@ export function CampaignsList({ consultantId, refreshKey }: { consultantId: stri
 
         // ─── Leads reais do WhatsApp atribuídos por campanha ───────────
         // Conta customers com source_campaign_id = cada campanha (últimos 30 dias).
-        const { data: waRows } = await supabase
+        const { data: waRows } = await (supabase as any)
           .from("customers")
           .select("source_campaign_id")
           .in("source_campaign_id", list.map(c => c.id))

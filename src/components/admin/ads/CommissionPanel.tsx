@@ -65,7 +65,7 @@ export function CommissionPanel({ consultantId }: Props) {
       if (!camps || camps.length === 0) { setRows([]); return; }
 
       // 2) Leads convertidos com valor de fatura, agrupados por campanha
-      const { data: converted } = await supabase
+      const { data: converted } = await (supabase as any)
         .from("customers")
         .select("source_campaign_id, electricity_bill_value, commission_rate")
         .eq("consultant_id", consultantId)
@@ -73,7 +73,7 @@ export function CommissionPanel({ consultantId }: Props) {
         .not("source_campaign_id", "is", null);
 
       // 3) Leads convertidos SEM campanha (para o total geral)
-      const { data: convertedNoCamp } = await supabase
+      const { data: convertedNoCamp } = await (supabase as any)
         .from("customers")
         .select("electricity_bill_value, commission_rate")
         .eq("consultant_id", consultantId)
