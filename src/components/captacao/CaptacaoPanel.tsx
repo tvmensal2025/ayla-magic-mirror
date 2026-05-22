@@ -214,11 +214,11 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
 
       {gameOn ? (
         <GameShell>
-          <div className="px-4 py-3 space-y-3">
+          <div className="px-3 py-2 space-y-2">
             <PlayerHud progress={progress} />
             <QuestsBar progress={progress} />
           </div>
-          <div className="flex-1 flex flex-col md:flex-row overflow-hidden md:h-[calc(100vh-460px)] md:min-h-[420px]">
+          <div className="flex-1 flex flex-col md:flex-row overflow-hidden md:h-[calc(100vh-340px)] md:min-h-[420px]">
             {/* Mobile: lead list visível só quando NÃO há lead selecionado. Desktop: sempre. */}
             <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-72 md:shrink-0 md:border-r border-border overflow-hidden`}>
               <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
