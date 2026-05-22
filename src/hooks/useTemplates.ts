@@ -10,14 +10,25 @@ export function applyTemplate(
   template: MessageTemplate,
   customer: { name: string; electricity_bill_value?: number }
 ): string {
-  let result = template.content;
-  result = result.split("{{nome}}").join(customer.name);
-  result = result.split("{{valor_conta}}").join(
-    customer.electricity_bill_value != null
-      ? String(customer.electricity_bill_value)
-      : ""
+  const name = String(customer.name || "").trim();
+  const firstName = name.split(/\s+/)[0] || "";
+  const bill = customer.electricity_bill_value;
+  const billStr =
+    bill != null && Number.isFinite(Number(bill))
+      ? String(bill)
+      : "";
+
+  // Substitui {chave} e {{chave}} em qualquer caixa (NOME, Nome, nome) com espaços.
+  return String(template.content || "").replace(
+    /\{\{?\s*([a-zA-ZÀ-ÿ_][\w\sÀ-ÿ-]{0,40})\s*\}?\}/g,
+    (match, rawKey: string) => {
+      const key = String(rawKey).trim().toLowerCase();
+      if (key === "nome" || key === "first_name" || key === "primeiro_nome" || key === "cliente") return firstName;
+      if (key === "nome_completo" || key === "name") return name;
+      if (key === "valor_conta" || key === "valor" || key === "conta" || key === "fatura") return billStr;
+      return match;
+    },
   );
-  return result;
 }
 
 export function useTemplates(consultantId: string) {

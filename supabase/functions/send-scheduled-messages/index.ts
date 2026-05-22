@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.49.4";
 import { captureError } from "../_shared/sentry.ts";
 import { isQuietHourBRT, nextQuietWindowEndISO, logQuietSkip } from "../_shared/quiet-hours.ts";
 import { isBotGloballyEnabled } from "../_shared/bot/global-flag.ts";
+import { renderTemplateVars } from "../_shared/render-vars.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -76,10 +77,13 @@ Deno.serve(async (req) => {
         const phone = msg.remote_jid.split("@")[0].replace(/\D/g, "");
 
         // 🛑 Regra de ouro: humano assumiu → IA NÃO manda nada
+        let customerName: string | null = null;
+        let billValue: number | null = null;
+        let representante: string | null = null;
         if (phone) {
           const { data: cust } = await supabase
             .from("customers")
-            .select("bot_paused, assigned_human_id, bot_paused_until")
+            .select("name, electricity_bill_value, consultant_id, bot_paused, assigned_human_id, bot_paused_until")
             .eq("phone_whatsapp", phone)
             .order("updated_at", { ascending: false })
             .limit(1)
@@ -97,12 +101,30 @@ Deno.serve(async (req) => {
             skippedPaused++;
             continue;
           }
+          customerName = (cust as any)?.name || null;
+          billValue = (cust as any)?.electricity_bill_value ?? null;
+          if ((cust as any)?.consultant_id) {
+            const { data: consultant } = await supabase
+              .from("consultants")
+              .select("name")
+              .eq("id", (cust as any).consultant_id)
+              .maybeSingle();
+            representante = (consultant as any)?.name || null;
+          }
         }
+
+        // ✅ Renderiza {{nome}}, {nome}, {NOME}, {{valor_conta}} etc. antes de enviar.
+        const renderedText = renderTemplateVars(msg.message_text, {
+          name: customerName,
+          phone,
+          representante,
+          valor_conta: billValue,
+        });
 
         const res = await fetch(`${evolutionUrl}/message/sendText/${msg.instance_name}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", apikey: evolutionKey },
-          body: JSON.stringify({ number: phone, text: msg.message_text }),
+          body: JSON.stringify({ number: phone, text: renderedText }),
         });
 
         if (res.ok) {

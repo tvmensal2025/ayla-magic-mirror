@@ -23,6 +23,7 @@ import {
 } from "../../_shared/utils.ts";
 import { isQuietHourBRT, logQuietSkip } from "../../_shared/quiet-hours.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../_shared/step-media-order.ts";
+import { renderTemplateVars } from "../../_shared/render-vars.ts";
 import { canSendMediaOnce } from "../../_shared/media-dedupe.ts";
 import {
   getReplyForStep,
@@ -918,17 +919,23 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       }
 
       const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
-      const vars: Record<string, string> = {
-        "{nome}": firstName,
-        "{{nome}}": firstName,
-        "{nome_completo}": String((customer as any).name || ""),
-        "{{nome_completo}}": String((customer as any).name || ""),
-        "{representante}": nomeRepresentante || "",
-        "{{representante}}": nomeRepresentante || "",
-        ...extraVars,
-      };
+      // Normaliza extraVars: callers passam chaves como "{conta}" / "{{conta}}".
+      // Convertemos para chaves nuas ("conta") para o helper compartilhado.
+      const normalizedExtras: Record<string, string> = {};
+      for (const [k, v] of Object.entries(extraVars || {})) {
+        const bare = String(k).replace(/^\{+\s*/, "").replace(/\s*\}+$/, "").toLowerCase();
+        if (bare) normalizedExtras[bare] = String(v ?? "");
+      }
+      normalizedExtras.first_name = firstName;
+      // Helper case-insensitive + tolerante a {nome}, {{nome}}, {NOME}, {{ nome }}.
       const applyVars = (s: string) =>
-        Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
+        renderTemplateVars(s, {
+          name: (customer as any).name || "",
+          phone: (customer as any).phone_whatsapp || "",
+          representante: nomeRepresentante || "",
+          valor_conta: (customer as any).electricity_bill_value,
+          extra: normalizedExtras,
+        });
 
       type Item = { kind: string; text?: string; media?: any };
       const items: Item[] = medias.map((m) => ({
@@ -1187,7 +1194,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     // F: texto entra como item ordenável junto com mídias
     const baseText = qa.text_response
-      ? String(qa.text_response).replaceAll("{nome}", customer.name || "").replaceAll("{representante}", nomeRepresentante || "")
+      ? renderTemplateVars(String(qa.text_response), { name: customer.name || "", representante: nomeRepresentante || "" })
       : "";
     const nudgeStep = qa.is_closing ? "aguardando_conta" : (step || "qualificacao");
     const nudge = qa.is_closing ? "" : buildStepNudge(nudgeStep, customer.name || null);
@@ -1441,9 +1448,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             const openingText = (openingQa as any).text_response;
             if (openingText) {
               try {
-                await sendText(remoteJid, String(openingText)
-                  .replaceAll("{nome}", customer.name || "")
-                  .replaceAll("{representante}", nomeRepresentante || ""));
+                await sendText(remoteJid, renderTemplateVars(String(openingText), {
+                  name: customer.name || "",
+                  representante: nomeRepresentante || "",
+                }));
                 await supabase.from("conversations").insert({
                   customer_id: customer.id,
                   message_direction: "outbound",
@@ -2895,9 +2903,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             try {
               const rawText = (nextCustom.message_text || "").trim();
               const firstName = String(customer.name || "").trim().split(/\s+/)[0] || "";
-              const finalText = (rawText || FINAL_FALLBACK_TEXT)
-                .replaceAll("{{nome}}", firstName)
-                .replaceAll("{{representante}}", nomeRepresentante || "");
+              const finalText = renderTemplateVars(rawText || FINAL_FALLBACK_TEXT, {
+                name: customer.name || "",
+                representante: nomeRepresentante || "",
+              });
               await sendOptions(remoteJid, finalText, [
                 { id: "btn_finalizar", title: "✅ Finalizar" },
               ]);
@@ -4118,9 +4127,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             .limit(1).maybeSingle();
           const txt = (passo?.message_text || "").trim();
           if (txt) {
-            parabens = txt
-              .replaceAll("{{nome}}", (customer.name || "").split(/\s+/)[0] || "")
-              .replaceAll("{{representante}}", nomeRepresentante || "");
+          parabens = renderTemplateVars(txt, {
+            name: customer.name || "",
+            representante: nomeRepresentante || "",
+          });
           }
         }
       } catch (e) {
