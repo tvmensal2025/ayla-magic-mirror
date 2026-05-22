@@ -1,46 +1,35 @@
-## Diagnóstico
+# Plano: Deixar o app abrir mais rápido
 
-O painel `/admin` foi construído mobile-first com container `max-w-7xl mx-auto` (1280px). Em monitores grandes (1440, 1920, 2560px) sobra fundo preto nas laterais — por isso "parece que não foi feito pra PC". Além disso, em desktop o conteúdo continua empilhado verticalmente como no celular, desperdiçando a tela.
+Objetivo: reduzir o tempo de abertura do app (especialmente `/admin` e `/super-admin`) sem mudar nenhuma funcionalidade ou visual.
 
-Vou tratar isso de forma sistêmica, sem quebrar o mobile.
+## 1. Lazy loading de rotas em `src/App.tsx`
+Converter todas as páginas pesadas para `React.lazy()` + `Suspense`:
+- `Admin`, `SuperAdmin`, `WhatsAppClientsPage`, `FluxoCamila`, páginas de relatórios, captação, saúde-bot, install, etc.
+- Manter rotas leves (landing `/ayla-viana`, `/cadastro`, `NotFound`) com import normal para não atrasar o first paint público.
+- Adicionar um `<Suspense fallback={<LoadingScreen />}>` global com um spinner usando o design system (verde primário).
 
-## O que vou fazer
+## 2. Lazy loading de tabs/painéis dentro do Admin e SuperAdmin
+Os painéis mais pesados (Ads, IA, Captação, Saúde Bot, Templates WhatsApp, Fluxos, Kanban) serão carregados via `lazy()` somente quando a aba for aberta. Hoje todos entram no bundle inicial mesmo sem o usuário abrir.
 
-### 1. Shell do /admin com largura total + sidebar fixa em desktop
+## 3. Split de chunks no `vite.config.ts`
+Adicionar `build.rollupOptions.output.manualChunks` separando:
+- `react-vendor`: react, react-dom, react-router-dom
+- `supabase`: @supabase/supabase-js
+- `ui-vendor`: radix-ui, lucide-react
+- `charts`: recharts (se usado)
+- `motion`: framer-motion (se usado)
 
-- Substituir o `max-w-7xl mx-auto` em `src/pages/Admin.tsx` por um shell de duas colunas:
-  - **Sidebar lateral fixa** (≥ `lg:`) com as abas atuais (Dashboard, WhatsApp, CRM, Templates, Fluxos, etc.) — usando o padrão Shadcn `Sidebar` (collapsible em ícone).
-  - **Área de conteúdo fluida** ocupando o resto da tela (`flex-1`, sem max-width travado).
-- No mobile (< `lg:`) mantém exatamente o layout atual (top bar + tabs horizontais) — zero regressão.
-- Header passa a ter `SidebarTrigger` para colapsar a barra.
+Isso reduz o bundle principal e permite cache melhor entre deploys.
 
-### 2. Container de conteúdo respira até telas grandes
+## 4. Pré-carregar rotas críticas após o idle
+Usar `requestIdleCallback` para pré-buscar o chunk do `/admin` depois que o login renderiza, evitando "tela branca" ao clicar para entrar.
 
-- Onde hoje tem `max-w-7xl`, troco por padding lateral generoso (`px-4 lg:px-8 xl:px-12`) e largura controlada por `max-w-screen-2xl` (1536px) com `mx-auto`, em vez de 1280px estreito.
-- Em telas ≥ 1920px, conteúdo respira sem barras pretas berrantes.
+## 5. Fora de escopo
+- Nenhuma mudança em lógica de negócio, edge functions, banco, RLS, WhatsApp, CRM ou IA.
+- Nenhuma mudança visual além do spinner do Suspense.
+- Landing pages públicas continuam como estão.
 
-### 3. Densidade desktop nas telas-chave
-
-Aumentar colunas onde hoje tudo empilha:
-
-- **DashboardTab** — KPIs em `grid-cols-2 md:grid-cols-3 xl:grid-cols-4`; gráficos lado-a-lado em `xl:grid-cols-2`.
-- **WhatsApp (chat)** — 3 colunas em desktop: lista de conversas | chat ativo | painel do cliente (CRM lateral). Hoje o painel do cliente vira modal mesmo em PC.
-- **CRM Kanban** — colunas com largura mínima maior em desktop (`xl:min-w-[320px]`) e scroll horizontal contido na área.
-- **Templates / Fluxos / Saúde Bot** — listagens passam de 1 coluna para `xl:grid-cols-2`.
-
-### 4. Fundo do app
-
-- Substituir o preto puro pelo gradient sutil do design system (`bg-background` com leve textura verde glassmorphism que já existe na LP), pra que mesmo em ultrawide as laterais fiquem elegantes em vez de "vazio preto".
-
-## Fora de escopo
-
-- Landing pages públicas (`/ayla-viana`, `/cadastro`) — já são responsivas e desenhadas para desktop. Só mexo se você confirmar problema específico ali.
-- Mudanças de funcionalidade — só CSS/layout.
-
-## Validação
-
-Depois de aplicar, tiro screenshots em 1366, 1536, 1920 e 1191 (o seu atual) para confirmar zero overflow e zero faixa preta indevida.
-
----
-
-**Pergunta rápida antes de implementar:** confirma que quer começar pelo **/admin inteiro** (CRM + WhatsApp + Templates + Dashboard) ou prefere que eu faça primeiro só a tela do **WhatsApp** (que é a mais usada) e depois evoluo as outras?
+## Detalhes técnicos
+- Arquivos tocados: `src/App.tsx`, `vite.config.ts`, `src/pages/Admin.tsx`, `src/pages/SuperAdmin.tsx` (somente para lazy nos tabs).
+- Sem novas dependências.
+- Build do Vite vai gerar vários chunks pequenos em `dist/assets/` — primeiro load do `/admin` cai significativamente porque só baixa o chunk da aba ativa.
