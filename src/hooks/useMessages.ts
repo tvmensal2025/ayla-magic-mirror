@@ -170,9 +170,9 @@ export function useMessages(
         .filter((m) => clearedAtMs === 0 || m.timestamp * 1000 >= clearedAtMs)
         .sort((a, b) => {
           if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
-          // Mesmo segundo: mantém exatamente a ordem bruta do provedor.
-          // Inverter aqui embaralha sequências rápidas (áudio -> vídeo -> texto).
-          return a.sourceIndex - b.sourceIndex;
+          // Mesmo segundo: Whapi/Evolution geralmente retornam newest-first.
+          // Para renderizar oldest-first, inverte só o desempate dentro do empate.
+          return b.sourceIndex - a.sourceIndex;
         })
         .map(({ sourceIndex: _sourceIndex, ...m }) => m);
       setMessages(mapped);
