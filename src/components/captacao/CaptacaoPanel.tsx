@@ -403,6 +403,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       onSent={(stepId) => setSentSteps((s) => new Set(s).add(stepId))}
                     />
                   </div>
+                  <CaptureConversationFeed customerId={selectedId} />
                   <div className="rounded-lg border border-dashed border-border bg-secondary/20 p-3 text-[11px] text-muted-foreground space-y-1">
                     <p>💡 <span className="font-semibold">Como funciona:</span> envie os passos, conforme o cliente responde os campos vão sendo preenchidos automaticamente (OCR ativo). Capturas em sequência ativam <span className="font-bold text-primary">combos</span>!</p>
                     <p className="hidden md:block">Edite manualmente qualquer campo na ficha à direita.</p>
