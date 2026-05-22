@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Pause, Phone, MapPin, Zap } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNowStrict } from "date-fns";
+
 import { ptBR } from "date-fns/locale";
 import { leadHeat, type FunnelLead } from "@/hooks/useSalesFunnel";
 
@@ -80,7 +81,7 @@ export function SalesFunnelCard({ lead, onDragStart, onClick }: SalesFunnelCardP
 
       {/* Footer: badges */}
       <div className="flex items-center justify-between gap-1 mt-2 pt-2 border-t border-border/50">
-        <div className="flex items-center gap-1 flex-wrap">
+        <div className="flex items-center gap-1 flex-wrap min-w-0">
           {origin && (
             <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-primary/30 text-primary">
               {origin}
@@ -92,10 +93,11 @@ export function SalesFunnelCard({ lead, onDragStart, onClick }: SalesFunnelCardP
             </Badge>
           )}
         </div>
-        <span className="text-[9px] text-muted-foreground shrink-0">
-          {formatDistanceToNow(new Date(lastReply), { addSuffix: true, locale: ptBR })}
+        <span className="text-[10px] text-muted-foreground shrink-0 whitespace-nowrap tabular-nums">
+          {formatDistanceToNowStrict(new Date(lastReply), { locale: ptBR })}
         </span>
       </div>
+
     </div>
   );
 }
