@@ -1,24 +1,70 @@
-# Fix: passos do fluxo não aparecem na primeira abertura do FlowQuickBar
+# Ativar PWA para escalar
 
-## Causa raiz
-Em `src/components/whatsapp/FlowQuickBar.tsx` o estado `byVariant` (mapa variant → flowId) vive em um `useRef`. Existem dois efeitos:
+Hoje o projeto já tem `manifest.json` + meta tags (`apple-mobile-web-app-capable`, theme-color, icons), então o app **já é instalável** ("Adicionar à tela inicial") em iOS e Android. O que falta para um PWA "de verdade" é o **service worker** (cache, carregamento offline, atualização automática).
 
-- Efeito 1 (`[open, consultantId, customerId]`): faz `await` no Supabase, preenche `byVariantRef.current` e chama `setVariant(selected)`.
-- Efeito 2 (`[open, consultantId, variant]`): lê `byVariantRef.current` para carregar `bot_flow_steps`.
+## ⚠️ Aviso importante (Lovable)
 
-Na primeira abertura, os dois efeitos disparam no mesmo render. O Efeito 2 executa antes do `await` do Efeito 1 resolver → `byVariantRef.current` está vazio → `setSteps([])` e o popover mostra "Nenhum passo configurado". Quando o Efeito 1 termina e chama `setVariant("A")`, como o valor já era `"A"`, o Efeito 2 não re-dispara. Só ao trocar para B/C e voltar para A é que o Efeito 2 acha o flowId e carrega os passos.
+PWA com service worker **não funciona no preview do editor** (iframe). Só vai funcionar:
+- Na URL publicada (`ayla-magic-mirror.lovable.app`)
+- No domínio customizado (`igreen.cloud`)
+- Em produção no celular do usuário
 
-## Correção
-Trocar o `useRef` por estado React para o mapa de variantes, fazendo o Efeito 2 reagir quando o mapa for preenchido.
+No editor o SW será automaticamente desativado para não cachear builds antigos.
 
-1. Substituir `byVariantRef` por `const [byVariant, setByVariant] = useState<Map<...>>(new Map())`.
-2. No Efeito 1, em vez de `byVariantRef.current = byVariant`, chamar `setByVariant(byVariant)`.
-3. Adicionar `byVariant` na dependência do Efeito 2 e ler do estado em vez do ref.
-4. Manter a lógica restante (variante default vinda de `customers.flow_variant`, fallback para primeira disponível, limpeza de previews ao trocar variant).
+## O que vou fazer
 
-Resultado: na primeira abertura, assim que o fetch dos fluxos terminar, o Efeito 2 re-dispara com o mapa preenchido e carrega os passos da variante A — sem precisar trocar de aba.
+### 1. Instalar e configurar `vite-plugin-pwa`
+- `vite.config.ts`: adicionar `VitePWA` com:
+  - `registerType: "autoUpdate"` (atualiza sozinho quando sai deploy novo)
+  - `devOptions.enabled: false` (não roda em dev)
+  - `workbox.navigateFallbackDenylist: [/^\/~oauth/, /^\/api/]` (não cacheia rotas internas)
+  - `workbox.runtimeCaching` com `NetworkFirst` para HTML (evita travar em build velho) e `CacheFirst` para assets estáticos (`/assets/`, imagens MinIO)
+  - Reaproveita o `manifest.json` existente (não duplica)
 
-## Arquivos
-- `src/components/whatsapp/FlowQuickBar.tsx` — única mudança.
+### 2. Guard contra iframe/preview em `src/main.tsx`
+```ts
+const inIframe = (() => { try { return window.self !== window.top; } catch { return true; } })();
+const isPreview = location.hostname.includes("id-preview--") || location.hostname.includes("lovableproject.com");
+if (!inIframe && !isPreview) {
+  import("virtual:pwa-register").then(({ registerSW }) => registerSW({ immediate: true }));
+} else {
+  navigator.serviceWorker?.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
+}
+```
 
-Sem alterações de comportamento em backend, banco ou no envio manual (`manual-step-send`).
+### 3. Página `/install` (opcional, recomendada)
+Pequena tela com:
+- Detecção de plataforma (iOS/Android/Desktop)
+- Instruções "Compartilhar → Adicionar à Tela de Início" (iOS)
+- Botão `beforeinstallprompt` (Android/Chrome desktop)
+- Status "✅ Já instalado" quando rodando em standalone
+
+Útil para mandar o link aos consultores: `igreen.cloud/install`.
+
+### 4. Ajustes no `manifest.json`
+- Trocar `start_url` de `/admin` para `/admin?source=pwa` (telemetria de uso instalado via GA4)
+- Manter `id: "/admin"` (não pode mudar, senão vira "novo app" pra quem já instalou)
+- Adicionar ícone 192x192 caso `favicon.png` não tenha (verifico na hora)
+
+## Detalhes técnicos
+
+- **Rotas excluídas do cache**: `/~oauth/*` (callback de auth), `/api/*` (edge functions Supabase), qualquer fetch para `supabase.co` e `minio` (esses vão direto pra rede, sem cache, pra não servir media velha do WhatsApp).
+- **Estratégia HTML**: NetworkFirst com timeout 3s → se a rede falhar serve do cache. Garante que deploy novo aparece sempre que tem internet.
+- **Update flow**: `autoUpdate` aplica novo SW na próxima navegação sem prompt. Sem `selfDestroying`.
+- **Sem mudar appID** do Capacitor / sem mexer no backend.
+
+## Arquivos alterados
+
+- `vite.config.ts` — adiciona `VitePWA`
+- `src/main.tsx` — guard de registro
+- `public/manifest.json` — pequenos ajustes
+- `src/pages/InstallPage.tsx` (novo) + rota em `src/App.tsx`
+- `package.json` — `vite-plugin-pwa` como devDep
+
+## O que NÃO vou fazer
+
+- Não vou habilitar SW no editor (cacheia builds velhos e quebra HMR).
+- Não vou mudar `id`/`scope`/`display` (PWAs já instalados perderiam continuidade).
+- Não vou virar Capacitor/app nativa — você pediu PWA.
+
+Posso seguir?

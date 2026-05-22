@@ -28,3 +28,29 @@ if (SENTRY_DSN) {
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
+
+// ─── PWA: registro de Service Worker com guards de iframe/preview ──────────
+// Service worker quebra o preview do Lovable (cacheia builds velhos).
+// Só registramos em produção real (domínio publicado / igreen.cloud).
+const inIframe = (() => {
+  try { return window.self !== window.top; } catch { return true; }
+})();
+const host = typeof window !== "undefined" ? window.location.hostname : "";
+const isPreviewHost =
+  host.includes("id-preview--") ||
+  host.includes("lovableproject.com") ||
+  host === "localhost" ||
+  host === "127.0.0.1";
+
+if (!inIframe && !isPreviewHost && "serviceWorker" in navigator) {
+  import("virtual:pwa-register")
+    .then(({ registerSW }) => {
+      registerSW({ immediate: true });
+    })
+    .catch((e) => console.warn("[PWA] register failed:", e));
+} else if ("serviceWorker" in navigator) {
+  // Em preview / iframe / localhost: limpa qualquer SW antigo para não cachear.
+  navigator.serviceWorker.getRegistrations().then((rs) => {
+    rs.forEach((r) => r.unregister());
+  }).catch(() => {});
+}

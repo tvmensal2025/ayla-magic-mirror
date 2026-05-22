@@ -21,6 +21,7 @@ const SaudeBot = lazy(() => import("./pages/SaudeBot"));
 const AdminKnowledge = lazy(() => import("./pages/AdminKnowledge"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const InstallPage = lazy(() => import("./pages/InstallPage"));
 const PoliticaPrivacidade = lazy(() => import("./pages/PoliticaPrivacidade"));
 import { CookieBanner } from "@/components/CookieBanner";
 
@@ -64,6 +65,7 @@ const App = () => (
               <Route path="/licenciado/:licenca" element={<LicenciadaPage />} />
               <Route path="/cadastro/:licenca" element={<CadastroPage />} />
               <Route path="/politica-privacidade" element={<PoliticaPrivacidade />} />
+              <Route path="/install" element={<InstallPage />} />
               <Route path="/:licenca" element={<ConsultantPage />} />
               <Route path="/" element={<Navigate to="/auth" replace />} />
               <Route path="*" element={<NotFound />} />
