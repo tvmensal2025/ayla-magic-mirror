@@ -105,7 +105,6 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
   // correspondente, sem mexer em `variant` nem reler flow_variant do cliente.
   useEffect(() => {
     if (!open || !consultantId) return;
-    const byVariant = byVariantRef.current;
     if (byVariant.size === 0) return;
     const flowId = byVariant.get(variant);
     if (!flowId) { setSteps([]); return; }
@@ -127,7 +126,7 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
       setLoading(false);
     })();
     return () => { mounted = false; };
-  }, [open, consultantId, variant]);
+  }, [open, consultantId, variant, byVariant]);
 
 
 
