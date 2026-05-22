@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { mediaIcon, mediaBadge, MEDIA_TYPES } from "./templateUtils";
 import { useUserRole } from "@/hooks/useUserRole";
 import { supabase } from "@/integrations/supabase/client";
+import { VoiceClipRecorder } from "@/components/whatsapp/voice/VoiceClipRecorder";
 
 interface Props {
   template: MessageTemplate;
@@ -136,13 +137,21 @@ export function TemplateListItem({ template: t, consultantId, onUpdateTemplate, 
 
         {editMediaType !== "text" && (
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <input ref={editFileRef} type="file" accept={getAcceptString(editMediaType)} onChange={(e) => handleEditFileUpload(e, "media")} className="hidden" />
               <Button type="button" variant="outline" size="sm" onClick={() => editFileRef.current?.click()} disabled={isEditUploading}
-                className="gap-1.5 rounded-lg border-dashed text-xs h-9 flex-1">
+                className="gap-1.5 rounded-lg border-dashed text-xs h-9 flex-1 min-w-[140px]">
                 {isEditUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                {editMediaUrl ? "Trocar mídia" : "Upload mídia"}
+                {editMediaUrl ? "Trocar arquivo" : "Selecionar arquivo"}
               </Button>
+              {editMediaType === "audio" && (
+                <VoiceClipRecorder
+                  consultantId={consultantId}
+                  slug={`tpl-${t.id.slice(0,8)}-voz`}
+                  idleLabel={editMediaUrl ? "Regravar com minha voz" : "Gravar minha voz"}
+                  onUploaded={(url) => setEditMediaUrl(url)}
+                />
+              )}
             </div>
             {editMediaUrl && (
               <div className="rounded-lg border border-border/30 bg-secondary/10 p-2">
