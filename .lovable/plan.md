@@ -1,44 +1,24 @@
-## Captação mobile — barra fina e meia-tela
+# Fix: passos do fluxo não aparecem na primeira abertura do FlowQuickBar
 
-Arquivo único: `src/components/captacao/CaptureSheet.tsx`.
+## Causa raiz
+Em `src/components/whatsapp/FlowQuickBar.tsx` o estado `byVariant` (mapa variant → flowId) vive em um `useRef`. Existem dois efeitos:
 
-### 1. Barra minimizada (substitui a barra grande atual)
+- Efeito 1 (`[open, consultantId, customerId]`): faz `await` no Supabase, preenche `byVariantRef.current` e chama `setVariant(selected)`.
+- Efeito 2 (`[open, consultantId, variant]`): lê `byVariantRef.current` para carregar `bot_flow_steps`.
 
-Altura `h-11` (≈44px) full-width no rodapé, respeitando `safe-area-inset-bottom`.
+Na primeira abertura, os dois efeitos disparam no mesmo render. O Efeito 2 executa antes do `await` do Efeito 1 resolver → `byVariantRef.current` está vazio → `setSteps([])` e o popover mostra "Nenhum passo configurado". Quando o Efeito 1 termina e chama `setVariant("A")`, como o valor já era `"A"`, o Efeito 2 não re-dispara. Só ao trocar para B/C e voltar para A é que o Efeito 2 acha o flowId e carrega os passos.
 
-Layout em 1 linha:
-- Esquerda: bolinha verde pequena (`w-7 h-7`) com ícone Gamepad
-- Centro: texto compacto numa linha só → `Captação 2/10 · 0/10 passos` (font `text-xs`, truncate)
-- Direita: botão circular verde (`w-9 h-9 rounded-full`) com ícone `Maximize2` (abre)
-- Sem botão "Sair/X" na barra (evita toque acidental; fechar usa o X do header expandido)
+## Correção
+Trocar o `useRef` por estado React para o mapa de variantes, fazendo o Efeito 2 reagir quando o mapa for preenchido.
 
-Toque em qualquer parte da barra abre o sheet. Visual: `bg-card/95 backdrop-blur`, borda superior verde fina, sombra suave.
+1. Substituir `byVariantRef` por `const [byVariant, setByVariant] = useState<Map<...>>(new Map())`.
+2. No Efeito 1, em vez de `byVariantRef.current = byVariant`, chamar `setByVariant(byVariant)`.
+3. Adicionar `byVariant` na dependência do Efeito 2 e ler do estado em vez do ref.
+4. Manter a lógica restante (variante default vinda de `customers.flow_variant`, fallback para primeira disponível, limpeza de previews ao trocar variant).
 
-### 2. Abertura em meia tela
+Resultado: na primeira abertura, assim que o fetch dos fluxos terminar, o Efeito 2 re-dispara com o mapa preenchido e carrega os passos da variante A — sem precisar trocar de aba.
 
-Ao expandir no mobile, o sheet sobe até **50dvh** (não fullscreen). Chat continua visível em cima.
+## Arquivos
+- `src/components/whatsapp/FlowQuickBar.tsx` — única mudança.
 
-- `expanded=false` por padrão no mobile → altura `h-[50dvh]`
-- Grabber arrasta pra **cima** (>60px) → vira fullscreen (`expanded=true`, `h-[100dvh]`)
-- Grabber arrasta pra **baixo** (>60px) → minimiza pra barra fina
-- Overlay continua transparente e sem bloquear o chat enquanto não estiver fullscreen
-
-### 3. Header/footer compactos no modo meia-tela
-
-Mantém o layout compacto já existente (header `py-1`, footer `px-2 py-1`) quando `expanded=false`. Quando vira fullscreen, usa o layout grande já presente.
-
-Botões do header com área de toque mínima 40px (`h-10 w-10`) — apenas X (fechar) e ChevronDown (minimizar) no mobile; desktop mantém Minimize/Maximize.
-
-### 4. Não muda
-
-- Lógica de captura, passos, envio, scoreboard, combo, XP — intocado
-- Desktop continua igual (sheet `38dvh` compacto / fullscreen via M)
-- Chat, useMessages, scroll — intocado
-
-### Verificação
-
-Preview 429x853:
-- Abre lead → barra fina de 44px no rodapé com "Captação 2/10 · 0/10 passos" + botão redondo Abrir
-- Toca barra → sheet sobe a 50dvh, chat continua visível acima
-- Arrasta grabber pra cima → fullscreen
-- Arrasta grabber pra baixo → volta pra barra fina
+Sem alterações de comportamento em backend, banco ou no envio manual (`manual-step-send`).

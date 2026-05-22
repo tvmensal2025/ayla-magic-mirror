@@ -56,7 +56,7 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
   const [oneByOneStepId, setOneByOneStepId] = useState<string | null>(null);
   const [variant, setVariant] = useState<"A" | "B" | "C">("A");
   const [variantsAvailable, setVariantsAvailable] = useState<Array<"A" | "B" | "C">>(["A"]);
-  const byVariantRef = useRef<Map<"A" | "B" | "C", string>>(new Map());
+  const [byVariant, setByVariant] = useState<Map<"A" | "B" | "C", string>>(new Map());
 
   // Efeito 1 — inicialização: roda quando o popover abre ou o cliente muda.
   // Define a variante default a partir de customers.flow_variant SEM ouvir mudanças
@@ -86,7 +86,7 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
         const v = String(f.variant || "A").toUpperCase() as "A" | "B" | "C";
         if (["A", "B", "C"].includes(v) && !byVariant.has(v)) byVariant.set(v, f.id);
       });
-      byVariantRef.current = byVariant;
+      setByVariant(byVariant);
       const available = (["A", "B", "C"] as const).filter((v) => byVariant.has(v));
       if (!mounted) return;
       setVariantsAvailable(available.length > 0 ? available : ["A"]);
@@ -105,7 +105,6 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
   // correspondente, sem mexer em `variant` nem reler flow_variant do cliente.
   useEffect(() => {
     if (!open || !consultantId) return;
-    const byVariant = byVariantRef.current;
     if (byVariant.size === 0) return;
     const flowId = byVariant.get(variant);
     if (!flowId) { setSteps([]); return; }
@@ -127,7 +126,7 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
       setLoading(false);
     })();
     return () => { mounted = false; };
-  }, [open, consultantId, variant]);
+  }, [open, consultantId, variant, byVariant]);
 
 
 
