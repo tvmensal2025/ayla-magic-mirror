@@ -125,14 +125,15 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
   }, [rows.length, scheduleScrollToBottom]);
 
   return (
-    <div className="rounded-lg border border-border bg-card/30 overflow-hidden">
-      <div className="px-2.5 py-1.5 border-b border-border/60 bg-muted/30 flex items-center justify-between">
+    <div className="rounded-lg border border-border bg-card/30 overflow-hidden flex flex-col min-h-0 flex-1">
+      <div className="px-2.5 py-1.5 border-b border-border/60 bg-muted/30 flex items-center justify-between shrink-0">
         <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
           <MessageCircle className="w-3 h-3 text-primary" /> Conversa ao vivo
         </span>
         <span className="text-[9px] text-muted-foreground tabular-nums">{rows.length}</span>
       </div>
-      <div ref={scrollRef} className="max-h-56 overflow-y-auto p-2 space-y-1.5 bg-[#0b141a]/40">
+      <div ref={scrollRef} className="flex-1 min-h-[280px] md:min-h-[360px] overflow-y-auto p-3 space-y-2 bg-[#0b141a]/40">
+
         {loading && (
           <div className="flex items-center justify-center py-4 text-muted-foreground text-[10px] gap-1.5">
             <Loader2 className="w-3 h-3 animate-spin" /> carregando…
@@ -149,20 +150,21 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
           return (
             <div key={r.id} className={`flex ${out ? "justify-end" : "justify-start"}`}>
               <div
-                className={`max-w-[85%] rounded-lg px-2 py-1.5 shadow-sm ${
+                className={`max-w-[85%] rounded-lg px-3 py-2 shadow-sm ${
                   out
                     ? "bg-[#005c4b] text-white rounded-tr-sm"
                     : "bg-[#202c33] text-white rounded-tl-sm"
                 }`}
               >
-                <div className="flex items-center gap-1 text-[9px] opacity-70 mb-0.5">
+                <div className="flex items-center gap-1 text-[10px] opacity-70 mb-1">
                   {iconFor(r.message_type)}
                   <span className="uppercase font-semibold">{out ? "Você" : "Lead"}</span>
                   <span>·</span>
                   <span className="tabular-nums">{fmtTime(r.created_at)}</span>
                   {r.slot_key && <span className="ml-1 opacity-60">· {r.slot_key}</span>}
                 </div>
-                <p className="text-[11px] leading-snug whitespace-pre-wrap break-words">{text}</p>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{text}</p>
+
               </div>
             </div>
           );
