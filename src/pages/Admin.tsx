@@ -210,7 +210,13 @@ const AdminContent = () => {
   const effectivePhotoPreview = localPhotoPreview || photoPreview;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative overflow-x-hidden">
+      {/* Ambient gradient for ultrawide screens — evita fundo preto vazio nas laterais */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 opacity-60">
+        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-primary/10 blur-[120px]" />
+        <div className="absolute top-1/3 -right-40 w-[700px] h-[700px] rounded-full bg-emerald-500/[0.06] blur-[140px]" />
+        <div className="absolute bottom-0 left-1/4 w-[500px] h-[500px] rounded-full bg-green-500/[0.05] blur-[120px]" />
+      </div>
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border bg-card/80 backdrop-blur-xl">
         <div className="max-w-[1760px] mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
