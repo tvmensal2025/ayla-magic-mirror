@@ -107,7 +107,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
 
       const hasEmail = enriched.some((r) => r.step_type === "capture_email" || r.step_key === "ask_email");
       const hasConfirm = enriched.some((r) => r.step_type === "confirm_phone" || r.step_key === "ask_phone_confirm");
-      const merged = [...enriched.slice(0, 10)];
+      const merged: StepRow[] = [...enriched.slice(0, 10)];
       if (!hasEmail) merged.push(SYNTHETIC_EMAIL);
       if (!hasConfirm) merged.push(SYNTHETIC_CONFIRM_PHONE);
       if (mounted) setSteps(merged);
