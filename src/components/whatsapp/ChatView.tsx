@@ -378,8 +378,11 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
           </div>
         )}
         {messages.map((msg, index) => (
-          <MessageBubble key={`${msg.id}-${index}`} message={msg} onLoadMedia={loadMedia} consultantId={consultantId} />
+          <div key={`${msg.id}-${index}`} data-msg-bubble>
+            <MessageBubble message={msg} onLoadMedia={loadMedia} consultantId={consultantId} />
+          </div>
         ))}
+        <div ref={bottomRef} aria-hidden className="h-2" />
       </div>
 
       {/* Composer */}
