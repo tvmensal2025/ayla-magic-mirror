@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -52,15 +53,17 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<"passos" | "ficha">("passos");
   const [submitting, setSubmitting] = useState(false);
+  const isMobile = useIsMobile();
   const [minimized, setMinimized] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [allSteps, setAllSteps] = useState<SequenceStep[]>([]);
   const [seqOpen, setSeqOpen] = useState(false);
   const lastCountRef = useRef(0);
 
-  useEffect(() => { setSentSteps(new Set()); setMinimized(false); setExpanded(false); }, [customerId]);
+  // No mobile o painel abre minimizado (pílula no rodapé) pra não tampar o teclado/composer.
+  useEffect(() => { setSentSteps(new Set()); setMinimized(isMobile); setExpanded(false); }, [customerId, isMobile]);
   const pendingSteps = useMemo(() => allSteps.filter((s) => !sentSteps.has(s.step_key)), [allSteps, sentSteps]);
-  useEffect(() => { if (!open) { setMinimized(false); setExpanded(false); } }, [open]);
+  useEffect(() => { if (open) { setMinimized(isMobile); setExpanded(false); } else { setMinimized(false); setExpanded(false); } }, [open, isMobile]);
 
   // Garante modo manual ao abrir
   useEffect(() => {
@@ -292,7 +295,7 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
         className={`w-full p-0 flex flex-col gap-0 border-0 bg-background sm:max-w-none shadow-[0_-12px_40px_-12px_hsl(var(--primary)/0.35)] ${
           expanded
             ? "h-[100dvh] rounded-none"
-            : "h-[44dvh] min-h-[260px] max-h-[100dvh] rounded-t-2xl"
+            : "h-[38dvh] min-h-[240px] max-h-[100dvh] rounded-t-2xl"
         }`}
       >
         {/* Grabber */}

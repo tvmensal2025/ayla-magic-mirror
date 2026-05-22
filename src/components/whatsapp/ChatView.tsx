@@ -208,11 +208,46 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
     if (newCustomerId) setCustomerId(newCustomerId);
   }, []);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll robusto: usa sentinel + ResizeObserver pra acompanhar mídias
+  // que carregam depois (áudio/imagem/vídeo). Só rola se o usuário já estiver
+  // perto do fim — assim quem rolou pra cima lendo histórico não é puxado.
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottomRef.current = distance < 120;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const sentinel = bottomRef.current;
+    if (!scroller || !sentinel) return;
+
+    const scrollToBottom = () => {
+      if (!stickToBottomRef.current) return;
+      // dois rAF garantem que o layout terminou (mídias, fonts, sheets)
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          sentinel.scrollIntoView({ block: "end" });
+        });
+      });
+    };
+
+    scrollToBottom();
+
+    const ro = new ResizeObserver(scrollToBottom);
+    ro.observe(scroller);
+    // Observa também todas as bolhas (mídia carregando muda altura)
+    const children = scroller.querySelectorAll<HTMLElement>("[data-msg-bubble]");
+    children.forEach((c) => ro.observe(c));
+    return () => ro.disconnect();
   }, [messages]);
 
   // Unified helper to resolve JID for media/audio/document sends
@@ -343,8 +378,11 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
           </div>
         )}
         {messages.map((msg, index) => (
-          <MessageBubble key={`${msg.id}-${index}`} message={msg} onLoadMedia={loadMedia} consultantId={consultantId} />
+          <div key={`${msg.id}-${index}`} data-msg-bubble>
+            <MessageBubble message={msg} onLoadMedia={loadMedia} consultantId={consultantId} />
+          </div>
         ))}
+        <div ref={bottomRef} aria-hidden className="h-2" />
       </div>
 
       {/* Composer */}

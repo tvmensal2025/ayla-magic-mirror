@@ -37,6 +37,8 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
   const [rows, setRows] = useState<ConvRow[]>([]);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
 
   useEffect(() => {
     let mounted = true;
@@ -74,9 +76,28 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
   }, [customerId, limit]);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const d = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickRef.current = d < 80;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const sentinel = bottomRef.current;
+    if (!scroller || !sentinel) return;
+    const go = () => {
+      if (!stickRef.current) return;
+      requestAnimationFrame(() => sentinel.scrollIntoView({ block: "end" }));
+    };
+    go();
+    const ro = new ResizeObserver(go);
+    ro.observe(scroller);
+    return () => ro.disconnect();
   }, [rows.length]);
 
   return (
@@ -122,6 +143,7 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
             </div>
           );
         })}
+        <div ref={bottomRef} aria-hidden className="h-1" />
       </div>
     </div>
   );
