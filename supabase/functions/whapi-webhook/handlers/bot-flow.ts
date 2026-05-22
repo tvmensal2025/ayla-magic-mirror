@@ -23,6 +23,7 @@ import {
 } from "../../_shared/utils.ts";
 import { isQuietHourBRT, logQuietSkip } from "../../_shared/quiet-hours.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../_shared/step-media-order.ts";
+import { renderTemplateVars } from "../../_shared/render-vars.ts";
 import { canSendMediaOnce } from "../../_shared/media-dedupe.ts";
 import {
   getReplyForStep,
@@ -918,17 +919,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       }
 
       const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
-      const vars: Record<string, string> = {
-        "{nome}": firstName,
-        "{{nome}}": firstName,
-        "{nome_completo}": String((customer as any).name || ""),
-        "{{nome_completo}}": String((customer as any).name || ""),
-        "{representante}": nomeRepresentante || "",
-        "{{representante}}": nomeRepresentante || "",
-        ...extraVars,
-      };
+      // Helper case-insensitive + tolerante a {nome}, {{nome}}, {NOME}, {{ nome }}.
       const applyVars = (s: string) =>
-        Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
+        renderTemplateVars(s, {
+          name: (customer as any).name || "",
+          phone: (customer as any).phone_whatsapp || "",
+          representante: nomeRepresentante || "",
+          valor_conta: (customer as any).electricity_bill_value,
+          extra: {
+            ...extraVars,
+            // mantém compatibilidade com chaves legadas usadas em alguns passos
+            first_name: firstName,
+          },
+        });
 
       type Item = { kind: string; text?: string; media?: any };
       const items: Item[] = medias.map((m) => ({
