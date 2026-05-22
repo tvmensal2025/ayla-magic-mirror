@@ -2230,7 +2230,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 );
                 if (!defTxn) break; // tem pergunta/objeção → aguarda resposta
                 let nxt: any = null;
-                if (defTxn.goto_step_id) nxt = await _loadStepById(String(defTxn.goto_step_id));
+                if (defTxn?.goto_step_id) nxt = await _loadStepById(String(defTxn.goto_step_id));
                 if (!nxt) {
                   nxt = await findNextActiveFlowStep(supabase, customer.consultant_id, {
                     afterPosition: Number(current.position) || 0,
