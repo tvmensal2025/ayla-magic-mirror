@@ -33,6 +33,12 @@ function fmtTime(iso: string) {
   } catch { return ""; }
 }
 
+function sortRows(rows: ConvRow[], limit: number) {
+  return [...rows]
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .slice(-limit);
+}
+
 export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
   const [rows, setRows] = useState<ConvRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,10 +53,10 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
         .from("conversations")
         .select("id, message_direction, message_text, message_type, created_at, slot_key")
         .eq("customer_id", customerId)
-        .order("created_at", { ascending: false })
+        .order("created_at", { ascending: true })
         .limit(limit);
       if (!mounted) return;
-      setRows(((data as ConvRow[]) || []).reverse());
+      setRows(sortRows((data as ConvRow[]) || [], limit));
       setLoading(false);
     };
     void load();
@@ -61,7 +67,7 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "conversations", filter: `customer_id=eq.${customerId}` },
         (payload) => {
-          setRows((prev) => [...prev.slice(-(limit - 1)), payload.new as ConvRow]);
+          setRows((prev) => sortRows([...prev, payload.new as ConvRow], limit));
         }
       )
       .subscribe();
