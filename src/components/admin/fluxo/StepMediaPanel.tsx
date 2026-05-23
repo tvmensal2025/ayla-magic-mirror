@@ -369,11 +369,12 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
               size="icon"
               className="h-7 w-7"
               onClick={() => removeMedia(m)}
-              disabled={variant !== "A"}
-              title={variant !== "A" ? "Mídias são compartilhadas. Remova pela aba A." : "Remover mídia"}
+              disabled={variant === "B" || variant === "C"}
+              title={(variant === "B" || variant === "C") ? "Mídias são compartilhadas. Remova pela aba A." : "Remover mídia"}
             >
               <Trash2 className="h-3.5 w-3.5 text-destructive" />
             </Button>
+
           </div>
         </div>
         {m.url && m.kind === "audio" && <audio controls src={m.url} className="w-full h-8" />}
