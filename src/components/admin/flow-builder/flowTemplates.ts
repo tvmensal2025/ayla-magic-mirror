@@ -243,7 +243,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Confirmar telefone",
         icon: "msg",
         message_text:
-          "Esse mesmo número *{{telefone}}* é o seu WhatsApp para contato?",
+          "Última confirmação, {{nome}} 👇\n\n📱 *{{telefone}}*\n\nEsse mesmo número é o seu *WhatsApp para contato*?",
         slot_key: "confirmar_telefone",
         captures: [
           {
