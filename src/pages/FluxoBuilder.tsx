@@ -295,10 +295,6 @@ export default function FluxoBuilder() {
               <Sparkles className="mr-1 h-3 w-3" />
               Templates
             </Button>
-            <Button variant="outline" size="sm" onClick={() => navigate("/admin/fluxos-legado")}>
-              <ExternalLink className="mr-1 h-3 w-3" />
-              Editor antigo
-            </Button>
           </div>
         </div>
 
