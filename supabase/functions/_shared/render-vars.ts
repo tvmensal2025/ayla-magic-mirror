@@ -101,6 +101,11 @@ export function renderTemplateVars(text: string | null | undefined, vars: Render
     if (BILL_KEYS.has(key)) return billStr;
     if (key === "economia_mensal" && hasBill) return fmtBRL(billNum * 0.20);
     if (key === "economia_anual" && hasBill) return fmtBRL(billNum * 0.20 * 12);
+    if ((key === "economia_range" || key === "economia_faixa") && hasBill) {
+      const min = Math.max(1, Math.floor(billNum * 0.08));
+      const max = Math.max(min + 1, Math.ceil(billNum * 0.20));
+      return `R$ ${min} a R$ ${max}`;
+    }
     if (vars.extra && Object.prototype.hasOwnProperty.call(vars.extra, key)) {
       const v = vars.extra[key];
       return v == null ? "" : String(v);
