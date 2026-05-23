@@ -157,7 +157,10 @@ export function useFlowValidation(steps: Step[]): FlowValidation {
           kind: "orphan_step",
           message: "Nenhum passo leva até aqui",
         });
+      }
+
       // OCR sem passo de confirmação logo depois
+
       if (isOcrStep(s) && s.auto_detect_doc_type !== false) {
         const next = steps
           .filter((x) => x.position > s.position && x.is_active)
