@@ -220,7 +220,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
 
       {gameOn ? (
         <GameShell>
-          <div className="px-2 py-1.5 space-y-1.5">
+          <div className="px-2 py-1 space-y-1 shrink-0">
             <PlayerHud progress={progress} />
             <QuestsBar progress={progress} />
           </div>
