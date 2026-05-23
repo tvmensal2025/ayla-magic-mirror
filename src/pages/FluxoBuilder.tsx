@@ -302,12 +302,6 @@ export default function FluxoBuilder() {
               <Sparkles className="mr-1 h-3 w-3" />
               Templates
             </Button>
-            <div className="flex items-center gap-2 rounded-lg border px-3 py-1.5">
-              <Switch checked={globalAtivo} onCheckedChange={toggleGlobal} id="global" />
-              <label htmlFor="global" className="cursor-pointer text-xs font-medium">
-                Fluxo ativo
-              </label>
-            </div>
             <Button variant="outline" size="sm" onClick={() => navigate("/admin/fluxos-legado")}>
               <ExternalLink className="mr-1 h-3 w-3" />
               Editor antigo
@@ -315,19 +309,15 @@ export default function FluxoBuilder() {
           </div>
         </div>
 
-        {/* Variantes */}
-        {existingVariants.length > 1 && (
-          <div className="mx-auto max-w-7xl px-4 pb-2">
-            <Tabs value={editingVariant} onValueChange={(v) => setEditingVariant(v as Variant)}>
-              <TabsList>
-                {existingVariants.map((v) => (
-                  <TabsTrigger key={v} value={v} className="text-xs">
-                    {VARIANT_LABEL[v]}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-          </div>
+        {/* Distribuição entre variantes (ativar/pausar/criar) */}
+        {userId && (
+          <VariantDistributionBar
+            consultantId={userId}
+            existingVariants={existingVariants}
+            editingVariant={editingVariant}
+            onSelectVariant={setEditingVariant}
+            onChanged={() => userId && reload(userId, editingVariant)}
+          />
         )}
       </header>
 
