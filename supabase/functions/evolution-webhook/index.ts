@@ -546,6 +546,26 @@ Deno.serve(async (req) => {
         const adsRegex = /(tenho interesse.*mais informa[çc][õo]es|gostaria de saber mais|quero saber mais|vi seu an[uú]ncio|vim do an[uú]ncio|do an[uú]ncio|pelo an[uú]ncio|vi o an[uú]ncio|facebook|instagram|\bfb ads?\b|\bmeta ads?\b|patrocinad|reels|stories|sponsored)/i;
         const textMatch = !isFile && messageText && adsRegex.test(messageText);
 
+        // 3) Match via ctwa_clid_mapping (Req 8.1) — sinal forte
+        let matchMethod: "ctwa_clid" | "exact_message" | "tsvector" | "unmatched" = "unmatched";
+        let matchSimilarity: number | null = null;
+        if (ctwaClid && !sourceCampaignId) {
+          try {
+            const { data: mapping } = await supabase
+              .from("ctwa_clid_mapping")
+              .select("campaign_id")
+              .eq("ctwa_clid", ctwaClid)
+              .maybeSingle();
+            if ((mapping as any)?.campaign_id) {
+              sourceCampaignId = (mapping as any).campaign_id;
+              matchMethod = "ctwa_clid";
+            }
+          } catch (e) {
+            console.warn("[lead-source] ctwa_clid_mapping lookup falhou:", (e as Error).message);
+          }
+        }
+        if (sourceCampaignId && matchMethod === "unmatched") matchMethod = "exact_message";
+
         if (hasReferral || textMatch || sourceCampaignId) {
           const patch: Record<string, any> = { lead_source: "meta_ads" };
           if (sourceCampaignId) patch.source_campaign_id = sourceCampaignId;
@@ -556,7 +576,7 @@ Deno.serve(async (req) => {
           Object.assign(customer, patch);
 
           const reason = sourceCampaignId
-            ? `campaign_match id=${sourceCampaignId}`
+            ? `campaign_match id=${sourceCampaignId} method=${matchMethod}`
             : hasReferral
             ? `referral ctwa=${ctwaClid}`
             : `regex msg="${(messageText || "").slice(0, 60)}"`;
@@ -566,7 +586,21 @@ Deno.serve(async (req) => {
             reason,
             source_campaign_id: sourceCampaignId,
             ctwa_clid: ctwaClid,
+            match_method: matchMethod,
           });
+        }
+
+        // Log de auditoria de match (Req 8.6) — best-effort, fail-open (Req 8.7)
+        try {
+          await supabase.from("campaign_match_log").insert({
+            customer_id: customer.id,
+            campaign_id: sourceCampaignId,
+            method: matchMethod,
+            similarity: matchSimilarity,
+            message_sample: messageText ? String(messageText).slice(0, 200) : null,
+          });
+        } catch (e) {
+          console.warn("[campaign-match-log] insert falhou:", (e as Error).message);
         }
       }
     } catch (e) {
