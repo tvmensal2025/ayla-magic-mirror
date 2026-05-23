@@ -204,7 +204,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
           <div className="h-full bg-gradient-to-r from-emerald-500 to-lime-400 transition-all duration-500"
                style={{ width: `${Math.round((sentSteps.size / Math.max(display.length, 1)) * 100)}%` }} />
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 xl:grid-cols-6 gap-1.5 capture-card-flip">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2 capture-card-flip">
           {display.map((s: StepRow, i: number) => {
             const sent = sentSteps.has(s.id);
             const isSending = sending === s.id;
@@ -213,7 +213,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
             return (
               <div
                 key={s.id}
-                className={`group relative rounded-lg border p-2.5 transition-all duration-300 ${
+                className={`group relative rounded-lg border p-2.5 flex flex-col h-full transition-all duration-300 ${
                   sent
                     ? "border-primary/60 bg-gradient-to-br from-primary/15 to-emerald-500/5 shadow-[0_0_14px_hsl(var(--primary)/0.2)] animate-exec-card"
                     : isNext
@@ -227,11 +227,11 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                     <Check className="w-3.5 h-3.5 text-primary drop-shadow-[0_0_4px_hsl(var(--primary))]" />
                   ) : null}
                 </div>
-                <p className="text-xs font-semibold leading-tight line-clamp-2 min-h-[2rem]">
+                <p className="text-xs font-semibold leading-tight line-clamp-3 break-words">
                   {s.title || s.step_key || "Passo"}
                 </p>
                 {inlinePreview && (
-                  <p className="mt-1 text-[10px] leading-snug text-muted-foreground line-clamp-2 italic">
+                  <p className="mt-1 text-xs leading-snug text-muted-foreground line-clamp-3 italic break-words">
                     “{inlinePreview}”
                   </p>
                 )}
@@ -241,23 +241,30 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                   <ImageIcon className={`w-3 h-3 ${s.has_image ? "text-amber-400" : "text-muted-foreground/30"}`} />
                   <Video className={`w-3 h-3 ${s.has_video ? "text-cyan-400" : "text-muted-foreground/30"}`} />
                 </div>
-                <div className="mt-2 flex items-center gap-1">
+                <div className="mt-auto pt-2 flex items-center gap-1">
                   <Button
                     size="sm"
                     variant={sent ? "outline" : "default"}
-                    className="h-8 px-2 text-[11px] flex-1 min-h-[40px] md:min-h-[32px]"
+                    className="h-8 px-2 text-[11px] flex-1 min-w-0 min-h-[36px]"
                     onClick={() => setPreviewStep(s)}
-                    disabled={!!sending}
+                    disabled={isSending}
                     aria-busy={isSending}
-                    title="Ver e enviar"
+                    title={sent ? "Reenviar" : "Ver e enviar"}
                   >
-                    {isSending ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Eye className="w-3 h-3 mr-1" /> {sent ? "Reenviar" : "Ver e enviar"}</>}
+                    {isSending ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <>
+                        <Eye className="w-3 h-3 mr-1 shrink-0" />
+                        <span className="truncate">{sent ? "Reenviar" : "Ver e enviar"}</span>
+                      </>
+                    )}
                   </Button>
                   {onEditTemplate && (
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-8 w-8 p-0"
+                      className="h-8 w-8 p-0 shrink-0"
                       onClick={() => void loadTemplate(s.id, s.step_key)}
                       title="Editar antes de enviar"
                     >
@@ -269,6 +276,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
             );
           })}
         </div>
+
       </div>
 
       {previewStep && (
