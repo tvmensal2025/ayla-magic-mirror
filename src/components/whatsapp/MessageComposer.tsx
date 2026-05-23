@@ -117,10 +117,10 @@ export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMed
 
   return (
     <div
-      className="relative border-t border-border bg-card p-2"
+      className="relative border-t border-border bg-card p-1.5"
       // Garante que o composer respeite o safe-area do iOS (notch/home bar)
       // e fique acima do teclado virtual em mobile.
-      style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom, 0px))" }}
+      style={{ paddingBottom: "max(0.375rem, env(safe-area-inset-bottom, 0px))" }}
     >
       {showQuickReply && <QuickReplyMenu templates={templates} search={quickSearch} onSelect={handleTemplateSelect} onClose={() => setShowQuickReply(false)} onExactShortcut={setExactShortcut} />}
 
@@ -173,7 +173,7 @@ export function MessageComposer({ onSend, onSendAudio, onSendAudioUrl, onSendMed
           enterKeyHint="send"
           inputMode="text"
           autoCapitalize="sentences"
-          className="flex-1 resize-none bg-secondary rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring min-h-[36px] max-h-[120px]"
+          className="flex-1 resize-none bg-secondary rounded-lg px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring min-h-[34px] max-h-[88px]"
           style={{ overflow: "auto" }}
         />
         {/* Botão Send sempre visível em mobile pra evitar caso onde o teclado
