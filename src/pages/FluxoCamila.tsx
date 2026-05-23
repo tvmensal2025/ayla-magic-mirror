@@ -224,12 +224,12 @@ export default function FluxoCamila() {
     }
     setExistingVariants(ALL_VARIANTS.filter((v) => ex.has(v)));
 
-    const counts: Record<Variant, number> = { A: 0, B: 0, C: 0, D: 0, E: 0 };
+    const vc: Record<Variant, number> = { A: 0, B: 0, C: 0, D: 0, E: 0 };
     for (const r of ((allCustomers as any[]) || [])) {
       const fv = (r.flow_variant || "A") as Variant;
-      if (ALL_VARIANTS.includes(fv)) counts[fv]++;
+      if (ALL_VARIANTS.includes(fv)) vc[fv]++;
     }
-    setVariantCounts(counts);
+    setVariantCounts(vc);
 
     let fid = flows?.[0]?.id ?? null;
     if (!fid && variant === "A") {
