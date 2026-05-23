@@ -58,13 +58,15 @@ Deno.serve(async (req) => {
 
     // Reset opcional: vira o cliente em "virgem" para testar end-to-end completo
     const reset = !!body?.reset;
+    const fresh = !!body?.fresh; // simulação do zero (também limpa conversation history e nome)
     const resetPayload: Record<string, unknown> = {
       bot_paused: false,
       last_custom_prompt_at: null,
     };
-    if (reset) {
+    if (reset || fresh) {
       Object.assign(resetPayload, {
         conversation_step: null,
+        previous_conversation_step: null,
         bill_data_confirmed_at: null,
         doc_data_confirmed_at: null,
         bill_holder_name: null,
@@ -85,7 +87,27 @@ Deno.serve(async (req) => {
         ocr_doc_attempts: 0,
         assigned_human_id: null,
         flow_variant: variant,
+        last_inbound_media_at: null,
+        last_inbound_media_url: null,
+        last_inbound_media_mime: null,
+        last_inbound_media_kind: null,
+        last_inbound_media_message_id: null,
+        media_message_id: null,
+        media_consumo: null,
+        media_storage: null,
       });
+    }
+    if (fresh) {
+      Object.assign(resetPayload, {
+        name: `Teste ${new Date().toISOString().slice(11, 19)}`,
+        name_source: "manual_seed",
+        conversation_summary: null,
+      });
+      const { error: delErr } = await supabase
+        .from("conversations")
+        .delete()
+        .eq("customer_id", customerId);
+      if (delErr) console.warn("[dev-fire-all-steps] conversations delete error", delErr.message);
     }
     await supabase.from("customers").update(resetPayload).eq("id", customerId);
 
