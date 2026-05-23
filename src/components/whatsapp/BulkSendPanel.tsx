@@ -296,8 +296,16 @@ export function BulkSendPanel({ instanceName, customers, templates, applyTemplat
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500/20 to-orange-600/10 flex items-center justify-center border border-orange-500/20">
             <Megaphone className="w-5 h-5 text-orange-400" />
           </div>
-          <div>
-            <h3 className="font-heading font-bold text-foreground text-lg">Envio em Massa</h3>
+          <div className="flex-1">
+            <h3 className="font-heading font-bold text-foreground text-lg flex items-center gap-2">
+              Envio em Massa
+              <HelpHint
+                title="Envio em Massa"
+                summary="Envia a mesma mensagem para vários contatos com delay seguro"
+                details="Selecione público (Leads WhatsApp ou Clientes iGreen — nunca mistura os dois), aplique filtros de status/licenciada, escreva ou escolha um template e dispare. O envio respeita delay entre mensagens (1,5s–2,5s) e ordem áudio → imagem → texto para parecer humano."
+                example="Quer avisar todos os leads em 'Aguardando conta' sobre um novo prazo? Filtre por esse status e envie um lembrete único."
+              />
+            </h3>
             <p className="text-xs text-muted-foreground">Envie para vários clientes de uma vez</p>
           </div>
         </div>
