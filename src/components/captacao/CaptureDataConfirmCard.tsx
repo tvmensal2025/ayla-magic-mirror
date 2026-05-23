@@ -93,6 +93,7 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
           .eq("is_active", true)
           .eq("variant", variant)
           .maybeSingle();
+        let dispatchedBetween = 0;
         if (flowRow?.id) {
           const { data: allSteps } = await supabase
             .from("bot_flow_steps")
@@ -120,10 +121,47 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
                   skipNameGuard: true,
                 },
               });
+              dispatchedBetween++;
               await new Promise((r) => setTimeout(r, 1800));
             } catch (msgErr: any) {
               console.warn(`[confirm-self] msg-step ${msgStep.step_key} failed:`, msgErr?.message);
             }
+          }
+        }
+
+        // Se o fluxo do consultor NÃO tem passo de simulação entre conta
+        // e doc (variantes A/B típicas), injeta a proposta padrão (8%–20%)
+        // pra cliente ver o benefício antes de mandar o documento.
+        if (kind === "bill" && dispatchedBetween === 0) {
+          try {
+            const valor = Number((customer as any)?.electricity_bill_value || 0);
+            if (valor > 30) {
+              const min = Math.max(1, Math.floor(valor * 0.08));
+              const max = Math.max(min + 1, Math.ceil(valor * 0.20));
+              const fmtBRL = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              const firstName = String(customer?.name || "").trim().split(/\s+/)[0] || "";
+              const simText =
+                `🎉 *Pronto${firstName ? `, ${firstName}` : ""}!* Já fiz a *simulação* com base na sua conta.\n\n` +
+                `💡 Conta atual: *R$ ${fmtBRL(valor)}*\n` +
+                `💚 Economia estimada: *de R$ ${min} (8%) até R$ ${max} (20%)* todo mês\n\n` +
+                `✅ Sem obra\n✅ Sem instalação\n✅ Mesma distribuidora — só muda quem fornece a energia\n\n` +
+                `Bora *finalizar seu cadastro agora*? 🚀`;
+              let phone = String(customer?.phone_whatsapp || "").replace(/\D/g, "");
+              if (phone && !phone.startsWith("55")) phone = "55" + phone;
+              if (phone) {
+                const to = `${phone}@s.whatsapp.net`;
+                await supabase.functions.invoke("whapi-proxy", {
+                  body: { action: "send_text", consultantId: customer.consultant_id, payload: { to, text: simText } },
+                });
+                await supabase.from("conversations").insert({
+                  customer_id: customer.id, message_direction: "outbound",
+                  message_text: simText, message_type: "text", conversation_step: "simulacao_consultor",
+                });
+                await new Promise((r) => setTimeout(r, 1500));
+              }
+            }
+          } catch (simErr: any) {
+            console.warn("[confirm-self] simulação default falhou:", simErr?.message);
           }
         }
 
