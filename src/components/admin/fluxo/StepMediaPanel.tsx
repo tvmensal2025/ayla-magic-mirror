@@ -277,13 +277,17 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
   }
 
   async function removeMedia(m: Media) {
-    if (variant !== "A") {
+    const isShared = variant === "B" || variant === "C";
+    if (isShared) {
       toast.error("Mídias são compartilhadas entre A/B/C. Remova pela aba A. Na B, áudios já são ignorados automaticamente.");
       return;
     }
+    const sharedNote = variant === "A"
+      ? "Esta mídia será removida de todas as variantes do fluxo (A, B e C). Você poderá enviar uma nova depois."
+      : "Esta mídia será removida deste passo. Você poderá enviar uma nova depois.";
     const ok = await confirm({
       title: `Remover "${m.label}"?`,
-      description: "Esta mídia será removida de todas as variantes do fluxo (A, B e C). Você poderá enviar uma nova depois.",
+      description: sharedNote,
       confirmText: "Remover mídia",
       tone: "danger",
     });
@@ -299,6 +303,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     setItems(prev => prev.filter(x => x.id !== m.id));
     toast.success("Mídia removida");
   }
+
 
   async function updateDelay(m: Media, newDelayMs: number) {
     const clamped = Math.max(0, Math.min(60000, Math.round(newDelayMs)));
