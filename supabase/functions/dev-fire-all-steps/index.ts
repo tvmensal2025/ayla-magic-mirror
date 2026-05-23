@@ -59,10 +59,13 @@ Deno.serve(async (req) => {
     // Reset opcional: vira o cliente em "virgem" para testar end-to-end completo
     const reset = !!body?.reset;
     const fresh = !!body?.fresh; // simulação do zero (também limpa conversation history e nome)
+    const wantsReal = body?.mode === "real";
     const resetPayload: Record<string, unknown> = {
       bot_paused: false,
       last_custom_prompt_at: null,
     };
+    // Modo real: força capture_mode=auto para o motor avançar sozinho conforme inbound
+    if (wantsReal) resetPayload.capture_mode = "auto";
     if (reset || fresh) {
       Object.assign(resetPayload, {
         conversation_step: null,
