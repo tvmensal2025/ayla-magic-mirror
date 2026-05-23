@@ -1251,17 +1251,115 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // - repeat  (0.5–0.75): repete o passo atual sem avançar.
   // Quando a intenção é tem_duvida deixamos passar (cai no AI FAQ logo abaixo).
   if (cls.action === "handoff" && cls.intent !== "tem_duvida") {
-    console.log(`[conversational] 🤝 handoff por baixa confiança (conf=${cls.confidence})`);
-    return _finalize(stepKey, {
-      reply: "",
-      updates: {
-        conversation_step: stepKey,
-        bot_paused: true,
-        bot_paused_reason: "low_confidence_handoff",
-        bot_paused_at: new Date().toISOString(),
-        ...restoreDetourUpdates,
-      },
-    });
+    console.log(`[conversational] 🤝 baixa confiança (conf=${cls.confidence}) — tentando recuperar ao invés de pausar mudo`);
+
+    const stepButtons = extractStepButtons(currentStep);
+    const stepType = String(currentStep.step_type || "message");
+    const isCaptureStep = stepType.startsWith("capture_") || stepType === "confirm_phone";
+    const refusalCountKey = "ai_followups_count";
+    const prevRefusals = Number((ctx.customer as any)[refusalCountKey] || 0);
+
+    // (1) Passo com botões + texto livre → tenta IA mapear pra botão
+    if (stepButtons.length > 0 && !ctx.buttonId) {
+      const intent = await matchButtonIntent(ctx.messageText || "", stepButtons, {
+        apiKey: Deno.env.get("LOVABLE_API_KEY"),
+      });
+      console.log(`[conversational] button-intent: ${JSON.stringify(intent)}`);
+
+      if (intent.match) {
+        // Cliente quis um botão — injeta como se tivesse clicado
+        ctx.buttonId = intent.match;
+        // Cai pro matchTransition logo abaixo (não retorna aqui)
+      } else if (intent.refused) {
+        // Recusa explícita → tchau gentil + pausa 24h
+        const nome = (ctx.customer as any)?.name || "";
+        const saida = `Tranquilo${nome ? `, ${nome}` : ""}! Quando quiser voltar é só me mandar uma mensagem. Tô por aqui 💚`;
+        return _finalize(stepKey, {
+          reply: saida,
+          updates: {
+            conversation_step: stepKey,
+            bot_paused: true,
+            bot_paused_reason: "lead_refused_softpause",
+            bot_paused_at: new Date().toISOString(),
+            ...restoreDetourUpdates,
+          },
+        });
+      } else if (intent.confused) {
+        // Confuso → reenviar passo com nudge; após 2 tentativas, escalar humano
+        if (prevRefusals >= 2) {
+          try {
+            await notifyHandoff(
+              consultantId || ctx.customer.consultant_id,
+              { id: ctx.customer.id, name: (ctx.customer as any).name, phone_whatsapp: (ctx.customer as any).phone_whatsapp, conversation_step: stepKey },
+              ctx.messageText || "",
+              "cliente_confuso_botoes",
+            ).catch(() => {});
+          } catch (_) { /* noop */ }
+          return _finalize(stepKey, {
+            reply: "Vou chamar alguém do time pra te ajudar — em instantes te respondem por aqui 🙌",
+            updates: {
+              conversation_step: stepKey,
+              bot_paused: true,
+              bot_paused_reason: "confused_after_retries",
+              bot_paused_at: new Date().toISOString(),
+              [refusalCountKey]: 0,
+              ...restoreDetourUpdates,
+            },
+          });
+        }
+        const btnList = stepButtons.slice(0, 3).map((b, i) => `${i + 1}) ${b.title}`).join("\n");
+        const nudge = `Posso te ajudar com qualquer uma destas opções 👇\n\n${btnList}\n\nÉ só tocar no botão ou responder com o número 🙂`;
+        return _finalize(stepKey, {
+          reply: nudge,
+          updates: {
+            conversation_step: stepKey,
+            [refusalCountKey]: prevRefusals + 1,
+            ...restoreDetourUpdates,
+          },
+        });
+      }
+    }
+
+    // (2) Passo de captura + texto livre → detecta recusa
+    if (isCaptureStep && !ctx.buttonId) {
+      const intent = await matchButtonIntent(ctx.messageText || "", [], { apiKey: Deno.env.get("LOVABLE_API_KEY") });
+      if (intent.refused) {
+        const nome = (ctx.customer as any)?.name || "";
+        return _finalize(stepKey, {
+          reply: `Tranquilo${nome ? `, ${nome}` : ""}! Quando quiser dar continuidade é só me mandar a foto da conta. Tô por aqui 💚`,
+          updates: {
+            conversation_step: stepKey,
+            bot_paused: true,
+            bot_paused_reason: "lead_refused_softpause",
+            bot_paused_at: new Date().toISOString(),
+            ...restoreDetourUpdates,
+          },
+        });
+      }
+    }
+
+    // (3) Sem botões e sem recusa → notifica humano + mensagem amigável (nunca silêncio)
+    if (!ctx.buttonId) {
+      try {
+        await notifyHandoff(
+          consultantId || ctx.customer.consultant_id,
+          { id: ctx.customer.id, name: (ctx.customer as any).name, phone_whatsapp: (ctx.customer as any).phone_whatsapp, conversation_step: stepKey },
+          ctx.messageText || "",
+          "low_confidence_handoff",
+        ).catch(() => {});
+      } catch (_) { /* noop */ }
+      return _finalize(stepKey, {
+        reply: "Deixa eu chamar alguém do time pra te responder direitinho — já já te respondem por aqui 🙌",
+        updates: {
+          conversation_step: stepKey,
+          bot_paused: true,
+          bot_paused_reason: "low_confidence_handoff",
+          bot_paused_at: new Date().toISOString(),
+          ...restoreDetourUpdates,
+        },
+      });
+    }
+    // ctx.buttonId foi injetado pela IA → não retorna; deixa fluxo normal seguir
   }
   // Nota: action="repeat" (confiança média) é tratado implicitamente — se
   // nenhuma transição casar, o fluxo default já é repetir o passo atual.
