@@ -1,55 +1,73 @@
-# Variantes de fluxo dinâmicas + status de ativação
+## Objetivo
 
-Hoje o sistema é fixo em A/B/C com um único switch `ab_test_enabled` que só liga **se B e C existirem** (tudo-ou-nada). Vamos generalizar para até **5 variantes (A, B, C, D, E)** e dar ao consultor controle de **qual subconjunto entra no round-robin** (A só, A+B, A+C, A+B+C, A+B+C+D+E, etc.).
+Criar **Fluxo D** com botões reais do Whapi, reaproveitando as mídias já cadastradas no Fluxo A (consultor 0c2711ad — Camila/Rafael), e deixar D como **único variant ativo**. Inclui editor de botões no `/admin/fluxos` e suporte a `sendButtons` no dispatcher.
 
-## Banco
+---
 
-1. `consultants.active_variants text[]` (default `'{A}'`) — substitui a lógica do boolean. `ab_test_enabled` fica como leitura legada (= `array_length(active_variants,1) > 1`) e some da UI.
-2. Generaliza `assign_flow_variant(_consultant_id)`:
-   - Lê `active_variants` do consultor.
-   - Se vazio/`{A}` → sempre `'A'`.
-   - Senão: `counter % len(active_variants)` → escolhe item pelo índice (round-robin determinístico).
-   - Só considera variantes que tenham `bot_flows.is_active=true` correspondente — se o admin marcar D como ativo mas o fluxo D não existir, é ignorado silenciosamente no sorteio.
-3. Nova RPC genérica `clone_bot_flow_as(_consultant_id uuid, _variant text)` que cobre B/C/D/E a partir de A (substitui as duas RPCs `_as_b` e `_as_c`, que viram wrappers).
-4. Constraint check em `bot_flows.variant IN ('A','B','C','D','E')` e em `customers.flow_variant` idem.
+## 1) Editor de botões no Flow Builder (`/admin/fluxos`)
 
-## UI — `/admin/fluxos` (FluxoCamila.tsx)
+`src/pages/FluxoCamila.tsx` — abaixo de "Mensagem de texto", novo card **"Botões de resposta rápida (Whapi)"**, visível apenas para `step_type = message`:
 
-Reorganiza o card "Teste A/B/C" para um card **"Fluxos ativos"**:
+- Checkbox "Usar botões"
+- Lista (máx 3): `[título ≤20 chars]` + `[id estável]` + 🗑
+- Botão "+ Adicionar botão"
+- Hint: "O `id` precisa bater com uma `trigger_phrase` no bloco 'Para onde ir depois'."
 
-```
-┌─ Fluxos ativos ─────────────────────────────────┐
-│  Atualmente rodando:  [ A + B + C ]  ← badge   │
-│                                                  │
-│  ☑ A (com áudio)        Leads: 412              │
-│  ☑ B (sem áudio)        Leads: 408              │
-│  ☑ C (vídeo inicial)    Leads: 405              │
-│  ☐ D (personalizado)    — não criado            │
-│  ☐ E (personalizado)    — não criado            │
-│                                                  │
-│  [+ Adicionar fluxo D]                          │
-└──────────────────────────────────────────────────┘
-```
+Persistir em `bot_flow_steps.captures` como `{ field: "_buttons", enabled: true, value: [{id,title}] }` — `captures` já é `jsonb`, sem migration de schema.
 
-- **Checkboxes** por variante existente → escrevem em `consultants.active_variants`. Desabilitado quando o fluxo daquela letra não existe.
-- **Badge "Atualmente rodando: A+B+C"** (ou só "A", ou "A+C", etc.) — calculada a partir de `active_variants ∩ variantes_existentes`. Cor verde se >1 ativa, cinza se só A.
-- **Botão "+ Adicionar fluxo {próxima_letra}"** — chama `clone_bot_flow_as(consultantId, próxima_letra_disponível)`. Some quando já existem 5.
-- **Tabs de edição**: gera dinamicamente uma aba por variante existente (`A`, `B`, `C`, `D`, `E`), substituindo os 3 botões fixos atuais.
-- Remove o `Switch` "ab_test_enabled" — substituído pelos checkboxes (a regra "precisa de >1 variante ativa pra rodar A/B" fica implícita).
+## 2) Dispatcher passa a enviar botões
 
-## Código tocado
+`supabase/functions/whapi-webhook/handlers/bot-flow.ts` → `dispatchStepFromFlow`:
 
-- `supabase/migrations/<novo>.sql` — coluna, RPCs, constraints.
-- `src/pages/FluxoCamila.tsx` — bloco da linha ~580-647 (card A/B/C → card Fluxos ativos), `reload()` para carregar contagens dinâmicas, `cloneFlow(letra)` genérico, `setActiveVariants(arr)`.
-- `src/integrations/supabase/types.ts` regenera automaticamente após a migration.
+- Selecionar também `captures` no `bot_flow_steps`.
+- Quando o item `text` for o **último** e houver `_buttons`, trocar `sendText` por `sendButtons(jid, text, buttons)` (helper já existe em `_shared/whapi-api.ts`, com fallback automático para texto numerado em Evolution).
+- `matchTransition` já casa `buttonId` ↔ `trigger_phrases` (em `flow-router.ts`) — basta o `id` do botão estar como `trigger_phrase` da transition.
 
-## Não muda
+## 3) Variável `{economia_range}` (8% a 20%)
 
-- Dispatchers (`whapi-webhook`, `manual-step-send`, `bot-flow.ts`): já lêem `customers.flow_variant` como string e fazem match com `bot_flows.variant`. Funcionam com qualquer letra sem alteração.
-- Lógica do `CaptureStepsGrid` e admin de passos: já é `variant: "A" | "B" | "C"` — vira `string` para aceitar D/E.
-- Memória `ab-test-audio-vs-text` será atualizada para refletir o modelo N-variantes.
+`supabase/functions/_shared/render-vars.ts`: adicionar `economia_range = "R$ <floor(valor*0.08)> a R$ <ceil(valor*0.20)>"`. Disponível em todos os passos do flow.
 
-## Risco / migração
+## 4) Seed do Fluxo D (RPC + chamada via UI)
 
-- Backfill: `UPDATE consultants SET active_variants = CASE WHEN ab_test_enabled THEN '{A,B,C}' ELSE '{A}' END WHERE active_variants IS NULL;` — sem perda de comportamento atual.
-- D e E começam vazios; clonar a partir de A é idempotente (a RPC `clone_bot_flow_as` deleta o existente antes, igual a B/C hoje).
+RPC `seed_flow_d(_consultant_id uuid)` (migration):
+
+1. `DELETE FROM bot_flows WHERE consultant_id=_consultant_id AND variant='D';`
+2. `INSERT bot_flows (variant='D', name='Fluxo Whapi (botões)', is_active=true)`.
+3. Insere os steps abaixo. **Reaproveita `slot_key**` dos passos do Fluxo A para herdar as mídias (áudio/vídeo do `como_funciona` e fotos do `passo_mp74oztd` de documento) — não duplica mídia no MinIO.
+4. `UPDATE consultants SET active_variants='{D}' WHERE id=_consultant_id;` → D fica único no round-robin.
+
+Botão "Criar/Recriar Fluxo D com botões" no card "Fluxos ativos" chama essa RPC.
+
+### Steps do Fluxo D
+
+
+| Pos | step_key            | step_type              | slot_key                                                                        | message_text                                                                                                                                                                                                              | _buttons                                                                                              | transitions                                                                             |
+| --- | ------------------- | ---------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 1   | `d_welcome`         | message                | —                                                                               | "Olá, seja muito bem-vindo(a) 😊\n\nSou a assistente virtual do {{representante}} e vou te ajudar a verificar se sua conta de luz tem perfil para economia.\n\nEscolha uma opção:"                                        | `simular / Quero simular`, `como / Como funciona`, `humano / Falar com {{representante}}`             | `simular`→passo 2, `como`→passo 3, `humano`→passo 7                                     |
+| 2   | `d_pedir_conta`     | **capture_conta**      | —                                                                               | "Perfeito! Me envia uma foto da sua conta de luz que já calculo a economia 💚"                                                                                                                                            | —                                                                                                     | default → passo 4 (após OCR)                                                            |
+| 3   | `d_como_funciona`   | message                | `**como_funciona**` (do Fluxo A, passo 6 — herda áudio + vídeo já cadastrados)  | (texto vazio — só envia áudio+vídeo do slot)                                                                                                                                                                              | `simular / Quero simular agora`, `humano / Falar com {{representante}}`                               | `simular`→passo 2, `humano`→passo 7                                                     |
+| 4   | `d_resultado`       | message                | —                                                                               | "Pronto, {{nome}}! 🎉\n\nSua conta hoje é *R$ {{valor_conta}}*.\n\nVocê pode ter de *{{economia_range}}* de redução todo mês — sem obra, sem instalação, continuando com a mesma distribuidora.\n\nBora cadastrar agora?" | `cadastrar / Cadastrar agora`, `duvidas / Tenho mais dúvidas`, `humano / Falar com {{representante}}` | `cadastrar`→passo 5, `duvidas`→passo 6, `humano`→passo 7                                |
+| 5   | `d_pedir_documento` | **capture_documento**  | `**passo_mp74oztd**` (slot do passo 9 do Fluxo A — `auto_detect_doc_type=true`) | "Show! Pra finalizar preciso de uma foto do seu *RG ( frente + verso ) ou CNH* (frente). A IA detecta sozinha 📸"                                                                                                         | —                                                                                                     | default → passo 8 (após OCR doc)                                                        |
+| 6   | `d_duvidas`         | message                | `como_funciona` (reusa áudio/vídeo)                                             | "Claro! Te mando de novo o áudio e o vídeo explicando 👇"                                                                                                                                                                 | `simular / Quero simular`, `cadastrar / Já quero cadastrar`, `humano / Falar com {{representante}}`   | `simular`→2, `cadastrar`→5, `humano`→7                                                  |
+| 7   | `d_handoff`         | message                | —                                                                               | "Beleza! Já chamei o {{representante}} pra você. Em instantes ele te responde 🙌"                                                                                                                                         | —                                                                                                     | `goto_special='humano'` (pausa bot + `notifyHandoff` — lógica `human-takeover-silence`) |
+| 8   | `d_finalizar`       | **finalizar_cadastro** | `passo_mp74xnmn`                                                                | "Tudo certo! Estou enviando seu cadastro para o portal da iGreen ⏳\n\nVocê vai receber um *código de verificação* aqui no WhatsApp — quando chegar, *digite ele aqui mesmo*."                                             | —                                                                                                     | —                                                                                       |
+
+
+### Fluxo de finalização automática
+
+O `step_type='finalizar_cadastro'` já dispara o pipeline existente (`finalize-capture` → `portal-worker` → OTP → selfie). Como os passos 2 e 5 já coletaram conta+OCR+documento, ao chegar no passo 8 todos os 10 campos obrigatórios de `finalize-capture` estão preenchidos e o worker sobe direto pro portal sem perguntas extras.
+
+Se faltar algum campo (ex.: e-mail), o `bot-flow.ts` legacy completa via `getNextMissingStep` — comportamento herdado, sem mexer.
+
+---
+
+## Arquivos tocados
+
+- `src/pages/FluxoCamila.tsx` — card "Botões de resposta rápida" + botão "Criar Fluxo D".
+- `supabase/functions/_shared/render-vars.ts` — `{economia_range}`.
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — `dispatchStepFromFlow` lê `captures._buttons` e usa `sendButtons`.
+- `supabase/migrations/<novo>.sql` — RPC `seed_flow_d`.
+
+## Confirmação
+
+Crio agora o **Fluxo D só pro seu consultor** (Camila — `0c2711ad…`) e marco **D como único ativo**? Os fluxos A/B continuam existindo, mas saem do round-robin até você re-marcar no card "Fluxos ativos".
