@@ -59,7 +59,7 @@ export default function FluxoBuilder() {
       (supabase as any).from("bot_flows").select("id").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
       supabase.from("bot_flows").select("variant").eq("consultant_id", uid).eq("is_active", true),
     ]);
-    void cons;
+    
     setConsultantName((cons as any)?.name ?? "");
     const ex = new Set<Variant>(["A"]);
     for (const r of ((allFlows as any[]) || [])) {
