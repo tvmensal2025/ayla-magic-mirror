@@ -4,7 +4,7 @@ interface Props { children: ReactNode; }
 
 export function GameShell({ children }: Props) {
   return (
-    <div className="relative exec-ambient">
+    <div className="relative exec-ambient flex-1 min-h-0 flex flex-col overflow-hidden">
       {/* Subtle ambient top glow — executive war room feel */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-xl">
         <div
@@ -14,7 +14,7 @@ export function GameShell({ children }: Props) {
           }}
         />
       </div>
-      <div className="relative">{children}</div>
+      <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">{children}</div>
     </div>
   );
 }
