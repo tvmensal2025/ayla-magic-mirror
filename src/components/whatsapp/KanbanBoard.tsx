@@ -166,7 +166,18 @@ export function KanbanBoard({ consultantId, instanceName }: KanbanBoardProps) {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-foreground">CRM Kanban</h3>
+          <HelpHint
+            title="CRM Kanban"
+            summary="Arraste leads entre estágios para acompanhar o funil"
+            details="Cada coluna representa uma etapa padronizada do funil (Novo lead → Aguardando conta → Cadastro enviado → etc). A auto-progressão move o lead automaticamente quando o bot detecta evento-chave (ex: OCR da conta concluído). Você pode arrastar manualmente também."
+            example="Lead respondeu mas parou no 'Aguardando conta' por 3 dias? Mova manualmente para 'Sem resposta' e dispare uma mensagem de retomada."
+          />
           <Badge variant="secondary" className="text-[9px] gap-1"><Zap className="h-2.5 w-2.5" />Auto-progressão ativa</Badge>
+          <HelpHint
+            title="Auto-progressão"
+            summary="O bot move o lead de coluna conforme detecta eventos"
+            details="Quando ativo, eventos como 'OCR da conta lido', 'documento aprovado' ou 'cadastro finalizado' movem o lead para o próximo estágio sem intervenção. Desative apenas se quiser controle 100% manual."
+          />
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
