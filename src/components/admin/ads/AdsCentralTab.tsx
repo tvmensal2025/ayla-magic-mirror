@@ -5,6 +5,7 @@ import { WalletChip } from "./WalletChip";
 import { AdTemplatesGallery } from "./AdTemplatesGallery";
 import { CtwaConnectGuide } from "./CtwaConnectGuide";
 import { SyncMetricsButton } from "./SyncMetricsButton";
+import { DragResizer } from "@/components/layout/DragResizer";
 
 import { IntelligenceTab } from "./IntelligenceTab";
 import { ResultsDashboard } from "./ResultsDashboard";
@@ -128,9 +129,18 @@ export function AdsCentralTab({ consultantId }: Props) {
           <AdMetricsCharts consultantId={adAccountId} periodDays={periodDays} managed={managedConsultants} />
           <MainChart data={(analytics as any)?.dailyMain} />
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <CpcPanel data={(analytics as any)?.cpcByTarget} totalCtaClicks={(analytics as any)?.totalCtaClicks} />
-            <RecentClicks clicks={(analytics as any)?.recentClicks} />
+          <div
+            data-resize-scope
+            className="flex flex-col lg:flex-row gap-4 items-stretch"
+            style={{ "--ads-left-w": "50%" } as React.CSSProperties}
+          >
+            <div className="lg:w-[var(--ads-left-w)] min-w-0">
+              <CpcPanel data={(analytics as any)?.cpcByTarget} totalCtaClicks={(analytics as any)?.totalCtaClicks} />
+            </div>
+            <DragResizer storageKey="ads-cpc" cssVar="ads-left-w" defaultPx={520} minPx={300} maxPx={900} />
+            <div className="flex-1 min-w-0">
+              <RecentClicks clicks={(analytics as any)?.recentClicks} />
+            </div>
           </div>
 
           <FunnelStrip funnel={(analytics as any)?.funnel} />
