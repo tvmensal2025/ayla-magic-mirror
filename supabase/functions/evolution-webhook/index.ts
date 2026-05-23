@@ -117,7 +117,8 @@ Deno.serve(async (req) => {
       .single();
 
     console.log(`✅ Instance found: ${instanceName} (consultant: ${consultantData?.name || "unknown"})`);
-    const nomeRepresentante = consultantData?.name || "iGreen Energy";
+    const _fullName = consultantData?.name || "iGreen Energy";
+    const nomeRepresentante = _fullName.trim().split(/\s+/)[0] || "iGreen Energy";
     const consultorId = consultantData?.igreen_id || "124170";
 
     if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
