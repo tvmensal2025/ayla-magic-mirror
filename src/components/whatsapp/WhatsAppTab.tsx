@@ -165,7 +165,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
   const isConnected = connectionStatus === "connected";
 
   return (
-    <div className="flex flex-col gap-0 h-[calc(100vh-160px)] min-h-[520px]">
+    <div className="flex flex-col gap-0 flex-1 min-h-0">
       {/* Compact connection status */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-card border border-border rounded-t-lg">
         {isConnected ? (
