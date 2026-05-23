@@ -1011,6 +1011,7 @@ export type Database = {
         Row: {
           active: boolean
           consultant_id: string | null
+          content_hash: string | null
           created_at: string
           delay_before_ms: number
           duration_sec: number | null
@@ -1038,6 +1039,7 @@ export type Database = {
         Insert: {
           active?: boolean
           consultant_id?: string | null
+          content_hash?: string | null
           created_at?: string
           delay_before_ms?: number
           duration_sec?: number | null
@@ -1065,6 +1067,7 @@ export type Database = {
         Update: {
           active?: boolean
           consultant_id?: string | null
+          content_hash?: string | null
           created_at?: string
           delay_before_ms?: number
           duration_sec?: number | null
