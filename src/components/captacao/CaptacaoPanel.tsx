@@ -231,7 +231,9 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
 
               <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
             </div>
-            <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden`}>
+            <DragResizer storageKey="captacao-list" cssVar="cap-list-w" defaultPx={256} minPx={180} maxPx={420} />
+            <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden min-w-0`}>
+
               {!selectedId ? (
                 <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
                   <ClipboardList className="w-14 h-14 text-primary/40" strokeWidth={1} />
