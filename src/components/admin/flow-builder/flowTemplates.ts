@@ -37,7 +37,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Boas-vindas",
         icon: "msg",
         message_text:
-          "Oi {{nome}}! Aqui é {{representante}} da iGreen 🌱\nVocê pode economizar até 20% na sua conta de luz sem instalar nada. Quer que eu te mostre como?",
+          "Oi, {{nome}}! 😊\n\nAqui é o *{{representante}}*, da *iGreen Energy*. 🌱\n\nVocê pode economizar *até 20%* na sua conta de luz, *sem instalar nada*.\n\nQuer que eu te mostre *como funciona*? 👇",
         slot_key: "welcome",
         captures: [{ field: "_buttons", enabled: true, value: [
           { id: "simular", title: "📸 Quero simular" },
@@ -50,7 +50,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Como funciona",
         icon: "msg",
         message_text:
-          "É bem simples: você continua na sua distribuidora, recebe a mesma energia, e paga até 20% menos.\nSem obra, sem instalação, sem fidelidade. Bora simular?",
+          "É *bem simples*, {{nome}} 👇\n\nVocê continua na *mesma distribuidora*, recebe a *mesma energia* — só que paga *até 20% menos* todo mês.\n\n✅ Sem obra\n✅ Sem instalação\n✅ Sem fidelidade\n\nBora *simular* agora? 🚀",
         slot_key: "como_funciona",
         captures: [{ field: "_buttons", enabled: true, value: [
           { id: "simular", title: "📸 Quero simular" },
@@ -61,7 +61,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         step_type: "capture_conta",
         title: "Captar conta de luz",
         icon: "file",
-        message_text: "Me manda uma foto da sua conta de luz pra eu calcular sua economia 📸",
+        message_text: "📸 Me manda uma *foto da sua conta de luz* pra eu calcular sua *economia* na hora. 💚\n\n(pode ser a fatura do *mês atual* ou a anterior)",
         slot_key: "aguardando_conta",
       },
       {
@@ -70,7 +70,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Confirmar dados",
         icon: "msg",
         message_text:
-          "Show {{nome}}! Sua economia vai ser de {{economia_range}} por mês 🎉\nPra cadastrar, preciso confirmar: este WhatsApp ({{telefone}}) é o melhor pra contato?",
+          "Show, {{nome}}! 🎉\n\nSua economia vai ser de *{{economia_range}}* por mês. 💚\n\nPra cadastrar, só preciso confirmar uma coisinha 👇\n\nEste WhatsApp (*{{telefone}}*) é o *melhor número* pra contato?",
         slot_key: "pre_cadastro",
         captures: [{ field: "_buttons", enabled: true, value: [
           { id: "sim", title: "✅ Sim" },
@@ -82,7 +82,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         step_type: "finalizar_cadastro",
         title: "Finalizar cadastro",
         icon: "sparkle",
-        message_text: "Pronto! Seu cadastro foi enviado 🎉\nEm até 2 dias úteis sua conta nova chega no seu e-mail.",
+        message_text: "Pronto, {{nome}}! 🎉\n\nSeu *cadastro foi enviado* com sucesso.\n\n📬 Em até *2 dias úteis* sua *conta nova* chega no seu e-mail.\n\nQualquer dúvida, é só me chamar aqui! 💚",
         slot_key: "finalizar_cadastro",
       },
     ],
@@ -99,7 +99,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Pitch direto",
         icon: "msg",
         message_text:
-          "Oi {{nome}}! Sou {{representante}} 🌱\nConsigo te dar até 20% de desconto fixo na conta de luz, sem instalar nada. Me manda a foto da última conta?",
+          "Oi, {{nome}}! 😊\n\nSou o *{{representante}}* 🌱\n\nConsigo te dar *até 20% de desconto fixo* na conta de luz — *sem instalar nada*.\n\n📸 Me manda a foto da *última conta* que eu já calculo sua *economia*?",
         slot_key: "welcome",
       },
       {
@@ -107,7 +107,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         step_type: "capture_conta",
         title: "Captar conta",
         icon: "file",
-        message_text: "Pode mandar a foto da conta 📸",
+        message_text: "📸 Pode mandar a *foto da conta* aqui mesmo. 💚",
         slot_key: "aguardando_conta",
       },
       {
@@ -115,7 +115,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         step_type: "finalizar_cadastro",
         title: "Finalizar",
         icon: "sparkle",
-        message_text: "Beleza {{nome}}! Cadastro enviado. Aguarde 24h e te aviso ✅",
+        message_text: "Beleza, {{nome}}! ✅\n\n*Cadastro enviado* com sucesso.\n\n⏳ Em até *24h* eu te aviso aqui no WhatsApp. 💚",
         slot_key: "finalizar_cadastro",
       },
     ],
@@ -132,7 +132,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Pitch Conexão Club",
         icon: "msg",
         message_text:
-          "{{nome}}, agora além da sua economia, você pode ganhar cashback indicando amigos no Conexão Club 💰\nQuer saber como funciona?",
+          "{{nome}}, tenho uma novidade pra você 💰\n\nAlém da sua *economia* todo mês, agora você pode *ganhar cashback* indicando amigos no *Conexão Club*. 🤝\n\nQuer saber *como funciona*? 👇",
         slot_key: "pitch_conexao_club",
         captures: [{ field: "_buttons", enabled: true, value: [
           { id: "sim", title: "✅ Quero saber" },
@@ -144,7 +144,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         step_type: "message",
         title: "Tirar dúvidas",
         icon: "msg",
-        message_text: "Ficou alguma dúvida sobre o Conexão Club? Posso te explicar 👇",
+        message_text: "Ficou alguma *dúvida* sobre o *Conexão Club*? 🤔\n\nPode mandar aqui que eu te explico 👇",
         slot_key: "duvidas_pos_club",
       },
     ],
@@ -161,7 +161,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Reengajamento",
         icon: "msg",
         message_text:
-          "Oi {{nome}}, voltei aqui 👋\nAquela economia de até 20% na conta de luz ainda tá de pé. Bora simular agora?",
+          "Oi, {{nome}}! Voltei aqui 👋\n\nAquela *economia de até 20%* na conta de luz ainda *tá de pé*. 💚\n\nBora *simular agora* e ver quanto você economiza? 🚀",
         slot_key: "welcome",
         captures: [{ field: "_buttons", enabled: true, value: [
           { id: "simular", title: "📸 Quero simular" },
@@ -182,7 +182,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Boas-vindas pós-cadastro",
         icon: "sparkle",
         message_text:
-          "{{nome}}, parabéns por entrar pra iGreen! 🎉\nEm até 2 faturas você já vê a economia de até 20%. Qualquer dúvida me chama aqui.",
+          "{{nome}}, *parabéns* por entrar pra *iGreen*! 🎉\n\nEm até *2 faturas* você já vê a *economia de até 20%* na sua conta. 💚\n\nQualquer dúvida, é só me *chamar aqui*. 🙌",
         slot_key: "welcome",
       },
       {
@@ -191,7 +191,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Convite Conexão Club",
         icon: "msg",
         message_text:
-          "E olha só: agora você pode ganhar cashback indicando amigos no Conexão Club 💰\nQuer que eu te mostre?",
+          "E olha só essa novidade 👇\n\nAgora você pode *ganhar cashback* indicando amigos no *Conexão Club*. 💰\n\nQuer que eu te mostre *como funciona*?",
         slot_key: "pitch_conexao_club",
         captures: [{ field: "_buttons", enabled: true, value: [
           { id: "sim", title: "✅ Mostrar" },
@@ -213,7 +213,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Confirmar dados extraídos",
         icon: "msg",
         message_text:
-          "Consegui ler aqui, {{nome}} 👇\n• Nome: {{nome}}\n• CPF: {{cpf}}\n• Valor da conta: R$ {{valor_conta}}\n\nEstá tudo certo?",
+          "Consegui ler aqui, {{nome}} 👇\n\n👤 *Nome:* {{nome}}\n🪪 *CPF:* {{cpf}}\n💡 *Valor da conta:* R$ {{valor_conta}}\n\nEstá *tudo certo*? ✅",
         slot_key: "confirmar_dados",
         captures: [
           {
@@ -233,7 +233,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Pedir e-mail",
         icon: "msg",
         message_text:
-          "Show! Agora me passa seu *e-mail* para eu finalizar o cadastro 📧",
+          "Show! 🙌\n\nAgora me passa o seu *e-mail* pra eu finalizar o cadastro 📧\n\n(ex.: *joao@email.com*)",
         slot_key: "pedir_email",
         captures: [{ field: "email", enabled: true } as any],
       },
@@ -243,7 +243,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Confirmar telefone",
         icon: "msg",
         message_text:
-          "Esse mesmo número *{{telefone}}* é o seu WhatsApp para contato?",
+          "Última confirmação, {{nome}} 👇\n\n📱 *{{telefone}}*\n\nEsse mesmo número é o seu *WhatsApp para contato*?",
         slot_key: "confirmar_telefone",
         captures: [
           {
