@@ -11,7 +11,22 @@ import { Zap, Send, ListChecks, FastForward, Loader2, StopCircle, ExternalLink, 
 import { ManualStepDialog } from "@/components/admin/AIAgentTab/ManualStepDialog";
 import { StepPartPreview, type PartKind } from "@/components/whatsapp/StepPartPreview";
 
-type Step = { id: string; step_key: string | null; title: string | null; slot_key: string | null; message_text: string | null; position: number };
+type Step = { id: string; step_key: string | null; title: string | null; slot_key: string | null; message_text: string | null; position: number; captures?: any };
+
+function extractStepButtons(step: Step | undefined): { id: string; title: string }[] {
+  if (!step) return [];
+  try {
+    const caps = Array.isArray((step as any).captures) ? (step as any).captures : [];
+    const found = caps.find((c: any) => c?.field === "_buttons" && c?.enabled !== false);
+    if (found && Array.isArray(found.value)) {
+      return found.value
+        .map((b: any) => ({ id: String(b?.id || "").trim(), title: String(b?.title || "").trim() }))
+        .filter((b: any) => b.id && b.title)
+        .slice(0, 3);
+    }
+  } catch {}
+  return [];
+}
 type Part = { kind: PartKind; text?: string | null; url?: string | null };
 
 interface Props {
