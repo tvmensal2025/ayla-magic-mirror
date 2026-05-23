@@ -17,7 +17,6 @@ const AssistentePage = lazy(() => import("./pages/AssistentePage"));
 const Auth = lazy(() => import("./pages/Auth"));
 const Admin = lazy(() => import("./pages/Admin"));
 
-const FluxoCamila = lazy(() => import("./pages/FluxoCamila"));
 const FluxoBuilder = lazy(() => import("./pages/FluxoBuilder"));
 const SaudeBot = lazy(() => import("./pages/SaudeBot"));
 const AdminKnowledge = lazy(() => import("./pages/AdminKnowledge"));
