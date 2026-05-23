@@ -181,6 +181,9 @@ export function useFlowValidation(steps: Step[]): FlowValidation {
             message:
               "OCR ativo, mas não há passo de confirmação logo depois. Aplique o template \"Confirmação pós-OCR\".",
           });
+        }
+      }
+
       // Passos "IA livre" — precisam de botões pra lead sair do loop
       if (isAiAnswerStep(s) && s.is_active) {
         const btns = getButtons(s);
@@ -207,7 +210,7 @@ export function useFlowValidation(steps: Step[]): FlowValidation {
       }
     }
 
-    }
+
 
 
     const byStep: Record<string, FlowWarning[]> = {};
