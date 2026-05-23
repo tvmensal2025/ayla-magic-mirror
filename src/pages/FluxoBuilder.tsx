@@ -49,6 +49,7 @@ export default function FluxoBuilder() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [inspectorId, setInspectorId] = useState<string | null>(null);
   const [mediaCounts, setMediaCounts] = useState<Record<string, { audio: number; image: number; video: number }>>({});
+  const [templatesOpen, setTemplatesOpen] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
