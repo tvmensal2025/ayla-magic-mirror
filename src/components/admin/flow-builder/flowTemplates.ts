@@ -99,7 +99,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Pitch direto",
         icon: "msg",
         message_text:
-          "Oi {{nome}}! Sou {{representante}} 🌱\nConsigo te dar até 20% de desconto fixo na conta de luz, sem instalar nada. Me manda a foto da última conta?",
+          "Oi, {{nome}}! 😊\n\nSou o *{{representante}}* 🌱\n\nConsigo te dar *até 20% de desconto fixo* na conta de luz — *sem instalar nada*.\n\n📸 Me manda a foto da *última conta* que eu já calculo sua *economia*?",
         slot_key: "welcome",
       },
       {
