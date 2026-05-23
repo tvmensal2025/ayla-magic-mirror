@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
+import StepSuggestions from "./StepSuggestions";
 import {
   Step, Transition, Capture, BUTTON_PRESETS, STEP_TYPE_OPTIONS, getButtons,
 } from "./flowTypes";
@@ -19,8 +20,11 @@ interface Props {
   steps: Step[];
   consultantId: string;
   variant: "A" | "B" | "C" | "D" | "E";
+  flowId?: string | null;
+  maxPosition?: number;
   onClose: () => void;
   onPatch: (patch: Partial<Step>) => void;
+  onReload?: () => void;
 }
 
 /**
