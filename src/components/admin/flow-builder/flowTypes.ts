@@ -161,15 +161,7 @@ export function isAiAnswerStep(step: Step): boolean {
   return false;
 }
 
-  const key = (step.step_key ?? "").toLowerCase();
-  const type = (step.step_type ?? "").toLowerCase();
-  if (type === "capture_conta" || /conta|fatura|luz/.test(key)) {
-    if (/document|rg|cnh/.test(key)) return "documento";
-    if (/conta|fatura|luz/.test(key)) return "conta";
-  }
-  if (type === "capture_documento" || /document|rg|cnh/.test(key)) return "documento";
-  return null;
-}
+
 
 
 /** Resolve o título de um passo destino para exibir no preview/inspector. */
