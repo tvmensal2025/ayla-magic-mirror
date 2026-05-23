@@ -316,7 +316,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                     {/* Mobile A/B/C */}
                     <div className="sm:hidden flex items-center gap-1 rounded-md border border-border/60 p-0.5 bg-background/40 self-start">
                       <span className="text-[10px] text-muted-foreground px-1">Fluxo:</span>
-                      {(["A", "B", "C"] as const).map((v) => (
+                      {availableVariants.map((v) => (
                         <button
                           key={v}
                           onClick={() => changeVariant(v)}
