@@ -1,42 +1,37 @@
-## Objetivo
+Plano para fazer exatamente o fluxo completo, do primeiro passo ao último:
 
-Parar de "disparar tudo" e rodar o fluxo como cliente real: cada passo de captura só avança quando o lead responde de verdade no WhatsApp.
+1. Ajustar `dev-fire-all-steps`
+   - O modo de simulação vai parar de depender do `continueFlow`, porque ele interrompe quando encontra pergunta/captura.
+   - Em vez disso, ele vai percorrer todos os passos ativos do Fluxo 1/variante A por `position`, do início ao fim.
+   - Para cada passo, vai chamar `manual-step-send` com `part: "all"`, `force: true`, `skipNameGuard: true` e `continueFlow: false`.
 
-## Diagnóstico do problema atual
+2. Disparar a sequência completa
+   - Vai enviar nesta ordem real do fluxo atual:
+     - 1. Captura do nome
+     - 2. Boas-vindas
+     - 3. Pergunta valor da conta
+     - 4. Explica o desconto
+     - 5. Pede permissão para explicar
+     - 6. Como funciona
+     - 7. Convite para o cadastro
+     - 8. Conta de luz
+     - 9. Documento com foto
+     - 10. Confirmação e envio
+   - Não vai esperar resposta real no meio.
+   - Não vai deixar o bot decidir o próximo passo.
+   - Não vai pular para código/conta/documento sozinho por webhook.
 
-O `dev-fire-all-steps` simula os passos em sequência sem esperar inbound. Resultado no run do JOSINETE:
-- 01:33:23 → bot pediu a conta
-- 01:33:38 → bot já pediu o documento (15s depois, sem cliente responder)
+3. Corrigir os resets para teste do zero
+   - Ao iniciar com `fresh/reset`, limpar estado anterior do lead.
+   - Forçar `flow_variant = "A"`, `bot_paused = false`, `capture_mode = "auto"` ou neutro conforme necessário.
+   - Limpar histórico de conversas quando for teste do zero.
 
-Isso é "bagunça" porque pula o OCR real e empilha perguntas. O bot de produção (`whapi-webhook`) já faz a transição correta sozinho quando recebe a mídia.
+4. Melhorar o retorno do teste
+   - A resposta da função vai mostrar o plano completo com todos os passos.
+   - Cada passo terá status individual: enviado, ignorado por estar vazio, erro ou debounce.
+   - Logs vão mostrar claramente `position`, `step_type`, `step_key` e resultado.
 
-## Plano
-
-### 1. Novo modo no `dev-fire-all-steps`: `mode: "real"`
-
-- Reset opcional do customer (mesmas flags que hoje: `bill_*`, `doc_*`, `last_inbound_media_*`, conversation history).
-- Dispara **somente o primeiro passo** do fluxo (welcome / saudação) com `continueFlow: true`.
-- Encerra a execução. A partir daí, **quem avança é o `whapi-webhook`** com base nas respostas reais que você mandar pelo WhatsApp.
-- Retorna no JSON o `run_id`, o próximo passo esperado e instruções curtas ("Responda seu nome → envie valor → envie foto da conta → envie foto do documento").
-
-### 2. Botão/ação no `/admin/fluxos` (ou onde está hoje)
-
-- Renomear "Disparar todos" para deixar 2 opções claras:
-  - **Simular tudo (debug)** → comportamento atual.
-  - **Iniciar teste real** → chama novo modo `real`.
-- Mostra um painel pequeno com o status do customer atualizado a cada 10s (passo atual, última mensagem in/out) lendo `customers` + `conversations`, para você acompanhar o avanço sem abrir o DB.
-
-### 3. Watchdog leve (opcional, default ON)
-
-- Se passar > 10min sem inbound do lead de teste, marca o run como `idle` no painel — não força nada, só sinaliza.
-
-## Detalhes técnicos
-
-- Arquivo: `supabase/functions/dev-fire-all-steps/index.ts` — adicionar branch `if (mode === "real")` que executa apenas o primeiro passo via `manual-step-send` com `continueFlow: true` e sai.
-- Frontend: ajustar o componente que hoje chama `dev-fire-all-steps` para passar `mode` e renderizar o painel de acompanhamento (poll simples no Supabase JS).
-- Sem mudanças em `whapi-webhook`, `manual-step-send` ou no engine de fluxo — eles já tratam o avanço real.
-
-## Fora de escopo
-
-- Mudar a lógica de OCR / captura.
-- Alterar o fluxo A/B/C ou o resolver de passos custom.
+Detalhes técnicos:
+- A mudança principal será em `supabase/functions/dev-fire-all-steps/index.ts`.
+- `manual-step-send` será reutilizado para manter a mesma lógica de envio de texto, áudio, vídeo, imagem e prompts automáticos de captura.
+- Não vou mexer no `whapi-webhook` agora, porque esse teste deve ser um disparo completo controlado, não uma conversa real orientada por respostas.
