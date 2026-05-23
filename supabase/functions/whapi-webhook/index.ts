@@ -484,6 +484,64 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── 🔄 RE-WELCOME após inatividade longa ────────────────────────────
+    // Se o lead voltou após silêncio do bot por horas e mandou só "oi",
+    // OU ficou >24h sem qualquer interação, resetar conversation_step para
+    // que o welcome do fluxo ativo rode de novo. Isso evita o cenário do
+    // lead travado num passo `capture_*` por dias mandando "oi" e o bot
+    // gravando "texto salvo sem avanço" silenciosamente.
+    if (messageText && !isFile && customer && (customer as any).conversation_step) {
+      try {
+        const { data: lastOut } = await supabase
+          .from("conversations")
+          .select("created_at")
+          .eq("customer_id", customer.id)
+          .eq("message_direction", "outbound")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const lastOutAt = (lastOut as any)?.created_at;
+        const hoursSinceBot = lastOutAt
+          ? (Date.now() - new Date(lastOutAt).getTime()) / 3_600_000
+          : Infinity;
+        const trimmed = String(messageText || "").trim();
+        const isGreeting = /^(oi+|olá+|ola+|opa+|bom dia|boa tarde|boa noite|eai|e\s*aí|hey+|hello+|hi+|alo+|começar|comecar|iniciar)\W*$/i
+          .test(trimmed);
+        const shortMsg = trimmed.length <= 24;
+        const shouldRewelcome =
+          (hoursSinceBot >= 4 && (isGreeting || shortMsg)) || hoursSinceBot >= 24;
+
+        if (shouldRewelcome) {
+          const prevStep = (customer as any).conversation_step;
+          console.log(`[re-welcome] customer=${customer.id} inatividade=${hoursSinceBot === Infinity ? "∞" : hoursSinceBot.toFixed(1)}h step_anterior="${prevStep}" greeting=${isGreeting} msg="${trimmed.slice(0, 40)}"`);
+          await supabase
+            .from("customers")
+            .update({
+              conversation_step: null,
+              capture_mode: "auto",
+              custom_step_retries: 0,
+              custom_step_retries_step: null,
+              last_custom_prompt_at: null,
+              ai_followups_count: 0,
+              previous_conversation_step: prevStep,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", customer.id);
+          (customer as any).conversation_step = null;
+          (customer as any).capture_mode = "auto";
+          (customer as any).custom_step_retries = 0;
+          (customer as any).last_custom_prompt_at = null;
+          (customer as any).ai_followups_count = 0;
+          (customer as any).previous_conversation_step = prevStep;
+
+        }
+      } catch (e) {
+        console.warn("[re-welcome] falhou:", (e as Error).message);
+      }
+    }
+
+
+
     // IA em modo manual (globalAiDisabled=true) NÃO pode bloquear o pipeline
     // de cadastro: nome, email, CPF, CEP, conta de luz, documento, finalização
     // no portal e OTP. Se o lead está em um passo ativo desses, o bot responde

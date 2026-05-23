@@ -1,42 +1,73 @@
-# Ajustar Passo 6 do Fluxo D — somente IA (sem áudio/vídeo)
+# Fix: IA ligada mas fluxo não reinicia após inatividade
 
-## Diagnóstico
-Investiguei o passo 6 do **Fluxo D** (`Fluxo Whapi (botões)` — id `320bf22c-...02558`):
-
-| Campo | Valor atual | Problema |
-|---|---|---|
-| `step_key` | `d_duvidas` | OK |
-| `slot_key` | `como_funciona` | Faz o editor exibir áudios/vídeos reutilizados do "Como funciona" |
-| `media_order` | `[audio, image, video, text]` | Lista mídia para envio |
-| `step_type` | `message` | OK |
-
-**Backend já está correto**: o handler em `whapi-webhook/handlers/bot-flow.ts` (linhas 904-998) detecta `step_key` contendo "duvid" e responde **apenas texto via Gemini 3.1 Pro**, com guard absoluto contra mídia mesmo se a IA falhar.
-
-**Problema real**: o **editor `/admin/fluxos` exibe** áudios e vídeos no passo 6 porque o `slot_key=como_funciona` puxa a biblioteca de mídia daquele slot. Isso confunde o consultor e dá a impressão de que mídia é enviada.
+## Problema confirmado
+Lead Rafael (`55d3c89f...`) parou no passo 4 (capture `electricity_bill_value`) às 04:46. Voltou 9h depois mandando "oi" e o bot ficou mudo — cada mensagem caía no `manual-capture-stop` ("texto salvo sem avanço") porque não era número. Não existe regra que detecte reentrada longa e reinicie o welcome.
 
 ## Mudanças
 
-### Migration — atualizar o passo 6 do Fluxo D
-```sql
-UPDATE bot_flow_steps
-SET 
-  slot_key = 'esclarecer_duvidas',
-  media_order = ARRAY['text']::text[]
-WHERE flow_id = '320bf22c-e383-4f53-a3c0-b88b89b02558'
-  AND step_key = 'd_duvidas';
+### 1. Regra de **re-welcome** em `whapi-webhook/handlers/bot-flow.ts`
+Adicionar no início do pipeline, antes de qualquer lógica de capture/custom step:
+
+```ts
+// Re-welcome: lead voltou após inatividade longa
+const lastOutboundAt = (customer as any).last_bot_reply_at || (customer as any).updated_at;
+const hoursSinceBot = lastOutboundAt
+  ? (Date.now() - new Date(lastOutboundAt).getTime()) / 3_600_000
+  : 0;
+const isGreeting = /^(oi+|olá+|ola+|opa+|bom dia|boa tarde|boa noite|eai|e aí|hey|hello|hi+)\W*$/i
+  .test(String(inboundText || "").trim());
+
+const shouldRewelcome =
+  (hoursSinceBot >= 4 && isGreeting) || hoursSinceBot >= 24;
+
+if (shouldRewelcome && customer.conversation_step) {
+  console.log(`[re-welcome] inatividade=${hoursSinceBot.toFixed(1)}h step_anterior=${customer.conversation_step} greeting=${isGreeting}`);
+  await supabase
+    .from("customers")
+    .update({
+      conversation_step: null,
+      capture_mode: null,
+      custom_step_retries: 0,
+      custom_step_retries_step: null,
+      last_custom_prompt_at: null,
+      ai_followups_count: 0,
+      previous_conversation_step: customer.conversation_step,
+    })
+    .eq("id", customer.id);
+  customer.conversation_step = null as any;
+  // Cai no welcome do fluxo ativo normalmente
+}
 ```
 
-Efeito:
-- Editor passa a mostrar o passo 6 **só com texto** (sem seções de áudio/vídeo/imagem).
-- Backend continua enviando resposta da IA (slot `esclarecer_duvidas` também está na lista de detecção do guard, linha 912).
-- Nenhum outro passo/fluxo é afetado.
+Aplicar mesma lógica em `evolution-webhook/handlers/bot-flow.ts`.
 
-### Sem mudanças de código
-- `whapi-webhook/handlers/bot-flow.ts` — guard de IA já cobre `esclarecer_duvidas` e `/duvid/`.
-- `evolution-webhook/handlers/bot-flow.ts` — idem.
-- Frontend `/admin/fluxos` — usa `media_order` para decidir o que renderizar; ao limitar a `['text']`, áudios/vídeos somem automaticamente.
+### 2. Fallback de retry após 3 capturas mudas
+No bloco `manual-capture-stop` (whapi + evolution): incrementar `custom_step_retries` quando salvar texto sem avanço. Ao atingir 3 numa janela de 10 min, enviar:
+> *"Não consegui entender, {{nome}} 😅 Pode me mandar só o valor médio da sua conta de luz? (ex: 250)"*
+(usar `retry_text` do step se houver). Resetar contador ao avançar ou ao captar valor válido.
+
+### 3. Limpar o lead Rafael (one-shot)
+```sql
+UPDATE customers
+SET conversation_step = NULL,
+    capture_mode = NULL,
+    custom_step_retries = 0,
+    last_custom_prompt_at = NULL,
+    ai_followups_count = 0
+WHERE id = '55d3c89f-2557-4864-988d-91ee48e643f8';
+```
+
+### 4. Memória nova
+`mem://whatsapp/re-welcome-rule` — registra que reentrada ≥4h com saudação ou ≥24h reseta `conversation_step` e dispara welcome do fluxo ativo.
+
+## Arquivos
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — itens 1 e 2
+- `supabase/functions/evolution-webhook/handlers/bot-flow.ts` — espelho
+- Migração de dados — item 3
+- `mem://whatsapp/re-welcome-rule` + atualizar `mem://index.md`
 
 ## Critério de sucesso
-- Em `/admin/fluxos` → Fluxo D → Passo 6: aparece apenas campo de texto, sem seções "ÁUDIOS"/"VÍDEOS"/"IMAGENS".
-- Quando o lead chega no passo 6 (ou pergunta algo), o bot responde **só texto** gerado pelo Gemini 3.1 Pro.
-- Passos 1–5 e 7+ permanecem intactos.
+- Próximo "oi" do Rafael → bot manda welcome do fluxo A novamente.
+- Lead parado em qualquer capture por ≥4h que mandar saudação → reinicia welcome.
+- Lead que insiste com texto inválido em capture → recebe retry humanizado após 3 tentativas, nunca mudo.
+- Leads com `bot_paused=true` ou `assigned_human_id` continuam silenciados (regra existente preservada).
