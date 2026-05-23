@@ -26,6 +26,9 @@ import { sendWhatsAppMessage } from "@/services/messageSender";
 import { toast as sonnerToast } from "sonner";
 import { useCaptureSession } from "@/hooks/useCaptureSession";
 import { FinalizeButton } from "@/components/captacao/FinalizeButton";
+import { ResizableShell } from "@/components/layout/ResizableShell";
+import { useIsMobile } from "@/hooks/use-mobile";
+
 import { PortalStatusTracker } from "@/components/captacao/PortalStatusTracker";
 
 interface Props { consultantId: string; onOpenChat?: (phone: string) => void; instanceName?: string | null; isWhapi?: boolean; }
