@@ -214,6 +214,40 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
           <div className="space-y-2">
             {loading ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> :
               steps.length === 0 ? <p className="text-sm text-muted-foreground">Nenhum passo configurado.</p> :
+              variant === "D" ? (
+                <div className="space-y-3 p-2">
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    ⚡ O <strong className="text-foreground">Fluxo D</strong> é automático por botões. Clique abaixo para <strong>iniciar</strong> — o bot conduz o resto conforme o cliente clicar.
+                  </p>
+                  <Button
+                    className="w-full gap-2"
+                    disabled={sending}
+                    onClick={async () => {
+                      const first = steps[0];
+                      if (!first) return;
+                      setSending(true);
+                      try {
+                        const { data, error } = await supabase.functions.invoke("manual-step-send", {
+                          body: { consultantId, customerId, stepId: first.id, part: "all", variant },
+                        });
+                        if (error || (data as any)?.error || (data as any)?.ok === false) {
+                          throw new Error(normalizeSendStepError(error, data).message);
+                        }
+                        toast({ title: "▶️ Fluxo D iniciado", description: "Bot continua sozinho conforme o cliente responder." });
+                        onOpenChange(false);
+                      } catch (e: any) {
+                        toast({ title: "Erro", description: e?.message, variant: "destructive" });
+                      } finally { setSending(false); }
+                    }}
+                  >
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    Iniciar Fluxo D (automático)
+                  </Button>
+                  <p className="text-[11px] text-muted-foreground text-center">
+                    Primeiro passo: <strong>{steps[0]?.title || steps[0]?.step_key}</strong>
+                  </p>
+                </div>
+              ) :
               steps.map((s, i) => (
                 <Card key={s.id} className="p-3 flex items-center gap-3 hover:bg-secondary/30 cursor-pointer"
                       onClick={() => loadStepParts(s)}>
