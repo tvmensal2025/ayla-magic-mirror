@@ -213,7 +213,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Confirmar dados extraídos",
         icon: "msg",
         message_text:
-          "Consegui ler aqui, {{nome}} 👇\n• Nome: {{nome}}\n• CPF: {{cpf}}\n• Valor da conta: R$ {{valor_conta}}\n\nEstá tudo certo?",
+          "Consegui ler aqui, {{nome}} 👇\n\n👤 *Nome:* {{nome}}\n🪪 *CPF:* {{cpf}}\n💡 *Valor da conta:* R$ {{valor_conta}}\n\nEstá *tudo certo*? ✅",
         slot_key: "confirmar_dados",
         captures: [
           {
