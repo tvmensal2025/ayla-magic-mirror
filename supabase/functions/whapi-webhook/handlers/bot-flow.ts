@@ -983,12 +983,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           console.warn(`[dispatch:${stepKey}] ai_limit check falhou:`, (e as Error).message);
         }
 
-
+        try {
           const { data: lastInbound } = await supabase
             .from("conversations")
             .select("message_text, created_at")
             .eq("customer_id", customer.id)
             .eq("message_direction", "inbound")
+
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle();
