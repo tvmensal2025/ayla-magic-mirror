@@ -17,7 +17,7 @@ export function ExecHudBar({ progress }: { progress: GameProgress }) {
   ];
 
   return (
-    <div className="relative rounded-lg border exec-border-gold bg-card/85 backdrop-blur-md px-2.5 h-11 flex items-center gap-3 overflow-hidden">
+    <div className="relative rounded-lg border exec-border-gold bg-card/85 backdrop-blur-md px-2.5 h-11 hidden md:flex items-center gap-3 overflow-hidden">
       {/* Linha dourada superior */}
       <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-400/60 to-transparent" />
 
