@@ -233,7 +233,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Pedir e-mail",
         icon: "msg",
         message_text:
-          "Show! Agora me passa seu *e-mail* para eu finalizar o cadastro 📧",
+          "Show! 🙌\n\nAgora me passa o seu *e-mail* pra eu finalizar o cadastro 📧\n\n(ex.: *joao@email.com*)",
         slot_key: "pedir_email",
         captures: [{ field: "email", enabled: true } as any],
       },
