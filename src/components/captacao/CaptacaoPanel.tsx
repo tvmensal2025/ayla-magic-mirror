@@ -52,6 +52,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const [phone, setPhone] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [variant, setVariant] = useState<"A" | "B" | "C" | "D" | "E">("A");
+  const [availableVariants, setAvailableVariants] = useState<Array<"A" | "B" | "C" | "D" | "E">>(["A"]);
   const [mismatch, setMismatch] = useState<{ flag: boolean; bill: string; doc: string; acked: boolean }>({ flag: false, bill: "", doc: "", acked: false });
   const [missionsVersion, setMissionsVersion] = useState(0);
   const [showAside, setShowAside] = useState(false);
