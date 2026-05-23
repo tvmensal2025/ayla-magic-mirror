@@ -204,7 +204,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
           <div className="h-full bg-gradient-to-r from-emerald-500 to-lime-400 transition-all duration-500"
                style={{ width: `${Math.round((sentSteps.size / Math.max(display.length, 1)) * 100)}%` }} />
         </div>
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(128px,1fr))] 2xl:grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-1.5 capture-card-flip">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(108px,1fr))] gap-1.5 capture-card-flip">
           {display.map((s: StepRow, i: number) => {
             const sent = sentSteps.has(s.id);
             const isSending = sending === s.id;
