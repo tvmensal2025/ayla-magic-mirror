@@ -152,7 +152,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
   return (
     <aside className={embedded
       ? "w-full h-full flex flex-col bg-transparent overflow-hidden"
-      : "w-80 shrink-0 flex flex-col border-l border-border bg-card/40 backdrop-blur-sm overflow-y-auto"}>
+      : "w-full min-w-0 shrink-0 flex flex-col border-l border-border bg-card/40 backdrop-blur-sm overflow-y-auto"}>
       <XpFloater events={game.events} />
 
       {!embedded && (
