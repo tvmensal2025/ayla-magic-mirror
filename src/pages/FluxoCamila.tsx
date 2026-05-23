@@ -30,6 +30,16 @@ import { simulateMatch, detectRuleConflicts } from "@/lib/flowSimulator";
 // ---------------------------------------------------------------------------
 type IconKey = "msg" | "video" | "sparkle" | "user" | "file";
 
+type Variant = "A" | "B" | "C" | "D" | "E";
+const ALL_VARIANTS: Variant[] = ["A", "B", "C", "D", "E"];
+const VARIANT_LABEL: Record<Variant, string> = {
+  A: "A (com áudio)",
+  B: "B (sem áudio)",
+  C: "C (vídeo inicial)",
+  D: "D (personalizado)",
+  E: "E (personalizado)",
+};
+
 type Transition = {
   trigger_intent: string;            // 'afirmacao' | 'negacao' | 'tem_duvida' | 'ja_assistiu_video' | 'quer_cadastrar' | 'valor_brl' | 'nome_proprio' | 'telefone_br' | 'cpf_br' | 'palavra_chave' | string custom
   trigger_phrases: string[];
