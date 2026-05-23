@@ -459,7 +459,15 @@ export default function FluxoCamila() {
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => navigate("/admin")}><ArrowLeft className="h-5 w-5" /></Button>
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg sm:text-xl font-bold truncate">Fluxo da Camila</h1>
+            <h1 className="text-lg sm:text-xl font-bold truncate flex items-center gap-2">
+              Fluxo da Camila
+              <HelpHint
+                title="Editor do Fluxo da Camila"
+                summary="Configure o que a IA fala, em que ordem, e quando capturar dados"
+                details="Aqui você cria os passos do fluxo automático (variantes A/B/C). Cada passo pode ser do tipo 'mensagem' (envia texto/áudio/vídeo/imagem) ou 'captura' (espera o lead responder com nome, valor da conta, foto da conta, etc). A ordem é dada pelo campo posição (1→10) e a UNIQUE no banco garante que não tenha duas posições iguais ou dois fluxos ativos da mesma variante."
+                example="Quer testar uma abordagem sem áudio? Crie a Variante B clonando da A e remova os áudios. O sistema vai alternar leads entre A/B/C automaticamente."
+              />
+            </h1>
             <p className="text-xs text-muted-foreground">Você decide o que ela fala, em que ordem, e pra onde vai depois.</p>
           </div>
           <Button
