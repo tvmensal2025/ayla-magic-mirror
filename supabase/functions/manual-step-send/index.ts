@@ -683,6 +683,7 @@ Deno.serve(async (req) => {
               title: applyVarsBtn(b.title).slice(0, 20),
             }));
             await sender.sendButtons(remoteJid, it.text, renderedButtons);
+            buttonsSentManual = true;
           } else {
             await sender.sendText(remoteJid, it.text);
           }
