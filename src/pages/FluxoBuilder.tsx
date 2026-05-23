@@ -251,14 +251,6 @@ export default function FluxoBuilder() {
     toast.success("Passo removido");
   }
 
-  async function toggleGlobal(v: boolean) {
-    if (!userId) return;
-    setGlobalAtivo(v);
-    const { error } = await supabase.from("consultants")
-      .update({ conversational_flow_enabled: v }).eq("id", userId);
-    if (error) { toast.error(error.message); setGlobalAtivo(!v); }
-    else toast.success(v ? "Fluxo ativo para todos os leads" : "Fluxo desligado");
-  }
 
   if (loading && !steps.length) {
     return (
