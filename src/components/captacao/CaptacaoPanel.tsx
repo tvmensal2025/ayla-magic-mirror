@@ -90,7 +90,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const [xpToast, setXpToast] = useState<number | null>(null);
   const [levelUp, setLevelUp] = useState<{ level: number; label: string } | null>(null);
 
-  useEffect(() => { setSentSteps(new Set()); setPhone(null); setCustomerName(null); setShowAside(false); setVariant("A"); setMismatch({ flag: false, bill: "", doc: "", acked: false }); }, [selectedId]);
+  useEffect(() => { setSentSteps(new Set()); setPhone(null); setCustomerName(null); setShowAside(false); setVariant("A"); setMismatch({ flag: false, bill: "", doc: "", acked: false }); setMobileTab("passos"); }, [selectedId]);
 
   // Reconstitui sentSteps a partir do log de conversations outbound: tile fica ✓
   // mesmo após trocar de lead ou recarregar a página.
