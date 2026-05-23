@@ -38,21 +38,35 @@ export function LayoutLockToggle({ className }: { className?: string }) {
   }, [toggle]);
 
   return (
-    <button
-      type="button"
-      onClick={() => { setPulse(false); try { localStorage.setItem(HINT_KEY, "1"); } catch {}; toggle(); }}
-      title={locked ? "Layout travado — clique (Shift+L) para liberar o ajuste das colunas" : "Layout liberado — arraste as bordas para redimensionar (Shift+L trava)"}
-      aria-label={locked ? "Destravar layout" : "Travar layout"}
-      className={cn(
-        "relative p-1.5 sm:p-2 rounded-xl transition-all duration-200",
-        locked
-          ? "text-muted-foreground hover:text-foreground hover:bg-secondary"
-          : "text-primary bg-primary/10 hover:bg-primary/20 ring-1 ring-primary/40",
-        pulse && locked && "ring-2 ring-primary/60 animate-pulse",
-        className,
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => { setPulse(false); try { localStorage.setItem(HINT_KEY, "1"); } catch {}; toggle(); }}
+        title={locked ? "Layout travado — clique (Shift+L) para liberar o ajuste das colunas" : "Layout liberado — arraste as bordas para redimensionar (Shift+L trava)"}
+        aria-label={locked ? "Destravar layout" : "Travar layout"}
+        className={cn(
+          "relative p-1.5 sm:p-2 rounded-xl transition-all duration-200",
+          locked
+            ? "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            : "text-primary bg-primary/10 hover:bg-primary/20 ring-1 ring-primary/40",
+          pulse && locked && "ring-2 ring-primary/60 animate-pulse",
+          className,
+        )}
+      >
+        {locked ? <Lock className="h-4 w-4 sm:h-5 sm:w-5" /> : <Unlock className="h-4 w-4 sm:h-5 sm:w-5" />}
+      </button>
+      {!locked && (
+        <button
+          type="button"
+          onClick={() => { if (confirm("Resetar todos os tamanhos das colunas para o padrão?")) resetSizes(); }}
+          title="Resetar tamanhos das colunas"
+          aria-label="Resetar tamanhos das colunas"
+          className="p-1.5 sm:p-2 rounded-xl text-muted-foreground hover:text-primary hover:bg-secondary transition-all"
+        >
+          <RotateCcw className="h-4 w-4" />
+        </button>
       )}
-    >
-      {locked ? <Lock className="h-4 w-4 sm:h-5 sm:w-5" /> : <Unlock className="h-4 w-4 sm:h-5 sm:w-5" />}
-    </button>
+    </div>
   );
 }
+
