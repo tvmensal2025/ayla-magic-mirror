@@ -1,45 +1,69 @@
-## Problema
+## Diagnóstico
 
-Cliente 11971254913 clicou "Como funciona" 5x hoje. Áudio + vídeo só foram registrados como enviados às 14:46 (em `ai_slot_dispatch_log`). Nas tentativas seguintes (14:35, 14:25, 17:19…), o RPC `try_log_media_send` retornou `false` por causa do `ON CONFLICT (customer_id, media_id) DO NOTHING` — bloqueando para sempre o reenvio da mesma mídia ao mesmo lead. Resultado: o lead só recebeu o texto, sem o vídeo/áudio.
+Cliente `JOSINETE` (`55d3c89f…`, variante D) saltou direto de "conta recebida" → mensagem `d_finalizar`, sem confirmação da conta no WhatsApp, sem mensagem de simulação (`d_resultado`) e sem pedir o documento (`d_pedir_documento`).
 
-## Solução
+Logs e código mostram **dois bugs em série**:
 
-Permitir reenvio da mesma mídia se passaram **≥ 10 minutos** do último envio bem-sucedido. Dentro de 10min, continua bloqueando (anti-duplo-clique / anti-loop).
+### Bug 1 — `manual-step-send.buildContinuationPatch` ultrapassa passo de captura
+Quando o consultor clica **"Eu confirmo"** no `OcrReviewCard` (bill), o front chama `manual-step-send` com `stepKey: "capture_documento"` + `continueFlow: true`.
 
-### Mudança 1 — função `try_log_media_send` (migration)
+`buildContinuationPatch` envia o conteúdo do passo de doc corretamente, mas o **loop de encadeamento (linha 841) continua avançando** após o passo clicado:
+- `d_pedir_documento` (pos 5, capture_documento) → conteúdo enviado, cursor = `aguardando_doc_auto` ✅
+- LOOP entra em `d_duvidas` (pos 6, message sem `?` nem intent transitions) → envia e segue ❌
+- LOOP cai em `d_finalizar` (pos 8, finalizar_cadastro) → envia o texto do "Finalizar" e **sobrescreve** `conversation_step` para `finalizando` ❌
 
-Substituir a lógica `ON CONFLICT DO NOTHING` por:
+Resultado: lead nunca foi convidado a mandar o RG/CNH; o bot já considera o cadastro pronto.
 
-```sql
--- Procura último envio dessa (customer, media). Se for > 10min atrás, registra novo e libera.
--- Se for recente, retorna false (bloqueia).
-SELECT sent_at INTO _last_sent
-  FROM ai_slot_dispatch_log
- WHERE customer_id = _customer_id AND media_id = _media_id
- ORDER BY sent_at DESC LIMIT 1;
+### Bug 2 — `confirmando_dados_conta` (SIM) pula passos `message`
+No handler legacy, depois do SIM, o "SAFETY-BELT" (linhas 3140-3151) procura o **próximo passo de captura/finalização**, ignorando passos `message` entre a conta e o documento. Isso elimina a tela `d_resultado` (porcentagem de economia, valores) que o usuário quer ver antes do pedido de documento.
 
-IF _last_sent IS NOT NULL AND _last_sent > now() - interval '10 minutes' THEN
-  RETURN false;
-END IF;
+### Bug 3 — Confirmação no painel não envia simulação
+`OcrReviewCard.confirmSelf` chama direto `stepKey: "capture_documento"`, então mesmo se o Bug 1 for corrigido, ainda assim a mensagem `d_resultado` (pos 4) continua sendo pulada.
 
-INSERT INTO ai_slot_dispatch_log (...) VALUES (...);
-RETURN true;
+---
+
+## Mudanças
+
+### 1. `supabase/functions/manual-step-send/index.ts` — parar o chain em captura
+Em `buildContinuationPatch`, logo após definir `patch.conversation_step` baseado no `clickedType`, **retornar imediatamente** se o passo clicado for de captura/confirm_phone/finalizar_cadastro. O chain só faz sentido depois de um passo `message`.
+
+```ts
+if (clickedType !== "message") {
+  // Captura: aguarda resposta do lead, nunca encadeia automaticamente.
+  return patch;
+}
 ```
 
-Remover o índice/constraint único `(customer_id, media_id)` se existir (vira histórico de envios, não única).
+Isso isola o efeito do clique do consultor ao passo que ele realmente selecionou.
 
-### Mudança 2 — verificar constraint
+### 2. `OcrReviewCard.tsx` — emitir simulação antes do pedido de doc
+Em `confirmSelf`, quando `kind === "bill"`, **antes** de chamar `capture_documento`, percorrer os passos `message` ativos entre `capture_conta` e o próximo `capture_documento` e despachá-los via `manual-step-send` com `continueFlow: false` (apenas envia o conteúdo, sem mover cursor para finalizar).
 
-Antes da migration, checar se há `UNIQUE(customer_id, media_id) WHERE media_id IS NOT NULL` em `ai_slot_dispatch_log`. Se houver, dropar (vai virar histórico, múltiplas linhas permitidas).
+Fluxo final no painel:
+1. `update customers ocr_review_*` (já existe).
+2. Para cada passo `message` ativo entre o `capture_conta` e o próximo `capture_documento`/`finalizar_cadastro`: `manual-step-send` com `stepKey` do passo, `continueFlow: false`, com pequeno delay (~2s).
+3. Por fim: `manual-step-send` com `stepKey: "capture_documento"`, `continueFlow: false` (o conteúdo do prompt do doc já é enviado, e com a correção do Bug 1, o cursor fica em `aguardando_doc_auto`).
 
-## Escopo
+Para `kind === "doc"` o comportamento permanece: chama `finalizar_cadastro` (que continua ok pois é o passo final).
 
-- **Não muda** o código dos webhooks (`whapi-webhook`, `evolution-webhook`, `manual-step-send`, `bot-flow.ts`, `_shared/media-dedupe.ts`). Todos eles já chamam o RPC — só a lógica interna do RPC muda.
-- **Vale para todos os fluxos e todos os consultores** automaticamente, porque é uma única função no banco.
-- Ordem do passo (`text → audio → video → image` ou configurada em `flow_step_media_order`) já é respeitada pelo código atual; não muda nada.
+### 3. `bot-flow.ts` — preservar mensagens entre conta e documento no caminho SIM (Bug 2)
+Na branch `confirmando_dados_conta` → SIM (linhas 3127-3151), trocar a lógica:
+- Buscar o **próximo passo ativo** após `capture_conta_pos` SEM filtrar tipo.
+- Se for `message` (ex.: `d_resultado`): despachá-lo via `dispatchStepFromFlow` e fixar `conversation_step = <uuid>` (mesma lógica do bloco else `message → fica no UUID`), deixando o resolver pré-switch avançar quando o lead responder OU encadeando até o próximo capture.
+- Manter o caminho atual quando o próximo já é capture/finalizar.
 
-## Teste pós-deploy
+Implementação prática: reaproveitar o mesmo loop de `buildContinuationPatch` (despacha mensagens até bater em `capture_*`/`finalizar_cadastro` ou pergunta), garantindo que a simulação saia antes do pedido de doc tanto pelo bot quanto pelo painel.
 
-1. Cliente clica "Como funciona" → recebe texto + áudio + vídeo + imagem.
-2. Clica de novo em <10min → recebe só o texto (bloqueado, anti-spam).
-3. Clica de novo após 10min → recebe tudo de novo.
+### 4. Reforço de guarda em `finalizando` (já existe parcialmente)
+A validação `validateCustomerForPortal` em `bot-flow.ts:4506` já bloqueia envio sem CPF/doc/etc. Verificar que `customers.cpf`, `document_number`, `document_front_url` constam dos campos obrigatórios; se a planilha de validação atual permitir submeter sem doc, adicionar `document_front_url` e `cpf` como obrigatórios (ler `_shared/validateCustomerForPortal.ts` antes de mexer). Isso é a rede de segurança que impede o portal de receber lead incompleto mesmo se algum chain futuro voltar a errar.
+
+---
+
+## Validação pós-deploy
+
+1. Resetar `customers/55d3c89f…` para `conversation_step='aguardando_conta'` e limpar `ocr_review_*`.
+2. Reenviar foto da conta → confirmar com consultor online: deve sair `d_resultado` (simulação) e depois `d_pedir_documento`. NÃO deve sair `d_finalizar`.
+3. Enviar foto do documento → confirmar via painel → deve sair `d_finalizar` com botão.
+4. Clicar "Finalizar" → bot valida CPF + doc + valor + nome antes de chamar portal.
+5. Logs `[manual-step-send] continueFlow … final=…` devem mostrar `aguardando_doc_auto` no clique do bill, não `finalizando`.
+

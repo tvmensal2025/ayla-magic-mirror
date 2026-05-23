@@ -114,23 +114,79 @@ export function OcrReviewCard({ customer, kind, onDecided }: Props) {
       };
       await supabase.from("customers").update(updatePayload).eq("id", customer.id);
 
-      // Avança o fluxo do bot — manual-step-send com continueFlow=true vai
-      // disparar o próximo step configurado.
+      // Avança o fluxo do bot. Antes de chamar o próximo capture, despachamos
+      // os passos `message` ativos que estão entre o passo de captura recém-
+      // confirmado (capture_conta/capture_documento) e o próximo capture/
+      // finalizar — assim a simulação (ex.: d_resultado) sai antes do pedido
+      // de documento, como o fluxo configurado prevê.
       try {
-        const nextStepKey = kind === "bill" ? "capture_documento" : "finalizar_cadastro";
+        const nextCaptureKey = kind === "bill" ? "capture_documento" : "finalizar_cadastro";
+        const currentCaptureType = kind === "bill" ? "capture_conta" : "capture_documento";
+
+        // Busca o fluxo ativo do consultor (mesma variant do customer).
+        const variant = (customer as any)?.flow_variant || "A";
+        const { data: flowRow } = await supabase
+          .from("bot_flows")
+          .select("id")
+          .eq("consultant_id", customer.consultant_id)
+          .eq("is_active", true)
+          .eq("variant", variant)
+          .maybeSingle();
+
+        if (flowRow?.id) {
+          const { data: allSteps } = await supabase
+            .from("bot_flow_steps")
+            .select("position, step_key, step_type, is_active")
+            .eq("flow_id", flowRow.id)
+            .eq("is_active", true)
+            .order("position", { ascending: true });
+
+          const steps = (allSteps as any[]) || [];
+          const captureIdx = steps.findIndex((s) => s.step_type === currentCaptureType);
+          const nextStopIdx = steps.findIndex(
+            (s, i) => i > captureIdx && (s.step_type === "capture_documento" || s.step_type === "capture_doc" || s.step_type === "capture_email" || s.step_type === "confirm_phone" || s.step_type === "finalizar_cadastro"),
+          );
+
+          const between = captureIdx >= 0
+            ? steps.slice(captureIdx + 1, nextStopIdx > 0 ? nextStopIdx : steps.length).filter((s) => s.step_type === "message")
+            : [];
+
+          // Despacha cada passo de mensagem intermediário (ex.: resultado/simulação).
+          for (const msgStep of between) {
+            try {
+              await supabase.functions.invoke("manual-step-send", {
+                body: {
+                  consultantId: customer.consultant_id,
+                  customerId: customer.id,
+                  stepKey: msgStep.step_key,
+                  part: "all",
+                  continueFlow: false,
+                  skipNameGuard: true,
+                },
+              });
+              // Pequeno gap entre as mensagens informativas.
+              await new Promise((r) => setTimeout(r, 1800));
+            } catch (msgErr: any) {
+              console.warn(`[ocr-review] msg-step ${msgStep.step_key} failed:`, msgErr?.message);
+            }
+          }
+        }
+
+        // Finalmente, despacha o próximo capture (doc) sem encadear o resto.
         await supabase.functions.invoke("manual-step-send", {
           body: {
             consultantId: customer.consultant_id,
             customerId: customer.id,
-            stepKey: nextStepKey,
+            stepKey: nextCaptureKey,
             part: "all",
-            continueFlow: true,
+            continueFlow: false,
             skipNameGuard: true,
           },
         });
       } catch (advErr: any) {
         console.warn("[ocr-review] advance flow failed:", advErr?.message);
       }
+
 
       haptics.success();
       toast({ title: "✓ Você confirmou", description: "Bot avançando para o próximo passo…", duration: 2000 });
