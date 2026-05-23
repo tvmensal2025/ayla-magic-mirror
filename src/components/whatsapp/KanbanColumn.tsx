@@ -43,8 +43,8 @@ export function KanbanColumn({ stage, deals, searchQuery, stepFilter = "all", cu
 
   return (
     <div
-      style={{ width: "var(--kanban-col-w, 280px)" }}
-      className="shrink-0 bg-muted/30 rounded-2xl border border-border/40 backdrop-blur-sm overflow-hidden transition-colors hover:border-border/60"
+      style={{ width: "var(--kanban-col-w, 248px)" }}
+      className="shrink-0 h-full min-h-0 flex flex-col bg-muted/30 rounded-lg border border-border/40 backdrop-blur-sm overflow-hidden transition-colors hover:border-border/60"
       onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("border-primary/30", "bg-primary/[0.03]"); }}
       onDragLeave={(e) => { e.currentTarget.classList.remove("border-primary/30", "bg-primary/[0.03]"); }}
       onDrop={(e) => { e.currentTarget.classList.remove("border-primary/30", "bg-primary/[0.03]"); onDrop(stage.stage_key); }}
@@ -65,7 +65,7 @@ export function KanbanColumn({ stage, deals, searchQuery, stepFilter = "all", cu
       </div>
 
       {/* Cards */}
-      <ScrollArea className="max-h-[420px]">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-2 space-y-1.5">
           {stageDeals.map((deal) => (
             <KanbanDealCard
