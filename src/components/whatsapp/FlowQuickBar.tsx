@@ -349,8 +349,7 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
                   </p>
                 </div>
               );
-            })()
-            ) : (
+            })() : (
               steps.map((s, i) => {
                 const isSending = sendingId === s.id;
                 return (
