@@ -6,13 +6,13 @@ export function PlayerHud({ progress }: { progress: GameProgress }) {
   const isOnFire = streak >= 3;
 
   return (
-    <div className="relative rounded-xl border border-border/60 bg-card/80 backdrop-blur-md px-3 py-2 overflow-hidden exec-ambient">
+    <div className="relative rounded-lg border border-border/60 bg-card/80 backdrop-blur-md px-2.5 py-1.5 overflow-hidden exec-ambient">
       <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-400/40 to-transparent" />
 
       <div className="relative flex items-center gap-3 flex-wrap">
         <div className="relative shrink-0">
-          <div className={`w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center ${isOnFire ? "animate-exec-rank" : ""}`}>
-            <TrendingUp className="w-5 h-5 text-primary" strokeWidth={1.5} />
+          <div className={`w-8 h-8 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center ${isOnFire ? "animate-exec-rank" : ""}`}>
+            <TrendingUp className="w-4 h-4 text-primary" strokeWidth={1.5} />
           </div>
           <span className="absolute -bottom-1 -right-1 bg-amber-400 text-amber-950 text-[9px] font-black rounded w-5 h-4 flex items-center justify-center border border-card tabular-nums">
             {level}
