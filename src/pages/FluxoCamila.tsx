@@ -1459,7 +1459,7 @@ function FlowAuditPanel({ steps, flowId, onRepaired }: { steps: Step[]; flowId: 
 
 function AiGenerateTextButton({
   consultantId, stepId, variant, onGenerated,
-}: { consultantId: string; stepId: string; variant: "A" | "B" | "C"; onGenerated: (t: string) => void }) {
+}: { consultantId: string; stepId: string; variant: Variant; onGenerated: (t: string) => void }) {
   const [loading, setLoading] = useState(false);
   async function gen() {
     if (loading) return;
