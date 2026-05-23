@@ -50,7 +50,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Como funciona",
         icon: "msg",
         message_text:
-          "É bem simples: você continua na sua distribuidora, recebe a mesma energia, e paga até 20% menos.\nSem obra, sem instalação, sem fidelidade. Bora simular?",
+          "É *bem simples*, {{nome}} 👇\n\nVocê continua na *mesma distribuidora*, recebe a *mesma energia* — só que paga *até 20% menos* todo mês.\n\n✅ Sem obra\n✅ Sem instalação\n✅ Sem fidelidade\n\nBora *simular* agora? 🚀",
         slot_key: "como_funciona",
         captures: [{ field: "_buttons", enabled: true, value: [
           { id: "simular", title: "📸 Quero simular" },
