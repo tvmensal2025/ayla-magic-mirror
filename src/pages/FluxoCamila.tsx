@@ -679,6 +679,20 @@ export default function FluxoCamila() {
             })}
           </div>
 
+          {/* Receita pronta: Fluxo D com botões Whapi */}
+          <div className="mt-4 pt-4 border-t border-border/60 flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-xs text-muted-foreground flex-1 min-w-[200px]">
+              <strong className="text-foreground">Receita pronta:</strong> Fluxo D com botões Whapi
+              (welcome → Quero simular / Como funciona / Falar com humano → simulação 8–20% → cadastro automático).
+              Reaproveita áudios e vídeos do Fluxo A.
+            </div>
+            <Button size="sm" variant="default" disabled={seedDBusy} onClick={seedFlowD}>
+              {seedDBusy ? "Criando…" : existingVariants.includes("D") ? "Recriar Fluxo D" : "✨ Criar Fluxo D (botões)"}
+            </Button>
+          </div>
+
+
+
           {existingVariants.length > 1 && (
             <div className="mt-4 pt-4 border-t border-border/60 flex items-center gap-2 flex-wrap">
               <Label className="text-sm">Editando:</Label>
