@@ -197,14 +197,15 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
     <>
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-[11px]">
-          <span className="font-bold uppercase tracking-wide text-muted-foreground">Passos do fluxo</span>
+          <span className="hidden md:inline font-bold uppercase tracking-wide text-muted-foreground">Passos do fluxo</span>
+          <span className="md:hidden text-muted-foreground">Progresso</span>
           <span className="tabular-nums font-bold text-primary">{sentSteps.size}/{display.length}</span>
         </div>
         <div className="h-1 rounded-full bg-secondary overflow-hidden">
           <div className="h-full bg-gradient-to-r from-emerald-500 to-lime-400 transition-all duration-500"
                style={{ width: `${Math.round((sentSteps.size / Math.max(display.length, 1)) * 100)}%` }} />
         </div>
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(100px,1fr))] gap-1 capture-card-flip">
+        <div className="grid grid-cols-2 md:grid-cols-[repeat(auto-fill,minmax(100px,1fr))] gap-1 capture-card-flip">
           {display.map((s: StepRow, i: number) => {
             const sent = sentSteps.has(s.id);
             const isSending = sending === s.id;
@@ -213,26 +214,32 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
             return (
               <div
                 key={s.id}
-                className={`group relative rounded-md border p-1.5 flex flex-col h-full min-h-[96px] transition-all duration-300 ${
+                role="button"
+                tabIndex={0}
+                onClick={() => !isSending && setPreviewStep(s)}
+                onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !isSending) { e.preventDefault(); setPreviewStep(s); } }}
+                className={`group relative rounded-md border p-1.5 flex flex-col h-full min-h-[68px] md:min-h-[96px] transition-all duration-300 cursor-pointer select-none active:scale-[0.98] ${
                   sent
                     ? "border-primary/60 bg-gradient-to-br from-primary/15 to-emerald-500/5 shadow-[0_0_14px_hsl(var(--primary)/0.2)] animate-exec-card"
                     : isNext
-                        ? "border-primary bg-card hover:border-primary/80 hover:shadow-lg hover:-translate-y-0.5 ring-1 ring-primary/30"
+                        ? "border-primary bg-card hover:border-primary/80 hover:shadow-lg md:hover:-translate-y-0.5 ring-1 ring-primary/30"
                         : "border-border bg-card hover:border-primary/40"
                 }`}
               >
-                <div className="flex items-start justify-between mb-1.5">
-                  <span className={`text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded ${sent ? "bg-primary text-primary-foreground" : "bg-secondary text-primary"}`}>Passo {s.position}</span>
+                <div className="flex items-start justify-between mb-1">
+                  <span className={`text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded ${sent ? "bg-primary text-primary-foreground" : "bg-secondary text-primary"}`}>P{s.position}</span>
                   {sent ? (
                     <Check className="w-3.5 h-3.5 text-primary drop-shadow-[0_0_4px_hsl(var(--primary))]" />
+                  ) : isSending ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
                   ) : null}
                 </div>
                 <p className="text-[11px] font-semibold leading-tight line-clamp-2 break-words">
                   {s.title || s.step_key || "Passo"}
                 </p>
                 {inlinePreview && (
-                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground line-clamp-2 italic break-words">
-                    “{inlinePreview}”
+                  <p className="hidden md:block mt-1 text-[11px] leading-snug text-muted-foreground line-clamp-2 italic break-words">
+                    "{inlinePreview}"
                   </p>
                 )}
                 <div className="flex items-center gap-1.5 mt-1.5">
@@ -241,12 +248,12 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                   <ImageIcon className={`w-3 h-3 ${s.has_image ? "text-amber-400" : "text-muted-foreground/30"}`} />
                   <Video className={`w-3 h-3 ${s.has_video ? "text-cyan-400" : "text-muted-foreground/30"}`} />
                 </div>
-                <div className="mt-auto pt-2 flex items-center gap-1">
+                <div className="hidden md:flex mt-auto pt-2 items-center gap-1">
                   <Button
                     size="sm"
                     variant={sent ? "outline" : "default"}
                     className="h-7 px-2 text-[10px] flex-1 min-w-0"
-                    onClick={() => setPreviewStep(s)}
+                    onClick={(e) => { e.stopPropagation(); setPreviewStep(s); }}
                     disabled={isSending}
                     aria-busy={isSending}
                     title={sent ? "Reenviar" : "Ver e enviar"}
@@ -265,7 +272,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                       size="sm"
                       variant="ghost"
                       className="h-8 w-8 p-0 shrink-0"
-                      onClick={() => void loadTemplate(s.id, s.step_key)}
+                      onClick={(e) => { e.stopPropagation(); void loadTemplate(s.id, s.step_key); }}
                       title="Editar antes de enviar"
                     >
                       <Edit3 className="w-3 h-3" />
