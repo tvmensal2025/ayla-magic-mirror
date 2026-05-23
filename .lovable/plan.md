@@ -1,61 +1,86 @@
-## Objetivo
+## Diagnóstico do que está acontecendo agora
 
-Hoje o editor `/admin/fluxos` mostra todas as variantes que existem como abas e a distribuição entre clientes é fixa. Você quer:
+Na screenshot do `/admin/fluxos` aparecem dois problemas reais:
 
-1. Escolher quais variantes ficam **ativas** (recebendo clientes), independente de quais existem para edição.
-2. **Adicionar** novas variantes (criar fluxo C, D, E… vazio para editar).
-3. Definir a **regra de rotação** entre as variantes ativas.
+**1. Letras brancas "sumidas" no preview do WhatsApp (direita)**
+- `WhatsAppPreview.tsx` usa `<BotBubble>` com `bg-white text-foreground`.
+- Em dark mode (tema atual), `--foreground` é **branco/quase-branco** → texto branco em bolha branca = ilegível (foi exatamente o que você viu no celular do preview).
+- O footer "Mensagem" também usa `text-foreground/40` → mesmo problema.
 
-## Decisão da regra (a "melhor")
+**2. OCR existe no banco mas não no editor**
+- A coluna `auto_detect_doc_type` já existe em `bot_flow_steps` e o backend (`_shared/ocr.ts`, `whapi-webhook`) já chama OCR nos passos `pedir_conta_luz` e `pedir_documento`.
+- Mas o editor novo **não mostra nem deixa configurar** isso — não há badge "OCR ligado", nem switch, nem indicação visual de "este passo lê a imagem".
+- Também **não existe passo intermediário** para o cliente confirmar/editar os dados extraídos (valor da conta, nome, CPF) antes de pedir e-mail e confirmar telefone.
 
-**Round-robin 1 cliente por variante ativa** (não 2 a 2).
+## O que vou implementar
 
-Por quê:
-- Já é exatamente o que a função SQL `pick_next_flow_variant` faz hoje, baseada em `consultants.active_variants` — não precisa migrar nada no backend.
-- Distribui mais rápido = você vê resultado de cada variante com metade do volume vs. 2-a-2.
-- Para teste A/B/C/D/E significa amostra balanceada mais cedo (importante para o `bot-health-intel`).
-- 2-a-2 só faria sentido se houvesse risco de viés temporal forte (horário) — não é o caso aqui.
+### A) Corrigir contraste do preview (cosmético, alta prioridade)
 
-Exemplo com A, B e D ativas: cliente 1→A, 2→B, 3→D, 4→A, 5→B, 6→D…
+`src/components/admin/flow-builder/WhatsAppPreview.tsx`:
+- Bot bubble: `bg-white text-[#111B21]` (cor fixa do WhatsApp, igual ao real), `text-[10px] text-black/45` no horário.
+- User bubble (vou adicionar p/ botões clicados se houver): `bg-[#DCF8C6] text-[#111B21]`.
+- Footer placeholder: `text-black/40`.
+- Frame do celular: trocar `border-foreground/80 bg-foreground/80` por `border-zinc-900 bg-zinc-900` para não depender do token de tema.
 
-## Mudanças (somente UI no `FluxoBuilder`)
+Resultado: texto preto em fundo bege/branco como no WhatsApp real, legível em dark **e** light mode.
 
-Backend (`active_variants`, `pick_next_flow_variant`, `bot_flows.variant`) já existe — só plumbing no editor.
+### B) Badge e toggle de OCR nos passos certos
 
-### 1. Header — bloco "Distribuição de clientes"
-Substitui o atual toggle único "Fluxo ativo" por um painel compacto à direita do título:
+`src/components/admin/flow-builder/StepCard.tsx` e `StepInspector.tsx`:
+- Quando `step.captures` contém `electricity_bill_value`, `document_*`, ou `step_key` casa `pedir_conta` / `pedir_documento` / `aguardando_conta` / `aguardando_documento`: mostrar chip verde **"📷 OCR ativo — lê a imagem"** no card.
+- No Inspector adicionar bloco **"Leitura automática (OCR)"** com:
+  - Switch `auto_detect_doc_type` (já existe na coluna).
+  - Texto explicativo: "Quando o cliente enviar a foto, o bot extrai automaticamente: valor da conta / nome / CPF / RG."
+  - Lista dos campos que serão extraídos (lida de `captures`).
 
+### C) Novo passo padrão "Confirmar dados extraídos"
+
+Template novo em `flowTemplates.ts` chamado **"Confirmação pós-OCR"** que insere 3 passos após `pedir_documento`:
+
+1. **`confirmar_dados`** — mensagem:
+   > Consegui ler aqui, {{nome}}:
+   > • Nome: {{nome_ocr}}
+   > • CPF: {{cpf_ocr}}
+   > • Valor da conta: R$ {{valor_conta}}
+   >
+   > Está tudo certo?
+
+   Botões: `Sim, está certo` / `Não, editar` / `Falar com humano`.
+
+2. **`pedir_email`** (transição do botão "Sim") — captura `email` com validação.
+   > Show! Agora me passa seu **e-mail** para finalizar o cadastro.
+
+3. **`confirmar_telefone`** — mensagem:
+   > Esse mesmo número ({{telefone}}) é o seu WhatsApp para contato?
+   
+   Botões: `Sim, é esse` / `Quero editar`.
+   Transição "editar" → passo `editar_telefone` que captura novo telefone.
+
+Tudo isso é só **conteúdo de template** (linhas em `bot_flow_steps` via INSERT na ativação do template) — **não muda código de runtime**, o `whapi-webhook` já sabe processar `captures` e `transitions`.
+
+### D) Validação visual no editor
+
+`useFlowValidation.ts`: avisar (warning amarelo) quando existir passo `pedir_conta_luz`/`pedir_documento` sem um passo `confirmar_dados` logo depois → sugerir aplicar o template "Confirmação pós-OCR" com 1 clique.
+
+## Resumo das mudanças
+
+```text
+src/components/admin/flow-builder/WhatsAppPreview.tsx   (cores fixas WhatsApp)
+src/components/admin/flow-builder/StepCard.tsx          (chip OCR)
+src/components/admin/flow-builder/StepInspector.tsx     (bloco OCR + switch)
+src/components/admin/flow-builder/flowTemplates.ts      (template "Confirmação pós-OCR")
+src/components/admin/flow-builder/useFlowValidation.ts  (warning "falta confirmação")
 ```
-Distribuição (round-robin 1 a 1)
-[A ✓ ativa]  [B ✓ ativa]  [C – inativa]  [D ✓ ativa]  [E – inativa]   [+ Adicionar variante]
+
+Sem migrations, sem mudar edge functions, sem mexer no router/whapi. Só frontend do editor + 1 template de conteúdo.
+
+## Fluxo final que o cliente vai ver
+
+```text
+1. Pedir foto da conta de luz       (OCR → valor_conta, nome)
+2. Pedir foto do documento (RG/CNH) (OCR → cpf, nome)
+3. Confirmar dados                  [Sim] [Não, editar] [Falar humano]
+4. Pedir email                      (captura email)
+5. Confirmar telefone               [Sim, é esse] [Quero editar]
+6. Finalizar cadastro
 ```
-
-- Cada chip mostra a letra + label ("A com áudio", "B sem áudio"…) + Switch on/off.
-- Toggle on/off → `UPDATE consultants SET active_variants = …` (array com as letras ligadas).
-- "Adicionar variante" → cria `bot_flows` na próxima letra livre (ex.: já existem A,B,D → cria C) com nome editável e `is_active=true`, depois abre essa aba para edição.
-- Chip também tem menu (⋯): "Renomear", "Duplicar de outra variante", "Excluir variante".
-
-### 2. Abas de edição (logo abaixo)
-- Mostram **todas as variantes existentes** (A, B, D, …) para edição livre.
-- Letra com bolinha verde quando está em `active_variants`, cinza quando só existe para edição mas não recebe clientes.
-- Aba selecionada = qual fluxo você está editando agora (já funciona; mantém).
-
-### 3. Texto explicativo
-Tooltip no header: "Clientes novos são distribuídos 1 a 1 entre as variantes ativas. Variantes inativas continuam editáveis, mas não recebem leads."
-
-### 4. Remoção do toggle global "Fluxo ativo"
-Vira redundante: ativar/desativar variantes individuais já cobre. Mantém `consultants.conversational_flow_enabled` ligado se houver pelo menos 1 variante ativa; desliga se nenhuma.
-
-## Arquivos tocados
-
-- `src/pages/FluxoBuilder.tsx` — novo painel de distribuição no header, lógica de toggle, criar/excluir variante, recarregar `active_variants`.
-- `src/components/admin/flow-builder/VariantDistributionBar.tsx` (novo) — componente dos chips + Switch + "Adicionar".
-- `src/components/admin/flow-builder/flowTypes.ts` — apenas exports usados pelo novo componente (se necessário).
-
-Sem migrations, sem mexer em edge functions, sem mudar nada no router/whapi.
-
-## Validações
-
-- Não permitir desativar a **última** variante ativa (toast: "Pelo menos 1 variante precisa estar ativa, ou desligue o bot inteiro").
-- Não permitir excluir variante que tem `bot_conversations` recentes — usa soft delete (`is_active=false` + remove de `active_variants`).
-- Após criar nova variante, scroll/foca a aba dela e abre Templates para acelerar setup.

@@ -200,4 +200,63 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
       },
     ],
   },
+  {
+    id: "confirmacao_pos_ocr",
+    name: "Confirmação pós-OCR (dados + email + telefone)",
+    emoji: "✅",
+    description:
+      "Depois do OCR da conta e documento: confirma dados, pede e-mail e confirma telefone.",
+    steps: [
+      {
+        step_key: "confirmar_dados",
+        step_type: "message",
+        title: "Confirmar dados extraídos",
+        icon: "msg",
+        message_text:
+          "Consegui ler aqui, {{nome}} 👇\n• Nome: {{nome}}\n• CPF: {{cpf}}\n• Valor da conta: R$ {{valor_conta}}\n\nEstá tudo certo?",
+        slot_key: "confirmar_dados",
+        captures: [
+          {
+            field: "_buttons",
+            enabled: true,
+            value: [
+              { id: "sim", title: "✅ Sim, está certo" },
+              { id: "nao", title: "✏️ Não, editar" },
+              { id: "humano", title: "👤 Falar com humano" },
+            ],
+          },
+        ],
+      },
+      {
+        step_key: "pedir_email",
+        step_type: "capture_email",
+        title: "Pedir e-mail",
+        icon: "msg",
+        message_text:
+          "Show! Agora me passa seu *e-mail* para eu finalizar o cadastro 📧",
+        slot_key: "pedir_email",
+        captures: [{ field: "email", enabled: true } as any],
+      },
+      {
+        step_key: "confirmar_telefone",
+        step_type: "confirm_phone",
+        title: "Confirmar telefone",
+        icon: "msg",
+        message_text:
+          "Esse mesmo número *{{telefone}}* é o seu WhatsApp para contato?",
+        slot_key: "confirmar_telefone",
+        captures: [
+          {
+            field: "_buttons",
+            enabled: true,
+            value: [
+              { id: "sim", title: "✅ Sim, é esse" },
+              { id: "editar", title: "✏️ Quero editar" },
+            ],
+          },
+        ],
+      },
+    ],
+  },
 ];
+

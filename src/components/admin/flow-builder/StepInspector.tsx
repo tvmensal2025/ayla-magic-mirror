@@ -8,12 +8,13 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Trash2, ChevronDown, ChevronRight, ScanLine } from "lucide-react";
 import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
 import StepSuggestions from "./StepSuggestions";
 import {
-  Step, Transition, Capture, BUTTON_PRESETS, STEP_TYPE_OPTIONS, getButtons,
+  Step, Transition, Capture, BUTTON_PRESETS, STEP_TYPE_OPTIONS, getButtons, isOcrStep,
 } from "./flowTypes";
+
 
 interface Props {
   step: Step | null;
@@ -163,6 +164,40 @@ export default function StepInspector({
                 onCheckedChange={(v) => onPatch({ is_active: v })}
               />
             </div>
+
+            {(() => {
+              const ocr = isOcrStep(step);
+              if (!ocr) return null;
+              const on = step.auto_detect_doc_type !== false;
+              return (
+                <div className="space-y-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <ScanLine className="h-4 w-4 text-emerald-500" />
+                      <Label className="text-sm">Leitura automática (OCR)</Label>
+                    </div>
+                    <Switch
+                      checked={on}
+                      onCheckedChange={(v) => onPatch({ auto_detect_doc_type: v } as any)}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {ocr === "conta" ? (
+                      <>Quando o cliente enviar a foto, o bot extrai automaticamente <strong>valor da conta</strong>, <strong>nome</strong> e <strong>endereço</strong>.</>
+                    ) : (
+                      <>O bot tenta identificar <strong>RG ou CNH</strong> e extrai <strong>nome</strong>, <strong>CPF</strong> e <strong>data de nascimento</strong>.</>
+                    )}
+                    {" "}Os dados ficam disponíveis no próximo passo como <code className="rounded bg-muted px-1">{"{{valor_conta}}"}</code>, <code className="rounded bg-muted px-1">{"{{nome}}"}</code>, <code className="rounded bg-muted px-1">{"{{cpf}}"}</code>.
+                  </p>
+                  {!on && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      ⚠ OCR desligado — o bot só vai salvar a foto, sem ler os dados.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
+
 
             {flowId && (
               <div className="rounded-lg border bg-muted/10 p-3">

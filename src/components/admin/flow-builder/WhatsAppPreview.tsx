@@ -19,7 +19,7 @@ export default function WhatsAppPreview({ step, consultantName }: Props) {
   const buttons = useMemo(() => (step ? getButtons(step) : []), [step]);
 
   return (
-    <div className="sticky top-4 mx-auto w-full max-w-[380px] overflow-hidden rounded-[2rem] border-8 border-foreground/80 bg-foreground/80 shadow-2xl">
+    <div className="sticky top-4 mx-auto w-full max-w-[380px] overflow-hidden rounded-[2rem] border-8 border-zinc-900 bg-zinc-900 shadow-2xl">
       {/* Header WhatsApp */}
       <div className="flex items-center gap-3 bg-[#075E54] px-4 py-3 text-white">
         <div className="h-9 w-9 shrink-0 rounded-full bg-white/20 grid place-items-center text-sm font-semibold">
@@ -40,10 +40,11 @@ export default function WhatsAppPreview({ step, consultantName }: Props) {
         }}
       >
         {!step && (
-          <div className="grid h-[440px] place-items-center text-center text-xs text-foreground/60">
+          <div className="grid h-[440px] place-items-center text-center text-xs text-black/60">
             Selecione um passo à esquerda<br />para ver como o cliente vai receber
           </div>
         )}
+
 
         {step && (
           <>
@@ -74,7 +75,7 @@ export default function WhatsAppPreview({ step, consultantName }: Props) {
             {/* Estado vazio */}
             {!renderedText && buttons.length === 0 && !step.slot_key && (
               <BotBubble>
-                <p className="text-xs italic text-foreground/50">
+                <p className="text-xs italic text-black/50">
                   (sem texto, mídia ou botões — adicione conteúdo na coluna ao lado)
                 </p>
               </BotBubble>
@@ -85,7 +86,7 @@ export default function WhatsAppPreview({ step, consultantName }: Props) {
 
       {/* Footer */}
       <div className="flex items-center gap-2 bg-[#F0F0F0] px-3 py-2">
-        <div className="flex-1 rounded-full bg-white px-3 py-1.5 text-xs text-foreground/40">
+        <div className="flex-1 rounded-full bg-white px-3 py-1.5 text-xs text-black/40">
           Mensagem
         </div>
         <Mic className="h-4 w-4 text-[#075E54]" />
@@ -97,9 +98,9 @@ export default function WhatsAppPreview({ step, consultantName }: Props) {
 function BotBubble({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex">
-      <div className="relative max-w-[85%] rounded-lg rounded-tl-sm bg-white px-3 py-2 text-[13px] text-foreground shadow-sm">
+      <div className="relative max-w-[85%] rounded-lg rounded-tl-sm bg-white px-3 py-2 text-[13px] text-[#111B21] shadow-sm">
         {children}
-        <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-foreground/50">
+        <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-black/45">
           14:32
           <CheckCheck className="h-3 w-3 text-[#34B7F1]" />
         </div>
@@ -107,6 +108,7 @@ function BotBubble({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
 
 function MediaChip({ slot: _slot }: { slot: string }) {
   // Sem fetch — só mostra que o passo TEM mídia configurada. Real virá do
@@ -122,9 +124,10 @@ function MediaChip({ slot: _slot }: { slot: string }) {
 
 function Pill({ icon: Icon, label }: { icon: any; label: string }) {
   return (
-    <div className="flex items-center gap-1 rounded-full bg-white/80 px-2 py-1 text-[10px] text-foreground/70 shadow-sm">
+    <div className="flex items-center gap-1 rounded-full bg-white/90 px-2 py-1 text-[10px] text-black/70 shadow-sm">
       <Icon className="h-3 w-3" />
       {label}
     </div>
   );
 }
+
