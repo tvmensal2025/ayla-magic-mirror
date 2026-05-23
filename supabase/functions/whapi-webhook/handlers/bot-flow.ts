@@ -985,7 +985,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
         if (it.kind === "text" && it.text) {
           try {
-            await sendText(remoteJid, it.text);
+            const useButtons = isLast && _buttons.length > 0;
+            if (useButtons) {
+              const renderedButtons = _buttons.map((b) => ({
+                id: b.id,
+                title: applyVars(b.title).slice(0, 20),
+              }));
+              await sendButtons(remoteJid, it.text, renderedButtons);
+            } else {
+              await sendText(remoteJid, it.text);
+            }
             await supabase.from("conversations").insert({
               customer_id: customer.id,
               message_direction: "outbound",
@@ -1000,6 +1009,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }
           continue;
         }
+
 
         const m = it.media;
         if (!m?.url) continue;
