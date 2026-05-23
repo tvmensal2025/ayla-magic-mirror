@@ -1,72 +1,42 @@
-# IA Gemini 3.1 Pro global para dúvidas em qualquer momento
+# Ajustar Passo 6 do Fluxo D — somente IA (sem áudio/vídeo)
 
-## Objetivo
-1. Trocar `openai/gpt-5.5` por **`google/gemini-3.1-pro-preview`** (última geração, máxima precisão, PT-BR nativo).
-2. Garantir que o passo "Esclarecer Dúvidas" (passo 6) NUNCA dispare áudio/vídeo/imagem — só texto da IA.
-3. Tornar a IA **sempre ativa**: se o lead mandar uma pergunta em qualquer passo do funil, a IA responde com base no Knowledge Base (`ai_knowledge_sections`), sem precisar estar num passo específico.
+## Diagnóstico
+Investiguei o passo 6 do **Fluxo D** (`Fluxo Whapi (botões)` — id `320bf22c-...02558`):
+
+| Campo | Valor atual | Problema |
+|---|---|---|
+| `step_key` | `d_duvidas` | OK |
+| `slot_key` | `como_funciona` | Faz o editor exibir áudios/vídeos reutilizados do "Como funciona" |
+| `media_order` | `[audio, image, video, text]` | Lista mídia para envio |
+| `step_type` | `message` | OK |
+
+**Backend já está correto**: o handler em `whapi-webhook/handlers/bot-flow.ts` (linhas 904-998) detecta `step_key` contendo "duvid" e responde **apenas texto via Gemini 3.1 Pro**, com guard absoluto contra mídia mesmo se a IA falhar.
+
+**Problema real**: o **editor `/admin/fluxos` exibe** áudios e vídeos no passo 6 porque o `slot_key=como_funciona` puxa a biblioteca de mídia daquele slot. Isso confunde o consultor e dá a impressão de que mídia é enviada.
 
 ## Mudanças
 
-### 1. Modelo Gemini 3.1 Pro Preview
-- `supabase/functions/_shared/ai-faq-answerer.ts`: default `model = "google/gemini-3.1-pro-preview"`.
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` e `evolution-webhook/handlers/bot-flow.ts`: remover override do GPT-5.5 (usa o default Gemini 3.1 Pro).
-
-### 2. Passo 6 sem mídia (guard absoluto)
-Hoje `dispatchStepFromFlow` já intercepta `esclarecer_duvidas` e responde só com texto IA, mas mídia ainda chega. Causa provável: o passo é disparado por outra rota (switch legacy ou `runConversationalFlow`) antes de cair no interceptador.
-
-Fix: adicionar guard absoluto que pula qualquer envio de áudio/vídeo/imagem se o step atual for `esclarecer_duvidas` (ou `step_key` contém "duvid" exceto `duvidas_pos_club`). Aplicado nas funções de envio de mídia do flow runner.
-
-### 3. IA global (sempre ativa) — AI Fallback Layer
-Novo bloco em `whapi-webhook/handlers/bot-flow.ts` (e espelho `evolution-webhook`), executado em todo inbound de texto, na seguinte ordem:
-
-```
-1. customer.bot_paused / assigned_human_id → return (silêncio total)
-2. isFile / isButton → fluxo normal
-3. Handlers determinísticos (captura de valor, intent positivo, club progress)
-4. trySendConfiguredQa() → se bater FAQ estático, usa
-5. NOVO: AI Fallback Global
-   - se passo está em NO_QA_STEPS (cadastro/edição CPF/email/conta) E texto não tem "?"
-     → segue fluxo normal (não interrompe coleta)
-   - senão se (texto contém "?" OU começa com palavra-pergunta OU 4+ palavras
-              em passo conversacional)
-     → answerFaqWithAI(question, recentHistory=8, consultantId, leadName)
-     → se ai.confidence >= 0.55:
-         sendText(ai.text)
-         if ai.shouldHandoff: bot_paused=true + notifyHandoff
-         MANTÉM o step atual (não avança)
-         contador customer.ai_followups_count += 1
-         se ai_followups_count >= 3 sem progresso: bot_paused + notifyHandoff "muitas_duvidas_ia"
-         return
-6. Switch legacy do passo atual (comportamento default)
+### Migration — atualizar o passo 6 do Fluxo D
+```sql
+UPDATE bot_flow_steps
+SET 
+  slot_key = 'esclarecer_duvidas',
+  media_order = ARRAY['text']::text[]
+WHERE flow_id = '320bf22c-e383-4f53-a3c0-b88b89b02558'
+  AND step_key = 'd_duvidas';
 ```
 
-**Palavras-pergunta** (regex PT-BR):
-`^(como|quanto|qual|quando|onde|por\s?que|pq|posso|tem|é|funciona|cobra|paga|cancel|seguro|garantia|risco|fidelidade|multa|preciso|precisa|vale|dá|consigo|aceita|atende|distribuidor|conta)`
+Efeito:
+- Editor passa a mostrar o passo 6 **só com texto** (sem seções de áudio/vídeo/imagem).
+- Backend continua enviando resposta da IA (slot `esclarecer_duvidas` também está na lista de detecção do guard, linha 912).
+- Nenhum outro passo/fluxo é afetado.
 
-**Passos conversacionais** (já existem em `conversationalSteps`):
-`welcome, menu_inicial, pos_video, checkin_pos_video, qualificacao, pitch_conexao_club, duvidas_pos_club, aguardando_humano`
-
-**Reset do contador** `ai_followups_count` quando o lead progride (qualquer mudança de step) ou manda valor numérico válido.
-
-### 4. Espelhar em evolution-webhook
-Mesma lógica aplicada no espelho futuro.
-
-## Arquivos afetados
-- `supabase/functions/_shared/ai-faq-answerer.ts` — modelo default `google/gemini-3.1-pro-preview`.
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — guard mídia passo 6 + bloco AI Fallback global + contador.
-- `supabase/functions/evolution-webhook/handlers/bot-flow.ts` — espelho.
-- **Migration**: adicionar `customers.ai_followups_count INT DEFAULT 0`.
-
-## Detalhes técnicos
-- **Modelo**: `google/gemini-3.1-pro-preview` via AI Gateway (LOVABLE_API_KEY já configurado).
-- **Custo**: ~US$0.005 por pergunta (input ~1500 tok, output ~350 tok). ~2,5× mais barato que GPT-5.5.
-- **Latência**: ~1.5-3s.
-- **Memória**: últimas 8 mensagens da conversa enviadas ao prompt.
-- **Anti-loop**: máx 3 IA-responses consecutivas sem progresso → handoff humano.
-- **Respeita** `bot_paused`/`assigned_human_id` (silêncio total mantido).
+### Sem mudanças de código
+- `whapi-webhook/handlers/bot-flow.ts` — guard de IA já cobre `esclarecer_duvidas` e `/duvid/`.
+- `evolution-webhook/handlers/bot-flow.ts` — idem.
+- Frontend `/admin/fluxos` — usa `media_order` para decidir o que renderizar; ao limitar a `['text']`, áudios/vídeos somem automaticamente.
 
 ## Critério de sucesso
-- Passo 6 envia APENAS texto IA, nunca áudio/vídeo/imagem.
-- Lead pergunta "tem fidelidade?" durante qualificação → IA responde corretamente sem quebrar fluxo nem avançar step.
-- Lead pede humano explicitamente ou faz 3 perguntas seguidas → bot pausa e consultor é notificado.
-- Modelo Gemini 3.1 Pro entrega respostas precisas, em PT-BR, baseadas no knowledge base.
+- Em `/admin/fluxos` → Fluxo D → Passo 6: aparece apenas campo de texto, sem seções "ÁUDIOS"/"VÍDEOS"/"IMAGENS".
+- Quando o lead chega no passo 6 (ou pergunta algo), o bot responde **só texto** gerado pelo Gemini 3.1 Pro.
+- Passos 1–5 e 7+ permanecem intactos.
