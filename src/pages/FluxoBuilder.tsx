@@ -291,6 +291,10 @@ export default function FluxoBuilder() {
                 Auto-corrigir
               </Button>
             )}
+            <Button variant="outline" size="sm" onClick={() => navigate("/admin/conhecimento")}>
+              <BookOpen className="mr-1 h-3 w-3" />
+              Conhecimento
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setTemplatesOpen(true)} disabled={!flowId}>
               <Sparkles className="mr-1 h-3 w-3" />
               Templates
