@@ -41,9 +41,9 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
   const [parts, setParts] = useState<Part[]>([]);
   const [partIdx, setPartIdx] = useState(0);
   const [sending, setSending] = useState(false);
-  const [variant, setVariant] = useState<"A" | "B" | "C">("A");
-  const [variantsAvailable, setVariantsAvailable] = useState<Array<"A" | "B" | "C">>(["A"]);
-  const byVariantRef = useRef<Map<"A" | "B" | "C", string>>(new Map());
+  const [variant, setVariant] = useState<"A" | "B" | "C" | "D" | "E">("A");
+  const [variantsAvailable, setVariantsAvailable] = useState<Array<"A" | "B" | "C" | "D" | "E">>(["A"]);
+  const byVariantRef = useRef<Map<"A" | "B" | "C" | "D" | "E", string>>(new Map());
 
   // Efeito 1 — inicialização: define variante default a partir do cliente
   // sem reagir a mudanças posteriores em `variant` (clique manual não pode
@@ -57,24 +57,24 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
       const { data: cust } = await supabase
         .from("customers").select("flow_variant")
         .eq("id", customerId).maybeSingle();
-      const custVariant = String((cust as { flow_variant?: string } | null)?.flow_variant || "A").toUpperCase() as "A" | "B" | "C";
+      const custVariant = String((cust as { flow_variant?: string } | null)?.flow_variant || "A").toUpperCase() as "A" | "B" | "C" | "D" | "E";
 
       const { data: flowsAll } = await supabase
         .from("bot_flows").select("id, variant, created_at")
         .eq("consultant_id", consultantId).eq("is_active", true)
         .order("created_at", { ascending: false });
       const flowsList = ((flowsAll as Array<{ id: string; variant: string }> | null) || []);
-      const byVariant = new Map<"A" | "B" | "C", string>();
+      const byVariant = new Map<"A" | "B" | "C" | "D" | "E", string>();
       flowsList.forEach((f) => {
-        const v = String(f.variant || "A").toUpperCase() as "A" | "B" | "C";
-        if (["A", "B", "C"].includes(v) && !byVariant.has(v)) byVariant.set(v, f.id);
+        const v = String(f.variant || "A").toUpperCase() as "A" | "B" | "C" | "D" | "E";
+        if (["A", "B", "C", "D", "E"].includes(v) && !byVariant.has(v)) byVariant.set(v, f.id);
       });
       byVariantRef.current = byVariant;
-      const available = (["A", "B", "C"] as const).filter((v) => byVariant.has(v));
+      const available = (["A", "B", "C", "D", "E"] as const).filter((v) => byVariant.has(v));
       if (!mounted) return;
       setVariantsAvailable(available.length > 0 ? available : ["A"]);
 
-      const selected: "A" | "B" | "C" = byVariant.has(custVariant) ? custVariant : (available[0] || "A");
+      const selected: "A" | "B" | "C" | "D" | "E" = byVariant.has(custVariant) ? custVariant : (available[0] || "A");
       setVariant(selected);
       // Os passos serão carregados pelo Efeito 2 ao reagir a `variant`.
       setLoading(false);
