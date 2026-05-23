@@ -111,7 +111,7 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
       setLoading(true);
       const { data } = await supabase
         .from("bot_flow_steps")
-        .select("id, step_key, title, slot_key, message_text, position")
+        .select("id, step_key, title, slot_key, message_text, position, captures")
         .eq("flow_id", flowId).eq("is_active", true)
         .order("position", { ascending: true });
       if (!mounted) return;
