@@ -115,7 +115,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         step_type: "finalizar_cadastro",
         title: "Finalizar",
         icon: "sparkle",
-        message_text: "Beleza {{nome}}! Cadastro enviado. Aguarde 24h e te aviso ✅",
+        message_text: "Beleza, {{nome}}! ✅\n\n*Cadastro enviado* com sucesso.\n\n⏳ Em até *24h* eu te aviso aqui no WhatsApp. 💚",
         slot_key: "finalizar_cadastro",
       },
     ],
