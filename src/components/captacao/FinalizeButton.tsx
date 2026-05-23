@@ -49,19 +49,19 @@ export function FinalizeButton({ consultantId, customerId, missing, isComplete, 
   };
 
   return (
-    <div className="sticky bottom-0 left-0 right-0 border-t border-border/60 bg-card/80 backdrop-blur-md px-3 py-2.5 z-10" style={{ paddingBottom: "calc(0.625rem + env(safe-area-inset-bottom, 0px))" }}>
+    <div className="sticky bottom-0 left-0 right-0 border-t border-border/60 bg-card/80 backdrop-blur-md px-3 py-1.5 z-10" style={{ paddingBottom: "calc(0.375rem + env(safe-area-inset-bottom, 0px))" }}>
       {!canFinalize && blockers.length > 0 && (
         <div className="flex items-start gap-1.5 text-[10px] text-amber-400 mb-1.5">
           <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
-          <p className="leading-tight">
-            <span className="font-bold">Falta: </span>{blockers.slice(0, 4).join(", ")}{blockers.length > 4 ? ` +${blockers.length - 4}` : ""}
+          <p className="leading-tight truncate">
+            <span className="font-bold">Falta: </span>{blockers.slice(0, 3).join(", ")}{blockers.length > 3 ? ` +${blockers.length - 3}` : ""}
           </p>
         </div>
       )}
       <Button
         onClick={handleFinalize}
         disabled={!canFinalize || sending}
-        className={`w-full h-11 font-black uppercase tracking-wide ${canFinalize ? "bg-gradient-to-r from-emerald-500 to-lime-500 hover:from-emerald-400 hover:to-lime-400 text-black animate-pulse shadow-[0_0_24px_hsl(var(--primary)/0.5)]" : ""}`}
+        className={`w-full h-9 font-black uppercase tracking-wide ${canFinalize ? "bg-gradient-to-r from-emerald-500 to-lime-500 hover:from-emerald-400 hover:to-lime-400 text-black animate-pulse shadow-[0_0_24px_hsl(var(--primary)/0.5)]" : ""}`}
         variant={canFinalize ? "default" : "secondary"}
       >
         {sending ? (
