@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Plus, AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
+import { ArrowLeft, Plus, AlertTriangle, ExternalLink, Loader2, Sparkles, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 
@@ -20,6 +20,8 @@ import {
 import StepCard from "@/components/admin/flow-builder/StepCard";
 import StepInspector from "@/components/admin/flow-builder/StepInspector";
 import WhatsAppPreview from "@/components/admin/flow-builder/WhatsAppPreview";
+import FlowTemplatesDialog from "@/components/admin/flow-builder/FlowTemplatesDialog";
+import { useFlowValidation } from "@/components/admin/flow-builder/useFlowValidation";
 import {
   Step, Variant, ALL_VARIANTS, VARIANT_LABEL,
   parseTransitions, parseCaptures, parseFallback,
@@ -47,6 +49,7 @@ export default function FluxoBuilder() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [inspectorId, setInspectorId] = useState<string | null>(null);
   const [mediaCounts, setMediaCounts] = useState<Record<string, { audio: number; image: number; video: number }>>({});
+  const [templatesOpen, setTemplatesOpen] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -132,19 +135,31 @@ export default function FluxoBuilder() {
   const selected = useMemo(() => steps.find((s) => s.id === selectedId) ?? null, [steps, selectedId]);
   const inspectorStep = useMemo(() => steps.find((s) => s.id === inspectorId) ?? null, [steps, inspectorId]);
 
-  const flowWarnings = useMemo(() => {
-    let count = 0;
-    for (const s of steps) {
-      for (const t of s.transitions) {
-        if (!t.goto_step_id && !t.goto_special) count++;
-        else if (t.goto_step_id) {
-          const dst = steps.find((x) => x.id === t.goto_step_id);
-          if (!dst || !dst.is_active) count++;
-        }
-      }
+  const validation = useFlowValidation(steps);
+  const flowWarnings = validation.total;
+  const flowErrors = validation.errors;
+  const maxPosition = useMemo(
+    () => steps.reduce((m, s) => Math.max(m, s.position), 0),
+    [steps],
+  );
+
+  async function autoFixAll() {
+    if (!validation.autoFixablePatches.length) return;
+    const ok = await confirm({
+      title: "Auto-corrigir alertas?",
+      description: `Vou remover ${validation.autoFixablePatches.reduce(
+        (n, p) => n + (Array.isArray((p.patch as any).transitions) ? 1 : 0),
+        0,
+      )} regra(s) sem destino ou apontando para passos removidos.`,
+      confirmText: "Corrigir",
+    });
+    if (!ok) return;
+    for (const p of validation.autoFixablePatches) {
+      await patchStep(p.stepId, p.patch);
     }
-    return count;
-  }, [steps]);
+    toast.success("Alertas corrigidos");
+  }
+
 
   async function patchStep(id: string, patch: Partial<Step>) {
     setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
@@ -270,11 +285,24 @@ export default function FluxoBuilder() {
           </div>
           <div className="flex items-center gap-2">
             {flowWarnings > 0 && (
-              <Badge variant="destructive" className="gap-1">
+              <Badge
+                variant={flowErrors > 0 ? "destructive" : "secondary"}
+                className="gap-1"
+              >
                 <AlertTriangle className="h-3 w-3" />
                 {flowWarnings} {flowWarnings === 1 ? "alerta" : "alertas"}
               </Badge>
             )}
+            {validation.autoFixablePatches.length > 0 && (
+              <Button variant="outline" size="sm" onClick={autoFixAll}>
+                <Wand2 className="mr-1 h-3 w-3" />
+                Auto-corrigir
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => setTemplatesOpen(true)} disabled={!flowId}>
+              <Sparkles className="mr-1 h-3 w-3" />
+              Templates
+            </Button>
             <div className="flex items-center gap-2 rounded-lg border px-3 py-1.5">
               <Switch checked={globalAtivo} onCheckedChange={toggleGlobal} id="global" />
               <label htmlFor="global" className="cursor-pointer text-xs font-medium">
@@ -373,8 +401,22 @@ export default function FluxoBuilder() {
           steps={steps}
           consultantId={userId}
           variant={editingVariant}
+          flowId={flowId}
+          maxPosition={maxPosition}
           onClose={() => setInspectorId(null)}
           onPatch={(patch) => inspectorStep && patchStep(inspectorStep.id, patch)}
+          onReload={() => userId && reload(userId, editingVariant)}
+        />
+      )}
+
+      {/* Templates dialog */}
+      {userId && (
+        <FlowTemplatesDialog
+          open={templatesOpen}
+          onOpenChange={setTemplatesOpen}
+          flowId={flowId}
+          currentMaxPosition={maxPosition}
+          onApplied={() => reload(userId, editingVariant)}
         />
       )}
     </div>

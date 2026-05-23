@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
+import StepSuggestions from "./StepSuggestions";
 import {
   Step, Transition, Capture, BUTTON_PRESETS, STEP_TYPE_OPTIONS, getButtons,
 } from "./flowTypes";
@@ -19,8 +20,11 @@ interface Props {
   steps: Step[];
   consultantId: string;
   variant: "A" | "B" | "C" | "D" | "E";
+  flowId?: string | null;
+  maxPosition?: number;
   onClose: () => void;
   onPatch: (patch: Partial<Step>) => void;
+  onReload?: () => void;
 }
 
 /**
@@ -28,7 +32,7 @@ interface Props {
  * da aba "Avançado" pra um leigo nunca precisar abrir.
  */
 export default function StepInspector({
-  step, steps, consultantId, variant, onClose, onPatch,
+  step, steps, consultantId, variant, flowId, maxPosition, onClose, onPatch, onReload,
 }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -159,6 +163,18 @@ export default function StepInspector({
                 onCheckedChange={(v) => onPatch({ is_active: v })}
               />
             </div>
+
+            {flowId && (
+              <div className="rounded-lg border bg-muted/10 p-3">
+                <StepSuggestions
+                  consultantId={consultantId}
+                  stepId={step.id}
+                  flowId={flowId}
+                  currentMaxPosition={maxPosition ?? step.position}
+                  onAdded={() => onReload?.()}
+                />
+              </div>
+            )}
 
             <button
               type="button"
