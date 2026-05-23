@@ -1,16 +1,14 @@
 ---
-name: A/B/C Test Audio vs Text vs Video
-description: Fluxo A (com áudio), B (sem áudio, texto direto), C (com vídeo inicial) por consultor; round-robin 1=A, 2=B, 3=C
+name: Multi-Variant Flow A-E with Active Round-Robin
+description: Até 5 fluxos por consultor (A,B,C,D,E); active_variants[] controla quais entram no sorteio round-robin
 type: feature
 ---
-Fluxos A, B e C por consultor (bot_flows.variant). `customers.flow_variant` alterna via `assign_flow_variant` quando `consultants.ab_test_enabled=true`: contador % 3 → 1=A, 2=B, 0=C.
+`consultants.active_variants text[]` (default `{A}`) controla quais variantes participam do round-robin. `assign_flow_variant(_consultant_id)` filtra para variantes que (a) estão em `active_variants` E (b) têm `bot_flows.is_active=true`; sorteia por `count(customers) % len(disponíveis)`. Se nenhuma disponível, cai em `A`.
 
-**Variante A**: fluxo original, envia tudo (áudio + texto + mídias).
+**Variantes:** A (com áudio, fonte da verdade), B (sem áudio — dispatchers descartam `kind=audio`), C (vídeo inicial), D/E (personalizadas pelo consultor).
 
-**Variante B (texto puro)**: dispatchers (whapi-webhook, evolution-webhook, manual-step-send) **simplesmente descartam áudios** (`kind === 'audio'`). O consultor escreve a versão em texto direto no campo `message_text` do passo da variante B em `/admin/fluxos`. Nada de transcrição automática nem fallback para `ai_media_library.transcript`. Se o passo B não tiver `message_text` configurado, o cliente recebe só as mídias não-áudio (imagem/vídeo) — vazio se não houver nenhuma.
+**Clone genérico:** `clone_bot_flow_as(_consultant_id, _variant)` cobre B/C/D/E a partir do A (deleta existente + copia steps). `clone_bot_flow_as_b` e `_as_c` viram wrappers.
 
-**Variante C**: cópia independente do A criada por `clone_bot_flow_as_c` RPC. Tratada como A pelos dispatchers (sem lógica especial). Consultor adiciona um vídeo no primeiro passo via admin para iniciar a conversa com apresentação em vídeo.
+**Admin (`/admin/fluxos`):** Card "Fluxos ativos no round-robin" com checkboxes A-E (A obrigatório), badge "Rodando agora: A + B + C…", botão "+ Criar" por variante, tabs dinâmicas por variante existente. `ab_test_enabled` foi removido da UI (boolean fica legado).
 
-Admin (`/admin/fluxos` em `FluxoCamila.tsx`): seletor de 3 abas A/B/C; botões "Criar Fluxo B" e "Criar Fluxo C" chamam `clone_bot_flow_as_b` / `clone_bot_flow_as_c`. Switch só liga A/B/C test quando ambos B e C existem.
-
-`_shared/audio-transcript.ts` permanece no repo para outras features (search/analytics), mas NÃO é mais chamado por nenhum dispatcher.
+**Constraints:** `bot_flows.variant` e `customers.flow_variant` aceitam `('A','B','C','D','E')`.
