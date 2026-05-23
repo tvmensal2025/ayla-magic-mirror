@@ -670,6 +670,7 @@ Deno.serve(async (req) => {
 
     const { canSendMediaOnce } = await import("../_shared/media-dedupe.ts");
     const sentLog: any[] = [];
+    let buttonsSentManual = false;
     for (let i = 0; i < toSend.length; i++) {
       const it = toSend[i];
       const isLast = i === toSend.length - 1;
@@ -682,6 +683,7 @@ Deno.serve(async (req) => {
               title: applyVarsBtn(b.title).slice(0, 20),
             }));
             await sender.sendButtons(remoteJid, it.text, renderedButtons);
+            buttonsSentManual = true;
           } else {
             await sender.sendText(remoteJid, it.text);
           }
@@ -767,9 +769,34 @@ Deno.serve(async (req) => {
         } else {
           delay = 1500;
         }
-        await new Promise((r) => setTimeout(r, delay));
       }
     }
+
+    // Garantia: se o step tem _buttons mas a última mídia não foi texto,
+    // envia os botões em uma mensagem separada (caso a ordem termine em vídeo/imagem).
+    if (sentLog.length > 0 && _buttons.length > 0 && !buttonsSentManual) {
+      try {
+        const renderedButtons = _buttons.map((b) => ({
+          id: b.id,
+          title: applyVarsBtn(b.title).slice(0, 20),
+        }));
+        const prompt = "👇 Escolha uma opção:";
+        await new Promise((r) => setTimeout(r, 600));
+        await sender.sendButtons(remoteJid, prompt, renderedButtons);
+        await supabase.from("conversations").insert({
+          customer_id: customer.id,
+          message_direction: "outbound",
+          message_text: prompt,
+          message_type: "text",
+          conversation_step: (step as any).step_key || null,
+        });
+        sentLog.push({ kind: "buttons", standalone: true });
+      } catch (e) {
+        console.warn("[manual-step-send] envio dos botões (fallback) falhou:", (e as Error).message);
+      }
+    }
+
+
 
     const flowPatch = body.continueFlow && body.part === "all"
       ? await buildContinuationPatch(supabase, sender, remoteJid, body.consultantId, customer, step, vars, variant)
