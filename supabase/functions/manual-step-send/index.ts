@@ -376,6 +376,7 @@ Deno.serve(async (req) => {
       ? renderTemplateVars(String((step as any).message_text), {
           name: (customer as any).name || "",
           phone: (customer as any).phone_whatsapp || "",
+          cpf: (customer as any).cpf || "",
           valor_conta: (customer as any).electricity_bill_value,
         })
       : "";
@@ -383,24 +384,33 @@ Deno.serve(async (req) => {
     // Vars map for ad-hoc placeholder substitution in fallback prompts
     const _name = String((customer as any).name || "").trim();
     const _firstName = _name.split(/\s+/)[0] || _name;
-    const _phone = String((customer as any).phone_whatsapp || "");
+    const _phoneRaw = String((customer as any).phone_whatsapp || "").replace(/\D/g, "");
+    const _phoneNoCc = _phoneRaw.startsWith("55") && _phoneRaw.length >= 12 ? _phoneRaw.slice(2) : _phoneRaw;
+    const _phoneFmt = _phoneNoCc.length === 11
+      ? `(${_phoneNoCc.slice(0,2)}) ${_phoneNoCc.slice(2,7)}-${_phoneNoCc.slice(7)}`
+      : _phoneNoCc.length === 10
+        ? `(${_phoneNoCc.slice(0,2)}) ${_phoneNoCc.slice(2,6)}-${_phoneNoCc.slice(6)}`
+        : _phoneRaw;
+    const _cpfRaw = String((customer as any).cpf || "").replace(/\D/g, "");
+    const _cpfFmt = _cpfRaw.length === 11
+      ? _cpfRaw.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4")
+      : _cpfRaw;
     const _bill = (customer as any).electricity_bill_value;
     const _billStr = _bill == null ? "" : String(_bill);
     const vars: Record<string, string> = {
-      "{{nome}}": _firstName,
-      "{nome}": _firstName,
-      "{{Nome}}": _firstName,
-      "{Nome}": _firstName,
-      "{{name}}": _firstName,
-      "{name}": _firstName,
-      "{{primeiro_nome}}": _firstName,
-      "{primeiro_nome}": _firstName,
-      "{{telefone}}": _phone,
-      "{telefone}": _phone,
-      "{{phone}}": _phone,
-      "{phone}": _phone,
-      "{{valor_conta}}": _billStr,
-      "{valor_conta}": _billStr,
+      "{{nome}}": _firstName, "{nome}": _firstName,
+      "{{Nome}}": _firstName, "{Nome}": _firstName,
+      "{{name}}": _firstName, "{name}": _firstName,
+      "{{primeiro_nome}}": _firstName, "{primeiro_nome}": _firstName,
+      "{{telefone}}": _phoneFmt, "{telefone}": _phoneFmt,
+      "{{phone}}": _phoneFmt, "{phone}": _phoneFmt,
+      "{{celular}}": _phoneFmt, "{celular}": _phoneFmt,
+      "{{whatsapp}}": _phoneFmt, "{whatsapp}": _phoneFmt,
+      "{{cpf}}": _cpfFmt, "{cpf}": _cpfFmt,
+      "{{CPF}}": _cpfFmt, "{CPF}": _cpfFmt,
+      "{{documento}}": _cpfFmt, "{documento}": _cpfFmt,
+      "{{valor_conta}}": _billStr, "{valor_conta}": _billStr,
+      "{{valor}}": _billStr, "{valor}": _billStr,
     };
 
 
