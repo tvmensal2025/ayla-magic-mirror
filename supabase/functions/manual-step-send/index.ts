@@ -47,26 +47,32 @@ Deno.serve(async (req) => {
     );
 
     // Auth: must be logged-in user matching consultantId OR super_admin
+    // System bypass: Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY> from internal callers
     const authHeader = req.headers.get("Authorization") || "";
     const jwt = authHeader.replace(/^Bearer\s+/i, "");
     if (!jwt) return json({ ok: false, blocked: true, code: "unauthorized", error: "unauthorized", message: "Sessão expirada — faça login novamente." });
-    const userClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } },
-    );
-    const { data: userRes } = await userClient.auth.getUser(jwt);
-    const userId = userRes?.user?.id;
-    if (!userId) return json({ ok: false, blocked: true, code: "unauthorized", error: "unauthorized", message: "Sessão expirada — faça login novamente." });
 
     const body = (await req.json()) as Body & { skipNameGuard?: boolean };
     if (!body?.consultantId || !body?.customerId || !body?.part) {
       return json({ ok: false, blocked: true, code: "missing_fields", error: "missing_fields", message: "Faltam dados obrigatórios (consultor, cliente ou parte)." });
     }
-    // Allow if same consultant OR has super_admin role
-    if (userId !== body.consultantId) {
-      const { data: isAdmin } = await supabase.rpc("is_super_admin", { _user_id: userId });
-      if (!isAdmin) return json({ ok: false, blocked: true, code: "forbidden", error: "forbidden", message: "Sem permissão para enviar em nome deste consultor." });
+
+    const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const isSystemCall = !!SERVICE_KEY && jwt === SERVICE_KEY;
+
+    if (!isSystemCall) {
+      const userClient = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_ANON_KEY")!,
+        { global: { headers: { Authorization: authHeader } } },
+      );
+      const { data: userRes } = await userClient.auth.getUser(jwt);
+      const userId = userRes?.user?.id;
+      if (!userId) return json({ ok: false, blocked: true, code: "unauthorized", error: "unauthorized", message: "Sessão expirada — faça login novamente." });
+      if (userId !== body.consultantId) {
+        const { data: isAdmin } = await supabase.rpc("is_super_admin", { _user_id: userId });
+        if (!isAdmin) return json({ ok: false, blocked: true, code: "forbidden", error: "forbidden", message: "Sem permissão para enviar em nome deste consultor." });
+      }
     }
 
     // Resolve customer + phone
