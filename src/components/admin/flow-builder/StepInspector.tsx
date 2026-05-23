@@ -104,10 +104,11 @@ export default function StepInspector({
         </SheetHeader>
 
         <Tabs defaultValue="basico" className="mt-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="basico">Básico</TabsTrigger>
             <TabsTrigger value="midias">Mídias</TabsTrigger>
             <TabsTrigger value="botoes">Botões</TabsTrigger>
+            <TabsTrigger value="regras">Regras</TabsTrigger>
           </TabsList>
 
           {/* BÁSICO */}
@@ -491,6 +492,114 @@ export default function StepInspector({
               <Plus className="mr-1 h-3.5 w-3.5" />
               Botão personalizado
             </Button>
+          </TabsContent>
+
+          {/* REGRAS — palavras-chave que viram atalho pra outro passo */}
+          <TabsContent value="regras" className="space-y-3 pt-4">
+            <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
+              Regras são <strong>palavras-chave</strong> que o lead pode digitar pra pular pra outro passo. Ex: lead escreve <em>"quero falar com humano"</em> → bot vai pro handoff.
+              <br />Regras de botão são gerenciadas na aba <strong>Botões</strong>.
+            </div>
+
+            {(() => {
+              // Esconde transitions já cobertas por botões (pra não duplicar).
+              const buttonKeys = new Set(buttons.flatMap((b) => [b.id, b.title, b.title.replace(/^\S+\s/, "").trim()]));
+              const ruleTransitions = step.transitions
+                .map((t, idx) => ({ t, idx }))
+                .filter(({ t }) => !t.trigger_phrases.some((p) => buttonKeys.has(p)) && !buttonKeys.has(t.trigger_intent));
+
+              const updateTransition = (idx: number, patch: Partial<Transition>) => {
+                const next = step.transitions.map((t, i) => (i === idx ? { ...t, ...patch } : t));
+                onPatch({ transitions: next });
+              };
+              const removeTransition = (idx: number) => {
+                onPatch({ transitions: step.transitions.filter((_, i) => i !== idx) });
+              };
+              const addRule = () => {
+                onPatch({
+                  transitions: [
+                    ...step.transitions,
+                    { trigger_intent: "palavra_chave", trigger_phrases: [""], goto_step_id: null, goto_special: null },
+                  ],
+                });
+              };
+              const getGoto = (t: Transition): string => {
+                if (t.goto_special) return `special:${t.goto_special}`;
+                if (t.goto_step_id) return `step:${t.goto_step_id}`;
+                return "none";
+              };
+              const setGoto = (idx: number, value: string) => {
+                updateTransition(idx, {
+                  goto_step_id: value.startsWith("step:") ? value.slice(5) : null,
+                  goto_special: value.startsWith("special:") ? (value.slice(8) as any) : null,
+                });
+              };
+
+              return (
+                <>
+                  {ruleTransitions.length === 0 && (
+                    <div className="rounded-lg border border-dashed bg-muted/20 p-4 text-center text-xs text-muted-foreground">
+                      Nenhuma regra ainda. Clique em <strong>+ Nova regra</strong> abaixo.
+                    </div>
+                  )}
+
+                  {ruleTransitions.map(({ t, idx }) => (
+                    <div key={idx} className="space-y-2 rounded-lg border bg-card p-3">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-xs">Regra {idx + 1}</Badge>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="ml-auto h-7 w-7 text-destructive"
+                          onClick={() => removeTransition(idx)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Palavras-chave (separadas por vírgula)</Label>
+                        <Input
+                          className="h-9 text-sm"
+                          value={t.trigger_phrases.join(", ")}
+                          onChange={(e) =>
+                            updateTransition(idx, {
+                              trigger_phrases: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                            })
+                          }
+                          placeholder="ex: humano, atendente, falar com alguém"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Quando casar, vai para:</Label>
+                        <Select value={getGoto(t)} onValueChange={(v) => setGoto(idx, v)}>
+                          <SelectTrigger className="h-9">
+                            <SelectValue placeholder="Escolher destino…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">⚠ Sem destino</SelectItem>
+                            <SelectItem value="special:humano">👤 Falar com humano</SelectItem>
+                            <SelectItem value="special:cadastro">📝 Pular para cadastro</SelectItem>
+                            {steps
+                              .filter((s) => s.id !== step.id && s.is_active)
+                              .sort((a, b2) => a.position - b2.position)
+                              .map((s) => (
+                                <SelectItem key={s.id} value={`step:${s.id}`}>
+                                  #{s.position} {s.title}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  ))}
+
+                  <Button variant="outline" size="sm" className="w-full" onClick={addRule}>
+                    <Plus className="mr-1 h-3.5 w-3.5" />
+                    Nova regra
+                  </Button>
+                </>
+              );
+            })()}
           </TabsContent>
         </Tabs>
       </SheetContent>
