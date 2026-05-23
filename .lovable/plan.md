@@ -1,71 +1,69 @@
-# Fluxo D — mapeamento das respostas livres do cliente
+## Análise Fluxo D — Rafael Ferreira
 
-## O que está errado nas últimas conversas
+### Mapa atual (passo → resposta → próximo)
 
-### Lead `11989000650` (Oque Éisso) — **bot mudo total**
+```
+1 d_welcome (botões)
+   ├─ "Quero simular"     → 2 d_pedir_conta        ✅
+   ├─ "Como funciona"     → 3 d_como_funciona      ✅
+   └─ "Falar com Rafael"  → handoff (special)      ✅
 
-- 14:00:41 — welcome enviado **com botões** ✓ (confirmado nos logs whapi: `sendButtons botões entregues`)
-- 14:05:23 — cliente digitou `?`
-- 14:05:42 — cliente digitou `oque éisso?`
-- **bot não respondeu nada.**
+2 d_pedir_conta (capture_conta)
+   └─ envia foto OCR → 4 d_resultado               ✅ (handler pula 3 e vai pro resultado)
 
-Step atual: `flow:aee7b26c-...` (welcome do D). As `transitions` desse welcome só casam com `simular|como|humano|1|2|3`. Qualquer texto fora disso cai num caminho que retorna `false` silenciosamente — **não dispara smart-repeat, nem re-dispatch, nem AI fallback.** É o pior caso: cliente sem resposta.
+3 d_como_funciona (botões)
+   ├─ "📸 Quero simular"  → 2 d_pedir_conta        ✅
+   ├─ "🤔 Tenho dúvida"   → 6 d_duvidas            ⚠️ (d_duvidas é beco sem saída)
+   └─ "👨 Falar Rafael"   → 7 d_handoff            ❌ d_handoff está INATIVO
 
-### Lead `11971254913` (Oque) — mapeamento confuso
+4 d_resultado (botões)
+   ├─ "Cadastrar agora"   → 5 d_pedir_documento    ✅
+   ├─ "Tenho dúvidas"     → 6 d_duvidas            ⚠️
+   └─ "Falar com Rafael"  → handoff (special)      ✅
 
-- Clicou/digitou "Como funciona" → step `d_como_funciona` cujo `message_text` é **só** `"Vou te explicar rapidinho como funciona 👇"`. Não tem nada depois do 👇. O bot já pula direto para `d_pedir_conta`.
-- Cliente respondeu `"eu nao quero cadastrar ainda"` → bot ignorou intent negativa e repetiu o pedido de foto.
-- Cliente disse `"nao irei mandar"` → bot enviou welcome de novo, sem reconhecer recusa.
-- 3 welcomes em 2 minutos (14:00:41, 14:00:58, 14:02:08) — sem dedupe entre disparos manuais.
+5 d_pedir_documento (capture_documento)
+   └─ envia doc OCR → próxima posição ATIVA = 6 d_duvidas  ❌
+      (deveria ir pra 8 d_finalizar)
 
-## Causa raiz
+6 d_duvidas (message, sem botões, sem transitions)
+   └─ explica e fica MUDO                           ❌
 
-`handlers/bot-flow.ts`, no bloco que processa resposta do cliente quando step atual é `message` com `_buttons`:
+7 d_handoff (message)                               ❌ INATIVO
 
-1. Faz match nas `trigger_phrases` exatas/keywords.
-2. Se não casa, retorna sem mandar nada (silêncio).
-3. Não chama smart-repeat porque smart-repeat só roda em `capture_*`.
-4. Não tem AI intent-matching para mapear texto livre → botão.
+8 d_finalizar (finalizar_cadastro)                  ✅
+```
 
-E para `capture_*`, qualquer texto que não seja foto vira "Pode me responder" — sem detectar recusa explícita.
+### Problemas a corrigir
 
-## Mudanças
+**P1 — d_pedir_documento cai em d_duvidas (gravíssimo)**
+Após o cliente mandar o RG/CNH, o handler de capture avança pra próxima posição ativa. Como 7 está inativo, cai em 6 (`d_duvidas`) em vez de 8 (`d_finalizar`). O cadastro nunca finaliza.
 
-### 1. AI Intent Match para steps com botões — `handlers/bot-flow.ts`
+Fix: adicionar transition explícita em `d_pedir_documento` apontando pra `d_finalizar` (id `9f2d47d4-...`), OU reativar passo 7 e mover `d_finalizar` pra posição 6, OU desativar `d_duvidas` (deixar só acessível por botão de outro passo). Recomendo a **transition explícita** — é cirúrgico.
 
-Quando step atual é `message` com `_buttons` e cliente manda texto livre que não casa nas `trigger_phrases`:
+**P2 — d_duvidas é beco sem saída**
+Os passos 3 e 4 mandam o cliente pra dúvidas, mas depois da frase "Te explico de novo, é bem simples 👇" o bot fica mudo (sem áudio/vídeo? sem botões? sem transições). Cliente fica plantado.
 
-- Chama Lovable AI Gateway (Gemini Flash) com prompt curto:
-  > "Cliente respondeu '{msg}'. Opções: 1) {btn1}, 2) {btn2}, 3) {btn3}. Qual número ele quis? Se confuso, responda 0. Se quer sair/parar, 9. Só o número."
-- Resposta 1/2/3 → executa a `transition` daquele botão direto (como se tivesse clicado).
-- Resposta 0 → re-dispatch do mesmo step (manda welcome+botões de novo) com prefixo: "Sem problema! Toque em uma das opções abaixo 👇".
-- Resposta 9 → mensagem de despedida amigável + pausa bot 24h.
-- Limite: 2 chamadas IA por step/cliente (campo `ai_intent_match_count` em customers); na 3ª já escala para humano.
+Fix sugerido: adicionar botões no fim de `d_duvidas`:
+- "📸 Quero simular" → `d_pedir_conta`
+- "👨 Falar com Rafael" → handoff special
 
-### 2. Detector de recusa em `capture_*` — `handlers/bot-flow.ts` (ou `conversational/index.ts`)
+(Mantém texto curto como o usuário pediu antes; áudio/vídeo do slot `d_duvidas` continua sendo enviado se cadastrado.)
 
-Antes do smart-repeat, regex de recusa explícita: `/n[ãa]o (vou|quero|posso|irei|tenho|consigo|sei) (mandar|enviar|cadastrar|agora|tirar)|n[ãa]o tenho|sem tempo|depois eu|amanh[ãa]/i`.
+**P3 — d_como_funciona aponta pra d_handoff inativo**
+A transition "Falar com Rafael" usa `goto_step_id` pra passo 7 que está `is_active=false`. Resultado: clique pode quebrar ou ficar mudo.
 
-Se casar:
+Fix: trocar por `goto_special:"humano"` igual fazem os passos 1 e 4 (que funcionam).
 
-- Resposta humanizada: "Tranquilo, {{nome}}! Quando quiser dar continuidade é só me mandar uma foto da conta. Tô por aqui 💚"
-- Pausa bot 24h, marca step `lead_paused_by_refusal`.
-- Não dispara handoff (cliente só não quer agora — diferente de problema).
+**P4 — confirmar `{{economia_range}}`** (a confirmar com você)
+O passo 4 (`d_resultado`) usa a variável `{{economia_range}}`. Preciso checar se o resolver de variáveis preenche isso — se não, vai chegar literal `{{economia_range}}` pro cliente. Vou inspecionar `_shared/variables` ou similar antes de mexer.
 
-### 3. Conteúdo padrão para `d_como_funciona` — migration
+### Mudanças propostas (1 migration + 1 leitura de código)
 
-O step `d_como_funciona` está praticamente vazio. Preencher JAT EM UM AUDIO E UM VIDEO QUE VAI SER ENVIADO NO LUGAR DO TEXTO E EMBAISO APARECE AS PERGUNTAS DNV
+1. **Migration** atualizando 3 passos:
+   - `d_como_funciona`: trocar transition "humano" pra `goto_special:"humano"` (zerar `goto_step_id`).
+   - `d_pedir_documento`: adicionar transition `{trigger_phrases:["*"], goto_step_id: "<id de d_finalizar>"}` OU usar campo `captures.next_step_id` se o handler suportar (vou conferir em build mode).
+   - `d_duvidas`: adicionar `captures._buttons` com 2 botões + `transitions` correspondentes (simular / humano-special).
 
-E os `transitions` desse step ganham botões: `[Quero simular] [Falar com Rafael]`.
+2. **Verificação** (leitura) do resolver de variáveis pra confirmar que `{{economia_range}}` é preenchida (P4). Se não for, abro questão pra você decidir o texto fallback.
 
-### 4. Dedupe de welcome — `handlers/bot-flow.ts` no `dispatchStepFromFlow`
-
-Já existe anti-rep de 10min para alguns steps. Adicionar guard específico para steps do tipo `welcome` (step_key começando com `d_welcome` ou position=1): se já mandou nos últimos **3 minutos**, ignora silenciosamente o re-dispatch.
-
-## Arquivos
-
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — AI intent match (1), detector de recusa (2), dedupe welcome (4)
-- `supabase/functions/_shared/ai-intent.ts` — novo helper para chamar Gemini com prompt de match de botão (cache + limite)
-- Migration — atualizar `message_text` e `transitions` de `d_como_funciona`
-
-Sem mudanças de schema (`ai_intent_match_count` aproveita coluna `ai_followups_count` já existente).
+Sem mudança em edge function — tudo via migration.
