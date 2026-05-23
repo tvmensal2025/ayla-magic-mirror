@@ -921,6 +921,7 @@ async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string,
     return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
   });
 
+  const { canSendMediaOnce } = await import("../_shared/media-dedupe.ts");
   let sent = false;
   for (let i = 0; i < items.length; i++) {
     const it: any = items[i];
@@ -930,11 +931,25 @@ async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string,
       sent = true;
     } else if (it.media?.url) {
       const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
+      const canSend = await canSendMediaOnce(supabase, {
+        consultantId, customerId, mediaId: it.media.id,
+        slotKey: it.media.slot_key || slotKey, kind,
+      });
+      if (!canSend) { continue; }
       await sender.sendMedia(remoteJid, it.media.url, "", kind, Number(it.media.duration_sec || 0) || undefined);
       await supabase.from("conversations").insert({ customer_id: customerId, message_direction: "outbound", message_text: `[${kind}:${it.media.slot_key || slotKey}] (continue)`, message_type: kind, conversation_step: step.step_key || step.id });
       sent = true;
     }
-    if (i < items.length - 1) await new Promise((r) => setTimeout(r, 1200));
+    if (i < items.length - 1) {
+      let d = 1200;
+      if (it.kind === "audio" || it.kind === "video") {
+        const durSec = Number(it.media?.duration_sec || 0);
+        d = durSec > 0 ? Math.min(Math.max(durSec * 1000, 3000), 90_000) : (it.kind === "audio" ? 6000 : 8000);
+      } else if (it.kind === "image" || it.kind === "document") {
+        d = 2500;
+      }
+      await new Promise((r) => setTimeout(r, d));
+    }
   }
   return sent;
 }
