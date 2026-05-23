@@ -18,6 +18,7 @@ const Auth = lazy(() => import("./pages/Auth"));
 const Admin = lazy(() => import("./pages/Admin"));
 
 const FluxoCamila = lazy(() => import("./pages/FluxoCamila"));
+const FluxoBuilder = lazy(() => import("./pages/FluxoBuilder"));
 const SaudeBot = lazy(() => import("./pages/SaudeBot"));
 const AdminKnowledge = lazy(() => import("./pages/AdminKnowledge"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
@@ -54,12 +55,15 @@ const App = () => (
               <Route path="/admin" element={<Admin />} />
               <Route path="/admin/whatsapp-clients" element={<WhatsAppClientsPage />} />
               <Route path="/admin/fluxos" element={<FluxoCamila />} />
+              <Route path="/admin/fluxos" element={<FluxoBuilder />} />
+              <Route path="/admin/fluxos-legado" element={<FluxoCamila />} />
               <Route path="/admin/saude-bot" element={<SaudeBot />} />
               <Route path="/admin/conhecimento" element={<AdminKnowledge />} />
               <Route path="/admin/faq" element={<Navigate to="/admin/conhecimento?tab=ia" replace />} />
-              <Route path="/admin/fluxos-antigo" element={<Navigate to="/admin/fluxos" replace />} />
+              <Route path="/admin/fluxos-antigo" element={<Navigate to="/admin/fluxos-legado" replace />} />
               <Route path="/admin/bot-tools" element={<Navigate to="/admin/whatsapp-clients" replace />} />
               <Route path="/admin/bot-audit" element={<Navigate to="/admin/whatsapp-clients" replace />} />
+
               <Route path="/super-admin" element={<SuperAdmin />} />
               <Route path="/assistente" element={<AssistentePage />} />
               <Route path="/crm" element={<CRMLandingPage />} />

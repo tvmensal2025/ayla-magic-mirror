@@ -1,69 +1,117 @@
-## Análise Fluxo D — Rafael Ferreira
+## Redesign Completo — Editor de Fluxos WhatsApp
 
-### Mapa atual (passo → resposta → próximo)
+Reescrita do `/admin/fluxos` em 4 frentes paralelas. Foco: leigo conseguir montar um fluxo funcional em 5 minutos, sem caminhos órfãos e sem mídia duplicada/pesada.
 
-```
-1 d_welcome (botões)
-   ├─ "Quero simular"     → 2 d_pedir_conta        ✅
-   ├─ "Como funciona"     → 3 d_como_funciona      ✅
-   └─ "Falar com Rafael"  → handoff (special)      ✅
+---
 
-2 d_pedir_conta (capture_conta)
-   └─ envia foto OCR → 4 d_resultado               ✅ (handler pula 3 e vai pro resultado)
+### Frente 1 — Editor Híbrido (cards + preview WhatsApp ao vivo)
 
-3 d_como_funciona (botões)
-   ├─ "📸 Quero simular"  → 2 d_pedir_conta        ✅
-   ├─ "🤔 Tenho dúvida"   → 6 d_duvidas            ⚠️ (d_duvidas é beco sem saída)
-   └─ "👨 Falar Rafael"   → 7 d_handoff            ❌ d_handoff está INATIVO
+Substitui `src/pages/FluxoCamila.tsx` (1677 linhas, denso) por layout 2 colunas:
 
-4 d_resultado (botões)
-   ├─ "Cadastrar agora"   → 5 d_pedir_documento    ✅
-   ├─ "Tenho dúvidas"     → 6 d_duvidas            ⚠️
-   └─ "Falar com Rafael"  → handoff (special)      ✅
-
-5 d_pedir_documento (capture_documento)
-   └─ envia doc OCR → próxima posição ATIVA = 6 d_duvidas  ❌
-      (deveria ir pra 8 d_finalizar)
-
-6 d_duvidas (message, sem botões, sem transitions)
-   └─ explica e fica MUDO                           ❌
-
-7 d_handoff (message)                               ❌ INATIVO
-
-8 d_finalizar (finalizar_cadastro)                  ✅
+```text
+┌─────────────────────────────────┬──────────────────────┐
+│ COLUNA ESQUERDA (passos)        │ COLUNA DIREITA       │
+│                                 │  📱 Preview ao vivo  │
+│ ┌───────────────────────────┐   │ ┌──────────────────┐ │
+│ │ 1 💬 Boas-vindas          │   │ │ WhatsApp mockup  │ │
+│ │   "Olá, sou a assistente" │   │ │                  │ │
+│ │   [👇 3 botões]            │   │ │  Mensagens do    │ │
+│ │   ⚠ Botão "X" sem destino │   │ │  passo selec-    │ │
+│ └───────────────────────────┘   │ │  ionado renderi- │ │
+│           ↓                     │ │  zadas como bolha│ │
+│ ┌───────────────────────────┐   │ │  verde do bot    │ │
+│ │ 2 📸 Pedir conta de luz   │   │ │                  │ │
+│ └───────────────────────────┘   │ │  Botões aparecem │ │
+│           ↓                     │ │  como WhatsApp   │ │
+│ [+ Adicionar passo]             │ │  reply buttons   │ │
+│                                 │ └──────────────────┘ │
+└─────────────────────────────────┴──────────────────────┘
 ```
 
-### Problemas a corrigir
+**Componentes novos:**
+- `FlowEditor.tsx` — shell com 2 colunas, gerencia estado global do fluxo
+- `StepCard.tsx` — card colapsado/expandido com título, tipo, badges (mídia, botões), warnings inline
+- `WhatsAppPreview.tsx` — mockup fiel do WhatsApp (header verde, bolhas, botões reply, áudio player), renderiza o passo selecionado em tempo real com `{{variáveis}}` substituídas por exemplo (`{{nome}}` → "João")
+- `StepInspector.tsx` — drawer/sheet lateral que abre ao clicar editar (separa "editar" de "visualizar")
+- Drag-and-drop com `@dnd-kit/sortable` (já bem suportado, sem libs novas pesadas)
 
-**P1 — d_pedir_documento cai em d_duvidas (gravíssimo)**
-Após o cliente mandar o RG/CNH, o handler de capture avança pra próxima posição ativa. Como 7 está inativo, cai em 6 (`d_duvidas`) em vez de 8 (`d_finalizar`). O cadastro nunca finaliza.
+**Simplificações:**
+- Esconde campos avançados atrás de "Avançado ▾" (delay, fallback IA, intents customizadas)
+- Botões com presets visuais: ✅ Sim / ❌ Não / 🤔 Dúvida / 📸 Simular / 👤 Humano — clica e tudo é montado
+- Cada botão tem dropdown "vai para → [lista de passos]" ao invés de campos separados de intent/phrase/goto
 
-Fix: adicionar transition explícita em `d_pedir_documento` apontando pra `d_finalizar` (id `9f2d47d4-...`), OU reativar passo 7 e mover `d_finalizar` pra posição 6, OU desativar `d_duvidas` (deixar só acessível por botão de outro passo). Recomendo a **transition explícita** — é cirúrgico.
+---
 
-**P2 — d_duvidas é beco sem saída**
-Os passos 3 e 4 mandam o cliente pra dúvidas, mas depois da frase "Te explico de novo, é bem simples 👇" o bot fica mudo (sem áudio/vídeo? sem botões? sem transições). Cliente fica plantado.
+### Frente 2 — Biblioteca de Mídia com Dedup por Hash
 
-Fix sugerido: adicionar botões no fim de `d_duvidas`:
-- "📸 Quero simular" → `d_pedir_conta`
-- "👨 Falar com Rafael" → handoff special
+**Backend:**
+- Migration: adiciona `ai_media_library.content_hash TEXT` + UNIQUE `(consultant_id, content_hash)` parcial onde `content_hash IS NOT NULL`
+- Edge function nova `media-upload-dedup`: recebe arquivo, calcula SHA-256, consulta tabela, se já existe retorna `{ media_id, deduplicated: true, original_url }` sem reupload. Senão, faz upload normal pro MinIO/Supabase e grava o hash.
+- Migration de backfill: calcula hash das mídias existentes em batch (cron único)
 
-(Mantém texto curto como o usuário pediu antes; áudio/vídeo do slot `d_duvidas` continua sendo enviado se cadastrado.)
+**Frontend:**
+- `MediaLibraryDialog.tsx` — modal com grid de thumbnails, filtros por tipo (áudio/imagem/vídeo) e slot, busca por nome/transcript
+- Substitui o upload direto do `StepMediaPanel.tsx` por: "📚 Escolher da biblioteca" (padrão) ou "⬆ Subir nova" (que internamente já roda dedup)
+- Badge "♻ Reutilizada (3 passos)" mostra quantos passos usam a mesma mídia
+- Botão "Limpar órfãs" (super admin) lista mídias sem `slot_key` e sem uso há 90+ dias
 
-**P3 — d_como_funciona aponta pra d_handoff inativo**
-A transition "Falar com Rafael" usa `goto_step_id` pra passo 7 que está `is_active=false`. Resultado: clique pode quebrar ou ficar mudo.
+**Compressão (sem mexer no worker):**
+- Documenta que worker atual já comprime para 720p; o ganho real virá do dedup (não recomprimir o que já existe)
 
-Fix: trocar por `goto_special:"humano"` igual fazem os passos 1 e 4 (que funcionam).
+---
 
-**P4 — confirmar `{{economia_range}}`** (a confirmar com você)
-O passo 4 (`d_resultado`) usa a variável `{{economia_range}}`. Preciso checar se o resolver de variáveis preenche isso — se não, vai chegar literal `{{economia_range}}` pro cliente. Vou inspecionar `_shared/variables` ou similar antes de mexer.
+### Frente 3 — Templates + Sugestões IA + Validação
 
-### Mudanças propostas (1 migration + 1 leitura de código)
+**Templates prontos:**
+- Nova tabela `flow_templates` (global, super_admin gerencia) com 5 fluxos seed:
+  - "Captação solar (4 passos)" — boas-vindas → conta → resultado → cadastro
+  - "Captação simples (3 passos)" — boas-vindas → simular → humano
+  - "Pitch Conexão Club (5 passos)"
+  - "Reengajamento 30 dias"
+  - "Pós-venda + indicação"
+- Botão "🪄 Começar com template" no topo da página → modal mostra cards visuais, importa estrutura completa pro consultor
 
-1. **Migration** atualizando 3 passos:
-   - `d_como_funciona`: trocar transition "humano" pra `goto_special:"humano"` (zerar `goto_step_id`).
-   - `d_pedir_documento`: adicionar transition `{trigger_phrases:["*"], goto_step_id: "<id de d_finalizar>"}` OU usar campo `captures.next_step_id` se o handler suportar (vou conferir em build mode).
-   - `d_duvidas`: adicionar `captures._buttons` com 2 botões + `transitions` correspondentes (simular / humano-special).
+**Sugestões IA por passo:**
+- Botão "✨ Sugerir próximo passo" em cada `StepCard`
+- Edge function nova `flow-step-suggest`: recebe contexto (passo atual + histórico do fluxo) → Gemini 2.5 Pro retorna 3 sugestões: `{tipo, título, texto exemplo, próximo_passo}`
+- Consultor aceita/edita antes de inserir
 
-2. **Verificação** (leitura) do resolver de variáveis pra confirmar que `{{economia_range}}` é preenchida (P4). Se não for, abro questão pra você decidir o texto fallback.
+**Validação visual em tempo real:**
+- Hook `useFlowValidation(flow)` retorna array de warnings:
+  - Botão sem `goto_step_id` nem `goto_special`
+  - Passo nunca referenciado (órfão de entrada)
+  - Passo com `is_active=false` referenciado por outro passo (caso Fluxo D / `d_handoff`)
+  - Variável `{{xxx}}` no texto que não tem resolver
+  - Mídia anexada sem `url`
+- Warnings aparecem como badge amarela/vermelha no canto do `StepCard` + lista consolidada no topo "⚠ 3 problemas no fluxo"
+- Botão "Auto-corrigir" para casos simples (ex.: trocar `goto_step_id` quebrado por `goto_special:"humano"`)
 
-Sem mudança em edge function — tudo via migration.
+---
+
+### Frente 4 — Memória + Limpeza
+
+- Atualiza `mem://features/custom-flow-step-engine` documentando dedup de mídia e validação
+- Cria `mem://features/flow-editor-redesign` com arquitetura do novo editor
+- Move `FluxoCamila.tsx` antigo para `FluxoCamila.legacy.tsx` por 1 release (rollback rápido), rota `/admin/fluxos-legado` aponta pra ele
+- Remove código morto de variantes E ainda não usadas (mantém A/B/C/D conforme memória `ab-test-audio-vs-text`)
+
+---
+
+### Detalhes técnicos
+
+- **Sem libs novas pesadas** — só `@dnd-kit/core` + `@dnd-kit/sortable` (~15kb) para drag. React Flow descartado por peso.
+- **Sem mudança no engine de runtime** — `whapi-webhook` continua igual, só consome `bot_flow_steps` que o novo editor escreve. Backward-compat total.
+- **Schemas estáveis** — única migration de schema é `content_hash` em `ai_media_library` + tabela `flow_templates`. Tudo resto é UI.
+- **Mobile-first no preview** — mockup WhatsApp ocupa max 380px, encolhe em telas <1024px (vira aba).
+- **Acessibilidade** — todos `DialogContent` com `DialogTitle` (corrige warning atual do console).
+
+---
+
+### Ordem de entrega sugerida (4 PRs separados)
+
+1. **PR1 (UI shell)** — `FlowEditor.tsx` + `StepCard.tsx` + `WhatsAppPreview.tsx` + `StepInspector.tsx`, sem dedup ainda, lendo/escrevendo nos mesmos schemas atuais. ~3 dias de trabalho equivalente.
+2. **PR2 (mídia)** — migration `content_hash`, edge `media-upload-dedup`, `MediaLibraryDialog.tsx`, integração no inspector. ~2 dias.
+3. **PR3 (templates + IA + validação)** — `flow_templates` seed, `flow-step-suggest` edge, `useFlowValidation` hook + badges. ~2 dias.
+4. **PR4 (polimento)** — auto-corrigir warnings, remoção do legacy, atualização de memórias. ~1 dia.
+
+Total: ~8 dias-equivalente de trabalho. Cada PR é entregável independente e o fluxo continua funcionando entre eles.
