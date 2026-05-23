@@ -937,7 +937,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             currentStepLabel: stepKey,
             consultantId: customer.consultant_id,
             recentHistory,
-            model: "google/gemini-3.1-pro-preview",
+            model: "openai/gpt-5.5",
           });
 
           let answerText = (ai.text || "").trim();
