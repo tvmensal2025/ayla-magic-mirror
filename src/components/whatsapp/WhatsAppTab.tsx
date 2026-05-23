@@ -257,7 +257,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
                   </button>
                 </div>
               )}
-              <div className="flex flex-1 min-h-0">
+              <div data-resize-scope className="flex flex-1 min-h-0" style={{ "--wa-side-w": "300px" } as React.CSSProperties}>
               {/* Mobile: show sidebar OR chat, not both */}
               {isMobile ? (
                 selectedChatJid ? (
@@ -293,7 +293,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
                 )
               ) : (
                 <>
-                  <div className="w-[300px] shrink-0">
+                  <div className="w-[var(--wa-side-w)] shrink-0">
                     <ChatSidebar
                       chats={chats}
                       isLoading={chatsLoading}
@@ -302,16 +302,20 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
                       consultantId={userId}
                     />
                   </div>
-                  <ChatView
-                    instanceName={instanceName}
-                    chat={selectedChat}
-                    templates={templates}
-                    consultantId={userId}
-                    initialMessage={pendingMessage}
-                    isWhapi={isWhapi}
-                    key={`chat-${selectedChatJid}-${pendingMessageKey}`}
-                  />
+                  <DragResizer storageKey="whatsapp-side" cssVar="wa-side-w" defaultPx={300} minPx={220} maxPx={520} />
+                  <div className="flex-1 min-w-0">
+                    <ChatView
+                      instanceName={instanceName}
+                      chat={selectedChat}
+                      templates={templates}
+                      consultantId={userId}
+                      initialMessage={pendingMessage}
+                      isWhapi={isWhapi}
+                      key={`chat-${selectedChatJid}-${pendingMessageKey}`}
+                    />
+                  </div>
                 </>
+
               )}
               </div>
             </div>
