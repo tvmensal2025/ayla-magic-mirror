@@ -54,7 +54,6 @@ const App = () => (
               <Route path="/auth" element={<Auth />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/admin/whatsapp-clients" element={<WhatsAppClientsPage />} />
-              <Route path="/admin/fluxos" element={<FluxoCamila />} />
               <Route path="/admin/fluxos" element={<FluxoBuilder />} />
               <Route path="/admin/fluxos-legado" element={<FluxoCamila />} />
               <Route path="/admin/saude-bot" element={<SaudeBot />} />
