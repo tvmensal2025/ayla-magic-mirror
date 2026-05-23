@@ -1,35 +1,72 @@
-## Diagnóstico
+# IA Gemini 3.1 Pro global para dúvidas em qualquer momento
 
-O Fluxo D existe no banco com 8 passos, mas o editor mostra "cascata morta" porque a função `seed_flow_d` gravou todos os passos com `fallback = {mode:"repeat"}` e usou `trigger_intent='default'` para indicar a próxima etapa.
+## Objetivo
+1. Trocar `openai/gpt-5.5` por **`google/gemini-3.1-pro-preview`** (última geração, máxima precisão, PT-BR nativo).
+2. Garantir que o passo "Esclarecer Dúvidas" (passo 6) NUNCA dispare áudio/vídeo/imagem — só texto da IA.
+3. Tornar a IA **sempre ativa**: se o lead mandar uma pergunta em qualquer passo do funil, a IA responde com base no Knowledge Base (`ai_knowledge_sections`), sem precisar estar num passo específico.
 
-O parser do editor (`parseTransitions` / `parseFallback` em `FluxoCamila.tsx`) descarta a regra `default` e prioriza o `fallback` da coluna — resultado: passos de captura ficam sem regra, sem captura visível e sem Plano B útil. O diagnóstico flagra "O lead trava aqui".
+## Mudanças
 
-## O que vou ajustar
+### 1. Modelo Gemini 3.1 Pro Preview
+- `supabase/functions/_shared/ai-faq-answerer.ts`: default `model = "google/gemini-3.1-pro-preview"`.
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` e `evolution-webhook/handlers/bot-flow.ts`: remover override do GPT-5.5 (usa o default Gemini 3.1 Pro).
 
-**1. Reescrever `seed_flow_d` (migration) com `fallback` correto por passo:**
+### 2. Passo 6 sem mídia (guard absoluto)
+Hoje `dispatchStepFromFlow` já intercepta `esclarecer_duvidas` e responde só com texto IA, mas mídia ainda chega. Causa provável: o passo é disparado por outra rota (switch legacy ou `runConversationalFlow`) antes de cair no interceptador.
 
-| # | Passo | Tipo | Fallback (Plano B) |
-|---|---|---|---|
-| 1 | Boas-vindas (3 botões) | message | repeat (botões guiam) |
-| 2 | Pedir conta | capture_conta | goto → Resultado |
-| 3 | Como funciona | message | goto → Pedir conta |
-| 4 | Resultado (3 botões) | message | repeat (botões guiam) |
-| 5 | Pedir documento | capture_documento | goto → Finalizar |
-| 6 | Esclarecer dúvidas | message | goto → Resultado |
-| 7 | Handoff humano | message | repeat (inativo, usado via goto_special) |
-| 8 | Finalizar cadastro | finalizar_cadastro | repeat (terminal) |
+Fix: adicionar guard absoluto que pula qualquer envio de áudio/vídeo/imagem se o step atual for `esclarecer_duvidas` (ou `step_key` contém "duvid" exceto `duvidas_pos_club`). Aplicado nas funções de envio de mídia do flow runner.
 
-**2. Remover as transições `default` redundantes** — quem manda agora é a coluna `fallback` (o parser já entende).
+### 3. IA global (sempre ativa) — AI Fallback Layer
+Novo bloco em `whapi-webhook/handlers/bot-flow.ts` (e espelho `evolution-webhook`), executado em todo inbound de texto, na seguinte ordem:
 
-**3. Recriar automaticamente** o Fluxo D do Rafael (`0c2711ad…`) dentro da mesma migration, então ao abrir `/admin/fluxos > Fluxo D` os 8 passos aparecem com conexões válidas e zero alerta.
+```
+1. customer.bot_paused / assigned_human_id → return (silêncio total)
+2. isFile / isButton → fluxo normal
+3. Handlers determinísticos (captura de valor, intent positivo, club progress)
+4. trySendConfiguredQa() → se bater FAQ estático, usa
+5. NOVO: AI Fallback Global
+   - se passo está em NO_QA_STEPS (cadastro/edição CPF/email/conta) E texto não tem "?"
+     → segue fluxo normal (não interrompe coleta)
+   - senão se (texto contém "?" OU começa com palavra-pergunta OU 4+ palavras
+              em passo conversacional)
+     → answerFaqWithAI(question, recentHistory=8, consultantId, leadName)
+     → se ai.confidence >= 0.55:
+         sendText(ai.text)
+         if ai.shouldHandoff: bot_paused=true + notifyHandoff
+         MANTÉM o step atual (não avança)
+         contador customer.ai_followups_count += 1
+         se ai_followups_count >= 3 sem progresso: bot_paused + notifyHandoff "muitas_duvidas_ia"
+         return
+6. Switch legacy do passo atual (comportamento default)
+```
 
-## Resultado esperado
+**Palavras-pergunta** (regex PT-BR):
+`^(como|quanto|qual|quando|onde|por\s?que|pq|posso|tem|é|funciona|cobra|paga|cancel|seguro|garantia|risco|fidelidade|multa|preciso|precisa|vale|dá|consigo|aceita|atende|distribuidor|conta)`
 
-- Editor exibe os 8 passos do Fluxo D com setas/regras certinhas.
-- Diagnóstico "1 problema(s) detectado(s)" some para o Fluxo D.
-- A conversa real segue o caminho desenhado: boas-vindas → simular → resultado → cadastrar → portal (OTP + selfie).
+**Passos conversacionais** (já existem em `conversationalSteps`):
+`welcome, menu_inicial, pos_video, checkin_pos_video, qualificacao, pitch_conexao_club, duvidas_pos_club, aguardando_humano`
 
-## Arquivos tocados
+**Reset do contador** `ai_followups_count` quando o lead progride (qualquer mudança de step) ou manda valor numérico válido.
 
-- Nova migration SQL: substitui `public.seed_flow_d` e roda `seed_flow_d('0c2711ad-4836-41e6-afba-edd94f698ae3')` no final.
-- Nenhuma mudança em frontend/edge functions.
+### 4. Espelhar em evolution-webhook
+Mesma lógica aplicada no espelho futuro.
+
+## Arquivos afetados
+- `supabase/functions/_shared/ai-faq-answerer.ts` — modelo default `google/gemini-3.1-pro-preview`.
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — guard mídia passo 6 + bloco AI Fallback global + contador.
+- `supabase/functions/evolution-webhook/handlers/bot-flow.ts` — espelho.
+- **Migration**: adicionar `customers.ai_followups_count INT DEFAULT 0`.
+
+## Detalhes técnicos
+- **Modelo**: `google/gemini-3.1-pro-preview` via AI Gateway (LOVABLE_API_KEY já configurado).
+- **Custo**: ~US$0.005 por pergunta (input ~1500 tok, output ~350 tok). ~2,5× mais barato que GPT-5.5.
+- **Latência**: ~1.5-3s.
+- **Memória**: últimas 8 mensagens da conversa enviadas ao prompt.
+- **Anti-loop**: máx 3 IA-responses consecutivas sem progresso → handoff humano.
+- **Respeita** `bot_paused`/`assigned_human_id` (silêncio total mantido).
+
+## Critério de sucesso
+- Passo 6 envia APENAS texto IA, nunca áudio/vídeo/imagem.
+- Lead pergunta "tem fidelidade?" durante qualificação → IA responde corretamente sem quebrar fluxo nem avançar step.
+- Lead pede humano explicitamente ou faz 3 perguntas seguidas → bot pausa e consultor é notificado.
+- Modelo Gemini 3.1 Pro entrega respostas precisas, em PT-BR, baseadas no knowledge base.
