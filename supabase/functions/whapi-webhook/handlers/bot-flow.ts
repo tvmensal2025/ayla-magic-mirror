@@ -1163,6 +1163,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 title: applyVars(b.title).slice(0, 20),
               }));
               await sendButtons(remoteJid, it.text, renderedButtons);
+              buttonsSent = true;
             } else {
               await sendText(remoteJid, it.text);
             }
