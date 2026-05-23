@@ -118,7 +118,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
       setPhone(row?.phone_whatsapp || null);
       setCustomerName(row?.name || null);
       const v = String(row?.flow_variant || "A").toUpperCase();
-      setVariant((["A", "B", "C"].includes(v) ? v : "A") as "A" | "B" | "C" | "D" | "E");
+      setVariant(((["A","B","C","D","E"] as const).includes(v as any) ? v : "A") as "A" | "B" | "C" | "D" | "E");
       setMismatch({
         flag: !!row?.name_mismatch_flag,
         bill: row?.bill_holder_name || "",
