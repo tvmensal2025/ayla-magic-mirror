@@ -1,0 +1,1 @@
+DELETE FROM public.ai_slot_dispatch_log WHERE customer_id = '55d3c89f-2557-4864-988d-91ee48e643f8';

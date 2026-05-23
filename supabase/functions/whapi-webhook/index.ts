@@ -534,6 +534,18 @@ Deno.serve(async (req) => {
           (customer as any).ai_followups_count = 0;
           (customer as any).previous_conversation_step = prevStep;
 
+          // Limpa histórico de dispatch de slots para que áudio/vídeo possam
+          // ser reenviados nesta nova sessão (ignora min_interval_minutes).
+          try {
+            const { error: clrErr } = await supabase
+              .from("ai_slot_dispatch_log")
+              .delete()
+              .eq("customer_id", customer.id);
+            if (clrErr) console.warn("[re-welcome] limpar dispatch_log:", clrErr.message);
+            else console.log(`[re-welcome] dispatch_log limpo para customer=${customer.id}`);
+          } catch (e) {
+            console.warn("[re-welcome] dispatch_log cleanup falhou:", (e as Error).message);
+          }
         }
       } catch (e) {
         console.warn("[re-welcome] falhou:", (e as Error).message);
