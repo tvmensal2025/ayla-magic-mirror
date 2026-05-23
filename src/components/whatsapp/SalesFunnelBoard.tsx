@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useSalesFunnel, SALES_PHASES, type SalesPhase, type FunnelLead } from "@/hooks/useSalesFunnel";
 import { SalesFunnelCard } from "./SalesFunnelCard";
+import { DragResizer } from "@/components/layout/DragResizer";
 
 interface SalesFunnelBoardProps {
   consultantId: string;
@@ -104,8 +105,9 @@ export function SalesFunnelBoard({ consultantId, onOpenChat }: SalesFunnelBoardP
 
 
       {/* Board */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden">
-        <div className="flex gap-3 p-3 h-full min-w-max">
+      <div className="flex-1 overflow-x-auto overflow-y-hidden" data-resize-scope style={{ "--funnel-col-w": "288px" } as React.CSSProperties}>
+        <div className="flex gap-3 p-3 h-full min-w-max items-stretch">
+          <DragResizer storageKey="funnel-col" cssVar="funnel-col-w" defaultPx={288} minPx={220} maxPx={520} />
           {SALES_PHASES.map((phase) => {
             const items = byPhase.get(phase.key) || [];
             const isDragOver = draggedId !== null;
@@ -114,7 +116,8 @@ export function SalesFunnelBoard({ consultantId, onOpenChat }: SalesFunnelBoardP
                 key={phase.key}
                 onDragOver={(e) => { e.preventDefault(); }}
                 onDrop={() => handleDrop(phase.key)}
-                className={`w-72 shrink-0 flex flex-col bg-muted/20 rounded-xl border ${
+                style={{ width: "var(--funnel-col-w)" }}
+                className={`shrink-0 flex flex-col bg-muted/20 rounded-xl border ${
                   isDragOver ? "border-primary/50 border-dashed" : "border-border/50"
                 } transition-colors`}
               >

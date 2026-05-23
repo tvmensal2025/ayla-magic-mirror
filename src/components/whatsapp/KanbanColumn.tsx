@@ -43,7 +43,8 @@ export function KanbanColumn({ stage, deals, searchQuery, stepFilter = "all", cu
 
   return (
     <div
-      className="min-w-[220px] flex-1 bg-muted/30 rounded-2xl border border-border/40 backdrop-blur-sm overflow-hidden transition-colors hover:border-border/60"
+      style={{ width: "var(--kanban-col-w, 280px)" }}
+      className="shrink-0 bg-muted/30 rounded-2xl border border-border/40 backdrop-blur-sm overflow-hidden transition-colors hover:border-border/60"
       onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("border-primary/30", "bg-primary/[0.03]"); }}
       onDragLeave={(e) => { e.currentTarget.classList.remove("border-primary/30", "bg-primary/[0.03]"); }}
       onDrop={(e) => { e.currentTarget.classList.remove("border-primary/30", "bg-primary/[0.03]"); onDrop(stage.stage_key); }}

@@ -12,6 +12,7 @@ import { StageAutoMessageConfig } from "./StageAutoMessageConfig";
 import { AddLeadDialog } from "./AddLeadDialog";
 import { DropConfirmDialog } from "./DropConfirmDialog";
 import { KanbanColumn } from "./KanbanColumn";
+import { DragResizer } from "@/components/layout/DragResizer";
 import { useKanbanStages, COLOR_OPTIONS } from "@/hooks/useKanbanStages";
 import { useKanbanDeals } from "@/hooks/useKanbanDeals";
 import { useFlowSteps } from "@/hooks/useFlowSteps";
@@ -243,7 +244,8 @@ export function KanbanBoard({ consultantId, instanceName }: KanbanBoardProps) {
       </div>
 
       {/* Kanban columns */}
-      <div className="flex gap-3 overflow-x-auto pb-2">
+      <div className="flex gap-3 overflow-x-auto pb-2 items-stretch" data-resize-scope style={{ "--kanban-col-w": "280px" } as React.CSSProperties}>
+        <DragResizer storageKey="kanban-col" cssVar="kanban-col-w" defaultPx={280} minPx={220} maxPx={520} />
         {stages.map((s) => (
           <KanbanColumn key={s.id} stage={s} deals={deals} searchQuery={searchQuery} stepFilter={stepFilter} customStepMap={customStepMap} onDrop={handleDrop} onDragStart={setDraggedId} onEditDeal={openEditDeal} onDeleteDeal={setDeletingDealId} />
         ))}
