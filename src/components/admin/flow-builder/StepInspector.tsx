@@ -253,6 +253,71 @@ export default function StepInspector({
               );
             })()}
 
+            {isAiAnswerStep(step) && (() => {
+              const fb = (step.fallback ?? {}) as any;
+              const isLimit = fb.mode === "ai_limit";
+              const max = isLimit ? Number(fb.max_questions ?? 3) : 3;
+              const then = isLimit ? (fb.then ?? "humano") : "humano";
+              return (
+                <div className="space-y-2 rounded-lg border p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-sm">Limite de IA</Label>
+                      <p className="text-xs text-muted-foreground">Evita loop infinito de perguntas.</p>
+                    </div>
+                    <Switch
+                      checked={isLimit}
+                      onCheckedChange={(v) =>
+                        onPatch({
+                          fallback: v
+                            ? ({ mode: "ai_limit", max_questions: max, then } as any)
+                            : ({ mode: "repeat" } as any),
+                        })
+                      }
+                    />
+                  </div>
+                  {isLimit && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Após X perguntas</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={20}
+                          value={max}
+                          onChange={(e) =>
+                            onPatch({
+                              fallback: { mode: "ai_limit", max_questions: Math.max(1, Number(e.target.value) || 3), then } as any,
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Faz o quê?</Label>
+                        <Select
+                          value={then}
+                          onValueChange={(v) =>
+                            onPatch({
+                              fallback: { mode: "ai_limit", max_questions: max, then: v as any } as any,
+                            })
+                          }
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="humano">👤 Falar com humano</SelectItem>
+                            <SelectItem value="next">⏭ Avançar próximo passo</SelectItem>
+                            <SelectItem value="repeat">🔁 Continuar respondendo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+
+
 
             {flowId && (
               <div className="rounded-lg border bg-muted/10 p-3">
