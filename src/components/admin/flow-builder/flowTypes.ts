@@ -27,13 +27,17 @@ export type Capture = {
   value?: { id: string; title: string }[]; // _buttons usa value
 };
 
-export type FallbackMode = "repeat" | "goto" | "ai";
+export type FallbackMode = "repeat" | "goto" | "ai" | "ai_limit";
 
 export type Fallback = {
   mode: FallbackMode;
   goto_step_id?: string | null;
   ai_prompt?: string;
+  /** "ai_limit": após N perguntas sem clique, dispara `then` */
+  max_questions?: number;
+  then?: "humano" | "next" | "repeat";
 };
+
 
 export type Step = {
   id: string;
@@ -136,6 +140,27 @@ export function getButtons(step: Step): { id: string; title: string }[] {
 
 /** Detecta se o passo dispara OCR (foto da conta de luz ou documento). */
 export function isOcrStep(step: Step): "conta" | "documento" | null {
+  if (isAiAnswerStep(step)) return null;
+  const key = (step.step_key ?? "").toLowerCase();
+  const type = (step.step_type ?? "").toLowerCase();
+  if (type === "capture_conta" || /conta|fatura|luz/.test(key)) {
+    if (/document|rg|cnh/.test(key)) return "documento";
+    if (/conta|fatura|luz/.test(key)) return "conta";
+  }
+  if (type === "capture_documento" || /document|rg|cnh/.test(key)) return "documento";
+  return null;
+}
+
+/** Detecta se o passo é "IA livre" (responde dúvidas com Gemini em loop). */
+export function isAiAnswerStep(step: Step): boolean {
+  const slot = (step.slot_key ?? "").toLowerCase();
+  const key = (step.step_key ?? "").toLowerCase();
+  if (slot === "esclarecer_duvidas") return true;
+  if (slot && slot.includes("duvid") && slot !== "duvidas_pos_club") return true;
+  if (key && key.includes("duvid") && key !== "duvidas_pos_club") return true;
+  return false;
+}
+
   const key = (step.step_key ?? "").toLowerCase();
   const type = (step.step_type ?? "").toLowerCase();
   if (type === "capture_conta" || /conta|fatura|luz/.test(key)) {
