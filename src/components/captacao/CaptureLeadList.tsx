@@ -82,7 +82,7 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect, gameOn = f
   };
 
   return (
-    <aside className="w-full md:w-auto md:shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border bg-card/40 backdrop-blur-sm min-h-0">
+    <aside className="w-full md:w-auto md:shrink-0 flex flex-col flex-1 h-full border-b md:border-b-0 md:border-r border-border bg-card/40 backdrop-blur-sm min-h-0 overflow-hidden">
       <div className="p-2 border-b border-border space-y-1.5 shrink-0">
         <div className="flex items-center justify-between">
           <h3 className={`text-sm font-semibold ${gameOn ? "exec-shimmer font-black uppercase tracking-wider" : ""}`}>
