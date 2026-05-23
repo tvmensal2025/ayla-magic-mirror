@@ -82,7 +82,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         step_type: "finalizar_cadastro",
         title: "Finalizar cadastro",
         icon: "sparkle",
-        message_text: "Pronto! Seu cadastro foi enviado 🎉\nEm até 2 dias úteis sua conta nova chega no seu e-mail.",
+        message_text: "Pronto, {{nome}}! 🎉\n\nSeu *cadastro foi enviado* com sucesso.\n\n📬 Em até *2 dias úteis* sua *conta nova* chega no seu e-mail.\n\nQualquer dúvida, é só me chamar aqui! 💚",
         slot_key: "finalizar_cadastro",
       },
     ],
