@@ -52,6 +52,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const [phone, setPhone] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [variant, setVariant] = useState<"A" | "B" | "C" | "D" | "E">("A");
+  const [availableVariants, setAvailableVariants] = useState<Array<"A" | "B" | "C" | "D" | "E">>(["A"]);
   const [mismatch, setMismatch] = useState<{ flag: boolean; bill: string; doc: string; acked: boolean }>({ flag: false, bill: "", doc: "", acked: false });
   const [missionsVersion, setMissionsVersion] = useState(0);
   const [showAside, setShowAside] = useState(false);
@@ -62,6 +63,25 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   useEffect(() => {
     try { localStorage.removeItem("capture_auto_mode"); } catch {}
   }, []);
+
+  // Load every active flow variant configured for this consultant (A/B/C/D/E)
+  useEffect(() => {
+    if (!consultantId) return;
+    let mounted = true;
+    (async () => {
+      const { data } = await supabase
+        .from("bot_flows").select("variant")
+        .eq("consultant_id", consultantId).eq("is_active", true);
+      const set = new Set<string>(["A"]);
+      ((data as any[]) || []).forEach((r) => {
+        const v = String(r.variant || "").toUpperCase();
+        if (["A","B","C","D","E"].includes(v)) set.add(v);
+      });
+      const ordered = (["A","B","C","D","E"] as const).filter((v) => set.has(v));
+      if (mounted) setAvailableVariants(ordered as Array<"A"|"B"|"C"|"D"|"E">);
+    })();
+    return () => { mounted = false; };
+  }, [consultantId]);
 
   // Game mode state
   const { enabled: gameOn, toggle: toggleGame, sound, toggleSound } = useGameMode(consultantId);
@@ -117,7 +137,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
       setPhone(row?.phone_whatsapp || null);
       setCustomerName(row?.name || null);
       const v = String(row?.flow_variant || "A").toUpperCase();
-      setVariant((["A", "B", "C"].includes(v) ? v : "A") as "A" | "B" | "C" | "D" | "E");
+      setVariant(((["A","B","C","D","E"] as const).includes(v as any) ? v : "A") as "A" | "B" | "C" | "D" | "E");
       setMismatch({
         flag: !!row?.name_mismatch_flag,
         bill: row?.bill_holder_name || "",
@@ -271,7 +291,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                         <p className="text-sm font-semibold truncate">{customerName || phone || "—"}</p>
                       </div>
                       <div className="hidden sm:flex items-center gap-1 rounded-md border border-border/60 p-0.5 bg-background/40">
-                        {(["A", "B", "C"] as const).map((v) => (
+                        {availableVariants.map((v) => (
                           <button
                             key={v}
                             onClick={() => changeVariant(v)}
@@ -296,7 +316,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                     {/* Mobile A/B/C */}
                     <div className="sm:hidden flex items-center gap-1 rounded-md border border-border/60 p-0.5 bg-background/40 self-start">
                       <span className="text-[10px] text-muted-foreground px-1">Fluxo:</span>
-                      {(["A", "B", "C"] as const).map((v) => (
+                      {availableVariants.map((v) => (
                         <button
                           key={v}
                           onClick={() => changeVariant(v)}
