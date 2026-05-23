@@ -104,10 +104,11 @@ export default function StepInspector({
         </SheetHeader>
 
         <Tabs defaultValue="basico" className="mt-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="basico">Básico</TabsTrigger>
             <TabsTrigger value="midias">Mídias</TabsTrigger>
             <TabsTrigger value="botoes">Botões</TabsTrigger>
+            <TabsTrigger value="regras">Regras</TabsTrigger>
           </TabsList>
 
           {/* BÁSICO */}
