@@ -173,7 +173,10 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
       if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message || "Falha");
       await supabase.from("customers").update({
         [kind === "bill" ? "bill_data_confirmation_by" : "doc_data_confirmation_by"]: "awaiting_client",
-      }).eq("id", customer.id);
+        ocr_review_pending: null,
+        ocr_review_decided_at: new Date().toISOString(),
+        ocr_review_decided_by: "awaiting_client",
+      } as any).eq("id", customer.id);
       toast({ title: "📩 Enviado ao cliente", description: "Aguardando confirmação no WhatsApp", duration: 2200 });
     } catch (e: any) {
       toast({ title: "Erro", description: e?.message || String(e), variant: "destructive" });
