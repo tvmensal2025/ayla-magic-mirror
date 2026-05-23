@@ -12,9 +12,9 @@ import { ClipboardList, ExternalLink, MessageCircle, ChevronLeft, ChevronDown } 
 import { useToast } from "@/hooks/use-toast";
 import { GameModeToggle } from "@/components/captacao/game/GameModeToggle";
 import { GameShell } from "@/components/captacao/game/GameShell";
-import { PlayerHud } from "@/components/captacao/game/PlayerHud";
-import { QuestsBar } from "@/components/captacao/game/QuestsBar";
+import { ExecHudBar } from "@/components/captacao/game/ExecHudBar";
 import { AchievementsRail } from "@/components/captacao/game/AchievementsRail";
+
 import { LevelUpOverlay } from "@/components/captacao/game/LevelUpOverlay";
 import { XpToast } from "@/components/captacao/game/XpToast";
 import { useGameMode } from "@/components/captacao/game/useGameMode";
