@@ -1,35 +1,114 @@
-## Problema
+## Auditoria
 
-Quando a Judite mandou a conta, o painel **não** mostrou o card "Eu confirmo / Pedir ao cliente" — o bot já disparou as opções SIM/NÃO direto pra ela.
+### Problema 1 — Duplicação
 
-## Causa
+`CaptureDataConfirmCard.tsx` (linhas ~73-165) e `OcrReviewCard.tsx` (linhas ~117-222) contêm **o mesmo bloco** de ~90 linhas após "Eu confirmo":
 
-No `whapi-webhook/handlers/bot-flow.ts` o passo de OCR (conta e documento) só marca `ocr_review_pending` se o RPC `is_consultant_online` devolver `true`. Esse RPC depende da tabela `consultant_presence`, que é atualizada por heartbeat a cada 25s **e é zerada para 1970 sempre que a aba do /admin fica oculta** (`useConsultantPresence.ts` linhas 86-102). Resultado prático: basta trocar de aba/janela por alguns segundos pra cair no caminho "manda direto pro cliente", sem nunca passar pelo card de revisão.
+1. Lookup do `bot_flow` ativo por `variant`
+2. Busca dos `bot_flow_steps`, filtro de `message` entre `capture_conta` e próximo capture
+3. Loop despachando via `manual-step-send` com delay 1,8s
+4. Fallback de simulação hardcoded (8%–20%)
+5. Dispatch do próximo `capture_*`
 
-O usuário quer o oposto: o card de revisão deve **sempre** abrir no painel quando o OCR terminar; quem decide se confirma sozinho ou pede pro cliente é o consultor, dentro do card. A fila de timeout (`ocr-review-timeout`, 5min) já existe e cuida do fallback automático caso o consultor não responda.
+Qualquer ajuste (ex.: corrigir copy, mudar delay, adicionar `capture_email` na lista de stops) precisa ser feito duas vezes — risco alto de divergência. **OcrReviewCard usa `continueFlow:false` no capture final; CaptureDataConfirmCard usa `continueFlow:true**` — já existe divergência sutil.
 
-## Mudança
+### Problema 2 — Copy "8%" conflita com memória
 
-Remover o gate de presença nas duas etapas de OCR no `whapi-webhook/handlers/bot-flow.ts`:
+`mem://copy/discount-rate-20` é explícita: **"NUNCA 12%, 15% ou faixa 10-20%"**, sempre "até 20%". O texto atual nos dois cards diz:
 
-1. **OCR da conta** (~linhas 3043-3072): apagar o bloco `is_consultant_online` + `if (consultantOnline)`. Sempre setar:
-   - `ocr_review_pending = "bill"`
-   - `ocr_review_started_at = now`
-   - `ocr_review_decided_at = null`, `ocr_review_decided_by = null`
-   - `reply = ""` (não manda SIM/NÃO pro cliente — espera o consultor decidir no painel)
+> `💚 Economia estimada: *de R$ X (8%) até R$ Y (20%)* todo mês`
 
-2. **OCR do documento** (~linhas 3654-3690): mesma coisa, com `ocr_review_pending = "doc"`.
+A faixa "8%" foi pedida em outra conversa como "piso realista", mas viola a regra oficial e cria inconsistência com LP, FAQ, IA agent e variáveis `{economia_mensal}` do bot (todos usam 0.20 puro).
 
-3. Manter o `conversation_step = "confirmando_dados_conta"` / `"confirmando_dados_doc"` como já está, e manter o cron `ocr-review-timeout` (5min) — ele continua liberando automaticamente se o consultor não decidir.
+## Plano
 
-4. Verificar se o `evolution-webhook/handlers/bot-flow.ts` tem o mesmo gate. Se tiver, aplicar a mesma remoção pra manter paridade.
+### 1. Criar helper compartilhado
 
-## Impacto
+**Novo arquivo:** `src/lib/captacao/postBillConfirm.ts`
 
-- O card "Eu confirmo / Pedir ao cliente" passa a aparecer **sempre** no painel do consultor assim que o OCR termina, independente de aba aberta/fechada.
-- Se o consultor não decidir em 5 min, o cron já existente solta o lead pro fluxo automático (manda dados pro cliente confirmar).
-- "Não está analisando" deve sumir junto, porque o card só renderiza quando o OCR preencheu pelo menos um campo — se ele não aparecer agora estava sendo escondido pela falta de presença, não por falha de OCR (mas vou conferir os logs da Judite após o ajuste pra confirmar).
+Exporta uma função única:
 
-## Memória
+```ts
+dispatchPostBillConfirm({
+  customer,
+  kind: "bill" | "doc",
+  continueFlowOnNextCapture?: boolean, // default true
+}): Promise<{ dispatchedBetween: number; nextCaptureKey: string }>
+```
 
-Atualizar `mem://features/ocr-review-flow` (criar se não existir) registrando: card de revisão sempre abre; presença não influencia mais; timeout de 5min cuida do fallback.
+Responsabilidades (move 100% da lógica atual dos dois cards):
+
+- Resolve `nextCaptureKey` e `currentCaptureType` por `kind`
+- Lookup `bot_flows` por `consultant_id + is_active + variant`
+- Busca `bot_flow_steps`, slice entre capture atual e próximo stop
+- Loop dispatch `manual-step-send` (delay 1,8s, try/catch individual)
+- Fallback de simulação (ver passo 2 para copy)
+- Dispatch do `nextCaptureKey` com `continueFlow` configurável
+- Toda lógica de log usa prefixo `[post-bill-confirm]`
+
+### 2. Alinhar copy à memória "até 20%"
+
+Substituir o bloco da simulação hardcoded por mensagem que respeita `mem://copy/discount-rate-20`:
+
+```
+🎉 *Pronto{, Nome}!* Já fiz a *simulação* com base na sua conta.
+
+💡 Conta atual: *R$ {valor}*
+💚 Economia: *até R$ {valor*0.20} todo mês*  (até 20%)
+
+✅ Sem obra
+✅ Sem instalação
+✅ Mesma distribuidora — só muda quem fornece a energia
+
+Bora *finalizar seu cadastro agora*? 🚀
+```
+
+- Remove o "de R$ X (8%)"
+- Usa `valor * 0.20` (mesma fórmula do `{economia_mensal}` no bot-flow e do `ai-sales-agent`)
+- Mantém threshold `valor > 30` e o insert em `conversations` com `conversation_step: "simulacao_consultor"`
+
+### 3. Refatorar os dois cards
+
+`**OcrReviewCard.tsx**` — substituir linhas 117-225 por:
+
+```ts
+try {
+  await dispatchPostBillConfirm({ customer, kind, continueFlowOnNextCapture: false });
+} catch (advErr: any) {
+  console.warn("[ocr-review] advance flow failed:", advErr?.message);
+}
+```
+
+`**CaptureDataConfirmCard.tsx**` — substituir linhas 73-167 por:
+
+```ts
+try {
+  await dispatchPostBillConfirm({ customer, kind, continueFlowOnNextCapture: true });
+} catch (advErr: any) {
+  console.warn("[confirm-self] advance flow failed:", advErr?.message);
+}
+```
+
+### 4. Decisão sobre `continueFlow`
+
+Padronizar para `true` nos dois (atual `OcrReviewCard` está com `false`, o que pode estar segurando o avanço automático após o `capture_documento`). Confirmar com você antes de mudar — se preferir manter divergência, o param fica como está.
+
+### 5. Memória
+
+Atualizar `mem://features/ocr-review-flow`: registrar que a lógica pós-confirmação vive em `src/lib/captacao/postBillConfirm.ts` e que a copy da simulação fallback segue `mem://copy/discount-rate-20`.
+
+## Arquivos tocados
+
+- **Novo:** `src/lib/captacao/postBillConfirm.ts` (~120 linhas)
+- **Editado:** `src/components/captacao/OcrReviewCard.tsx` (remove ~108 linhas, adiciona ~5)
+- **Editado:** `src/components/captacao/CaptureDataConfirmCard.tsx` (remove ~95 linhas, adiciona ~5)
+- **Editado:** `mem/features/ocr-review-flow.md`
+
+## Riscos
+
+- Baixo. Lógica idêntica, só muda lugar. Cobertura de teste manual: confirmar 1 lead em variante A (fallback hardcoded dispara) e 1 lead em variante com `d_resultado` (fluxo despacha `message` step e pula fallback).
+
+## Pergunta antes de implementar
+
+1. Quer que eu **padronize** `continueFlow: true` nos dois cards, ou mantenho `OcrReviewCard` com `false` como hoje?
+2. Confirma a copy nova "até R$ X todo mês (até 20%)" ou prefere outra formulação?
