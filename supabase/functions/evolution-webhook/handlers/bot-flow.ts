@@ -2698,42 +2698,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }
 
           updates.conversation_step = "confirmando_dados_conta";
-          const _merged = { ...customer, ...updates };
 
-          // 🟡 NOVO: Se o consultor está online no painel admin, NÃO manda
-          // os dados pro cliente confirmar — coloca `ocr_review_pending='bill'`
-          // e o consultor decide no painel (foto + dados + 2 botões).
-          // Se consultor ausente OU não decidir em 5 min, segue caminho normal.
-          let consultantOnline = false;
-          try {
-            const { data: presOk } = await supabase.rpc("is_consultant_online", {
-              p_consultant: customer.consultant_id,
-            });
-            consultantOnline = presOk === true;
-          } catch (presErr) {
-            console.warn("[ocr-bill] presence check failed (default offline):", (presErr as Error)?.message);
-          }
-
-          if (consultantOnline) {
-            console.log(`[ocr-bill] 👀 consultor online — pausando confirmação para review (customer=${customer.id})`);
-            updates.ocr_review_pending = "bill";
-            updates.ocr_review_started_at = new Date().toISOString();
-            updates.ocr_review_decided_at = null;
-            updates.ocr_review_decided_by = null;
-            // NÃO envia mensagem ao cliente. NÃO seta reply.
-            // O painel admin do consultor vai mostrar o OcrReviewCard.
-            reply = "";
-            break; // sai do case sem mandar nada — bot fica em standby.
-          }
-
-          // Caminho atual (consultor ausente): manda pro cliente confirmar.
-          reply = buildConfirmacaoConta(_merged);
-          await sendOptions(remoteJid, reply, [
-            { id: "sim_conta", title: "✅ SIM" },
-            { id: "nao_conta", title: "❌ NÃO" },
-            { id: "editar_conta", title: "✏️ EDITAR" },
-          ]);
+          // Sempre pausa pro card de revisão no painel. Cron de 5 min
+          // libera automaticamente se o consultor não decidir.
+          console.log(`[ocr-bill] 📥 marcando review pendente (customer=${customer.id})`);
+          updates.ocr_review_pending = "bill";
+          updates.ocr_review_started_at = new Date().toISOString();
+          updates.ocr_review_decided_at = null;
+          updates.ocr_review_decided_by = null;
           reply = "";
+          break;
+
 
         } else {
           console.error("❌ OCR conta falhou:", ocrData.erro);
