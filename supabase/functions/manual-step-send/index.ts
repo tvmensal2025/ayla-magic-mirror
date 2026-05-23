@@ -380,6 +380,31 @@ Deno.serve(async (req) => {
         })
       : "";
 
+    // Vars map for ad-hoc placeholder substitution in fallback prompts
+    const _name = String((customer as any).name || "").trim();
+    const _firstName = _name.split(/\s+/)[0] || _name;
+    const _phone = String((customer as any).phone_whatsapp || "");
+    const _bill = (customer as any).electricity_bill_value;
+    const _billStr = _bill == null ? "" : String(_bill);
+    const vars: Record<string, string> = {
+      "{{nome}}": _firstName,
+      "{nome}": _firstName,
+      "{{Nome}}": _firstName,
+      "{Nome}": _firstName,
+      "{{name}}": _firstName,
+      "{name}": _firstName,
+      "{{primeiro_nome}}": _firstName,
+      "{primeiro_nome}": _firstName,
+      "{{telefone}}": _phone,
+      "{telefone}": _phone,
+      "{{phone}}": _phone,
+      "{phone}": _phone,
+      "{{valor_conta}}": _billStr,
+      "{valor_conta}": _billStr,
+    };
+
+
+
     // Build items list per part request
     type Item = { kind: string; text?: string; media?: any };
     const allItems: Item[] = [];
