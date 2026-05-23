@@ -76,16 +76,16 @@ ${knowledge}
 CONTEXTO:
 - Nome do lead: ${opts.leadName || "(desconhecido)"}
 - Passo atual do funil: ${opts.currentStepLabel || "(início)"}
-
-PERGUNTA DO LEAD: "${q.slice(0, 400)}"`;
+${opts.recentHistory ? `\nÚLTIMAS MENSAGENS DA CONVERSA:\n${opts.recentHistory.slice(0, 2000)}\n` : ""}
+PERGUNTA DO LEAD: "${q.slice(0, 600)}"`;
 
   try {
     const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 10_000);
+    const to = setTimeout(() => ctrl.abort(), 15_000);
     const res = await aiChat({
-      model: "google/gemini-3-flash-preview",
-      temperature: 0.3,
-      maxTokens: 250,
+      model: opts.model || "google/gemini-3.1-pro-preview",
+      temperature: 0.35,
+      maxTokens: 500,
       jsonSchema: {
         name: "faq_answer",
         schema: {
@@ -106,6 +106,7 @@ PERGUNTA DO LEAD: "${q.slice(0, 400)}"`;
       signal: opts.signal || ctrl.signal,
     });
     clearTimeout(to);
+
 
     const parsed = res.json;
     if (!parsed || typeof parsed.text !== "string") {
