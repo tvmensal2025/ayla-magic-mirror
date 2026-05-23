@@ -1437,17 +1437,25 @@ function AiGenerateTextButton({
     }
   }
   return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      className="h-7 gap-1.5 text-[11px] border-primary/40 text-primary hover:bg-primary/10"
-      onClick={gen}
-      disabled={loading || !consultantId || !stepId}
-      title={`Gerar texto persuasivo (variante ${variant})`}
-    >
-      <Sparkles className={`h-3.5 w-3.5 ${loading ? "animate-pulse" : ""}`} />
-      {loading ? "Gerando..." : "Gerar texto (IA)"}
-    </Button>
+    <span className="inline-flex items-center gap-1">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 gap-1.5 text-[11px] border-primary/40 text-primary hover:bg-primary/10"
+        onClick={gen}
+        disabled={loading || !consultantId || !stepId}
+        title={`Gerar texto persuasivo (variante ${variant})`}
+      >
+        <Sparkles className={`h-3.5 w-3.5 ${loading ? "animate-pulse" : ""}`} />
+        {loading ? "Gerando..." : "Gerar texto (IA)"}
+      </Button>
+      <HelpHint
+        title="Gerar texto com IA (Gemini)"
+        summary="A IA escreve uma versão persuasiva do texto do passo"
+        details="Usa o Gemini para criar uma mensagem alinhada ao tom da Camila e ao objetivo deste passo (boas-vindas, captura, fechamento, etc). Você pode editar livremente depois. O texto leva em conta a variante (A/B/C) — versões 'sem áudio' tendem a ficar mais explicativas no texto."
+        example="Passo de boas-vindas em branco? Clique e a IA cria uma saudação calorosa que cita o consultor pelo nome."
+      />
+    </span>
   );
 }
