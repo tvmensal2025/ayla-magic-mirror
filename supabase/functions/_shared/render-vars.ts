@@ -14,6 +14,7 @@
 export type RenderVars = {
   name?: string | null;
   phone?: string | null;
+  cpf?: string | null;
   representante?: string | null;
   valor_conta?: number | string | null;
   extra?: Record<string, string | number | null | undefined>;
@@ -28,7 +29,8 @@ const NAME_KEYS = new Set([
   "cliente",
 ]);
 
-const PHONE_KEYS = new Set(["telefone", "phone", "celular", "whatsapp"]);
+const PHONE_KEYS = new Set(["telefone", "phone", "celular", "whatsapp", "numero", "número"]);
+const CPF_KEYS = new Set(["cpf", "documento", "doc"]);
 const REP_KEYS = new Set([
   "representante",
   "consultor",
