@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Step, getButtons, isOcrStep } from "./flowTypes";
+import { Step, getButtons, isOcrStep, isAiAnswerStep } from "./flowTypes";
 
 
 export type FlowWarning = {
@@ -14,8 +14,11 @@ export type FlowWarning = {
     | "orphan_step"
     | "unresolved_var"
     | "empty_message"
-    | "ocr_without_confirm";
+    | "ocr_without_confirm"
+    | "ai_no_buttons"
+    | "ai_no_humano_exit";
   message: string;
+
 
   /** Sugestão de correção automática (se aplicável). */
   autoFix?: () => Partial<Step> | null;
@@ -178,8 +181,32 @@ export function useFlowValidation(steps: Step[]): FlowValidation {
             message:
               "OCR ativo, mas não há passo de confirmação logo depois. Aplique o template \"Confirmação pós-OCR\".",
           });
+      // Passos "IA livre" — precisam de botões pra lead sair do loop
+      if (isAiAnswerStep(s) && s.is_active) {
+        const btns = getButtons(s);
+        if (btns.length === 0) {
+          warnings.push({
+            id: `${s.id}:ai_no_buttons`,
+            stepId: s.id,
+            level: "error",
+            kind: "ai_no_buttons",
+            message: "Passo de IA livre sem botões — lead fica em loop infinito. Adicione 'Quero simular' e 'Falar com humano'.",
+          });
+        } else {
+          const hasHumano = s.transitions.some((t) => t.goto_special === "humano");
+          if (!hasHumano) {
+            warnings.push({
+              id: `${s.id}:ai_no_humano_exit`,
+              stepId: s.id,
+              level: "warn",
+              kind: "ai_no_humano_exit",
+              message: "Adicione um botão 'Falar com humano' como saída de emergência.",
+            });
+          }
         }
       }
+    }
+
     }
 
 
