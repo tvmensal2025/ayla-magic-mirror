@@ -1,45 +1,42 @@
-## Plano de correção
+## Objetivo
 
-### Objetivo
-Garantir que o lead `11971254913` receba todos os passos corretamente, sem duplicar mensagens/mídias, com tempo realista entre envios e com variáveis como telefone e CPF funcionando em todos os caminhos: manual, bot, fluxo customizado, A/B/C e atalhos.
+Parar de "disparar tudo" e rodar o fluxo como cliente real: cada passo de captura só avança quando o lead responde de verdade no WhatsApp.
 
-### Correções propostas
+## Diagnóstico do problema atual
 
-1. **Unificar variáveis de template**
-   - Expandir o helper `renderTemplateVars` para suportar `cpf`, `documento`, `telefone`, `valor_conta`, economia e extras.
-   - Usar esse helper também no `manual-step-send` em vez de mapas locais incompletos.
-   - Garantir que `{cpf}`, `{{cpf}}`, `{telefone}`, `{{telefone}}`, `{phone}` e variações com maiúsculas/espaços funcionem igualmente.
+O `dev-fire-all-steps` simula os passos em sequência sem esperar inbound. Resultado no run do JOSINETE:
+- 01:33:23 → bot pediu a conta
+- 01:33:38 → bot já pediu o documento (15s depois, sem cliente responder)
 
-2. **Corrigir o número de destino em todos os caminhos**
-   - Padronizar o telefone do cliente como destino do envio, sempre derivado de `customers.phone_whatsapp`.
-   - Validar o caso `11971254913` para sair como `5511971254913@s.whatsapp.net`.
-   - Evitar que atalhos, envio manual, continuação e bot usem número do consultor por engano.
+Isso é "bagunça" porque pula o OCR real e empilha perguntas. O bot de produção (`whapi-webhook`) já faz a transição correta sozinho quando recebe a mídia.
 
-3. **Eliminar duplicação de envio manual e continuação**
-   - Reforçar debounce por customer + step + tipo + conteúdo, não só por `conversation_step`.
-   - Fazer `continueFlow` não reenviar o mesmo step quando ele acabou de ser enviado.
-   - Aplicar anti-duplicação também em mídias no `manual-step-send`, como já existe parcialmente no bot (`canSendMediaOnce`).
+## Plano
 
-4. **Ajustar o tempo entre mensagens/mídias**
-   - Substituir delays fixos muito curtos (`1200ms`, `2500ms`, `4500ms`) por cálculo baseado em tipo e duração real da mídia.
-   - Áudio/vídeo devem esperar proporcionalmente à duração antes do próximo item, evitando sobreposição e duplicação percebida.
-   - Texto deve usar tempo humano mínimo, sem estourar o timeout do client.
+### 1. Novo modo no `dev-fire-all-steps`: `mode: "real"`
 
-5. **Aplicar em todos os fluxos A/B/C**
-   - Respeitar a variante do lead em bot e dispatch customizado.
-   - Manter o comportamento atual: variante B remove áudio no bot; envio manual continua podendo mandar áudio se o consultor escolher.
-   - Garantir que fallback C→B não reenvie mídia já entregue.
+- Reset opcional do customer (mesmas flags que hoje: `bill_*`, `doc_*`, `last_inbound_media_*`, conversation history).
+- Dispara **somente o primeiro passo** do fluxo (welcome / saudação) com `continueFlow: true`.
+- Encerra a execução. A partir daí, **quem avança é o `whapi-webhook`** com base nas respostas reais que você mandar pelo WhatsApp.
+- Retorna no JSON o `run_id`, o próximo passo esperado e instruções curtas ("Responda seu nome → envie valor → envie foto da conta → envie foto do documento").
 
-6. **Validar com logs e teste focado**
-   - Conferir nos logs do `manual-step-send` e `whapi-webhook` se não há novo `vars is not defined`.
-   - Testar o fluxo do cliente `11971254913` com um envio manual + seguir fluxo e verificar que não duplica.
-   - Confirmar que mensagens com CPF/telefone renderizam sem deixar `{cpf}` ou `{telefone}` no texto.
+### 2. Botão/ação no `/admin/fluxos` (ou onde está hoje)
 
-### Arquivos principais a alterar
-- `supabase/functions/_shared/render-vars.ts`
-- `supabase/functions/manual-step-send/index.ts`
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
-- Possivelmente `supabase/functions/_shared/whapi-api.ts` / `evolution-api.ts` apenas se o ajuste de tempo precisar ficar no sender compartilhado.
+- Renomear "Disparar todos" para deixar 2 opções claras:
+  - **Simular tudo (debug)** → comportamento atual.
+  - **Iniciar teste real** → chama novo modo `real`.
+- Mostra um painel pequeno com o status do customer atualizado a cada 10s (passo atual, última mensagem in/out) lendo `customers` + `conversations`, para você acompanhar o avanço sem abrir o DB.
 
-### Resultado esperado
-O envio manual, o bot automático, o fluxo customizado, as variantes A/B/C e os atalhos passam a usar a mesma renderização de dados, o mesmo destino do cliente e travas consistentes contra reenvio duplicado.
+### 3. Watchdog leve (opcional, default ON)
+
+- Se passar > 10min sem inbound do lead de teste, marca o run como `idle` no painel — não força nada, só sinaliza.
+
+## Detalhes técnicos
+
+- Arquivo: `supabase/functions/dev-fire-all-steps/index.ts` — adicionar branch `if (mode === "real")` que executa apenas o primeiro passo via `manual-step-send` com `continueFlow: true` e sai.
+- Frontend: ajustar o componente que hoje chama `dev-fire-all-steps` para passar `mode` e renderizar o painel de acompanhamento (poll simples no Supabase JS).
+- Sem mudanças em `whapi-webhook`, `manual-step-send` ou no engine de fluxo — eles já tratam o avanço real.
+
+## Fora de escopo
+
+- Mudar a lógica de OCR / captura.
+- Alterar o fluxo A/B/C ou o resolver de passos custom.

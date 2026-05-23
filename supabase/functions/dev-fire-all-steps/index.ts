@@ -113,13 +113,65 @@ Deno.serve(async (req) => {
 
     const FN_URL = `${SUPABASE_URL}/functions/v1/manual-step-send`;
     const runId = crypto.randomUUID();
+    const mode: "simulate" | "real" = (body?.mode === "real") ? "real" : "simulate";
 
+    // ============ MODO REAL ============
+    // Dispara só o primeiro passo do fluxo com chain ON e devolve.
+    // O whapi-webhook cuida de avançar conforme o lead responde de verdade.
+    if (mode === "real") {
+      const firstStep = allSteps[0];
+      if (!firstStep) return json({ ok: false, error: "no_steps" }, 404);
+
+      const payload = {
+        consultantId: customer.consultant_id,
+        customerId,
+        stepId: firstStep.id,
+        stepKey: firstStep.step_key,
+        part: "all",
+        continueFlow: true,
+        variant,
+        force: true,
+        skipNameGuard: true,
+      };
+      let result: any; let httpStatus = 0;
+      try {
+        const r = await fetch(FN_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
+          body: JSON.stringify(payload),
+        });
+        httpStatus = r.status;
+        const text = await r.text();
+        try { result = JSON.parse(text); } catch { result = { raw: text.slice(0, 200) }; }
+      } catch (e) {
+        result = { error: String((e as Error).message || e) };
+      }
+      console.log(`[dev-fire-all-steps] run=${runId} mode=real first=${firstStep.step_key} status=${httpStatus} result=${JSON.stringify(result).slice(0,200)}`);
+
+      const expected = captureSteps.map((s: any) => ({
+        position: s.position, step_type: s.step_type, step_key: s.step_key,
+      }));
+
+      return json({
+        ok: true,
+        mode: "real",
+        run_id: runId,
+        customer: { id: customer.id, phone: phoneDigits, name: customer.name },
+        flow: { id: flow.id, variant },
+        fired_step: { position: firstStep.position, step_key: firstStep.step_key, step_type: firstStep.step_type },
+        next_expected_captures: expected,
+        instructions: "Responda no WhatsApp como cliente real. O bot avançará sozinho via whapi-webhook (nome → valor conta → foto da conta → foto do documento).",
+        send_status: httpStatus,
+        send_result: result,
+      });
+    }
+
+    // ============ MODO SIMULATE (debug) ============
     // PLANO: 1 disparo de mensagem com chain ON (chega até último message)
     //        + N disparos de capture sequenciais (cada um pede o input)
     const firstMessage = messageSteps[0];
     const sequence: Array<{ step: any; continueFlow: boolean; waitAfterMs: number }> = [];
     if (firstMessage) {
-      // estima tempo de cadeia: ~12s por message step
       sequence.push({ step: firstMessage, continueFlow: true, waitAfterMs: Math.max(messageSteps.length * 12_000, 30_000) });
     }
     for (const cap of captureSteps) {
@@ -166,7 +218,6 @@ Deno.serve(async (req) => {
         }
         const dt = Date.now() - t0;
         console.log(`[dev-fire-all-steps] run=${runId} pos=${item.step.position} type=${item.step.step_type} chain=${item.continueFlow} status=${httpStatus} elapsed=${dt}ms result=${JSON.stringify(result).slice(0,200)}`);
-        // limpa debounce antes do próximo capture
         await supabase.from("customers").update({ last_custom_prompt_at: null, bot_paused: false }).eq("id", customerId);
         await new Promise((res) => setTimeout(res, item.waitAfterMs));
       }
@@ -178,6 +229,7 @@ Deno.serve(async (req) => {
 
     return json({
       ok: true,
+      mode: "simulate",
       run_id: runId,
       customer: { id: customer.id, phone: phoneDigits, name: customer.name },
       flow: { id: flow.id, variant },
@@ -185,6 +237,7 @@ Deno.serve(async (req) => {
       strategy: "1 message with chain + N captures individuais (zero duplicação)",
       plan,
     });
+
   } catch (e) {
     return json({ ok: false, error: String((e as Error).message || e) }, 500);
   }
