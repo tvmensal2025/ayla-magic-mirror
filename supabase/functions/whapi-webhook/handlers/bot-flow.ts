@@ -3038,38 +3038,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }
 
           updates.conversation_step = "confirmando_dados_conta";
-          const _merged = { ...customer, ...updates };
 
-          // 🟡 Gate de presença do consultor (super admin no Whapi).
-          // Mesma lógica do evolution-webhook: se Rafael está olhando o
-          // painel, pausa a confirmação ao cliente e mostra o OcrReviewCard.
-          let consultantOnline = false;
-          try {
-            const { data: presOk } = await supabase.rpc("is_consultant_online", {
-              p_consultant: customer.consultant_id,
-            });
-            consultantOnline = presOk === true;
-          } catch (presErr) {
-            console.warn("[ocr-bill/whapi] presence check failed (default offline):", (presErr as Error)?.message);
-          }
-
-          if (consultantOnline) {
-            console.log(`[ocr-bill/whapi] 👀 super admin online — pausando confirmação para review (customer=${customer.id})`);
-            updates.ocr_review_pending = "bill";
-            updates.ocr_review_started_at = new Date().toISOString();
-            updates.ocr_review_decided_at = null;
-            updates.ocr_review_decided_by = null;
-            reply = "";
-            break;
-          }
-
-          reply = buildConfirmacaoConta(_merged);
-          await sendOptions(remoteJid, reply, [
-            { id: "sim_conta", title: "✅ SIM" },
-            { id: "nao_conta", title: "❌ NÃO" },
-            { id: "editar_conta", title: "✏️ EDITAR" },
-          ]);
+          // Sempre pausa pro card de revisão no painel. O cron
+          // `ocr-review-timeout` (5 min) libera automaticamente se o
+          // consultor não decidir — não dependemos mais de presença.
+          console.log(`[ocr-bill/whapi] 📥 marcando review pendente (customer=${customer.id})`);
+          updates.ocr_review_pending = "bill";
+          updates.ocr_review_started_at = new Date().toISOString();
+          updates.ocr_review_decided_at = null;
+          updates.ocr_review_decided_by = null;
           reply = "";
+          break;
+
 
         } else {
           console.error("❌ OCR conta falhou:", ocrData.erro);
