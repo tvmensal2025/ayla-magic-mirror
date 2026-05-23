@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -72,6 +73,7 @@ interface Props {
 const DEFAULT_ORDER: ("audio" | "image" | "video" | "text")[] = ["audio", "image", "video", "text"];
 
 export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initialOrder, onOrderChange, variant = "A" }: Props) {
+  const confirm = useConfirm();
   const [items, setItems] = useState<Media[]>([]);
   const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<("audio" | "image" | "video" | "text")[]>(initialOrder ?? DEFAULT_ORDER);
@@ -279,7 +281,13 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
       toast.error("Mídias são compartilhadas entre A/B/C. Remova pela aba A. Na B, áudios já são ignorados automaticamente.");
       return;
     }
-    if (!confirm(`Remover "${m.label}"? Isso remove de TODAS as variantes (A, B e C).`)) return;
+    const ok = await confirm({
+      title: `Remover "${m.label}"?`,
+      description: "Esta mídia será removida de todas as variantes do fluxo (A, B e C). Você poderá enviar uma nova depois.",
+      confirmText: "Remover mídia",
+      tone: "danger",
+    });
+    if (!ok) return;
     const { error } = await supabase.from("ai_media_library").update({ active: false }).eq("id", m.id);
     if (error) {
       toast.error(error.message);
