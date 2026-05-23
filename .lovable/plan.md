@@ -1,64 +1,71 @@
-# Fluxo D — botões + redesign do card de início
+# Fluxo D — mapeamento das respostas livres do cliente
 
-## Diagnóstico
+## O que está errado nas últimas conversas
 
-Analisando o Fluxo D (variant `D` — flow `Fluxo Whapi (botões)`, 8 passos), encontrei **2 problemas**:
+### Lead `11989000650` (Oque Éisso) — **bot mudo total**
 
-### 1. Bug crítico: botões não são enviados no disparo manual
+- 14:00:41 — welcome enviado **com botões** ✓ (confirmado nos logs whapi: `sendButtons botões entregues`)
+- 14:05:23 — cliente digitou `?`
+- 14:05:42 — cliente digitou `oque éisso?`
+- **bot não respondeu nada.**
 
-O passo `d_welcome` tem botões configurados em `captures._buttons`:
+Step atual: `flow:aee7b26c-...` (welcome do D). As `transitions` desse welcome só casam com `simular|como|humano|1|2|3`. Qualquer texto fora disso cai num caminho que retorna `false` silenciosamente — **não dispara smart-repeat, nem re-dispatch, nem AI fallback.** É o pior caso: cliente sem resposta.
 
-- ▶ Quero simular
-- ❓ Como funciona
-- 👤 Falar com Rafael
+### Lead `11971254913` (Oque) — mapeamento confuso
 
-Mas a edge `manual-step-send` (linha 656) envia o texto via `sender.sendText(...)` — **ignora completamente** o array `_buttons` do passo. O handler automático `whapi-webhook/handlers/bot-flow.ts` (linha 1086) já lê `_buttons` e usa `sender.sendButtons()`; o manual nunca recebeu essa lógica. Por isso o cliente recebeu só a frase "Escolha uma das opções abaixo 👇" sem botão nenhum.
+- Clicou/digitou "Como funciona" → step `d_como_funciona` cujo `message_text` é **só** `"Vou te explicar rapidinho como funciona 👇"`. Não tem nada depois do 👇. O bot já pula direto para `d_pedir_conta`.
+- Cliente respondeu `"eu nao quero cadastrar ainda"` → bot ignorou intent negativa e repetiu o pedido de foto.
+- Cliente disse `"nao irei mandar"` → bot enviou welcome de novo, sem reconhecer recusa.
+- 3 welcomes em 2 minutos (14:00:41, 14:00:58, 14:02:08) — sem dedupe entre disparos manuais.
 
-### 2. UX feia no popover de Fluxo D
+## Causa raiz
 
-A view atual (`FlowQuickBar.tsx` linhas 279-303 e `ManualStepDialog.tsx` equivalente) é um bloco genérico: parágrafo cinza + botão + linha "Primeiro passo: …". Não mostra prévia da mensagem, não mostra os botões que serão enviados, nem dá sensação de "automático guiado por botões".
+`handlers/bot-flow.ts`, no bloco que processa resposta do cliente quando step atual é `message` com `_buttons`:
+
+1. Faz match nas `trigger_phrases` exatas/keywords.
+2. Se não casa, retorna sem mandar nada (silêncio).
+3. Não chama smart-repeat porque smart-repeat só roda em `capture_*`.
+4. Não tem AI intent-matching para mapear texto livre → botão.
+
+E para `capture_*`, qualquer texto que não seja foto vira "Pode me responder" — sem detectar recusa explícita.
 
 ## Mudanças
 
-### A. Backend — `supabase/functions/manual-step-send/index.ts`
+### 1. AI Intent Match para steps com botões — `handlers/bot-flow.ts`
 
-No loop de envio (linhas 651-741), quando o item for **`text`** e for o **último item** (`isLast`) **de um passo `message`** que tenha `captures._buttons` válidos, trocar `sender.sendText()` por `sender.sendButtons()` com os botões renderizados (mesma normalização usada em `bot-flow.ts`: `{ id, title }`, máx. 3, fallback texto numerado já tratado dentro do sender).
+Quando step atual é `message` com `_buttons` e cliente manda texto livre que não casa nas `trigger_phrases`:
 
-Aplica para **qualquer variant** (não só D) — corrige também passos com botões em A/B/C/E. Sem mudança de schema, sem mudança no fluxo automático.
+- Chama Lovable AI Gateway (Gemini Flash) com prompt curto:
+  > "Cliente respondeu '{msg}'. Opções: 1) {btn1}, 2) {btn2}, 3) {btn3}. Qual número ele quis? Se confuso, responda 0. Se quer sair/parar, 9. Só o número."
+- Resposta 1/2/3 → executa a `transition` daquele botão direto (como se tivesse clicado).
+- Resposta 0 → re-dispatch do mesmo step (manda welcome+botões de novo) com prefixo: "Sem problema! Toque em uma das opções abaixo 👇".
+- Resposta 9 → mensagem de despedida amigável + pausa bot 24h.
+- Limite: 2 chamadas IA por step/cliente (campo `ai_intent_match_count` em customers); na 3ª já escala para humano.
 
-### B. UI — `src/components/whatsapp/FlowQuickBar.tsx` e `src/components/admin/AIAgentTab/ManualStepDialog.tsx`
+### 2. Detector de recusa em `capture_*` — `handlers/bot-flow.ts` (ou `conversational/index.ts`)
 
-Redesenhar o bloco do Fluxo D usando tokens do design system (verde primary, glassmorphism leve já existente no projeto):
+Antes do smart-repeat, regex de recusa explícita: `/n[ãa]o (vou|quero|posso|irei|tenho|consigo|sei) (mandar|enviar|cadastrar|agora|tirar)|n[ãa]o tenho|sem tempo|depois eu|amanh[ãa]/i`.
 
-```text
-┌─ Fluxo D — Automático por botões ─────────┐
-│ ⚡ ícone + título destacado                │
-│                                           │
-│ ┌─ Prévia da 1ª mensagem ────────────┐    │
-│ │ "Olá, seja muito bem-vindo(a) 😊…" │    │
-│ │ (texto cinza, max 3 linhas, fade)  │    │
-│ └────────────────────────────────────┘    │
-│                                           │
-│ Botões que o cliente vai ver:             │
-│ [▶ Quero simular] [❓ Como funciona]      │
-│ [👤 Falar com Rafael]                     │
-│ (chips verdes outline, lidos do step)     │
-│                                           │
-│ ╔══════════════════════════════════════╗  │
-│ ║  ▶ Iniciar Fluxo D                   ║  │
-│ ╚══════════════════════════════════════╝  │
-│ depois disso o bot conduz sozinho ✨      │
-└───────────────────────────────────────────┘
-```
+Se casar:
 
-- Lê `steps[0].message_text` e `steps[0].captures` para preview real e chips de botões.
-- Mantém o mesmo `invokeStep(first.id)` já em uso (sem mudar lógica de envio do front).
-- Toast verde após sucesso. Sem alterar A/B/C/E.
+- Resposta humanizada: "Tranquilo, {{nome}}! Quando quiser dar continuidade é só me mandar uma foto da conta. Tô por aqui 💚"
+- Pausa bot 24h, marca step `lead_paused_by_refusal`.
+- Não dispara handoff (cliente só não quer agora — diferente de problema).
+
+### 3. Conteúdo padrão para `d_como_funciona` — migration
+
+O step `d_como_funciona` está praticamente vazio. Preencher JAT EM UM AUDIO E UM VIDEO QUE VAI SER ENVIADO NO LUGAR DO TEXTO E EMBAISO APARECE AS PERGUNTAS DNV
+
+E os `transitions` desse step ganham botões: `[Quero simular] [Falar com Rafael]`.
+
+### 4. Dedupe de welcome — `handlers/bot-flow.ts` no `dispatchStepFromFlow`
+
+Já existe anti-rep de 10min para alguns steps. Adicionar guard específico para steps do tipo `welcome` (step_key começando com `d_welcome` ou position=1): se já mandou nos últimos **3 minutos**, ignora silenciosamente o re-dispatch.
 
 ## Arquivos
 
-- `supabase/functions/manual-step-send/index.ts` — usar `sendButtons` no último texto quando `captures._buttons` existir
-- `src/components/whatsapp/FlowQuickBar.tsx` — redesign do bloco D
-- `src/components/admin/AIAgentTab/ManualStepDialog.tsx` — redesign do bloco D (mesmo layout)
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — AI intent match (1), detector de recusa (2), dedupe welcome (4)
+- `supabase/functions/_shared/ai-intent.ts` — novo helper para chamar Gemini com prompt de match de botão (cache + limite)
+- Migration — atualizar `message_text` e `transitions` de `d_como_funciona`
 
-Sem migrations. Sem mudar passos do Fluxo D no banco — eles já estão corretos.
+Sem mudanças de schema (`ai_intent_match_count` aproveita coluna `ai_followups_count` já existente).
