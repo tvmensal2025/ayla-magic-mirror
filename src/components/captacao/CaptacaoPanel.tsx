@@ -56,6 +56,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const [mismatch, setMismatch] = useState<{ flag: boolean; bill: string; doc: string; acked: boolean }>({ flag: false, bill: "", doc: "", acked: false });
   const [missionsVersion, setMissionsVersion] = useState(0);
   const [showAside, setShowAside] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"passos" | "conversa" | "ficha">("passos");
   const { today, week, streak, bump } = useCaptureScoreboard(consultantId);
   const { toast } = useToast();
   const { templates } = useTemplates(consultantId);
@@ -89,7 +90,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const [xpToast, setXpToast] = useState<number | null>(null);
   const [levelUp, setLevelUp] = useState<{ level: number; label: string } | null>(null);
 
-  useEffect(() => { setSentSteps(new Set()); setPhone(null); setCustomerName(null); setShowAside(false); setVariant("A"); setMismatch({ flag: false, bill: "", doc: "", acked: false }); }, [selectedId]);
+  useEffect(() => { setSentSteps(new Set()); setPhone(null); setCustomerName(null); setShowAside(false); setVariant("A"); setMismatch({ flag: false, bill: "", doc: "", acked: false }); setMobileTab("passos"); }, [selectedId]);
 
   // Reconstitui sentSteps a partir do log de conversations outbound: tile fica ✓
   // mesmo após trocar de lead ou recarregar a página.
@@ -227,33 +228,49 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   return (
     <div className={`flex flex-col flex-1 min-h-0 rounded-lg border ${gameOn ? "exec-border-gold exec-radial-bg" : "border-border"} overflow-hidden bg-background/60 exec-ambient`}>
       {/* Header */}
-      <header className={`flex items-center justify-between px-3 py-1.5 border-b ${gameOn ? "border-amber-400/20" : "border-border"} bg-card/60 backdrop-blur-sm gap-3 flex-wrap shrink-0`}>
-        <div className="flex items-center gap-2">
-          <ClipboardList className={`w-5 h-5 ${gameOn ? "text-amber-400" : "text-primary"}`} strokeWidth={1.5} />
-          <div>
-            <h2 className={`text-sm font-bold ${gameOn ? "uppercase tracking-wider" : ""}`}>Painel de Captação</h2>
-            <p className="text-[11px] text-muted-foreground">
+      <header className={`flex items-center justify-between px-3 py-1.5 border-b ${gameOn ? "border-amber-400/20" : "border-border"} bg-card/60 backdrop-blur-sm gap-2 sm:gap-3 sm:flex-wrap shrink-0`}>
+        <div className="flex items-center gap-2 min-w-0">
+          <ClipboardList className={`w-5 h-5 shrink-0 ${gameOn ? "text-amber-400" : "text-primary"}`} strokeWidth={1.5} />
+          <div className="min-w-0">
+            <h2 className={`text-sm font-bold truncate ${gameOn ? "uppercase tracking-wider" : ""}`}>Captação</h2>
+            <p className="text-[11px] text-muted-foreground truncate">
               {gameOn ? (
-                <span className="flex items-center gap-1.5">
-                  <span className="exec-shimmer font-black tracking-wider">MODO PERFORMANCE</span>
-                  <span className="opacity-60">·</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="exec-shimmer font-black tracking-wider hidden sm:inline">PERFORMANCE</span>
                   <span className={`font-bold ${progress.rank.color}`}>{progress.rank.label}</span>
                   <span className="opacity-60">· Nv {progress.level}</span>
                 </span>
-              ) : "Registre clientes e acompanhe seu desempenho"}
+              ) : (
+                <>
+                  <span className="hidden sm:inline">Registre clientes e acompanhe seu desempenho</span>
+                  <span className="sm:hidden">Hoje {today} · Semana {week} · {streak}d</span>
+                </>
+              )}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 sm:gap-3 sm:flex-wrap shrink-0">
           {!gameOn && (
-            <>
+            <div className="hidden sm:flex items-center gap-3">
               <CaptureMissionsPanel consultantId={consultantId} streak={streak} bumpVersion={missionsVersion} />
               <CaptureScoreboard today={today} week={week} streak={streak} />
-            </>
+            </div>
           )}
           <GameModeToggle enabled={gameOn} onToggle={toggleGame} sound={sound} onToggleSound={toggleSound} />
         </div>
       </header>
+      {!gameOn && (
+        <details className="sm:hidden border-b border-border/40 bg-card/30">
+          <summary className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground cursor-pointer select-none flex items-center gap-2">
+            <span>📊 Metas e estatísticas</span>
+            <span className="ml-auto text-primary tabular-nums">{today}/3 · {week}/10 · {streak}d</span>
+          </summary>
+          <div className="px-3 py-2 flex flex-wrap items-center gap-3">
+            <CaptureMissionsPanel consultantId={consultantId} streak={streak} bumpVersion={missionsVersion} />
+            <CaptureScoreboard today={today} week={week} streak={streak} />
+          </div>
+        </details>
+      )}
 
       {gameOn ? (
         <GameShell>
@@ -309,7 +326,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                           <ExternalLink className="w-3 h-3" />
                         </Button>
                       )}
-                      <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setShowAside((s) => !s)} title="Ficha">
+                      <Button size="icon" variant="ghost" className="hidden h-8 w-8 shrink-0" onClick={() => setShowAside((s) => !s)} title="Ficha">
                         <ChevronDown className={`w-4 h-4 transition-transform ${showAside ? "rotate-180" : ""}`} />
                       </Button>
                     </div>
@@ -338,10 +355,18 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       </div>
                     )}
                   </div>
+                  {/* Mobile tabs */}
+                  <div className="md:hidden shrink-0 grid grid-cols-3 border-b border-border/60 bg-card/40 text-[11px] font-bold">
+                    {(["passos","conversa","ficha"] as const).map((t) => (
+                      <button key={t} onClick={() => setMobileTab(t)} className={`py-2 uppercase tracking-wider transition ${mobileTab === t ? "text-primary border-b-2 border-primary" : "text-muted-foreground"}`}>
+                        {t === "passos" ? "Passos" : t === "conversa" ? "Conversa" : "Ficha"}
+                      </button>
+                    ))}
+                  </div>
                   <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                    {/* Passos — fixo no topo */}
-                    <div className="shrink-0 p-2 border-b border-border/40">
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">10 Passos · clique para enviar <HelpHint {...STEPS_HELP} /></h3>
+                    {/* Passos */}
+                    <div className={`shrink-0 p-2 border-b border-border/40 ${mobileTab !== "passos" ? "hidden md:block" : ""}`}>
+                      <h3 className="hidden md:flex text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5 items-center gap-1">10 Passos · clique para enviar <HelpHint {...STEPS_HELP} /></h3>
                       <CaptureStepsGrid
                         consultantId={consultantId}
                         customerId={selectedId}
@@ -351,15 +376,15 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       />
                     </div>
 
-                    {/* Conversa — flex-1 com scroll interno */}
-                    <div className="flex-1 min-h-0 overflow-hidden flex flex-col p-2 gap-2">
+                    {/* Conversa */}
+                    <div className={`flex-1 min-h-0 overflow-hidden flex-col p-2 gap-2 ${mobileTab !== "conversa" ? "hidden md:flex" : "flex"}`}>
                       <CaptureConversationFeed customerId={selectedId} gameOn />
+                    </div>
 
-                      {/* Ficha + Achievements aparecem no fim do scroll em mobile (quando expandidos) */}
-                      <div className={`md:hidden ${showAside ? "block" : "hidden"} space-y-3`}>
-                        <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} embedded />
-                        <AchievementsRail progress={progress} />
-                      </div>
+                    {/* Ficha (mobile tab) */}
+                    <div className={`md:hidden flex-1 min-h-0 overflow-y-auto p-2 space-y-3 ${mobileTab !== "ficha" ? "hidden" : ""}`}>
+                      <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} embedded />
+                      <AchievementsRail progress={progress} />
                     </div>
                   </div>
 
@@ -446,16 +471,25 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       <ExternalLink className="w-3 h-3" />
                     </Button>
                   )}
-                  <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setShowAside((s) => !s)} title="Ficha do lead">
+                  <Button size="icon" variant="ghost" className="hidden md:hidden h-8 w-8 shrink-0" onClick={() => setShowAside((s) => !s)} title="Ficha do lead">
                     <ChevronDown className={`w-4 h-4 transition-transform ${showAside ? "rotate-180" : ""}`} />
                   </Button>
                 </div>
 
+                {/* Mobile tabs */}
+                <div className="md:hidden shrink-0 grid grid-cols-3 border-b border-border/60 bg-card/40 text-[11px] font-bold">
+                  {(["passos","conversa","ficha"] as const).map((t) => (
+                    <button key={t} onClick={() => setMobileTab(t)} className={`py-2 uppercase tracking-wider transition ${mobileTab === t ? "text-primary border-b-2 border-primary" : "text-muted-foreground"}`}>
+                      {t === "passos" ? "Passos" : t === "conversa" ? "Conversa" : "Ficha"}
+                    </button>
+                  ))}
+                </div>
+
                 {/* Desktop: passos (topo fixo) + conversa (flex-1 scroll interno) — sem scroll externo */}
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  {/* Passos — altura fixa/compacta no desktop, scroll no mobile */}
-                  <div className="shrink-0 p-2 border-b border-border/40">
-                    <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-1.5 flex items-center gap-1">
+                  {/* Passos */}
+                  <div className={`shrink-0 p-2 border-b border-border/40 ${mobileTab !== "passos" ? "hidden md:block" : ""}`}>
+                    <h3 className="hidden md:flex text-xs font-bold uppercase tracking-wide text-muted-foreground mb-1.5 items-center gap-1">
                       10 Passos · clique para enviar <HelpHint {...STEPS_HELP} />
                     </h3>
                     <CaptureStepsGrid
@@ -466,14 +500,14 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                     />
                   </div>
 
-                  {/* Conversa — ocupa o espaço restante com scroll interno */}
-                  <div className="flex-1 min-h-0 overflow-hidden flex flex-col p-2 gap-2">
+                  {/* Conversa */}
+                  <div className={`flex-1 min-h-0 overflow-hidden flex-col p-2 gap-2 ${mobileTab !== "conversa" ? "hidden md:flex" : "flex"}`}>
                     <CaptureConversationFeed customerId={selectedId} />
+                  </div>
 
-                    {/* Ficha colapsável só no mobile */}
-                    <div className={`md:hidden ${showAside ? "block" : "hidden"}`}>
-                      <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} embedded />
-                    </div>
+                  {/* Ficha (mobile tab) */}
+                  <div className={`md:hidden flex-1 min-h-0 overflow-y-auto p-2 ${mobileTab !== "ficha" ? "hidden" : ""}`}>
+                    <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} embedded />
                   </div>
                 </div>
               </>
