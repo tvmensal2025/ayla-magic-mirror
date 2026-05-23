@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 export interface RankInfo { key: string; label: string; emoji: string; minLevel: number; color: string; }
 const RANKS: RankInfo[] = [
-  { key: "associado",  label: "Associado",  emoji: "◈", minLevel: 1,  color: "text-slate-400" },
+  { key: "iniciante",  label: "Iniciante",  emoji: "◈", minLevel: 1,  color: "text-slate-400" },
   { key: "consultor",  label: "Consultor",  emoji: "◆", minLevel: 5,  color: "text-cyan-400" },
   { key: "gerente",    label: "Gerente",    emoji: "◈", minLevel: 10, color: "text-violet-400" },
   { key: "diretor",    label: "Diretor",    emoji: "◆", minLevel: 20, color: "text-amber-400" },

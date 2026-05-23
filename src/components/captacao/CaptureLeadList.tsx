@@ -86,7 +86,7 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect, gameOn = f
       <div className="p-2 border-b border-border space-y-1.5 shrink-0">
         <div className="flex items-center justify-between">
           <h3 className={`text-sm font-semibold ${gameOn ? "exec-shimmer font-black uppercase tracking-wider" : ""}`}>
-            {gameOn ? "Associados" : "Em captação"}
+            {gameOn ? "Leads" : "Em captação"}
           </h3>
           <span className={`text-xs tabular-nums font-bold ${gameOn ? "text-amber-400" : "text-muted-foreground"}`}>{leads.length}</span>
         </div>
