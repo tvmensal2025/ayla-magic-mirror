@@ -64,6 +64,25 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
     try { localStorage.removeItem("capture_auto_mode"); } catch {}
   }, []);
 
+  // Load every active flow variant configured for this consultant (A/B/C/D/E)
+  useEffect(() => {
+    if (!consultantId) return;
+    let mounted = true;
+    (async () => {
+      const { data } = await supabase
+        .from("bot_flows").select("variant")
+        .eq("consultant_id", consultantId).eq("is_active", true);
+      const set = new Set<string>(["A"]);
+      ((data as any[]) || []).forEach((r) => {
+        const v = String(r.variant || "").toUpperCase();
+        if (["A","B","C","D","E"].includes(v)) set.add(v);
+      });
+      const ordered = (["A","B","C","D","E"] as const).filter((v) => set.has(v));
+      if (mounted) setAvailableVariants(ordered as Array<"A"|"B"|"C"|"D"|"E">);
+    })();
+    return () => { mounted = false; };
+  }, [consultantId]);
+
   // Game mode state
   const { enabled: gameOn, toggle: toggleGame, sound, toggleSound } = useGameMode(consultantId);
   const progress = useGameProgress(consultantId);
