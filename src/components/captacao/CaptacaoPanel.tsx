@@ -312,7 +312,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                   </div>
                   <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
                     <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">10 Passos · clique para enviar</h3>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1">10 Passos · clique para enviar <HelpHint {...STEPS_HELP} /></h3>
                       <CaptureStepsGrid
                         consultantId={consultantId}
                         customerId={selectedId}
