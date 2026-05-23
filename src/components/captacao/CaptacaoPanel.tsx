@@ -261,14 +261,14 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
             <ExecHudBar progress={progress} />
           </div>
 
-          <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "14rem", "--cap-aside-w": "18rem" } as React.CSSProperties}>
+          <div data-resize-scope className="flex-1 min-h-0 w-full flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "13rem", "--cap-aside-w": "17rem" } as React.CSSProperties}>
             {/* Mobile: lead list visível só quando NÃO há lead selecionado. Desktop: sempre. */}
-            <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 md:border-r border-border overflow-hidden`}>
+            <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 md:min-w-[180px] md:max-w-[320px] md:border-r border-border overflow-hidden`}>
 
               <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} gameOn />
 
             </div>
-            <DragResizer storageKey="captacao-list" cssVar="cap-list-w" defaultPx={256} minPx={180} maxPx={420} />
+            <DragResizer storageKey="captacao-list" cssVar="cap-list-w" defaultPx={220} minPx={180} maxPx={320} />
             <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden min-w-0 min-h-0`}>
 
               {!selectedId ? (
@@ -338,9 +338,10 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       </div>
                     )}
                   </div>
-                  <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
-                    <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1">10 Passos · clique para enviar <HelpHint {...STEPS_HELP} /></h3>
+                  <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                    {/* Passos — fixo no topo */}
+                    <div className="shrink-0 p-2 border-b border-border/40">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">10 Passos · clique para enviar <HelpHint {...STEPS_HELP} /></h3>
                       <CaptureStepsGrid
                         consultantId={consultantId}
                         customerId={selectedId}
@@ -349,13 +350,16 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                         onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
                       />
                     </div>
-                    <CaptureConversationFeed customerId={selectedId} gameOn />
 
+                    {/* Conversa — flex-1 com scroll interno */}
+                    <div className="flex-1 min-h-0 overflow-hidden flex flex-col p-2 gap-2">
+                      <CaptureConversationFeed customerId={selectedId} gameOn />
 
-                    {/* Ficha + Achievements aparecem no fim do scroll em mobile (quando expandidos) */}
-                    <div className={`md:hidden ${showAside ? "block" : "hidden"} space-y-3`}>
-                      <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} embedded />
-                      <AchievementsRail progress={progress} />
+                      {/* Ficha + Achievements aparecem no fim do scroll em mobile (quando expandidos) */}
+                      <div className={`md:hidden ${showAside ? "block" : "hidden"} space-y-3`}>
+                        <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} embedded />
+                        <AchievementsRail progress={progress} />
+                      </div>
                     </div>
                   </div>
 
@@ -391,9 +395,9 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                 </>
               )}
             </main>
-              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={288} minPx={220} maxPx={520} invert />
+              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={280} minPx={220} maxPx={420} invert />
             {/* Desktop aside: ficha quando há lead, achievements quando não */}
-            <div className="hidden md:flex md:flex-col md:w-[var(--cap-aside-w)] md:border-l border-border/60 overflow-hidden">
+            <div className="hidden md:flex md:flex-col md:w-[var(--cap-aside-w)] md:min-w-[220px] md:max-w-[420px] md:border-l border-border/60 overflow-hidden">
 
               {selectedId ? (
                 <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />
@@ -406,12 +410,12 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           </div>
         </GameShell>
       ) : (
-        <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "14rem", "--cap-aside-w": "18rem" } as React.CSSProperties}>
+        <div data-resize-scope className="flex-1 min-h-0 w-full flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "13rem", "--cap-aside-w": "17rem" } as React.CSSProperties}>
           {/* Lista: full-width no mobile sem seleção; escondida no mobile com seleção; sidebar fixa em md+ */}
-          <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 overflow-hidden`}>
+          <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 md:min-w-[180px] md:max-w-[320px] overflow-hidden`}>
             <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
           </div>
-          <DragResizer storageKey="captacao-list" cssVar="cap-list-w" defaultPx={256} minPx={180} maxPx={420} />
+          <DragResizer storageKey="captacao-list" cssVar="cap-list-w" defaultPx={220} minPx={180} maxPx={320} />
 
           {/* Main: escondida no mobile sem seleção */}
             <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden min-w-0 min-h-0`}>
@@ -426,6 +430,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
               </div>
             ) : (
               <>
+                {/* Sub-header: nome do lead + botões */}
                 <div className="px-3 py-1.5 border-b border-border bg-card/40 flex items-center justify-between gap-2 shrink-0">
                   <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setSelectedId(null)} title="Voltar">
                     <ChevronLeft className="w-4 h-4" />
@@ -445,9 +450,14 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                     <ChevronDown className={`w-4 h-4 transition-transform ${showAside ? "rotate-180" : ""}`} />
                   </Button>
                 </div>
-                <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
-                  <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-2 flex items-center gap-1">10 Passos · clique para enviar <HelpHint {...STEPS_HELP} /></h3>
+
+                {/* Desktop: passos (topo fixo) + conversa (flex-1 scroll interno) — sem scroll externo */}
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  {/* Passos — altura fixa/compacta no desktop, scroll no mobile */}
+                  <div className="shrink-0 p-2 border-b border-border/40">
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-1.5 flex items-center gap-1">
+                      10 Passos · clique para enviar <HelpHint {...STEPS_HELP} />
+                    </h3>
                     <CaptureStepsGrid
                       consultantId={consultantId}
                       customerId={selectedId}
@@ -455,16 +465,15 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       onSent={(stepId) => setSentSteps((s) => new Set(s).add(stepId))}
                     />
                   </div>
-                  <CaptureConversationFeed customerId={selectedId} />
-                  <div className="rounded-lg border border-border/40 bg-muted/20 p-3 text-[11px] text-muted-foreground space-y-1">
-                    <p><span className="font-semibold text-foreground/70">Como funciona:</span> envie os passos e, conforme o cliente responde, os campos são preenchidos automaticamente via OCR. Capturas em sequência acumulam bônus de pontos.</p>
-                    <p className="hidden md:block">Edite manualmente qualquer campo na ficha à direita.</p>
-                    <p className="md:hidden">Toque no <span className="font-bold">▾</span> acima para abrir a ficha e editar campos.</p>
-                  </div>
 
-                  {/* Ficha colapsável só no mobile */}
-                  <div className={`md:hidden ${showAside ? "block" : "hidden"}`}>
-                    <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} embedded />
+                  {/* Conversa — ocupa o espaço restante com scroll interno */}
+                  <div className="flex-1 min-h-0 overflow-hidden flex flex-col p-2 gap-2">
+                    <CaptureConversationFeed customerId={selectedId} />
+
+                    {/* Ficha colapsável só no mobile */}
+                    <div className={`md:hidden ${showAside ? "block" : "hidden"}`}>
+                      <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} embedded />
+                    </div>
                   </div>
                 </div>
               </>
@@ -474,8 +483,8 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           {/* Ficha desktop fixa à direita */}
           {selectedId && (
             <>
-              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={320} minPx={220} maxPx={560} invert />
-              <div className="hidden md:flex md:w-[var(--cap-aside-w)] md:shrink-0">
+              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={280} minPx={220} maxPx={420} invert />
+              <div className="hidden md:flex md:flex-col md:w-[var(--cap-aside-w)] md:shrink-0 md:min-w-[220px] md:max-w-[420px] overflow-hidden">
                 <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />
               </div>
             </>

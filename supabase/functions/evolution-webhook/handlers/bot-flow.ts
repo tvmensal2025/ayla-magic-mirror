@@ -886,7 +886,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
       const { data: stepRow } = await supabase
         .from("bot_flow_steps")
-        .select("step_key, slot_key, message_text, media_order")
+        .select("step_key, slot_key, message_text, media_order, captures, transitions, step_type")
         .eq("flow_id", (flow as any).id)
         .eq("step_key", stepKey)
         .maybeSingle();
@@ -1117,6 +1117,36 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           console.warn(`[dispatch:${stepKey}] fallback C→B falhou:`, (e as any)?.message);
         }
       }
+
+      // ─── BOTÕES INTERATIVOS ──────────────────────────────────────────
+      // Se o passo tem botões configurados (captures._buttons), envia
+      // como mensagem com opções numeradas DEPOIS do conteúdo principal.
+      // Isso permite que passos de simulação/conversão tenham CTAs claros
+      // ("✅ Quero finalizar", "❓ Tenho dúvidas", "👤 Falar com humano").
+      try {
+        const captures = Array.isArray((stepRow as any).captures) ? (stepRow as any).captures : [];
+        const buttonsCapture = captures.find((c: any) => c?.field === "_buttons" && Array.isArray(c?.value));
+        const buttons = buttonsCapture?.value || [];
+        if (buttons.length > 0 && sent) {
+          // Pequena pausa pra separar o conteúdo dos botões visualmente
+          await new Promise((r) => setTimeout(r, 600));
+          // Evolution não suporta botões reais — envia como opções numeradas
+          const buttonText = buttons.map((b: any, i: number) => `${i + 1}. ${b.title}`).join("\n");
+          const ctaText = `\n*Toque numa opção (ou digite o número):*\n${buttonText}`;
+          await sendText(remoteJid, ctaText);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id,
+            message_direction: "outbound",
+            message_text: ctaText,
+            message_type: "text",
+            conversation_step: stepKey,
+          });
+          console.log(`[dispatch:${stepKey}] enviou ${buttons.length} botão(ões) como CTA`);
+        }
+      } catch (e) {
+        console.warn(`[dispatch:${stepKey}] envio de botões falhou:`, (e as any)?.message);
+      }
+
       return sent;
     } catch (e) {
       console.warn(`[dispatch:${stepKey}] erro geral:`, (e as any)?.message);
@@ -2799,16 +2829,35 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
           });
         }
-        // SAFETY-BELT: após SIM, NUNCA enviar outro passo informativo (message).
-        // O fluxo correto é avançar direto para captura de documento/finalização.
+        // SAFETY-BELT: após SIM, pula apenas passos `message` VAZIOS (sem
+        // texto e sem slot_key). Passos de simulação/pitch/conversão DEVEM
+        // ser enviados — é onde o lead vê a economia e decide finalizar.
+        // Detecta passos de conversão pela presença de:
+        //   - mídia (slot_key)
+        //   - botões (captures._buttons)
+        //   - variáveis de economia ({{economia_mensal}}, {{economia_anual}}, {{valor}})
+        //   - texto não vazio com mais de 20 chars
         if (nextCustom && nextCustom.step_type === "message") {
-          const forwardCapture = await findNextActiveFlowStep(supabase, customer.consultant_id, {
-            afterPosition: _captureContaPos > 0 ? _captureContaPos : undefined,
-            stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
-          });
-          if (forwardCapture) {
-            console.warn(`[post-confirm-conta] pulando message "${nextCustom.step_key}" → ${forwardCapture.step_key} (${forwardCapture.step_type})`);
-            nextCustom = forwardCapture;
+          const text = String(nextCustom.message_text || "").trim();
+          const hasSlot = !!(nextCustom.slot_key && String(nextCustom.slot_key).trim());
+          const hasButtons = Array.isArray((nextCustom as any).captures)
+            && (nextCustom as any).captures.some((c: any) => c?.field === "_buttons" && Array.isArray(c?.value) && c.value.length > 0);
+          const hasEconomyVar = /\{\{?\s*(economia|valor|simul)/i.test(text);
+          const hasMeaningfulText = text.length >= 20;
+          const isMeaningful = hasSlot || hasButtons || hasEconomyVar || hasMeaningfulText;
+
+          if (!isMeaningful) {
+            // Passo realmente vazio — pula direto para captura/finalização
+            const forwardCapture = await findNextActiveFlowStep(supabase, customer.consultant_id, {
+              afterPosition: Number(nextCustom.position) || (_captureContaPos > 0 ? _captureContaPos : undefined),
+              stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
+            });
+            if (forwardCapture) {
+              console.warn(`[post-confirm-conta] pulando message vazio "${nextCustom.step_key}" → ${forwardCapture.step_key}`);
+              nextCustom = forwardCapture;
+            }
+          } else {
+            console.log(`[post-confirm-conta] mantendo message "${nextCustom.step_key}" (slot=${hasSlot} btns=${hasButtons} econ=${hasEconomyVar} chars=${text.length}) — passo de simulação/conversão`);
           }
         }
         const DOC_FALLBACK = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH, o que estiver mais à mão.`;

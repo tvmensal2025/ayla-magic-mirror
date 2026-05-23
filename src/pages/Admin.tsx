@@ -314,7 +314,7 @@ const AdminContent = () => {
 
       {/* Content */}
       <main className={activeTab === "captacao" || activeTab === "whatsapp" || activeTab === "crm"
-        ? "w-full flex-1 min-h-0 px-1.5 sm:px-2 lg:px-3 py-1.5 overflow-hidden flex flex-col gap-1.5"
+        ? "w-full flex-1 min-h-0 px-1 sm:px-1.5 lg:px-2 py-1 overflow-hidden flex flex-col gap-1"
         : "flex-1 min-h-0 overflow-y-auto max-w-[1760px] mx-auto px-3 sm:px-6 lg:px-8 xl:px-12 py-4 sm:py-6 space-y-6 overflow-x-hidden"}>
         {/* OCR Review Banner — aparece quando há leads aguardando o consultor
             decidir entre "Eu confirmo" / "Pedir ao cliente" os dados extraídos

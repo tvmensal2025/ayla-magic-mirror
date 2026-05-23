@@ -17,7 +17,8 @@ export type FlowWarning = {
     | "empty_message"
     | "ocr_without_confirm"
     | "ai_no_buttons"
-    | "ai_no_humano_exit";
+    | "ai_no_humano_exit"
+    | "conversion_step_no_cta";
   message: string;
 
 
@@ -262,6 +263,39 @@ export function useFlowValidation(steps: Step[]): FlowValidation {
               level: "warn",
               kind: "ai_no_humano_exit",
               message: "Adicione um botão 'Falar com humano' como saída de emergência.",
+            });
+          }
+        }
+      }
+
+      // Passos de SIMULAÇÃO/CONVERSÃO entre OCR e captura de documento.
+      // Detecta passos `message` ativos que vêm DEPOIS de capture_conta e
+      // ANTES de capture_documento/finalizar_cadastro. Esses passos são
+      // CTAs cruciais (mostrar economia, pitch de fechamento) e precisam
+      // de botões para o cliente decidir prosseguir. Sem botões, o lead
+      // recebe a simulação e não sabe o que fazer — taxa de conversão cai.
+      if (s.step_type === "message" && s.is_active) {
+        const captureContaPos = steps
+          .find((x) => x.step_type === "capture_conta" && x.is_active)?.position;
+        const captureDocOrFinalPos = steps
+          .filter((x) => (x.step_type === "capture_documento" || x.step_type === "finalizar_cadastro") && x.is_active)
+          .map((x) => x.position)
+          .sort((a, b) => a - b)[0];
+        const isBetween =
+          captureContaPos != null &&
+          captureDocOrFinalPos != null &&
+          s.position > captureContaPos &&
+          s.position < captureDocOrFinalPos;
+        if (isBetween) {
+          const btns = getButtons(s);
+          if (btns.length === 0) {
+            warnings.push({
+              id: `${s.id}:conversion_step_no_cta`,
+              stepId: s.id,
+              level: "warn",
+              kind: "conversion_step_no_cta",
+              message:
+                "Passo de simulação/conversão sem botão CTA. Adicione 'Quero finalizar' ou 'Tenho dúvidas' para guiar o cliente — sem isso, o lead pode parar aqui e não avançar para o cadastro.",
             });
           }
         }
