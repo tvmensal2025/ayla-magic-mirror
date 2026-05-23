@@ -30,6 +30,16 @@ import { simulateMatch, detectRuleConflicts } from "@/lib/flowSimulator";
 // ---------------------------------------------------------------------------
 type IconKey = "msg" | "video" | "sparkle" | "user" | "file";
 
+type Variant = "A" | "B" | "C" | "D" | "E";
+const ALL_VARIANTS: Variant[] = ["A", "B", "C", "D", "E"];
+const VARIANT_LABEL: Record<Variant, string> = {
+  A: "A (com áudio)",
+  B: "B (sem áudio)",
+  C: "C (vídeo inicial)",
+  D: "D (personalizado)",
+  E: "E (personalizado)",
+};
+
 type Transition = {
   trigger_intent: string;            // 'afirmacao' | 'negacao' | 'tem_duvida' | 'ja_assistiu_video' | 'quer_cadastrar' | 'valor_brl' | 'nome_proprio' | 'telefone_br' | 'cpf_br' | 'palavra_chave' | string custom
   trigger_phrases: string[];
@@ -186,32 +196,40 @@ export default function FluxoCamila() {
   const [showMigrationBanner, setShowMigrationBanner] = useState(
     () => typeof window !== "undefined" && !localStorage.getItem("camila_migration_v2_dismissed")
   );
-  // A/B/C test state
-  const [editingVariant, setEditingVariant] = useState<"A" | "B" | "C">("A");
-  const [hasFlowB, setHasFlowB] = useState(false);
-  const [hasFlowC, setHasFlowC] = useState(false);
-  const [abEnabled, setAbEnabled] = useState(false);
-  const [variantCounts, setVariantCounts] = useState<{ A: number; B: number; C: number }>({ A: 0, B: 0, C: 0 });
-  const [cloneBusy, setCloneBusy] = useState(false);
-  const [cloneCBusy, setCloneCBusy] = useState(false);
+  // Variantes dinâmicas A..E
+  const [editingVariant, setEditingVariant] = useState<Variant>("A");
+  const [existingVariants, setExistingVariants] = useState<Variant[]>(["A"]);
+  const [activeVariants, setActiveVariantsState] = useState<Variant[]>(["A"]);
+  const [variantCounts, setVariantCounts] = useState<Record<Variant, number>>({ A: 0, B: 0, C: 0, D: 0, E: 0 });
+  const [cloneBusy, setCloneBusy] = useState<Variant | null>(null);
 
-  const reload = useCallback(async (uid: string, variant: "A" | "B" | "C" = "A") => {
-    const [{ data: cons }, { data: flows }, { count }, { data: flowB }, { data: flowC }, vAResp, vBResp, vCResp] = await Promise.all([
-      supabase.from("consultants").select("conversational_flow_enabled, ab_test_enabled").eq("id", uid).maybeSingle(),
+  const reload = useCallback(async (uid: string, variant: Variant = "A") => {
+    const [{ data: cons }, { data: flows }, { count }, { data: allFlows }, { data: allCustomers }] = await Promise.all([
+      supabase.from("consultants").select("conversational_flow_enabled, active_variants").eq("id", uid).maybeSingle(),
       (supabase as any).from("bot_flows").select("id, initial_delay_seconds").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
       supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("conversational_flow_enabled", true),
-      supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("variant", "B").limit(1),
-      supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("variant", "C").limit(1),
-      supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "A"),
-      supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "B"),
-      supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "C"),
+      supabase.from("bot_flows").select("variant").eq("consultant_id", uid).eq("is_active", true),
+      supabase.from("customers").select("flow_variant").eq("consultant_id", uid),
     ]);
     setGlobalAtivo(!!cons?.conversational_flow_enabled);
-    setAbEnabled(!!(cons as any)?.ab_test_enabled);
+    const av = (((cons as any)?.active_variants as string[] | null) || ["A"]).filter(
+      (x): x is Variant => ALL_VARIANTS.includes(x as Variant)
+    );
+    setActiveVariantsState(av.length ? av : ["A"]);
     setTestCount(count ?? 0);
-    setHasFlowB((flowB?.length ?? 0) > 0);
-    setHasFlowC((flowC?.length ?? 0) > 0);
-    setVariantCounts({ A: (vAResp as any)?.count ?? 0, B: (vBResp as any)?.count ?? 0, C: (vCResp as any)?.count ?? 0 });
+
+    const ex = new Set<Variant>(["A"]);
+    for (const r of ((allFlows as any[]) || [])) {
+      if (ALL_VARIANTS.includes(r.variant)) ex.add(r.variant);
+    }
+    setExistingVariants(ALL_VARIANTS.filter((v) => ex.has(v)));
+
+    const vc: Record<Variant, number> = { A: 0, B: 0, C: 0, D: 0, E: 0 };
+    for (const r of ((allCustomers as any[]) || [])) {
+      const fv = (r.flow_variant || "A") as Variant;
+      if (ALL_VARIANTS.includes(fv)) vc[fv]++;
+    }
+    setVariantCounts(vc);
 
     let fid = flows?.[0]?.id ?? null;
     if (!fid && variant === "A") {
@@ -270,45 +288,43 @@ export default function FluxoCamila() {
     })();
   }, [navigate, reload, editingVariant]);
 
-  async function toggleAbTest(v: boolean) {
+  async function setActiveVariants(next: Variant[]) {
     if (!userId) return;
-    setAbEnabled(v);
-    const { error } = await supabase.from("consultants").update({ ab_test_enabled: v } as any).eq("id", userId);
-    if (error) { toast.error(error.message); setAbEnabled(!v); return; }
-    toast.success(v ? "Teste A/B/C ligado — novos leads alternam A/B/C" : "Teste A/B/C desligado — todos novos leads vão para A");
+    const arr = next.length ? next : (["A"] as Variant[]);
+    const prev = activeVariants;
+    setActiveVariantsState(arr);
+    const { error } = await supabase.from("consultants").update({ active_variants: arr } as any).eq("id", userId);
+    if (error) { toast.error(error.message); setActiveVariantsState(prev); return; }
+    toast.success(arr.length > 1 ? `Round-robin ligado: ${arr.join(" + ")}` : "Apenas Fluxo A em uso");
   }
 
-  async function cloneFlowB() {
-    if (!userId) return;
-    if (hasFlowB && !confirm("Já existe Fluxo B. Recriar (apaga e copia do A novamente)?")) return;
-    setCloneBusy(true);
+  function toggleActiveVariant(v: Variant, checked: boolean) {
+    if (v === "A" && !checked) {
+      toast.error("Fluxo A é obrigatório no sorteio.");
+      return;
+    }
+    const set = new Set(activeVariants);
+    if (checked) set.add(v); else set.delete(v);
+    void setActiveVariants(ALL_VARIANTS.filter((x) => set.has(x)));
+  }
+
+  async function cloneFlowAs(v: Variant) {
+    if (!userId || v === "A") return;
+    const exists = existingVariants.includes(v);
+    if (exists && !confirm(`Já existe Fluxo ${v}. Recriar (apaga e copia do A novamente)?`)) return;
+    setCloneBusy(v);
     try {
-      const { error } = await supabase.rpc("clone_bot_flow_as_b" as any, { _consultant_id: userId });
+      const { error } = await supabase.rpc("clone_bot_flow_as" as any, { _consultant_id: userId, _variant: v });
       if (error) throw error;
-      toast.success("Fluxo B criado a partir do A (sem áudio).");
+      toast.success(`Fluxo ${v} criado a partir do A.`);
       await reload(userId, editingVariant);
     } catch (e: any) {
       toast.error(e?.message || "Erro ao clonar");
     } finally {
-      setCloneBusy(false);
+      setCloneBusy(null);
     }
   }
 
-  async function cloneFlowC() {
-    if (!userId) return;
-    if (hasFlowC && !confirm("Já existe Fluxo C. Recriar (apaga e copia do A novamente)?")) return;
-    setCloneCBusy(true);
-    try {
-      const { error } = await supabase.rpc("clone_bot_flow_as_c" as any, { _consultant_id: userId });
-      if (error) throw error;
-      toast.success("Fluxo C criado a partir do A. Adicione um vídeo no primeiro passo!");
-      await reload(userId, editingVariant);
-    } catch (e: any) {
-      toast.error(e?.message || "Erro ao clonar");
-    } finally {
-      setCloneCBusy(false);
-    }
-  }
 
   // ---------------------------------------------------------------------------
   // Mutadores otimistas
@@ -577,74 +593,95 @@ export default function FluxoCamila() {
           </div>
         </Card>
 
-        {/* Teste A/B/C */}
+        {/* Fluxos ativos (A..E) */}
         <Card className="p-4 sm:p-5 border-purple-500/30 bg-purple-500/5">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-start justify-between gap-4 flex-wrap mb-3">
             <div className="flex-1 min-w-[220px]">
               <div className="flex items-center gap-2 mb-1">
                 <FlaskConical className="h-4 w-4 text-purple-500" />
-                <Label className="text-base font-semibold">Teste A/B/C (áudio × só texto × vídeo inicial)</Label>
+                <Label className="text-base font-semibold">Fluxos ativos no round-robin</Label>
               </div>
               <p className="text-sm text-muted-foreground">
-                Quando ligado, novos leads alternam entre os 3 fluxos: 1º <strong>A</strong> (com áudio), 2º <strong>B</strong> (sem áudio, só texto), 3º <strong>C</strong> (com vídeo no início), 4º A, 5º B, 6º C... Cada fluxo é editado de forma independente.
+                Marque quais variantes participam do sorteio. Novos leads alternam ciclicamente entre as marcadas. Edite cada uma na aba abaixo. Você pode ter até 5 variantes (A–E).
               </p>
             </div>
-            <Switch checked={abEnabled} onCheckedChange={toggleAbTest} disabled={!hasFlowB || !hasFlowC} />
-          </div>
-
-          <div className="mt-4 pt-4 border-t border-border/60 flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-3 text-sm flex-wrap">
-              <span>Leads:</span>
-              <Badge variant="secondary">A: {variantCounts.A}</Badge>
-              <Badge variant="secondary">B: {variantCounts.B}</Badge>
-              <Badge variant="secondary">C: {variantCounts.C}</Badge>
-              {(!hasFlowB || !hasFlowC) && (
-                <span className="text-xs text-muted-foreground">
-                  — crie os Fluxos {!hasFlowB ? "B" : ""}{!hasFlowB && !hasFlowC ? " e " : ""}{!hasFlowC ? "C" : ""} para habilitar o teste
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button variant="outline" size="sm" onClick={cloneFlowB} disabled={cloneBusy}>
-                {cloneBusy ? "Clonando…" : hasFlowB ? "Recriar B a partir do A" : "Criar Fluxo B (sem áudio)"}
-              </Button>
-              <Button variant="outline" size="sm" onClick={cloneFlowC} disabled={cloneCBusy}>
-                {cloneCBusy ? "Clonando…" : hasFlowC ? "Recriar C a partir do A" : "Criar Fluxo C (com vídeo)"}
-              </Button>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Rodando agora:</span>
+              <Badge className={activeVariants.length > 1 ? "bg-emerald-500 text-white" : "bg-muted text-foreground"}>
+                {activeVariants.filter((v) => existingVariants.includes(v)).join(" + ") || "A"}
+              </Badge>
             </div>
           </div>
 
-          {(hasFlowB || hasFlowC) && (
-            <div className="mt-4 pt-4 border-t border-border/60 flex items-center gap-3 flex-wrap">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-2">
+            {ALL_VARIANTS.map((v) => {
+              const exists = existingVariants.includes(v);
+              const isActive = activeVariants.includes(v);
+              return (
+                <div
+                  key={v}
+                  className={`flex items-center justify-between gap-2 rounded-md border p-2.5 ${
+                    isActive && exists ? "border-emerald-500/60 bg-emerald-500/5" : "border-border bg-background/50"
+                  } ${!exists ? "opacity-70" : ""}`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Checkbox
+                      id={`av-${v}`}
+                      checked={isActive}
+                      disabled={!exists}
+                      onCheckedChange={(c) => toggleActiveVariant(v, !!c)}
+                    />
+                    <label htmlFor={`av-${v}`} className="text-sm cursor-pointer min-w-0">
+                      <div className="font-semibold truncate">Fluxo {VARIANT_LABEL[v]}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {exists ? `Leads: ${variantCounts[v]}` : "Ainda não criado"}
+                      </div>
+                    </label>
+                  </div>
+                  {v !== "A" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      disabled={cloneBusy === v}
+                      onClick={() => cloneFlowAs(v)}
+                    >
+                      {cloneBusy === v ? "…" : exists ? "Recriar" : "+ Criar"}
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {existingVariants.length > 1 && (
+            <div className="mt-4 pt-4 border-t border-border/60 flex items-center gap-2 flex-wrap">
               <Label className="text-sm">Editando:</Label>
-              <div className="inline-flex rounded-md border border-border overflow-hidden">
-                <button
-                  type="button"
-                  className={`px-3 py-1.5 text-sm ${editingVariant === "A" ? "bg-primary text-primary-foreground" : "bg-background"}`}
-                  onClick={() => setEditingVariant("A")}
-                >Fluxo A (com áudio)</button>
-                <button
-                  type="button"
-                  disabled={!hasFlowB}
-                  className={`px-3 py-1.5 text-sm border-l border-border ${editingVariant === "B" ? "bg-primary text-primary-foreground" : "bg-background"} disabled:opacity-50`}
-                  onClick={() => setEditingVariant("B")}
-                >Fluxo B (sem áudio)</button>
-                <button
-                  type="button"
-                  disabled={!hasFlowC}
-                  className={`px-3 py-1.5 text-sm border-l border-border ${editingVariant === "C" ? "bg-primary text-primary-foreground" : "bg-background"} disabled:opacity-50`}
-                  onClick={() => setEditingVariant("C")}
-                >Fluxo C (vídeo inicial)</button>
+              <div className="inline-flex rounded-md border border-border overflow-hidden flex-wrap">
+                {existingVariants.map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className={`px-3 py-1.5 text-sm border-l first:border-l-0 border-border ${
+                      editingVariant === v ? "bg-primary text-primary-foreground" : "bg-background"
+                    }`}
+                    onClick={() => setEditingVariant(v)}
+                  >
+                    Fluxo {v}
+                  </button>
+                ))}
               </div>
               {editingVariant === "B" && (
-                <span className="text-xs text-muted-foreground">No Fluxo B, cada áudio é enviado como texto usando a transcrição (editável em cada passo).</span>
+                <span className="text-xs text-muted-foreground">Fluxo B: áudios são ignorados — use o texto de cada passo.</span>
               )}
               {editingVariant === "C" && (
-                <span className="text-xs text-muted-foreground">No Fluxo C, adicione um vídeo no primeiro passo para começar a conversa com um vídeo de apresentação.</span>
+                <span className="text-xs text-muted-foreground">Fluxo C: adicione um vídeo no primeiro passo.</span>
               )}
             </div>
           )}
         </Card>
+
+
 
 
         {showMigrationBanner && (
@@ -755,7 +792,7 @@ function StepCard(props: {
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
-  variant?: "A" | "B" | "C";
+  variant?: Variant;
 }) {
   const { step, numero, total, consultantId, allSteps, mediaCounts, onPatch, onMoveUp, onMoveDown, onDelete, variant = "A" } = props;
   const [localText, setLocalText] = useState(step.message_text ?? "");
@@ -1422,7 +1459,7 @@ function FlowAuditPanel({ steps, flowId, onRepaired }: { steps: Step[]; flowId: 
 
 function AiGenerateTextButton({
   consultantId, stepId, variant, onGenerated,
-}: { consultantId: string; stepId: string; variant: "A" | "B" | "C"; onGenerated: (t: string) => void }) {
+}: { consultantId: string; stepId: string; variant: Variant; onGenerated: (t: string) => void }) {
   const [loading, setLoading] = useState(false);
   async function gen() {
     if (loading) return;
