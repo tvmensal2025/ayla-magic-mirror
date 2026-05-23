@@ -170,29 +170,27 @@ Deno.serve(async (req) => {
     }
 
     // ============ MODO SIMULATE (debug) ============
-    // PLANO: 1 disparo de mensagem com chain ON (chega até último message)
-    //        + N disparos de capture sequenciais (cada um pede o input)
-    const firstMessage = messageSteps[0];
-    const sequence: Array<{ step: any; continueFlow: boolean; waitAfterMs: number }> = [];
-    if (firstMessage) {
-      sequence.push({ step: firstMessage, continueFlow: true, waitAfterMs: Math.max(messageSteps.length * 12_000, 30_000) });
-    }
-    for (const cap of captureSteps) {
-      sequence.push({ step: cap, continueFlow: false, waitAfterMs: 8_000 });
-    }
+    // Percorre TODOS os passos ativos por position (1 → N), sem depender de
+    // continueFlow (que para em pergunta/captura). Cada passo é disparado
+    // individualmente via manual-step-send.
+    const sequence = allSteps.map((s: any) => ({
+      step: s,
+      waitAfterMs: s.step_type === "message" ? 12_000 : 4_000,
+    }));
 
     const plan = sequence.map((s) => ({
       position: s.step.position,
       step_type: s.step.step_type,
       step_key: s.step.step_key,
       step_id: s.step.id,
-      continue_flow: s.continueFlow,
       wait_after_ms: s.waitAfterMs,
       text_preview: String(s.step.message_text || s.step.title || "").slice(0, 60),
     }));
 
     const fireAll = async () => {
-      for (const item of sequence) {
+      for (let i = 0; i < sequence.length; i++) {
+        const item = sequence[i];
+        const isLast = i === sequence.length - 1;
         const t0 = Date.now();
         const payload = {
           consultantId: customer.consultant_id,
@@ -200,7 +198,7 @@ Deno.serve(async (req) => {
           stepId: item.step.id,
           stepKey: item.step.step_key,
           part: "all",
-          continueFlow: item.continueFlow,
+          continueFlow: false,
           variant,
           force: true,
           skipNameGuard: true,
@@ -220,11 +218,11 @@ Deno.serve(async (req) => {
           result = { error: String((e as Error).message || e) };
         }
         const dt = Date.now() - t0;
-        console.log(`[dev-fire-all-steps] run=${runId} pos=${item.step.position} type=${item.step.step_type} chain=${item.continueFlow} status=${httpStatus} elapsed=${dt}ms result=${JSON.stringify(result).slice(0,200)}`);
+        console.log(`[dev-fire-all-steps] run=${runId} pos=${item.step.position} type=${item.step.step_type} key=${item.step.step_key} status=${httpStatus} elapsed=${dt}ms result=${JSON.stringify(result).slice(0,200)}`);
         await supabase.from("customers").update({ last_custom_prompt_at: null, bot_paused: false }).eq("id", customerId);
-        await new Promise((res) => setTimeout(res, item.waitAfterMs));
+        if (!isLast) await new Promise((res) => setTimeout(res, item.waitAfterMs));
       }
-      console.log(`[dev-fire-all-steps] run=${runId} DONE`);
+      console.log(`[dev-fire-all-steps] run=${runId} DONE total=${sequence.length}`);
     };
 
     // @ts-ignore EdgeRuntime
@@ -237,7 +235,7 @@ Deno.serve(async (req) => {
       customer: { id: customer.id, phone: phoneDigits, name: customer.name },
       flow: { id: flow.id, variant },
       total: plan.length,
-      strategy: "1 message with chain + N captures individuais (zero duplicação)",
+      strategy: "Disparo sequencial de TODOS os passos ativos por position (1 → N), sem encadeamento automático.",
       plan,
     });
 
