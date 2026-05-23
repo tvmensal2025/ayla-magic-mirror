@@ -87,6 +87,14 @@ Deno.serve(async (req) => {
         ocr_doc_attempts: 0,
         assigned_human_id: null,
         flow_variant: variant,
+        last_inbound_media_at: null,
+        last_inbound_media_url: null,
+        last_inbound_media_mime: null,
+        last_inbound_media_kind: null,
+        last_inbound_media_message_id: null,
+        media_message_id: null,
+        media_consumo: null,
+        media_storage: null,
       });
     }
     if (fresh) {
