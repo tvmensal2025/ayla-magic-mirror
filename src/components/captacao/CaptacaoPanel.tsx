@@ -56,6 +56,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const [mismatch, setMismatch] = useState<{ flag: boolean; bill: string; doc: string; acked: boolean }>({ flag: false, bill: "", doc: "", acked: false });
   const [missionsVersion, setMissionsVersion] = useState(0);
   const [showAside, setShowAside] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"passos" | "conversa" | "ficha">("passos");
   const { today, week, streak, bump } = useCaptureScoreboard(consultantId);
   const { toast } = useToast();
   const { templates } = useTemplates(consultantId);
