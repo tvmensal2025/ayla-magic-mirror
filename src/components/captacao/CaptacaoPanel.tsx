@@ -245,7 +245,8 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
             {/* Mobile: lead list visível só quando NÃO há lead selecionado. Desktop: sempre. */}
             <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 md:border-r border-border overflow-hidden`}>
 
-              <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
+              <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} gameOn />
+
             </div>
             <DragResizer storageKey="captacao-list" cssVar="cap-list-w" defaultPx={256} minPx={180} maxPx={420} />
             <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden min-w-0 min-h-0`}>
@@ -328,7 +329,8 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                         onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
                       />
                     </div>
-                    <CaptureConversationFeed customerId={selectedId} />
+                    <CaptureConversationFeed customerId={selectedId} gameOn />
+
 
                     {/* Ficha + Achievements aparecem no fim do scroll em mobile (quando expandidos) */}
                     <div className={`md:hidden ${showAside ? "block" : "hidden"} space-y-3`}>
