@@ -195,7 +195,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
 
   return (
     <>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <div className="flex items-center justify-between text-[11px]">
           <span className="font-bold uppercase tracking-wide text-muted-foreground">Passos do fluxo</span>
           <span className="tabular-nums font-bold text-primary">{sentSteps.size}/{display.length}</span>
@@ -204,7 +204,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
           <div className="h-full bg-gradient-to-r from-emerald-500 to-lime-400 transition-all duration-500"
                style={{ width: `${Math.round((sentSteps.size / Math.max(display.length, 1)) * 100)}%` }} />
         </div>
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-1.5 capture-card-flip">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(128px,1fr))] 2xl:grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-1.5 capture-card-flip">
           {display.map((s: StepRow, i: number) => {
             const sent = sentSteps.has(s.id);
             const isSending = sending === s.id;
@@ -213,7 +213,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
             return (
               <div
                 key={s.id}
-                className={`group relative rounded-lg border p-2.5 flex flex-col h-full transition-all duration-300 ${
+                className={`group relative rounded-md border p-2 flex flex-col h-full min-h-[128px] transition-all duration-300 ${
                   sent
                     ? "border-primary/60 bg-gradient-to-br from-primary/15 to-emerald-500/5 shadow-[0_0_14px_hsl(var(--primary)/0.2)] animate-exec-card"
                     : isNext
@@ -227,11 +227,11 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                     <Check className="w-3.5 h-3.5 text-primary drop-shadow-[0_0_4px_hsl(var(--primary))]" />
                   ) : null}
                 </div>
-                <p className="text-xs font-semibold leading-tight line-clamp-3 break-words">
+                <p className="text-[11px] font-semibold leading-tight line-clamp-2 break-words">
                   {s.title || s.step_key || "Passo"}
                 </p>
                 {inlinePreview && (
-                  <p className="mt-1 text-xs leading-snug text-muted-foreground line-clamp-3 italic break-words">
+                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground line-clamp-2 italic break-words">
                     “{inlinePreview}”
                   </p>
                 )}
@@ -245,7 +245,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                   <Button
                     size="sm"
                     variant={sent ? "outline" : "default"}
-                    className="h-8 px-2 text-[11px] flex-1 min-w-0 min-h-[36px]"
+                    className="h-7 px-2 text-[10px] flex-1 min-w-0"
                     onClick={() => setPreviewStep(s)}
                     disabled={isSending}
                     aria-busy={isSending}
