@@ -153,8 +153,14 @@ function parseCaptures(raw: unknown): Capture[] {
   if (!Array.isArray(raw)) return [];
   return (raw as any[])
     .filter((c) => c && typeof c.field === "string")
-    .map((c) => ({ field: c.field as CaptureField, enabled: c.enabled !== false }));
+    .map((c) => {
+      // Preserva campos extras (ex.: _buttons.value) sem perder tipagem básica
+      const base: any = { field: c.field, enabled: c.enabled !== false };
+      if (c.field === "_buttons" && Array.isArray(c.value)) base.value = c.value;
+      return base as Capture;
+    });
 }
+
 
 function parseFallback(raw: unknown, transitions: unknown): Fallback {
   // 1) usa coluna nova se preenchida
@@ -307,6 +313,25 @@ export default function FluxoCamila() {
     if (checked) set.add(v); else set.delete(v);
     void setActiveVariants(ALL_VARIANTS.filter((x) => set.has(x)));
   }
+
+  const [seedDBusy, setSeedDBusy] = useState(false);
+  async function seedFlowD() {
+    if (!userId) return;
+    if (!confirm("Criar/Recriar Fluxo D com botões Whapi (welcome → Simular / Como funciona / Falar com humano) e deixar D como ÚNICO ativo?")) return;
+    setSeedDBusy(true);
+    try {
+      const { error } = await supabase.rpc("seed_flow_d" as any, { _consultant_id: userId });
+      if (error) throw error;
+      toast.success("Fluxo D criado. D agora é o único ativo no round-robin.");
+      await reload(userId, "D" as Variant);
+    } catch (e: any) {
+      toast.error(e?.message || "Erro ao criar Fluxo D");
+    } finally {
+      setSeedDBusy(false);
+    }
+  }
+
+
 
   async function cloneFlowAs(v: Variant) {
     if (!userId || v === "A") return;
@@ -654,6 +679,20 @@ export default function FluxoCamila() {
             })}
           </div>
 
+          {/* Receita pronta: Fluxo D com botões Whapi */}
+          <div className="mt-4 pt-4 border-t border-border/60 flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-xs text-muted-foreground flex-1 min-w-[200px]">
+              <strong className="text-foreground">Receita pronta:</strong> Fluxo D com botões Whapi
+              (welcome → Quero simular / Como funciona / Falar com humano → simulação 8–20% → cadastro automático).
+              Reaproveita áudios e vídeos do Fluxo A.
+            </div>
+            <Button size="sm" variant="default" disabled={seedDBusy} onClick={seedFlowD}>
+              {seedDBusy ? "Criando…" : existingVariants.includes("D") ? "Recriar Fluxo D" : "✨ Criar Fluxo D (botões)"}
+            </Button>
+          </div>
+
+
+
           {existingVariants.length > 1 && (
             <div className="mt-4 pt-4 border-t border-border/60 flex items-center gap-2 flex-wrap">
               <Label className="text-sm">Editando:</Label>
@@ -961,6 +1000,16 @@ function StepCard(props: {
         />
       </div>
 
+      {/* Botões de resposta rápida (Whapi) — apenas para passos do tipo mensagem */}
+      {(step.step_type || "message") === "message" && (
+        <ButtonsEditor
+          captures={step.captures as any}
+          onChange={(novas) => onPatch({ captures: novas as any })}
+        />
+      )}
+
+
+
 
       {/* BLOCO 1 — REGRAS */}
       <BlockShell
@@ -1062,6 +1111,98 @@ function StepCard(props: {
     </Card>
   );
 }
+
+// ---------------------------------------------------------------------------
+// ButtonsEditor — botões de resposta rápida (Whapi quick_reply, máx 3)
+// Persiste em bot_flow_steps.captures como { field:"_buttons", value:[{id,title}] }
+// ---------------------------------------------------------------------------
+type QuickButton = { id: string; title: string };
+
+function ButtonsEditor({
+  captures,
+  onChange,
+}: {
+  captures: Capture[];
+  onChange: (caps: Capture[]) => void;
+}) {
+  const entry = (captures as any[]).find((c) => c?.field === "_buttons");
+  const enabled = !!entry?.enabled;
+  const buttons: QuickButton[] = Array.isArray(entry?.value) ? entry.value : [];
+
+  const updateButtons = (next: QuickButton[]) => {
+    const others = (captures as any[]).filter((c) => c?.field !== "_buttons");
+    if (!enabled && next.length === 0) { onChange(others as any); return; }
+    onChange([...others, { field: "_buttons", enabled: true, value: next.slice(0, 3) }] as any);
+  };
+
+  const toggle = (v: boolean) => {
+    const others = (captures as any[]).filter((c) => c?.field !== "_buttons");
+    if (!v) { onChange(others as any); return; }
+    onChange([...others, { field: "_buttons", enabled: true, value: buttons.length ? buttons : [{ id: "opcao_1", title: "Opção 1" }] }] as any);
+  };
+
+  return (
+    <div className="mt-4 rounded-md border border-violet-500/20 bg-violet-500/[0.04] p-3">
+      <label className="flex items-center gap-2 cursor-pointer">
+        <Checkbox checked={enabled} onCheckedChange={(v) => toggle(!!v)} />
+        <span className="text-sm font-medium">📲 Mostrar botões de resposta rápida (Whapi)</span>
+      </label>
+      <p className="text-[11px] text-muted-foreground mt-1 ml-6">
+        Até 3 botões. O <code>id</code> precisa bater com uma <em>frase</em> de uma regra acima
+        (ex.: id <code>simular</code> → regra com frase <code>simular</code>) para o clique levar pro passo certo.
+      </p>
+      {enabled && (
+        <div className="mt-3 space-y-2">
+          {buttons.map((b, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Input
+                placeholder="Título (máx 20)"
+                value={b.title}
+                maxLength={20}
+                onChange={(e) => {
+                  const next = [...buttons];
+                  next[i] = { ...next[i], title: e.target.value };
+                  updateButtons(next);
+                }}
+                className="h-8 flex-1"
+              />
+              <Input
+                placeholder="id (ex: simular)"
+                value={b.id}
+                onChange={(e) => {
+                  const next = [...buttons];
+                  next[i] = { ...next[i], id: e.target.value.replace(/\s+/g, "_").toLowerCase() };
+                  updateButtons(next);
+                }}
+                className="h-8 w-32 font-mono text-xs"
+              />
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                onClick={() => updateButtons(buttons.filter((_, idx) => idx !== i))}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+          {buttons.length < 3 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[11px]"
+              onClick={() => updateButtons([...buttons, { id: `opcao_${buttons.length + 1}`, title: `Opção ${buttons.length + 1}` }])}
+            >
+              <Plus className="h-3 w-3 mr-1" /> Adicionar botão
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 
 // ---------------------------------------------------------------------------
 // BlockShell — visual wrapper para os 3 blocos

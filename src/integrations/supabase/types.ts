@@ -4683,6 +4683,7 @@ export type Database = {
         Args: { _consultant_id: string }
         Returns: string
       }
+      seed_flow_d: { Args: { _consultant_id: string }; Returns: Json }
       seed_objection_shortcut: {
         Args: {
           _flow_id: string
