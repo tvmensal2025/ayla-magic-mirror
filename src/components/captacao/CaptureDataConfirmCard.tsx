@@ -81,104 +81,14 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
         ocr_review_decided_by: "consultant",
       } as any).eq("id", customer.id);
 
-      // Despacha passos `message` intermediários (ex.: d_resultado/simulação dos
-      // 20%) entre o capture atual e o próximo capture — igual ao OcrReviewCard.
+      // Despacha passos `message` intermediários + fallback simulação +
+      // próximo capture via helper compartilhado (mesma lógica do OcrReviewCard).
       try {
-        const nextCaptureKey = kind === "bill" ? "capture_documento" : "finalizar_cadastro";
-        const currentCaptureType = kind === "bill" ? "capture_conta" : "capture_documento";
-        const variant = (customer as any)?.flow_variant || "A";
-        const { data: flowRow } = await supabase
-          .from("bot_flows")
-          .select("id")
-          .eq("consultant_id", customer.consultant_id)
-          .eq("is_active", true)
-          .eq("variant", variant)
-          .maybeSingle();
-        let dispatchedBetween = 0;
-        if (flowRow?.id) {
-          const { data: allSteps } = await supabase
-            .from("bot_flow_steps")
-            .select("position, step_key, step_type, is_active")
-            .eq("flow_id", flowRow.id)
-            .eq("is_active", true)
-            .order("position", { ascending: true });
-          const steps = (allSteps as any[]) || [];
-          const captureIdx = steps.findIndex((s) => s.step_type === currentCaptureType);
-          const nextStopIdx = steps.findIndex(
-            (s, i) => i > captureIdx && (s.step_type === "capture_documento" || s.step_type === "capture_doc" || s.step_type === "capture_email" || s.step_type === "confirm_phone" || s.step_type === "finalizar_cadastro"),
-          );
-          const between = captureIdx >= 0
-            ? steps.slice(captureIdx + 1, nextStopIdx > 0 ? nextStopIdx : steps.length).filter((s) => s.step_type === "message")
-            : [];
-          for (const msgStep of between) {
-            try {
-              await supabase.functions.invoke("manual-step-send", {
-                body: {
-                  consultantId: customer.consultant_id,
-                  customerId: customer.id,
-                  stepKey: msgStep.step_key,
-                  part: "all",
-                  continueFlow: false,
-                  skipNameGuard: true,
-                },
-              });
-              dispatchedBetween++;
-              await new Promise((r) => setTimeout(r, 1800));
-            } catch (msgErr: any) {
-              console.warn(`[confirm-self] msg-step ${msgStep.step_key} failed:`, msgErr?.message);
-            }
-          }
-        }
-
-        // Se o fluxo do consultor NÃO tem passo de simulação entre conta
-        // e doc (variantes A/B típicas), injeta a proposta padrão (8%–20%)
-        // pra cliente ver o benefício antes de mandar o documento.
-        if (kind === "bill" && dispatchedBetween === 0) {
-          try {
-            const valor = Number((customer as any)?.electricity_bill_value || 0);
-            if (valor > 30) {
-              const min = Math.max(1, Math.floor(valor * 0.08));
-              const max = Math.max(min + 1, Math.ceil(valor * 0.20));
-              const fmtBRL = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-              const firstName = String(customer?.name || "").trim().split(/\s+/)[0] || "";
-              const simText =
-                `🎉 *Pronto${firstName ? `, ${firstName}` : ""}!* Já fiz a *simulação* com base na sua conta.\n\n` +
-                `💡 Conta atual: *R$ ${fmtBRL(valor)}*\n` +
-                `💚 Economia estimada: *de R$ ${min} (8%) até R$ ${max} (20%)* todo mês\n\n` +
-                `✅ Sem obra\n✅ Sem instalação\n✅ Mesma distribuidora — só muda quem fornece a energia\n\n` +
-                `Bora *finalizar seu cadastro agora*? 🚀`;
-              let phone = String(customer?.phone_whatsapp || "").replace(/\D/g, "");
-              if (phone && !phone.startsWith("55")) phone = "55" + phone;
-              if (phone) {
-                const to = `${phone}@s.whatsapp.net`;
-                await supabase.functions.invoke("whapi-proxy", {
-                  body: { action: "send_text", consultantId: customer.consultant_id, payload: { to, text: simText } },
-                });
-                await supabase.from("conversations").insert({
-                  customer_id: customer.id, message_direction: "outbound",
-                  message_text: simText, message_type: "text", conversation_step: "simulacao_consultor",
-                });
-                await new Promise((r) => setTimeout(r, 1500));
-              }
-            }
-          } catch (simErr: any) {
-            console.warn("[confirm-self] simulação default falhou:", simErr?.message);
-          }
-        }
-
-        await supabase.functions.invoke("manual-step-send", {
-          body: {
-            consultantId: customer.consultant_id,
-            customerId: customer.id,
-            stepKey: nextCaptureKey,
-            part: "all",
-            continueFlow: true,
-            skipNameGuard: true,
-          },
-        });
+        await dispatchPostBillConfirm({ customer, kind, continueFlowOnNextCapture: true });
       } catch (advErr: any) {
         console.warn("[confirm-self] advance flow failed:", advErr?.message);
       }
+
 
       toast({ title: "✓ Confirmado", description: "Avançando para o próximo passo…", duration: 1800 });
       onConfirmed?.();
