@@ -1,0 +1,1 @@
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS ai_followups_count INTEGER NOT NULL DEFAULT 0;
