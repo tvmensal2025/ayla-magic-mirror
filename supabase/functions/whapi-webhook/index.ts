@@ -236,9 +236,11 @@ Deno.serve(async (req) => {
       .eq("id", superAdminConsultantId)
       .single();
 
-    const nomeRepresentante = consultantData?.name || "iGreen Energy";
+    // Usa só o PRIMEIRO NOME — soa mais natural no WhatsApp ("Rafael" em vez de "Rafael Ferreira").
+    const _fullName = consultantData?.name || "iGreen Energy";
+    const nomeRepresentante = _fullName.trim().split(/\s+/)[0] || "iGreen Energy";
     const consultorId = consultantData?.igreen_id || "124170";
-    console.log(`✅ Whapi super admin: ${nomeRepresentante} (iGreen ID: ${consultorId})`);
+    console.log(`✅ Whapi super admin: ${nomeRepresentante} (full: ${_fullName}, iGreen ID: ${consultorId})`);
 
 
 
