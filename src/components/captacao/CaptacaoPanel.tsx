@@ -26,9 +26,8 @@ import { sendWhatsAppMessage } from "@/services/messageSender";
 import { toast as sonnerToast } from "sonner";
 import { useCaptureSession } from "@/hooks/useCaptureSession";
 import { FinalizeButton } from "@/components/captacao/FinalizeButton";
-import { ResizableShell } from "@/components/layout/ResizableShell";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { DragResizer } from "@/components/layout/DragResizer";
+
 
 
 import { PortalStatusTracker } from "@/components/captacao/PortalStatusTracker";
@@ -36,7 +35,7 @@ import { PortalStatusTracker } from "@/components/captacao/PortalStatusTracker";
 interface Props { consultantId: string; onOpenChat?: (phone: string) => void; instanceName?: string | null; isWhapi?: boolean; }
 
 export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, isWhapi = false }: Props) {
-  const isMobile = useIsMobile();
+
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
