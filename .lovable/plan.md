@@ -1,69 +1,97 @@
-## Diagnóstico
+## Auditoria do fluxo de captação (Josinete / variante D)
 
-Cliente `JOSINETE` (`55d3c89f…`, variante D) saltou direto de "conta recebida" → mensagem `d_finalizar`, sem confirmação da conta no WhatsApp, sem mensagem de simulação (`d_resultado`) e sem pedir o documento (`d_pedir_documento`).
+Rodei o caminho `welcome → conta → simulação → documento → finalizar → portal` no código + no DB. O fluxo conduz até o portal, mas tem **um bug confirmado** (banner que não some) e **um ponto frágil** (atalho que pula a simulação).
 
-Logs e código mostram **dois bugs em série**:
+### Bug confirmado — banner "Revisar" não some
 
-### Bug 1 — `manual-step-send.buildContinuationPatch` ultrapassa passo de captura
-Quando o consultor clica **"Eu confirmo"** no `OcrReviewCard` (bill), o front chama `manual-step-send` com `stepKey: "capture_documento"` + `continueFlow: true`.
+No DB da JOSINETE (`55d3c89f-…`):
 
-`buildContinuationPatch` envia o conteúdo do passo de doc corretamente, mas o **loop de encadeamento (linha 841) continua avançando** após o passo clicado:
-- `d_pedir_documento` (pos 5, capture_documento) → conteúdo enviado, cursor = `aguardando_doc_auto` ✅
-- LOOP entra em `d_duvidas` (pos 6, message sem `?` nem intent transitions) → envia e segue ❌
-- LOOP cai em `d_finalizar` (pos 8, finalizar_cadastro) → envia o texto do "Finalizar" e **sobrescreve** `conversation_step` para `finalizando` ❌
+| Campo | Valor |
+|---|---|
+| `bill_data_confirmed_at` | 17:41:13 ✅ |
+| `bill_data_confirmation_by` | `consultant` ✅ |
+| `ocr_review_pending` | **`bill`** ❌ (deveria ser `null`) |
+| `ocr_review_decided_at` | **`null`** ❌ |
 
-Resultado: lead nunca foi convidado a mandar o RG/CNH; o bot já considera o cadastro pronto.
+Existem **dois componentes** com botão "Eu confirmo":
 
-### Bug 2 — `confirmando_dados_conta` (SIM) pula passos `message`
-No handler legacy, depois do SIM, o "SAFETY-BELT" (linhas 3140-3151) procura o **próximo passo de captura/finalização**, ignorando passos `message` entre a conta e o documento. Isso elimina a tela `d_resultado` (porcentagem de economia, valores) que o usuário quer ver antes do pedido de documento.
+1. `OcrReviewCard.confirmSelf` → limpa `ocr_review_pending`, `ocr_review_decided_at/by`. ✅ Correto.
+2. `CaptureDataConfirmCard.confirmSelf` (card embutido na ficha do lead, lado direito) → **só** seta `bill_data_confirmed_at`. **Não limpa `ocr_review_pending`** → o hook `useOcrReviewQueue` (filtra `ocr_review_pending IS NOT NULL`) continua exibindo o lead na fila.
 
-### Bug 3 — Confirmação no painel não envia simulação
-`OcrReviewCard.confirmSelf` chama direto `stepKey: "capture_documento"`, então mesmo se o Bug 1 for corrigido, ainda assim a mensagem `d_resultado` (pos 4) continua sendo pulada.
+A consultora clicou no card da ficha, e por isso o banner laranja "Conta de luz pronto pra revisar" continuou aparecendo mesmo após confirmar.
+
+O mesmo `CaptureDataConfirmCard.askClient` (botão "Pedir ao cliente") também não atualiza esses campos.
+
+### Ponto frágil — pula a simulação
+
+`CaptureDataConfirmCard.confirmSelf` chama `manual-step-send` direto com `stepKey: "capture_documento"`, sem despachar antes os passos `message` intermediários entre `capture_conta` e o próximo capture (no fluxo D do Rafael isso é o `d_resultado` da simulação dos 20%). Resultado: quem confirma pelo card da ficha pula a simulação. (`OcrReviewCard.confirmSelf` já faz esse encadeamento corretamente.)
+
+### Resto do fluxo — OK
+
+| Etapa | Status |
+|---|---|
+| 1. Welcome + 3 botões | OK (texto→áudio→vídeo→botões fallback que acabamos de adicionar) |
+| 2. Pergunta valor da conta | OK |
+| 3. Pede permissão | OK |
+| 4. Como funciona (texto+áudio+vídeo+botões) | OK com fallback novo |
+| 5. Convite cadastro | OK |
+| 6. Captura conta + OCR + review | OK |
+| 7. Captura documento + OCR + review | OK |
+| 8. `finalizar_cadastro` → habilita botão "Finalizar Cadastro 🚀" | OK |
+| 9. `finalize-capture` valida (`validateCustomerForPortal`) e marca `portal_submitting` | OK |
+| 10. Portal recebe OTP → cliente envia código → `complete` | OK |
+
+Não existe finalização automática hoje — o consultor sempre precisa clicar "Finalizar Cadastro". Isso é desejado (controle humano antes do portal); só vou listar isso na auditoria, sem alterar.
 
 ---
 
-## Mudanças
+## Plano de correção
 
-### 1. `supabase/functions/manual-step-send/index.ts` — parar o chain em captura
-Em `buildContinuationPatch`, logo após definir `patch.conversation_step` baseado no `clickedType`, **retornar imediatamente** se o passo clicado for de captura/confirm_phone/finalizar_cadastro. O chain só faz sentido depois de um passo `message`.
+### 1. `src/components/captacao/CaptureDataConfirmCard.tsx`
 
-```ts
-if (clickedType !== "message") {
-  // Captura: aguarda resposta do lead, nunca encadeia automaticamente.
-  return patch;
-}
+- Em `confirmSelf`, no payload de update incluir:
+  ```
+  ocr_review_pending: null,
+  ocr_review_decided_at: new Date().toISOString(),
+  ocr_review_decided_by: "consultant",
+  ```
+- Em `confirmSelf`, antes de chamar o próximo capture, replicar o trecho do `OcrReviewCard` que busca os passos `message` ativos entre o capture atual e o próximo capture/finalize, e despacha cada um via `manual-step-send` com `continueFlow: false` (assim a simulação é enviada antes do pedido do documento).
+- Em `askClient`, incluir no update:
+  ```
+  ocr_review_pending: null,
+  ocr_review_decided_at: new Date().toISOString(),
+  ocr_review_decided_by: "awaiting_client",
+  ```
+
+### 2. Migration de cleanup (1 linha)
+
+Limpar o estado preso da JOSINETE para o banner sumir agora:
+
+```sql
+update public.customers
+set ocr_review_pending = null,
+    ocr_review_decided_at = coalesce(ocr_review_decided_at, bill_data_confirmed_at, now()),
+    ocr_review_decided_by = coalesce(ocr_review_decided_by, 'consultant'),
+    updated_at = now()
+where ocr_review_pending is not null
+  and (
+    (ocr_review_pending = 'bill' and bill_data_confirmed_at is not null) or
+    (ocr_review_pending = 'doc'  and doc_data_confirmed_at  is not null)
+  );
 ```
 
-Isso isola o efeito do clique do consultor ao passo que ele realmente selecionou.
+Isso resolve a Josinete e qualquer outro lead que tenha caído no mesmo bug histórico.
 
-### 2. `OcrReviewCard.tsx` — emitir simulação antes do pedido de doc
-Em `confirmSelf`, quando `kind === "bill"`, **antes** de chamar `capture_documento`, percorrer os passos `message` ativos entre `capture_conta` e o próximo `capture_documento` e despachá-los via `manual-step-send` com `continueFlow: false` (apenas envia o conteúdo, sem mover cursor para finalizar).
+### 3. Auditoria — sem mudança de código
 
-Fluxo final no painel:
-1. `update customers ocr_review_*` (já existe).
-2. Para cada passo `message` ativo entre o `capture_conta` e o próximo `capture_documento`/`finalizar_cadastro`: `manual-step-send` com `stepKey` do passo, `continueFlow: false`, com pequeno delay (~2s).
-3. Por fim: `manual-step-send` com `stepKey: "capture_documento"`, `continueFlow: false` (o conteúdo do prompt do doc já é enviado, e com a correção do Bug 1, o cursor fica em `aguardando_doc_auto`).
+Documentar no resumo final para o usuário:
+- O fluxo conduz até o portal via botão "Finalizar Cadastro 🚀".
+- O botão só habilita quando `validateCustomerForPortal` passar (CPF, RG, foto conta, doc frente/verso, sem name_mismatch pendente).
+- Finalização permanece manual por design.
 
-Para `kind === "doc"` o comportamento permanece: chama `finalizar_cadastro` (que continua ok pois é o passo final).
+### Validação pós-deploy
 
-### 3. `bot-flow.ts` — preservar mensagens entre conta e documento no caminho SIM (Bug 2)
-Na branch `confirmando_dados_conta` → SIM (linhas 3127-3151), trocar a lógica:
-- Buscar o **próximo passo ativo** após `capture_conta_pos` SEM filtrar tipo.
-- Se for `message` (ex.: `d_resultado`): despachá-lo via `dispatchStepFromFlow` e fixar `conversation_step = <uuid>` (mesma lógica do bloco else `message → fica no UUID`), deixando o resolver pré-switch avançar quando o lead responder OU encadeando até o próximo capture.
-- Manter o caminho atual quando o próximo já é capture/finalizar.
-
-Implementação prática: reaproveitar o mesmo loop de `buildContinuationPatch` (despacha mensagens até bater em `capture_*`/`finalizar_cadastro` ou pergunta), garantindo que a simulação saia antes do pedido de doc tanto pelo bot quanto pelo painel.
-
-### 4. Reforço de guarda em `finalizando` (já existe parcialmente)
-A validação `validateCustomerForPortal` em `bot-flow.ts:4506` já bloqueia envio sem CPF/doc/etc. Verificar que `customers.cpf`, `document_number`, `document_front_url` constam dos campos obrigatórios; se a planilha de validação atual permitir submeter sem doc, adicionar `document_front_url` e `cpf` como obrigatórios (ler `_shared/validateCustomerForPortal.ts` antes de mexer). Isso é a rede de segurança que impede o portal de receber lead incompleto mesmo se algum chain futuro voltar a errar.
-
----
-
-## Validação pós-deploy
-
-1. Resetar `customers/55d3c89f…` para `conversation_step='aguardando_conta'` e limpar `ocr_review_*`.
-2. Reenviar foto da conta → confirmar com consultor online: deve sair `d_resultado` (simulação) e depois `d_pedir_documento`. NÃO deve sair `d_finalizar`.
-3. Enviar foto do documento → confirmar via painel → deve sair `d_finalizar` com botão.
-4. Clicar "Finalizar" → bot valida CPF + doc + valor + nome antes de chamar portal.
-5. Logs `[manual-step-send] continueFlow … final=…` devem mostrar `aguardando_doc_auto` no clique do bill, não `finalizando`.
-
+1. Conferir no DB que `ocr_review_pending` da Josinete virou `null`.
+2. Abrir `/admin` na ficha de outro lead com OCR pendente, clicar "Eu confirmo" no card da ficha (não no banner) e verificar:
+   - banner laranja desaparece;
+   - chega a mensagem de simulação (`d_resultado`) antes do pedido do documento.
