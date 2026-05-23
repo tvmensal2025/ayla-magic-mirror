@@ -1,73 +1,32 @@
-# Fix: IA ligada mas fluxo não reinicia após inatividade
+## Objetivo
 
-## Problema confirmado
-Lead Rafael (`55d3c89f...`) parou no passo 4 (capture `electricity_bill_value`) às 04:46. Voltou 9h depois mandando "oi" e o bot ficou mudo — cada mensagem caía no `manual-capture-stop` ("texto salvo sem avanço") porque não era número. Não existe regra que detecte reentrada longa e reinicie o welcome.
+1. Corrigir o erro de build do `LiveConversationsPanel.tsx` (faltam entradas `D` e `E` no `Record<Variant, FlowBundle>`).
+2. Ajustar o disparo manual do Fluxo D para **apenas iniciar** — sem rajada sequencial. O resto do fluxo segue automático conforme o cliente clica nos botões (lógica já existente no `whapi-webhook`).
 
-## Mudanças
+## Passos
 
-### 1. Regra de **re-welcome** em `whapi-webhook/handlers/bot-flow.ts`
-Adicionar no início do pipeline, antes de qualquer lógica de capture/custom step:
+### 1. Fix build — LiveConversationsPanel
+- Adicionar `D: { name: null, steps: [] }` e `E: { name: null, steps: [] }` nas duas inicializações (linhas 60-63 e 87-90) do `Record<Variant, FlowBundle>`.
 
-```ts
-// Re-welcome: lead voltou após inatividade longa
-const lastOutboundAt = (customer as any).last_bot_reply_at || (customer as any).updated_at;
-const hoursSinceBot = lastOutboundAt
-  ? (Date.now() - new Date(lastOutboundAt).getTime()) / 3_600_000
-  : 0;
-const isGreeting = /^(oi+|olá+|ola+|opa+|bom dia|boa tarde|boa noite|eai|e aí|hey|hello|hi+)\W*$/i
-  .test(String(inboundText || "").trim());
+### 2. Comportamento do Fluxo D no envio manual
+Hoje `FlowQuickBar` e `ManualStepDialog` listam todos os passos da variante e o consultor escolhe qual mandar (já é 1-a-1, não em rajada). Mas o D foi pensado para ser **só iniciado**:
 
-const shouldRewelcome =
-  (hoursSinceBot >= 4 && isGreeting) || hoursSinceBot >= 24;
+- Quando o consultor selecionar variante **D** nos chips:
+  - `FlowQuickBar`: esconder a lista de passos e mostrar **um único botão grande "▶ Iniciar fluxo D (automático)"** que dispara o **primeiro passo ativo** (menor `position`) via `manual-step-send` com `part: "all"`. Depois disso o webhook assume.
+  - `ManualStepDialog`: mesmo tratamento — auto-seleciona o primeiro passo e mostra CTA "Iniciar fluxo D".
+- Mensagem auxiliar curta: *"O Fluxo D segue automático conforme o cliente responde aos botões. Você só precisa iniciar."*
+- A/B/C/E mantêm o comportamento atual (lista de passos).
 
-if (shouldRewelcome && customer.conversation_step) {
-  console.log(`[re-welcome] inatividade=${hoursSinceBot.toFixed(1)}h step_anterior=${customer.conversation_step} greeting=${isGreeting}`);
-  await supabase
-    .from("customers")
-    .update({
-      conversation_step: null,
-      capture_mode: null,
-      custom_step_retries: 0,
-      custom_step_retries_step: null,
-      last_custom_prompt_at: null,
-      ai_followups_count: 0,
-      previous_conversation_step: customer.conversation_step,
-    })
-    .eq("id", customer.id);
-  customer.conversation_step = null as any;
-  // Cai no welcome do fluxo ativo normalmente
-}
-```
-
-Aplicar mesma lógica em `evolution-webhook/handlers/bot-flow.ts`.
-
-### 2. Fallback de retry após 3 capturas mudas
-No bloco `manual-capture-stop` (whapi + evolution): incrementar `custom_step_retries` quando salvar texto sem avanço. Ao atingir 3 numa janela de 10 min, enviar:
-> *"Não consegui entender, {{nome}} 😅 Pode me mandar só o valor médio da sua conta de luz? (ex: 250)"*
-(usar `retry_text` do step se houver). Resetar contador ao avançar ou ao captar valor válido.
-
-### 3. Limpar o lead Rafael (one-shot)
-```sql
-UPDATE customers
-SET conversation_step = NULL,
-    capture_mode = NULL,
-    custom_step_retries = 0,
-    last_custom_prompt_at = NULL,
-    ai_followups_count = 0
-WHERE id = '55d3c89f-2557-4864-988d-91ee48e643f8';
-```
-
-### 4. Memória nova
-`mem://whatsapp/re-welcome-rule` — registra que reentrada ≥4h com saudação ou ≥24h reseta `conversation_step` e dispara welcome do fluxo ativo.
+### 3. Sem mudanças no backend
+`manual-step-send` já aceita D (corrigido no turno anterior). O `whapi-webhook/handlers/bot-flow.ts` já roteia respostas de botões pela variante do customer. Nada a alterar lá.
 
 ## Arquivos
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — itens 1 e 2
-- `supabase/functions/evolution-webhook/handlers/bot-flow.ts` — espelho
-- Migração de dados — item 3
-- `mem://whatsapp/re-welcome-rule` + atualizar `mem://index.md`
+- `src/components/admin/AIAgentTab/LiveConversationsPanel.tsx` (fix build)
+- `src/components/whatsapp/FlowQuickBar.tsx` (UI condicional para D)
+- `src/components/admin/AIAgentTab/ManualStepDialog.tsx` (UI condicional para D)
 
 ## Critério de sucesso
-- Próximo "oi" do Rafael → bot manda welcome do fluxo A novamente.
-- Lead parado em qualquer capture por ≥4h que mandar saudação → reinicia welcome.
-- Lead que insiste com texto inválido em capture → recebe retry humanizado após 3 tentativas, nunca mudo.
-- Leads com `bot_paused=true` ou `assigned_human_id` continuam silenciados (regra existente preservada).
+- Build limpo.
+- Ao escolher chip **D** no popover de envio, o consultor vê só um botão "Iniciar fluxo D" + nota explicativa, em vez da lista de 10 passos.
+- Clicar dispara o 1º passo; webhook conduz o resto automaticamente via botões.
+- A/B/C/E inalterados.
