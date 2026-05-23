@@ -135,19 +135,31 @@ export default function FluxoBuilder() {
   const selected = useMemo(() => steps.find((s) => s.id === selectedId) ?? null, [steps, selectedId]);
   const inspectorStep = useMemo(() => steps.find((s) => s.id === inspectorId) ?? null, [steps, inspectorId]);
 
-  const flowWarnings = useMemo(() => {
-    let count = 0;
-    for (const s of steps) {
-      for (const t of s.transitions) {
-        if (!t.goto_step_id && !t.goto_special) count++;
-        else if (t.goto_step_id) {
-          const dst = steps.find((x) => x.id === t.goto_step_id);
-          if (!dst || !dst.is_active) count++;
-        }
-      }
+  const validation = useFlowValidation(steps);
+  const flowWarnings = validation.total;
+  const flowErrors = validation.errors;
+  const maxPosition = useMemo(
+    () => steps.reduce((m, s) => Math.max(m, s.position), 0),
+    [steps],
+  );
+
+  async function autoFixAll() {
+    if (!validation.autoFixablePatches.length) return;
+    const ok = await confirm({
+      title: "Auto-corrigir alertas?",
+      description: `Vou remover ${validation.autoFixablePatches.reduce(
+        (n, p) => n + (Array.isArray((p.patch as any).transitions) ? 1 : 0),
+        0,
+      )} regra(s) sem destino ou apontando para passos removidos.`,
+      confirmText: "Corrigir",
+    });
+    if (!ok) return;
+    for (const p of validation.autoFixablePatches) {
+      await patchStep(p.stepId, p.patch);
     }
-    return count;
-  }, [steps]);
+    toast.success("Alertas corrigidos");
+  }
+
 
   async function patchStep(id: string, patch: Partial<Step>) {
     setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
