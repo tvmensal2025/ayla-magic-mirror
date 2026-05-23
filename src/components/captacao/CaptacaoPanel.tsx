@@ -353,8 +353,10 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                 </>
               )}
             </main>
+            <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={256} minPx={200} maxPx={520} invert />
             {/* Desktop aside: ficha quando há lead, achievements quando não */}
-            <div className="hidden md:flex md:flex-col md:w-64 md:border-l border-border/60 overflow-hidden">
+            <div className="hidden md:flex md:flex-col md:w-[var(--cap-aside-w)] md:border-l border-border/60 overflow-hidden">
+
               {selectedId ? (
                 <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />
               ) : (
