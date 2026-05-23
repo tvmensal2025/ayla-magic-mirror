@@ -21,6 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
+import { HelpHint } from "@/components/ui/help-hint";
 
 import { simulateMatch, detectRuleConflicts } from "@/lib/flowSimulator";
 
@@ -458,7 +459,15 @@ export default function FluxoCamila() {
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => navigate("/admin")}><ArrowLeft className="h-5 w-5" /></Button>
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg sm:text-xl font-bold truncate">Fluxo da Camila</h1>
+            <h1 className="text-lg sm:text-xl font-bold truncate flex items-center gap-2">
+              Fluxo da Camila
+              <HelpHint
+                title="Editor do Fluxo da Camila"
+                summary="Configure o que a IA fala, em que ordem, e quando capturar dados"
+                details="Aqui você cria os passos do fluxo automático (variantes A/B/C). Cada passo pode ser do tipo 'mensagem' (envia texto/áudio/vídeo/imagem) ou 'captura' (espera o lead responder com nome, valor da conta, foto da conta, etc). A ordem é dada pelo campo posição (1→10) e a UNIQUE no banco garante que não tenha duas posições iguais ou dois fluxos ativos da mesma variante."
+                example="Quer testar uma abordagem sem áudio? Crie a Variante B clonando da A e remova os áudios. O sistema vai alternar leads entre A/B/C automaticamente."
+              />
+            </h1>
             <p className="text-xs text-muted-foreground">Você decide o que ela fala, em que ordem, e pra onde vai depois.</p>
           </div>
           <Button
@@ -1437,17 +1446,25 @@ function AiGenerateTextButton({
     }
   }
   return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      className="h-7 gap-1.5 text-[11px] border-primary/40 text-primary hover:bg-primary/10"
-      onClick={gen}
-      disabled={loading || !consultantId || !stepId}
-      title={`Gerar texto persuasivo (variante ${variant})`}
-    >
-      <Sparkles className={`h-3.5 w-3.5 ${loading ? "animate-pulse" : ""}`} />
-      {loading ? "Gerando..." : "Gerar texto (IA)"}
-    </Button>
+    <span className="inline-flex items-center gap-1">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 gap-1.5 text-[11px] border-primary/40 text-primary hover:bg-primary/10"
+        onClick={gen}
+        disabled={loading || !consultantId || !stepId}
+        title={`Gerar texto persuasivo (variante ${variant})`}
+      >
+        <Sparkles className={`h-3.5 w-3.5 ${loading ? "animate-pulse" : ""}`} />
+        {loading ? "Gerando..." : "Gerar texto (IA)"}
+      </Button>
+      <HelpHint
+        title="Gerar texto com IA (Gemini)"
+        summary="A IA escreve uma versão persuasiva do texto do passo"
+        details="Usa o Gemini para criar uma mensagem alinhada ao tom da Camila e ao objetivo deste passo (boas-vindas, captura, fechamento, etc). Você pode editar livremente depois. O texto leva em conta a variante (A/B/C) — versões 'sem áudio' tendem a ficar mais explicativas no texto."
+        example="Passo de boas-vindas em branco? Clique e a IA cria uma saudação calorosa que cita o consultor pelo nome."
+      />
+    </span>
   );
 }

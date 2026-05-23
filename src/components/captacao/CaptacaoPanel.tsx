@@ -31,6 +31,16 @@ import { DragResizer } from "@/components/layout/DragResizer";
 
 
 import { PortalStatusTracker } from "@/components/captacao/PortalStatusTracker";
+import { HelpHint } from "@/components/ui/help-hint";
+
+const STEPS_HELP = {
+  title: "Painel de Passos do fluxo",
+  summary: "Clique no avião ✈️ para enviar um passo isolado ao lead",
+  details:
+    "Cada linha é um passo do fluxo configurado em /admin/fluxos, na ordem 1→10. O avião verde envia somente aquele passo (texto + mídias) para o lead. O círculo com ✓ marca passos já enviados. O badge A/B/C mostra a variante do teste sendo usada com este lead.",
+  example:
+    "Use quando o lead pediu para repetir o áudio do passo 3 ou quando você quer pular direto para o passo de confirmação.",
+} as const;
 
 interface Props { consultantId: string; onOpenChat?: (phone: string) => void; instanceName?: string | null; isWhapi?: boolean; }
 
@@ -302,7 +312,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                   </div>
                   <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
                     <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">10 Passos · clique para enviar</h3>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1">10 Passos · clique para enviar <HelpHint {...STEPS_HELP} /></h3>
                       <CaptureStepsGrid
                         consultantId={consultantId}
                         customerId={selectedId}
@@ -408,7 +418,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                 </div>
                 <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
                   <div>
-                    <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-2">10 Passos · clique para enviar</h3>
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-2 flex items-center gap-1">10 Passos · clique para enviar <HelpHint {...STEPS_HELP} /></h3>
                     <CaptureStepsGrid
                       consultantId={consultantId}
                       customerId={selectedId}
