@@ -213,7 +213,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
             return (
               <div
                 key={s.id}
-                className={`group relative rounded-md border p-2 flex flex-col h-full min-h-[128px] transition-all duration-300 ${
+                className={`group relative rounded-md border p-1.5 flex flex-col h-full min-h-[108px] transition-all duration-300 ${
                   sent
                     ? "border-primary/60 bg-gradient-to-br from-primary/15 to-emerald-500/5 shadow-[0_0_14px_hsl(var(--primary)/0.2)] animate-exec-card"
                     : isNext
