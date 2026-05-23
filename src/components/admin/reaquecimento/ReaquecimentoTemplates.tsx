@@ -39,7 +39,7 @@ export function ReaquecimentoTemplates({ consultantId, availableSteps }: Props) 
 
   async function load() {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from("reactivation_templates")
       .select("*")
       .eq("consultant_id", consultantId)
@@ -63,14 +63,14 @@ export function ReaquecimentoTemplates({ consultantId, availableSteps }: Props) 
     }
     setCreating(true);
     // Desativa template anterior do mesmo step (UNIQUE partial)
-    await supabase
+    await (supabase as any)
       .from("reactivation_templates")
       .update({ is_active: false })
       .eq("consultant_id", consultantId)
       .eq("conversation_step", newStep)
       .eq("is_active", true);
 
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from("reactivation_templates")
       .insert({
         consultant_id: consultantId,
@@ -90,7 +90,7 @@ export function ReaquecimentoTemplates({ consultantId, availableSteps }: Props) 
   }
 
   async function updateTemplate(id: string, patch: Partial<Template>) {
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from("reactivation_templates")
       .update(patch)
       .eq("id", id);
@@ -104,7 +104,7 @@ export function ReaquecimentoTemplates({ consultantId, availableSteps }: Props) 
 
   async function deleteTemplate(id: string) {
     if (!confirm("Remover este template? Os envios passados ficam preservados.")) return;
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from("reactivation_templates")
       .delete()
       .eq("id", id);

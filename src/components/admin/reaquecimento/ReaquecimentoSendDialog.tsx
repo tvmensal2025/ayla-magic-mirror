@@ -52,7 +52,7 @@ export function ReaquecimentoSendDialog({
     setConversationStep(customer.conversation_step || "");
 
     // Busca template ativo pra esse step
-    const { data: tpl } = await supabase
+    const { data: tpl } = await (supabase as any)
       .from("reactivation_templates")
       .select("id, message_text")
       .eq("consultant_id", consultantId)
@@ -69,8 +69,8 @@ export function ReaquecimentoSendDialog({
         : "";
       setMessage(
         String(tpl.message_text)
-          .replaceAll("{{nome}}", firstName)
-          .replaceAll("{{valor_conta}}", valor),
+          .split("{{nome}}").join(firstName)
+          .split("{{valor_conta}}").join(valor),
       );
       setHasNoTemplate(false);
     } else {
