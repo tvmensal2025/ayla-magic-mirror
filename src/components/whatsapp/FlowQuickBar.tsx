@@ -291,31 +291,65 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
               <div className="flex items-center justify-center py-6"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>
             ) : steps.length === 0 ? (
               <p className="text-xs text-muted-foreground text-center py-6 px-3">Nenhum passo configurado neste consultor.</p>
-            ) : variant === "D" ? (
-              <div className="px-3 py-4 space-y-3">
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  ⚡ O <strong className="text-foreground">Fluxo D</strong> é automático por botões. Você só precisa <strong>iniciar</strong> — o bot conduz o resto conforme o cliente responde.
-                </p>
-                <Button
-                  className="w-full gap-2"
-                  disabled={!!seq || !!sendingId}
-                  onClick={async () => {
-                    const first = steps[0];
-                    if (!first) return;
-                    setSendingId(first.id);
-                    setOpen(false);
-                    const res = await invokeStep(first.id);
-                    setSendingId(null);
-                    if (res.ok) toast({ title: "▶️ Fluxo D iniciado", description: "Agora o bot continua sozinho conforme o cliente responder." });
-                  }}
-                >
-                  {sendingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  Iniciar Fluxo D (automático)
-                </Button>
-                <p className="text-[10px] text-muted-foreground text-center">
-                  Primeiro passo: <strong>{steps[0]?.title || steps[0]?.step_key}</strong>
-                </p>
-              </div>
+            ) : variant === "D" ? (() => {
+              const first = steps[0];
+              const btns = extractStepButtons(first);
+              const preview = (first?.message_text || "").trim();
+              return (
+                <div className="px-3 py-3 space-y-3">
+                  <div className="rounded-lg border border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-3 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center justify-center h-7 w-7 rounded-full bg-primary/20 text-primary">
+                        <Zap className="w-3.5 h-3.5" />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-foreground leading-tight">Fluxo D — automático</p>
+                        <p className="text-[10px] text-muted-foreground leading-tight">Cliente clica, bot conduz sozinho</p>
+                      </div>
+                    </div>
+
+                    {preview && (
+                      <div className="rounded-md bg-background/60 border border-border/50 p-2.5">
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Prévia da 1ª mensagem</p>
+                        <p className="text-[11px] text-foreground/90 leading-relaxed line-clamp-4 whitespace-pre-wrap">{preview}</p>
+                      </div>
+                    )}
+
+                    {btns.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Botões que o cliente verá</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {btns.map((b) => (
+                            <span key={b.id} className="inline-flex items-center px-2 py-1 rounded-md border border-primary/40 bg-primary/5 text-[11px] font-medium text-primary">
+                              {b.title}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <Button
+                    className="w-full gap-2 h-10 font-semibold shadow-md shadow-primary/20"
+                    disabled={!!seq || !!sendingId || !first}
+                    onClick={async () => {
+                      if (!first) return;
+                      setSendingId(first.id);
+                      setOpen(false);
+                      const res = await invokeStep(first.id);
+                      setSendingId(null);
+                      if (res.ok) toast({ title: "▶️ Fluxo D iniciado", description: "Agora o bot continua sozinho conforme o cliente responder." });
+                    }}
+                  >
+                    {sendingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    Iniciar Fluxo D
+                  </Button>
+                  <p className="text-[10px] text-muted-foreground text-center leading-tight">
+                    Depois disso o bot continua sozinho ✨
+                  </p>
+                </div>
+              );
+            })()
             ) : (
               steps.map((s, i) => {
                 const isSending = sendingId === s.id;
