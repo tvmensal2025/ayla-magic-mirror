@@ -1,63 +1,23 @@
-## Objetivo
-Permitir redimensionar (arrastar) as colunas laterais nos painéis principais do `/admin`, com **trava de segurança** pra não arrastar sem querer. Tamanho escolhido é salvo por usuário/painel.
+## Problemas identificados nos cards de Passos (Captação)
 
-## Como funciona
+1. **Botões bloqueados em todos os cards quando 1 está enviando** — `disabled={!!sending}` desabilita todos. Deve desabilitar só o card em envio.
+2. **Títulos cortados** — `line-clamp-2 min-h-[2rem]` corta "Pergunta valor da conta" → "Pergunt..." e força altura fixa mesmo com título curto.
+3. **Grid rígido** — `grid-cols-2 sm:3 md:5 xl:6` quebra em telas intermediárias; cards ficam estreitos demais e o botão "Ver e enviar" corta.
+4. **Preview da mensagem em 2 linhas** com fonte `text-[10px]` — fica ilegível.
+5. **Altura desigual** — cards com título curto + sem preview ficam menores que os outros.
 
-1. **Toggle global "Layout 🔒 / 🔓"** no header do `/admin` (perto do botão Sair). 
-   - 🔒 travado (padrão): handles invisíveis, não arrasta.
-   - 🔓 destravado: handles aparecem como barra fininha vertical com aderência visual (hover verde + cursor `col-resize`). Salvo em `localStorage` como `igreen:layout-unlocked`.
+## Mudanças (`src/components/captacao/CaptureStepsGrid.tsx`)
 
-2. **Componente novo `src/components/layout/ResizableShell.tsx`** — wrapper em cima de `react-resizable-panels` (já instalado) que:
-   - Recebe `storageKey`, `direction`, e `panels: { id, defaultSize, minSize, maxSize, content }[]`.
-   - Persiste tamanhos em `localStorage` (`igreen:layout:<storageKey>`).
-   - Lê o estado global do lock e passa `disabled` para os handles (não arrasta quando travado).
-   - Handles com `withHandle` (alça já existe em `ui/resizable.tsx`).
-
-3. **Hook `useLayoutLock`** — pequeno `useSyncExternalStore` baseado em `window` event para o lock global.
-
-## Onde aplicar
-
-| Tab | Painéis redimensionáveis |
-|---|---|
-| Captação | `lista leads` ↔ `passos + feed` ↔ `ficha cliente` (3 colunas) |
-| WhatsApp | `ChatSidebar` ↔ `ChatView` (2 colunas) |
-| Clientes | `lista` ↔ `detalhe/edição` quando houver split |
-| CRM | `KanbanBoard` colunas mantêm fluxo próprio; aplicar só se houver split lateral (filtros ↔ board) |
-| Rede | `lista upline/downline` ↔ `detalhe` se existir split |
-| Central de Anúncios | `lista anúncios` ↔ `editor/preview` |
-| Dashboard | `cards principais` ↔ `painel lateral` (se aplicável) |
-
-Em painéis sem split lateral (ex.: Dashboard só com grid), o lock não muda nada — apenas ignoro. Vou auditar cada tab e aplicar onde fizer sentido (não força split onde não tem).
-
-## Mudanças por arquivo
-
-- **NOVO** `src/components/layout/ResizableShell.tsx` — wrapper + persistência.
-- **NOVO** `src/hooks/useLayoutLock.ts` — store do lock global.
-- **NOVO** `src/components/layout/LayoutLockToggle.tsx` — botão 🔒/🔓 para o header.
-- `src/pages/Admin.tsx` — monta o toggle no header.
-- `src/components/captacao/CaptacaoPanel.tsx` — substituir o `flex md:flex-row` por `ResizableShell` (lista | centro | aside).
-- `src/components/whatsapp/CrmTabs.tsx` (ou onde fica o split ChatSidebar/ChatView) — `ResizableShell` 2 colunas.
-- `src/components/customers/...` — auditar; aplicar se houver split.
-- `src/components/crm/...` — auditar; aplicar se houver split lateral.
-- `src/components/rede/...`, `src/components/anuncios/...`, `src/components/dashboard/...` — aplicar onde houver split.
-
-## Trava de segurança
-
-- Lock **default = travado**. Usuário precisa clicar 🔓 explicitamente.
-- Quando travado: `PanelResizeHandle` recebe `disabled` + `pointer-events: none` + opacidade 0 (não aparece).
-- Quando destravado: handle visível com alça `GripVertical`, cursor `col-resize`, snap suave.
-- Tamanhos persistem mesmo após travar de novo.
-- Botão mostra estado atual e tooltip explicativo.
+- Grid `grid-cols-[repeat(auto-fill,minmax(180px,1fr))]` → auto-fit, cada card no mínimo 180px, sempre ocupa a linha inteira.
+- Cards `flex flex-col` com `h-full` para igualar altura na mesma linha; preview e ações alinhados.
+- Título: `line-clamp-3` em vez de 2; remover `min-h-[2rem]` (deixa o flex igualar).
+- Preview: `text-xs leading-snug line-clamp-3` (era `text-[10px] line-clamp-2`).
+- Botão: passa a desabilitar apenas o card em envio (`disabled={isSending}` em vez de `!!sending`); texto fica `"Enviar"` quando largura < ~190px usando `truncate` + `<span className="truncate">`; ícone Eye sempre visível.
+- Ação secundária (Editar) já é `w-8`, mantém; troco `flex-1` por `min-w-0 flex-1` no botão principal para nunca empurrar a edição pra fora.
 
 ## Fora de escopo
-- Não mexer em lógica de envio, bot, dados.
-- Mobile (`<md`) continua stacked vertical sem resize — resize só ativa em `md+`.
-- Não criar split onde não existe (ex.: não vou inventar sidebar no Dashboard se hoje é só grid).
+- Lógica de envio, variantes, OCR — sem mudança.
+- Outras abas — só este grid.
 
-## Arquivos a editar/criar
-- NOVO `src/components/layout/ResizableShell.tsx`
-- NOVO `src/components/layout/LayoutLockToggle.tsx`
-- NOVO `src/hooks/useLayoutLock.ts`
-- `src/pages/Admin.tsx`
-- `src/components/captacao/CaptacaoPanel.tsx`
-- Splits identificados em WhatsApp/Clientes/CRM/Rede/Anúncios após auditoria rápida.
+## Arquivos
+- `src/components/captacao/CaptureStepsGrid.tsx`
