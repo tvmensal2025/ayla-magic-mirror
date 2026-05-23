@@ -161,7 +161,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Reengajamento",
         icon: "msg",
         message_text:
-          "Oi {{nome}}, voltei aqui 👋\nAquela economia de até 20% na conta de luz ainda tá de pé. Bora simular agora?",
+          "Oi, {{nome}}! Voltei aqui 👋\n\nAquela *economia de até 20%* na conta de luz ainda *tá de pé*. 💚\n\nBora *simular agora* e ver quanto você economiza? 🚀",
         slot_key: "welcome",
         captures: [{ field: "_buttons", enabled: true, value: [
           { id: "simular", title: "📸 Quero simular" },
