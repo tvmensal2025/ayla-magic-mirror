@@ -1221,7 +1221,32 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         } catch (e) {
           if (kind === "video") videoFailed = true;
           console.warn(`[dispatch:${stepKey}] envio de ${kind} falhou:`, (e as any)?.message);
+      }
+
+      // Garantia: se o step tem _buttons mas o texto não foi o último item
+      // (ex.: ordem text→audio→video deixa o vídeo por último), enviamos os
+      // botões em uma mensagem separada para que o lead possa escolher.
+      if (sent && _buttons.length > 0 && !buttonsSent) {
+        try {
+          const renderedButtons = _buttons.map((b) => ({
+            id: b.id,
+            title: applyVars(b.title).slice(0, 20),
+          }));
+          const prompt = "👇 Escolha uma opção:";
+          await new Promise((r) => setTimeout(r, 600));
+          await sendButtons(remoteJid, prompt, renderedButtons);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id,
+            message_direction: "outbound",
+            message_text: prompt,
+            message_type: "text",
+            conversation_step: stepKey,
+          });
+          buttonsSent = true;
+        } catch (e) {
+          console.warn(`[dispatch:${stepKey}] envio dos botões (fallback) falhou:`, (e as any)?.message);
         }
+      }
       }
 
       // F10 — Fallback variant C → B quando o vídeo inicial falha.
