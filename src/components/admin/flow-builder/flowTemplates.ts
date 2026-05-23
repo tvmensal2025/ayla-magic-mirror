@@ -191,7 +191,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Convite Conexão Club",
         icon: "msg",
         message_text:
-          "E olha só: agora você pode ganhar cashback indicando amigos no Conexão Club 💰\nQuer que eu te mostre?",
+          "E olha só essa novidade 👇\n\nAgora você pode *ganhar cashback* indicando amigos no *Conexão Club*. 💰\n\nQuer que eu te mostre *como funciona*?",
         slot_key: "pitch_conexao_club",
         captures: [{ field: "_buttons", enabled: true, value: [
           { id: "sim", title: "✅ Mostrar" },
