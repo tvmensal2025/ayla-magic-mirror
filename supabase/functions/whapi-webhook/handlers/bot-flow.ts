@@ -892,7 +892,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
       const { data: stepRow } = await supabase
         .from("bot_flow_steps")
-        .select("step_key, slot_key, message_text, media_order")
+        .select("step_key, slot_key, message_text, media_order, captures")
         .eq("flow_id", (flow as any).id)
         .eq("step_key", stepKey)
         .maybeSingle();
@@ -900,6 +900,20 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         console.log(`[dispatch:${stepKey}] step não configurado no Flow Builder — nada para enviar`);
         return false;
       }
+
+      // Botões Whapi (quick_reply) — opcionais, configurados em captures._buttons
+      let _buttons: { id: string; title: string }[] = [];
+      try {
+        const caps = Array.isArray((stepRow as any).captures) ? (stepRow as any).captures : [];
+        const found = caps.find((c: any) => c?.field === "_buttons" && c?.enabled !== false);
+        if (found && Array.isArray(found.value)) {
+          _buttons = found.value
+            .map((b: any) => ({ id: String(b?.id || "").trim(), title: String(b?.title || "").trim() }))
+            .filter((b: any) => b.id && b.title)
+            .slice(0, 3);
+        }
+      } catch (_) { /* noop */ }
+
 
       const slotKey = (stepRow as any).slot_key || stepKey;
       const { data: mediaRows } = await supabase
