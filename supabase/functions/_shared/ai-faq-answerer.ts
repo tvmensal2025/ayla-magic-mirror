@@ -114,7 +114,7 @@ PERGUNTA DO LEAD: "${q.slice(0, 600)}"`;
     }
 
     return {
-      text: String(parsed.text).trim().slice(0, 600),
+      text: String(parsed.text).trim().slice(0, 1200),
       confidence: Number(parsed.confidence) || 0,
       shouldHandoff: !!parsed.shouldHandoff,
       source: "ai",
