@@ -61,7 +61,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         step_type: "capture_conta",
         title: "Captar conta de luz",
         icon: "file",
-        message_text: "Me manda uma foto da sua conta de luz pra eu calcular sua economia 📸",
+        message_text: "📸 Me manda uma *foto da sua conta de luz* pra eu calcular sua *economia* na hora. 💚\n\n(pode ser a fatura do *mês atual* ou a anterior)",
         slot_key: "aguardando_conta",
       },
       {
