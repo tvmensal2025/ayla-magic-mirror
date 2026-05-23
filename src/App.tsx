@@ -75,6 +75,7 @@ const App = () => (
             <CookieBanner />
           </Suspense>
         </BrowserRouter>
+        </ConfirmDialogProvider>
       </TooltipProvider>
     </ThemeProvider>
   </QueryClientProvider>
