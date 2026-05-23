@@ -26,6 +26,72 @@ export type FlowTemplate = {
 
 export const FLOW_TEMPLATES: FlowTemplate[] = [
   {
+    id: "captacao_meta_ads",
+    name: "Captação Meta Ads (Fluxo D)",
+    emoji: "🎯",
+    description:
+      "Otimizado para anúncios Meta. Fluxo rápido por botões: simular → conta → economia → cadastro. Ideal para tráfego pago.",
+    steps: [
+      {
+        step_key: "welcome",
+        step_type: "message",
+        title: "Boas-vindas (Meta Ads)",
+        icon: "msg",
+        message_text:
+          "Oi, {{nome}}! 👋\n\nVi que você se interessou pelo nosso anúncio de *energia solar por assinatura*.\n\n💡 *Economize até 20% na conta de luz*, sem obra e sem instalação.\n\nBora calcular *sua economia* agora? 👇",
+        slot_key: "welcome_meta",
+        captures: [{ field: "_buttons", enabled: true, value: [
+          { id: "simular", title: "📸 Quero simular" },
+          { id: "duvida", title: "🤔 Tenho dúvida" },
+        ]}],
+      },
+      {
+        step_key: "aguardando_conta",
+        step_type: "capture_conta",
+        title: "Captar conta de luz",
+        icon: "file",
+        message_text:
+          "Show! 📸 Me manda uma *foto da sua conta de luz* (pode ser do mês atual ou anterior).\n\nÉ rapidinho — em segundos eu calculo sua economia. 💚",
+        slot_key: "aguardando_conta",
+      },
+      {
+        step_key: "resultado_simulacao",
+        step_type: "message",
+        title: "Resultado da simulação",
+        icon: "sparkle",
+        message_text:
+          "🎉 *Pronto, {{nome}}!*\n\nCom base na sua conta de *R$ {{valor_conta}}*, você vai economizar:\n\n💰 *{{economia_range}} por mês*\n📅 Até *R$ 1.080/ano*\n\n✅ Sem obra\n✅ Sem instalação\n✅ Mesma distribuidora\n✅ Cancela quando quiser\n\nBora finalizar seu cadastro? 🚀",
+        slot_key: "resultado_simulacao",
+        captures: [{ field: "_buttons", enabled: true, value: [
+          { id: "cadastrar", title: "✅ Cadastrar agora" },
+          { id: "duvida", title: "❓ Tenho dúvidas" },
+          { id: "humano", title: "👤 Falar com humano" },
+        ]}],
+      },
+      {
+        step_key: "aguardando_doc_auto",
+        step_type: "capture_documento",
+        title: "Captar documento",
+        icon: "file",
+        message_text:
+          "Perfeito! 🪪\n\nMe manda uma *foto da frente do seu documento* (RG ou CNH).\n\nVou usar pra preencher seu cadastro automaticamente.",
+        slot_key: "aguardando_doc_auto",
+      },
+      {
+        step_key: "finalizar_cadastro",
+        step_type: "finalizar_cadastro",
+        title: "Finalizar cadastro",
+        icon: "sparkle",
+        message_text:
+          "Pronto, {{nome}}! 🎉\n\nSeu *cadastro foi enviado*. Em até *2 dias úteis* sua *conta nova* chega no e-mail.\n\nQualquer dúvida, é só me chamar! 💚",
+        slot_key: "finalizar_cadastro",
+        captures: [{ field: "_buttons", enabled: true, value: [
+          { id: "finalizar", title: "✅ Finalizar" },
+        ]}],
+      },
+    ],
+  },
+  {
     id: "captacao_solar",
     name: "Captação solar (completo)",
     emoji: "☀️",

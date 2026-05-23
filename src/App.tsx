@@ -20,6 +20,7 @@ const Admin = lazy(() => import("./pages/Admin"));
 const FluxoBuilder = lazy(() => import("./pages/FluxoBuilder"));
 const SaudeBot = lazy(() => import("./pages/SaudeBot"));
 const AdminKnowledge = lazy(() => import("./pages/AdminKnowledge"));
+const AdminReaquecimento = lazy(() => import("./pages/AdminReaquecimento"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const InstallPage = lazy(() => import("./pages/InstallPage"));
@@ -56,6 +57,7 @@ const App = () => (
               <Route path="/admin/fluxos" element={<FluxoBuilder />} />
               <Route path="/admin/saude-bot" element={<SaudeBot />} />
               <Route path="/admin/conhecimento" element={<AdminKnowledge />} />
+              <Route path="/admin/reaquecimento" element={<AdminReaquecimento />} />
               <Route path="/admin/faq" element={<Navigate to="/admin/conhecimento?tab=ia" replace />} />
               <Route path="/admin/fluxos-legado" element={<Navigate to="/admin/fluxos" replace />} />
               <Route path="/admin/fluxos-antigo" element={<Navigate to="/admin/fluxos" replace />} />

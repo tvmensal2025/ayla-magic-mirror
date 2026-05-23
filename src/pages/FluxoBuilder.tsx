@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-import { ArrowLeft, Plus, AlertTriangle, ExternalLink, Loader2, Sparkles, Wand2, GitBranch, BookOpen } from "lucide-react";
+import { ArrowLeft, Plus, AlertTriangle, ExternalLink, Loader2, Sparkles, Wand2, GitBranch, BookOpen, Play } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 
@@ -20,6 +20,7 @@ import StepInspector from "@/components/admin/flow-builder/StepInspector";
 import WhatsAppPreview from "@/components/admin/flow-builder/WhatsAppPreview";
 import FlowTemplatesDialog from "@/components/admin/flow-builder/FlowTemplatesDialog";
 import VariantDistributionBar from "@/components/admin/flow-builder/VariantDistributionBar";
+import FlowSimulator from "@/components/admin/flow-builder/FlowSimulator";
 import { useFlowValidation } from "@/components/admin/flow-builder/useFlowValidation";
 import {
   Step, Variant, ALL_VARIANTS, VARIANT_LABEL,
@@ -50,6 +51,7 @@ export default function FluxoBuilder() {
   const [showConnections, setShowConnections] = useState(true);
   const [mediaCounts, setMediaCounts] = useState<Record<string, { audio: number; image: number; video: number }>>({});
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [simulatorOpen, setSimulatorOpen] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -295,6 +297,16 @@ export default function FluxoBuilder() {
               <BookOpen className="mr-1 h-3 w-3" />
               Conhecimento
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSimulatorOpen(true)}
+              disabled={steps.length === 0}
+              title={steps.length === 0 ? "Adicione ao menos 1 passo para testar" : "Testar fluxo localmente"}
+            >
+              <Play className="mr-1 h-3 w-3" />
+              🎬 Testar fluxo
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setTemplatesOpen(true)} disabled={!flowId}>
               <Sparkles className="mr-1 h-3 w-3" />
               Templates
@@ -397,6 +409,13 @@ export default function FluxoBuilder() {
           onApplied={() => reload(userId, editingVariant)}
         />
       )}
+
+      {/* Simulador de Fluxo (modal) */}
+      <FlowSimulator
+        open={simulatorOpen}
+        onOpenChange={setSimulatorOpen}
+        steps={steps}
+      />
     </div>
   );
 }
