@@ -401,8 +401,22 @@ export default function FluxoBuilder() {
           steps={steps}
           consultantId={userId}
           variant={editingVariant}
+          flowId={flowId}
+          maxPosition={maxPosition}
           onClose={() => setInspectorId(null)}
           onPatch={(patch) => inspectorStep && patchStep(inspectorStep.id, patch)}
+          onReload={() => userId && reload(userId, editingVariant)}
+        />
+      )}
+
+      {/* Templates dialog */}
+      {userId && (
+        <FlowTemplatesDialog
+          open={templatesOpen}
+          onOpenChange={setTemplatesOpen}
+          flowId={flowId}
+          currentMaxPosition={maxPosition}
+          onApplied={() => reload(userId, editingVariant)}
         />
       )}
     </div>
