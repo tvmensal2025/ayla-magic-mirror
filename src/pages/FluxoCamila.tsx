@@ -288,45 +288,43 @@ export default function FluxoCamila() {
     })();
   }, [navigate, reload, editingVariant]);
 
-  async function toggleAbTest(v: boolean) {
+  async function setActiveVariants(next: Variant[]) {
     if (!userId) return;
-    setAbEnabled(v);
-    const { error } = await supabase.from("consultants").update({ ab_test_enabled: v } as any).eq("id", userId);
-    if (error) { toast.error(error.message); setAbEnabled(!v); return; }
-    toast.success(v ? "Teste A/B/C ligado — novos leads alternam A/B/C" : "Teste A/B/C desligado — todos novos leads vão para A");
+    const arr = next.length ? next : (["A"] as Variant[]);
+    const prev = activeVariants;
+    setActiveVariantsState(arr);
+    const { error } = await supabase.from("consultants").update({ active_variants: arr } as any).eq("id", userId);
+    if (error) { toast.error(error.message); setActiveVariantsState(prev); return; }
+    toast.success(arr.length > 1 ? `Round-robin ligado: ${arr.join(" + ")}` : "Apenas Fluxo A em uso");
   }
 
-  async function cloneFlowB() {
-    if (!userId) return;
-    if (hasFlowB && !confirm("Já existe Fluxo B. Recriar (apaga e copia do A novamente)?")) return;
-    setCloneBusy(true);
+  function toggleActiveVariant(v: Variant, checked: boolean) {
+    if (v === "A" && !checked) {
+      toast.error("Fluxo A é obrigatório no sorteio.");
+      return;
+    }
+    const set = new Set(activeVariants);
+    if (checked) set.add(v); else set.delete(v);
+    void setActiveVariants(ALL_VARIANTS.filter((x) => set.has(x)));
+  }
+
+  async function cloneFlowAs(v: Variant) {
+    if (!userId || v === "A") return;
+    const exists = existingVariants.includes(v);
+    if (exists && !confirm(`Já existe Fluxo ${v}. Recriar (apaga e copia do A novamente)?`)) return;
+    setCloneBusy(v);
     try {
-      const { error } = await supabase.rpc("clone_bot_flow_as_b" as any, { _consultant_id: userId });
+      const { error } = await supabase.rpc("clone_bot_flow_as" as any, { _consultant_id: userId, _variant: v });
       if (error) throw error;
-      toast.success("Fluxo B criado a partir do A (sem áudio).");
+      toast.success(`Fluxo ${v} criado a partir do A.`);
       await reload(userId, editingVariant);
     } catch (e: any) {
       toast.error(e?.message || "Erro ao clonar");
     } finally {
-      setCloneBusy(false);
+      setCloneBusy(null);
     }
   }
 
-  async function cloneFlowC() {
-    if (!userId) return;
-    if (hasFlowC && !confirm("Já existe Fluxo C. Recriar (apaga e copia do A novamente)?")) return;
-    setCloneCBusy(true);
-    try {
-      const { error } = await supabase.rpc("clone_bot_flow_as_c" as any, { _consultant_id: userId });
-      if (error) throw error;
-      toast.success("Fluxo C criado a partir do A. Adicione um vídeo no primeiro passo!");
-      await reload(userId, editingVariant);
-    } catch (e: any) {
-      toast.error(e?.message || "Erro ao clonar");
-    } finally {
-      setCloneCBusy(false);
-    }
-  }
 
   // ---------------------------------------------------------------------------
   // Mutadores otimistas
