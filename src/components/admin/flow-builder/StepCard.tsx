@@ -7,9 +7,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils";
 import {
   GripVertical, Pencil, Trash2, Copy, AlertTriangle,
-  Mic, Image as ImageIcon, Video, MessageSquare,
+  Mic, Image as ImageIcon, Video, MessageSquare, ScanLine,
 } from "lucide-react";
-import { Step, STEP_TYPE_OPTIONS, getButtons, resolveGotoLabel, renderVarsPreview } from "./flowTypes";
+import { Step, STEP_TYPE_OPTIONS, getButtons, resolveGotoLabel, renderVarsPreview, isOcrStep } from "./flowTypes";
+
 
 interface Props {
   step: Step;
@@ -90,6 +91,23 @@ export default function StepCard({
 
           {/* Badges */}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {(() => {
+              const ocr = isOcrStep(step);
+              if (!ocr) return null;
+              const on = step.auto_detect_doc_type !== false;
+              return (
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    "h-5 gap-1 text-[10px]",
+                    on ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  <ScanLine className="h-3 w-3" />
+                  {on ? `OCR ${ocr === "conta" ? "conta" : "documento"}` : "OCR desligado"}
+                </Badge>
+              );
+            })()}
             {mediaCount && mediaCount.audio > 0 && <MediaBadge icon={Mic} count={mediaCount.audio} />}
             {mediaCount && mediaCount.image > 0 && <MediaBadge icon={ImageIcon} count={mediaCount.image} />}
             {mediaCount && mediaCount.video > 0 && <MediaBadge icon={Video} count={mediaCount.video} />}
@@ -105,6 +123,7 @@ export default function StepCard({
               </Badge>
             )}
           </div>
+
 
           {/* Próximos destinos (resumo das transitions) */}
           {step.transitions.length > 0 && (
