@@ -1971,6 +1971,7 @@ export type Database = {
         Row: {
           ab_test_counter: number
           ab_test_enabled: boolean
+          active_variants: string[]
           approved: boolean | null
           cadastro_url: string
           conversational_flow_enabled: boolean
@@ -1995,6 +1996,7 @@ export type Database = {
         Insert: {
           ab_test_counter?: number
           ab_test_enabled?: boolean
+          active_variants?: string[]
           approved?: boolean | null
           cadastro_url: string
           conversational_flow_enabled?: boolean
@@ -2019,6 +2021,7 @@ export type Database = {
         Update: {
           ab_test_counter?: number
           ab_test_enabled?: boolean
+          active_variants?: string[]
           approved?: boolean | null
           cadastro_url?: string
           conversational_flow_enabled?: boolean
@@ -4475,6 +4478,10 @@ export type Database = {
       clear_pending_inbound: {
         Args: { _customer_id: string }
         Returns: undefined
+      }
+      clone_bot_flow_as: {
+        Args: { _consultant_id: string; _variant: string }
+        Returns: string
       }
       clone_bot_flow_as_b: { Args: { _consultant_id: string }; Returns: string }
       clone_bot_flow_as_c: { Args: { _consultant_id: string }; Returns: string }

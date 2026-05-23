@@ -1,51 +1,55 @@
-# Diagnóstico
+# Variantes de fluxo dinâmicas + status de ativação
 
-Na aba **WhatsApp → Conversas**, o `ChatView` está sem altura constrita, então:
+Hoje o sistema é fixo em A/B/C com um único switch `ab_test_enabled` que só liga **se B e C existirem** (tudo-ou-nada). Vamos generalizar para até **5 variantes (A, B, C, D, E)** e dar ao consultor controle de **qual subconjunto entra no round-robin** (A só, A+B, A+C, A+B+C, A+B+C+D+E, etc.).
 
-- A área de mensagens (`flex-1 overflow-y-auto`) cresce até caber **todas** as mensagens em vez de scrollar dentro de uma janela fixa.
-- O **`MessageComposer`** (campo de digitar + botão `/` de atalhos + anexos + áudio) fica empurrado para **abaixo do viewport** — por isso "não dá para escrever mensagem ou enviar atalhos".
-- Os players de áudio/vídeo parecem gigantes porque, sem limite de altura na área de mensagens, eles renderizam o tamanho natural e nada faz scroll interno.
+## Banco
 
-## Causa raiz
+1. `consultants.active_variants text[]` (default `'{A}'`) — substitui a lógica do boolean. `ab_test_enabled` fica como leitura legada (= `array_length(active_variants,1) > 1`) e some da UI.
+2. Generaliza `assign_flow_variant(_consultant_id)`:
+   - Lê `active_variants` do consultor.
+   - Se vazio/`{A}` → sempre `'A'`.
+   - Senão: `counter % len(active_variants)` → escolhe item pelo índice (round-robin determinístico).
+   - Só considera variantes que tenham `bot_flows.is_active=true` correspondente — se o admin marcar D como ativo mas o fluxo D não existir, é ignorado silenciosamente no sorteio.
+3. Nova RPC genérica `clone_bot_flow_as(_consultant_id uuid, _variant text)` que cobre B/C/D/E a partir de A (substitui as duas RPCs `_as_b` e `_as_c`, que viram wrappers).
+4. Constraint check em `bot_flows.variant IN ('A','B','C','D','E')` e em `customers.flow_variant` idem.
 
-Em `src/components/whatsapp/WhatsAppTab.tsx`, os dois wrappers que envolvem o `ChatView` são apenas `flex-1` sem `flex flex-col`:
+## UI — `/admin/fluxos` (FluxoCamila.tsx)
 
-```text
-main (Admin)              h-[100dvh] flex flex-col          OK
- └ <main>                 flex-1 min-h-0 ... flex flex-col  OK
-   └ Suspense → WhatsAppTab  flex-1 min-h-0 flex flex-col   OK
-     └ "Content area"     flex-1 ... (sem flex-col)         ❌
-       └ conversas wrap   flex flex-col h-full              OK
-         └ resize-scope   flex flex-1 min-h-0 (row)         OK
-           └ wrapper      flex-1 min-w-0 (sem flex-col)     ❌  ← quebra aqui
-             └ ChatView   flex-1 flex flex-col min-h-0      OK (mas pai não propaga altura)
+Reorganiza o card "Teste A/B/C" para um card **"Fluxos ativos"**:
+
+```
+┌─ Fluxos ativos ─────────────────────────────────┐
+│  Atualmente rodando:  [ A + B + C ]  ← badge   │
+│                                                  │
+│  ☑ A (com áudio)        Leads: 412              │
+│  ☑ B (sem áudio)        Leads: 408              │
+│  ☑ C (vídeo inicial)    Leads: 405              │
+│  ☐ D (personalizado)    — não criado            │
+│  ☐ E (personalizado)    — não criado            │
+│                                                  │
+│  [+ Adicionar fluxo D]                          │
+└──────────────────────────────────────────────────┘
 ```
 
-Sem `flex flex-col` (ou `h-full overflow-hidden`) no wrapper imediato, o `ChatView` cai em altura `auto` e o `flex-1` interno não tem efeito → mensagens empilham e o composer some.
+- **Checkboxes** por variante existente → escrevem em `consultants.active_variants`. Desabilitado quando o fluxo daquela letra não existe.
+- **Badge "Atualmente rodando: A+B+C"** (ou só "A", ou "A+C", etc.) — calculada a partir de `active_variants ∩ variantes_existentes`. Cor verde se >1 ativa, cinza se só A.
+- **Botão "+ Adicionar fluxo {próxima_letra}"** — chama `clone_bot_flow_as(consultantId, próxima_letra_disponível)`. Some quando já existem 5.
+- **Tabs de edição**: gera dinamicamente uma aba por variante existente (`A`, `B`, `C`, `D`, `E`), substituindo os 3 botões fixos atuais.
+- Remove o `Switch` "ab_test_enabled" — substituído pelos checkboxes (a regra "precisa de >1 variante ativa pra rodar A/B" fica implícita).
 
-# O que vou mudar (1 arquivo)
+## Código tocado
 
-`src/components/whatsapp/WhatsAppTab.tsx`
+- `supabase/migrations/<novo>.sql` — coluna, RPCs, constraints.
+- `src/pages/FluxoCamila.tsx` — bloco da linha ~580-647 (card A/B/C → card Fluxos ativos), `reload()` para carregar contagens dinâmicas, `cloneFlow(letra)` genérico, `setActiveVariants(arr)`.
+- `src/integrations/supabase/types.ts` regenera automaticamente após a migration.
 
-1. Conteúdo da aba (linha ~231): trocar `flex-1 border ... overflow-hidden bg-background` por o mesmo + `flex flex-col` para garantir que cada sub-aba ocupe a altura disponível.
-2. Wrapper do `ChatView` no desktop (linha 308): `flex-1 min-w-0` → `flex-1 min-w-0 min-h-0 flex flex-col`.
-3. Wrapper do `ChatView` no mobile (linha 273): `flex-1 min-h-0` → `flex-1 min-h-0 flex flex-col`.
+## Não muda
 
-Isso devolve a altura para o `ChatView`, que então:
-- Limita a área de mensagens (scroll interno volta a funcionar).
-- Mantém o `MessageComposer` fixo na base, visível.
-- Faz os players de áudio/vídeo respeitarem o `max-w-[75%]` da bolha + `max-h-60` do vídeo — sem mais "esticão".
+- Dispatchers (`whapi-webhook`, `manual-step-send`, `bot-flow.ts`): já lêem `customers.flow_variant` como string e fazem match com `bot_flows.variant`. Funcionam com qualquer letra sem alteração.
+- Lógica do `CaptureStepsGrid` e admin de passos: já é `variant: "A" | "B" | "C"` — vira `string` para aceitar D/E.
+- Memória `ab-test-audio-vs-text` será atualizada para refletir o modelo N-variantes.
 
-# O que NÃO vou mudar
+## Risco / migração
 
-- `MessageBubble` / players de mídia — o tamanho fica bom sozinho assim que o container parar de crescer.
-- Modo Performance da Captação, Kanban, Envio em massa, Fluxos.
-- Lógica de envio, hooks, edge functions.
-
-# Verificação
-
-Depois do fix, no preview em `/admin → WhatsApp → Conversas`:
-- Campo "Mensagem (use "/" para respostas rápidas)" visível na base.
-- `/` abre menu de atalhos.
-- Botão de áudio/anexo/IA visíveis.
-- Scroll de mensagens funciona dentro da área, sem empurrar a página.
+- Backfill: `UPDATE consultants SET active_variants = CASE WHEN ab_test_enabled THEN '{A,B,C}' ELSE '{A}' END WHERE active_variants IS NULL;` — sem perda de comportamento atual.
+- D e E começam vazios; clonar a partir de A é idempotente (a RPC `clone_bot_flow_as` deleta o existente antes, igual a B/C hoje).
