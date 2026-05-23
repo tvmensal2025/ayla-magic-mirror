@@ -18,9 +18,11 @@ interface Props {
   consultantId: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  gameOn?: boolean;
 }
 
-export function CaptureLeadList({ consultantId, selectedId, onSelect }: Props) {
+export function CaptureLeadList({ consultantId, selectedId, onSelect, gameOn = false }: Props) {
+
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
@@ -83,9 +85,12 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect }: Props) {
     <aside className="w-full md:w-auto md:shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border bg-card/40 backdrop-blur-sm min-h-0">
       <div className="p-2 border-b border-border space-y-1.5 shrink-0">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Em captação</h3>
-          <span className="text-xs text-muted-foreground tabular-nums">{leads.length}</span>
+          <h3 className={`text-sm font-semibold ${gameOn ? "exec-shimmer font-black uppercase tracking-wider" : ""}`}>
+            {gameOn ? "Associados" : "Em captação"}
+          </h3>
+          <span className={`text-xs tabular-nums font-bold ${gameOn ? "text-amber-400" : "text-muted-foreground"}`}>{leads.length}</span>
         </div>
+
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nome/telefone" className="h-8 pl-8 text-xs" />
@@ -115,14 +120,15 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect }: Props) {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-sm leading-none" title="Nível">{medal}</span>
-                      <span className="text-sm font-medium truncate">{l.name || "Sem nome"}</span>
+                      <span className={`leading-none ${gameOn ? "text-base" : "text-sm"}`} title="Nível">{medal}</span>
+                      <span className={`truncate ${gameOn ? "text-[15px] font-bold tracking-tight" : "text-sm font-medium"}`}>{l.name || "Sem nome"}</span>
                     </div>
                     <span className="text-[10px] text-muted-foreground flex items-center gap-0.5 shrink-0">
                       <Clock className="w-3 h-3" />{fmtTime(l.capture_started_at || l.created_at)}
                     </span>
                   </div>
-                  <p className="text-[11px] text-muted-foreground truncate">{l.phone_whatsapp || "—"}</p>
+                  <p className={`truncate ${gameOn ? "text-[11px] text-muted-foreground/80 font-mono" : "text-[11px] text-muted-foreground"}`}>{l.phone_whatsapp || "—"}</p>
+
                   <div className="mt-1.5 flex items-center gap-2">
                     <div className="flex-1 h-1 rounded-full bg-secondary overflow-hidden">
                       <div className={`h-full transition-all ${ready ? "bg-gradient-to-r from-amber-400 to-yellow-300" : "bg-gradient-to-r from-emerald-500 to-lime-400"}`} style={{ width: `${pct}%` }} />

@@ -12,9 +12,9 @@ import { ClipboardList, ExternalLink, MessageCircle, ChevronLeft, ChevronDown } 
 import { useToast } from "@/hooks/use-toast";
 import { GameModeToggle } from "@/components/captacao/game/GameModeToggle";
 import { GameShell } from "@/components/captacao/game/GameShell";
-import { PlayerHud } from "@/components/captacao/game/PlayerHud";
-import { QuestsBar } from "@/components/captacao/game/QuestsBar";
+import { ExecHudBar } from "@/components/captacao/game/ExecHudBar";
 import { AchievementsRail } from "@/components/captacao/game/AchievementsRail";
+
 import { LevelUpOverlay } from "@/components/captacao/game/LevelUpOverlay";
 import { XpToast } from "@/components/captacao/game/XpToast";
 import { useGameMode } from "@/components/captacao/game/useGameMode";
@@ -205,15 +205,22 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   };
 
   return (
-    <div className={`flex flex-col flex-1 min-h-0 rounded-lg border ${gameOn ? "border-primary/30" : "border-border"} overflow-hidden bg-background/60 exec-ambient`}>
+    <div className={`flex flex-col flex-1 min-h-0 rounded-lg border ${gameOn ? "exec-border-gold exec-radial-bg" : "border-border"} overflow-hidden bg-background/60 exec-ambient`}>
       {/* Header */}
-      <header className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-card/60 backdrop-blur-sm gap-3 flex-wrap shrink-0">
+      <header className={`flex items-center justify-between px-3 py-1.5 border-b ${gameOn ? "border-amber-400/20" : "border-border"} bg-card/60 backdrop-blur-sm gap-3 flex-wrap shrink-0`}>
         <div className="flex items-center gap-2">
-          <ClipboardList className="w-5 h-5 text-primary" strokeWidth={1.5} />
+          <ClipboardList className={`w-5 h-5 ${gameOn ? "text-amber-400" : "text-primary"}`} strokeWidth={1.5} />
           <div>
-            <h2 className="text-sm font-bold">Painel de Captação</h2>
+            <h2 className={`text-sm font-bold ${gameOn ? "uppercase tracking-wider" : ""}`}>Painel de Captação</h2>
             <p className="text-[11px] text-muted-foreground">
-              {gameOn ? "Performance ativa — acompanhe seus indicadores em tempo real" : "Registre clientes e acompanhe seu desempenho"}
+              {gameOn ? (
+                <span className="flex items-center gap-1.5">
+                  <span className="exec-shimmer font-black tracking-wider">MODO PERFORMANCE</span>
+                  <span className="opacity-60">·</span>
+                  <span className={`font-bold ${progress.rank.color}`}>{progress.rank.label}</span>
+                  <span className="opacity-60">· Nv {progress.level}</span>
+                </span>
+              ) : "Registre clientes e acompanhe seu desempenho"}
             </p>
           </div>
         </div>
@@ -230,15 +237,16 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
 
       {gameOn ? (
         <GameShell>
-          <div className="px-2 py-1 space-y-1 shrink-0">
-            <PlayerHud progress={progress} />
-            <QuestsBar progress={progress} />
+          <div className="px-2 pt-1.5 pb-1 shrink-0">
+            <ExecHudBar progress={progress} />
           </div>
+
           <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "14rem", "--cap-aside-w": "18rem" } as React.CSSProperties}>
             {/* Mobile: lead list visível só quando NÃO há lead selecionado. Desktop: sempre. */}
             <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 md:border-r border-border overflow-hidden`}>
 
-              <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
+              <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} gameOn />
+
             </div>
             <DragResizer storageKey="captacao-list" cssVar="cap-list-w" defaultPx={256} minPx={180} maxPx={420} />
             <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden min-w-0 min-h-0`}>
@@ -321,7 +329,8 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                         onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
                       />
                     </div>
-                    <CaptureConversationFeed customerId={selectedId} />
+                    <CaptureConversationFeed customerId={selectedId} gameOn />
+
 
                     {/* Ficha + Achievements aparecem no fim do scroll em mobile (quando expandidos) */}
                     <div className={`md:hidden ${showAside ? "block" : "hidden"} space-y-3`}>

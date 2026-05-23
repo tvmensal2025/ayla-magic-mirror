@@ -1,73 +1,55 @@
-## Plano: Ícones de ajuda (?) em todo o /admin
+## Problemas atuais do modo Performance
 
-Adicionar um componente reutilizável de ajuda que aparece como um pequeno ícone `(?)` cinza ao lado de cada função importante do painel. Comportamento duplo:
+1. **Visual quase igual ao modo normal** — só aparece um PlayerHud + QuestsBar discretos no topo, sem mudar a "atmosfera" do painel.
+2. **Lista de associados encolheu** — o HUD + Quests empurram conteúdo para baixo e o `CaptureLeadList` perde espaço vertical.
+3. **Feed "Conversa ao Vivo" também encolhe** pelo mesmo motivo (área central perde ~80px).
+4. Falta sensação de "modo ligado" — nenhum brilho dourado real, nenhuma diferença forte de borda/fundo, animações sutis demais.
 
-- **Hover (desktop)** → tooltip curto de 1 linha resumindo o que a função faz.
-- **Clique (qualquer dispositivo)** → popover detalhado com título, descrição, exemplo de uso e dica.
+## O que vou fazer
 
-### 1. Componente novo: `HelpHint`
+### 1. Identidade visual forte quando `gameOn = true`
+- Borda externa do painel em **gradiente dourado animado** (verde→âmbar→verde) ao invés do `border-primary/30` atual.
+- Fundo do painel com **vinheta dourada sutil** (radial top-center, opacity baixa) + grade fina diagonal só no modo Performance.
+- Header com **brasão de rank** (medalha animada do PlayerHud) integrado à esquerda, título "PAINEL DE CAPTAÇÃO" em uppercase com tracking maior + subtítulo dourado "MODO PERFORMANCE · NÍVEL X · RANK".
+- Linha decorativa horizontal do GameShell mais intensa (de `0.3` para `0.6` opacity, com pulse sutil).
 
-`src/components/ui/help-hint.tsx`
+### 2. HUD compacto e horizontal (não rouba altura)
+- Fundir **PlayerHud + QuestsBar em uma única faixa horizontal** de ~44px de altura (hoje ocupa ~96px somados).
+- Layout: `[Medalha+Nv] [Rank · barra XP] [3 metas inline com mini-progress] [Hoje · Sequência]`.
+- Em telas <md, vira accordion colapsável ("Performance ▾") que abre por cima sem empurrar.
+- Resultado: lista de leads e feed central recuperam ~50px de altura útil → ficam **maiores que no modo normal**, não menores.
 
-- Wrapper sobre `Tooltip` + `Popover` do shadcn (já no projeto).
-- Props: `title`, `summary` (linha curta), `details` (texto longo ou JSX), `example?` (opcional).
-- Ícone `HelpCircle` da lucide-react, tamanho 12-14px, cor `text-muted-foreground hover:text-primary`.
-- Mobile: tooltip não dispara, só o clique abre o popover.
+### 3. Lista de leads valorizada (associados)
+- No modo Performance, cada item da lista ganha:
+  - Pequeno **medalhão** ao lado do nome (cor por progresso: bronze/prata/ouro/diamante baseado em `sentStepsCount`).
+  - Nome em **font-weight maior** (semibold→bold) e size +1px.
+  - Quando o lead está em "streak" (>3 passos enviados hoje), animação `exec-energy` sutil no card.
+- Header da lista "Em Captação · 100" vira "ASSOCIADOS · 100" em dourado, com contador animado.
 
-### 2. Onde colocar (mapa completo)
+### 4. Feed "Conversa ao Vivo" destacado
+- Bloco do feed ganha **borda dourada fina + selo "AO VIVO"** pulsante no topo direito (já tem badge, mas é discreto).
+- Título "CONVERSA AO VIVO" em uppercase dourado, font-bold, tamanho maior (+2px) só no modo performance.
+- Última mensagem com leve glow âmbar quando chega nova.
 
-**Captação (`/admin` → painel atual)**
-- Título "Passos" → o que é o painel
-- Botão ✈️ ao lado de cada passo → "envia esse passo isolado pro lead"
-- Badge A/B/C → "variante do teste A/B/C que esse lead está recebendo"
-- Filtro "Pendentes" → "mostra só passos que ainda não foram enviados"
-- Aba "Ficha" → "dados que o bot já capturou desse lead"
-- Barra de progresso "8/10 enviado" → "quantos passos do fluxo o lead já recebeu"
+### 5. Microanimações executivas
+- Toggle do Performance dispara **flash dourado** de 600ms cobrindo o painel (já existe `LevelUpOverlay`, vou reutilizar a animação).
+- Botão GameModeToggle quando ativo: glow dourado pulsante constante (não só hover).
+- XP ganho ao enviar passo: floater dourado mais visível subindo do botão clicado.
 
-**Kanban (`/admin` → aba Kanban)**
-- Título de cada coluna (Novo lead, Aguardando conta, etc) → o que significa cada estágio
-- Botão "Pausar bot" no card → "para todas as mensagens automáticas pro lead"
-- Indicador de "humano assumiu" → quando aparece
+### 6. Tokens de design (sem cores hardcoded fora do tema)
+- Adiciono no `index.css`: `--exec-gold`, `--exec-gold-glow`, `--exec-radial` e classes utilitárias `exec-border-gold`, `exec-radial-bg`, `exec-rank-pulse` — todas em HSL, dark+light.
 
-**Envio em massa (`/admin/envio-em-massa`)**
-- Filtros de status → o que cada status inclui
-- Multiselect de licenciadas → como combinar filtros
-- Botão de origem (Leads WhatsApp / Clientes iGreen) → diferença entre os dois
-- Botão "Enviar" → o que acontece (delay, ordem áudio→imagem→texto)
+## Arquivos a editar
 
-**Fluxos (`/admin/fluxos`)**
-- Variantes A/B/C → o que diferencia cada uma
-- Tipos de passo (message vs capture) → quando usar cada
-- Campo `step_key` → o que é e quando precisa preencher
-- Botão "Gerar texto (IA)" → como funciona o Gemini
-- Mídias (áudio, imagem, vídeo) → ordem de envio garantida
+- `src/components/captacao/CaptacaoPanel.tsx` — borda/fundo condicional, header reformulado, integração do HUD único.
+- `src/components/captacao/game/GameShell.tsx` — vinheta + grade decorativa.
+- `src/components/captacao/game/PlayerHud.tsx` + `QuestsBar.tsx` — fundir em **`ExecHudBar.tsx`** (novo) horizontal.
+- `src/components/captacao/CaptureLeadList.tsx` — medalhão, peso de fonte e cabeçalho "ASSOCIADOS" no modo performance (recebe prop `gameOn`).
+- `src/components/captacao/CaptureConversationFeed.tsx` — borda + selo "AO VIVO" + título destacado no modo performance (recebe prop `gameOn`).
+- `src/components/captacao/game/GameModeToggle.tsx` — glow pulsante quando ativo.
+- `src/index.css` — tokens `--exec-gold*` e classes utilitárias.
 
-### 3. Padrão de copy
-
-- **Summary**: 5-10 palavras, ação direta. Ex: "Envia esse passo único para o lead".
-- **Details**: 2-3 frases curtas explicando comportamento, efeitos colaterais e quando usar.
-- **Example** (opcional): caso de uso real. Ex: "Use quando o lead pediu pra repetir o áudio".
-
-### 4. Arquivos afetados
-
-- **Novo**: `src/components/ui/help-hint.tsx`
-- **Edits** (adicionar `<HelpHint />` ao lado dos elementos):
-  - `src/components/captacao/CaptureStepsList.tsx`
-  - `src/components/captacao/CaptureStepsGrid.tsx`
-  - `src/components/captacao/CaptacaoPanel.tsx`
-  - `src/components/whatsapp/BulkSendPanel.tsx` (ou equivalente em `src/components/whatsapp/`)
-  - `src/components/admin/...` (Kanban e Fluxos — localizo no momento da implementação)
-
-### 5. O que NÃO entra
-
-- Tour guiado de primeira sessão (não foi escolhido).
-- Mudar nada da lógica de envio/fluxo — só camada de ajuda.
-- Tradução/i18n — texto direto em pt-BR.
-
-### Detalhes técnicos
-
-- Usa `@/components/ui/tooltip` e `@/components/ui/popover` já existentes.
-- `useIsMobile()` para condicionar o tooltip (só desktop).
-- Z-index do popover acima do drawer do lead.
-- Aria-label correto para acessibilidade.
-- Sem nova dependência.
+## O que NÃO vou mudar
+- Lógica de XP, level, streak, quests, sons.
+- A/B/C, fluxo de envio, ficha do lead, kanban.
+- Modo normal (não-performance) continua exatamente como está.

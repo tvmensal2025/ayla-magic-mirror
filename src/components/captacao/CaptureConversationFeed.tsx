@@ -6,7 +6,10 @@ interface Props {
   customerId: string;
   /** Quantas mensagens exibir. Default 12. */
   limit?: number;
+  /** Modo Performance: borda dourada + selo AO VIVO + título destacado */
+  gameOn?: boolean;
 }
+
 
 interface ConvRow {
   id: string;
@@ -39,7 +42,7 @@ function sortRows(rows: ConvRow[], limit: number) {
     .slice(-limit);
 }
 
-export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
+export function CaptureConversationFeed({ customerId, limit = 12, gameOn = false }: Props) {
   const [rows, setRows] = useState<ConvRow[]>([]);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -125,13 +128,17 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
   }, [rows.length, scheduleScrollToBottom]);
 
   return (
-    <div className="rounded-lg border border-border bg-card/30 overflow-hidden flex flex-col min-h-0 flex-1">
-      <div className="px-2.5 py-1.5 border-b border-border/60 bg-muted/30 flex items-center justify-between shrink-0">
-        <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-          <MessageCircle className="w-3 h-3 text-primary" /> Conversa ao vivo
+    <div className={`rounded-lg overflow-hidden flex flex-col min-h-0 flex-1 ${gameOn ? "border exec-border-gold bg-card/40" : "border border-border bg-card/30"}`}>
+      <div className={`px-2.5 py-1.5 border-b flex items-center justify-between shrink-0 ${gameOn ? "border-amber-400/25 bg-gradient-to-r from-amber-400/10 via-card/40 to-transparent" : "border-border/60 bg-muted/30"}`}>
+        <span className={`flex items-center gap-1.5 ${gameOn ? "text-[12px] font-black uppercase tracking-widest text-amber-300" : "text-[10px] font-bold uppercase tracking-wide text-muted-foreground"}`}>
+          {gameOn && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 exec-live-dot" aria-hidden />}
+          <MessageCircle className={`${gameOn ? "w-3.5 h-3.5 text-amber-400" : "w-3 h-3 text-primary"}`} />
+          {gameOn ? "Conversa ao vivo" : "Conversa ao vivo"}
+          {gameOn && <span className="ml-1 px-1.5 py-0 rounded text-[9px] font-black bg-red-500/20 text-red-300 border border-red-500/40 tracking-wider">AO VIVO</span>}
         </span>
-        <span className="text-[9px] text-muted-foreground tabular-nums">{rows.length}</span>
+        <span className={`tabular-nums ${gameOn ? "text-[10px] font-bold text-amber-300/80" : "text-[9px] text-muted-foreground"}`}>{rows.length}</span>
       </div>
+
       <div ref={scrollRef} className="flex-1 min-h-[140px] overflow-y-auto p-2.5 space-y-2 bg-[#0b141a]/40">
 
         {loading && (

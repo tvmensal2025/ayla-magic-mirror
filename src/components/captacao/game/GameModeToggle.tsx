@@ -27,19 +27,20 @@ export function GameModeToggle({ enabled, onToggle, sound, onToggleSound }: Prop
         onClick={onToggle}
         className={`group relative inline-flex items-center gap-2 px-3 h-9 rounded-lg border transition-all ${
           enabled
-            ? "border-primary/40 bg-primary/10 text-primary"
+            ? "border-amber-400/50 bg-gradient-to-r from-primary/15 to-amber-400/15 text-amber-300 exec-toggle-on"
             : "border-border/60 bg-card hover:border-primary/30 hover:bg-primary/5 text-muted-foreground"
         }`}
         title={enabled ? "Desativar painel de performance" : "Ativar painel de performance"}
       >
-        <BarChart2 className="w-4 h-4" strokeWidth={1.5} />
-        <span className="text-xs font-semibold tracking-wide">
+        <BarChart2 className={`w-4 h-4 ${enabled ? "text-amber-400" : ""}`} strokeWidth={1.5} />
+        <span className={`text-xs font-bold tracking-wider ${enabled ? "uppercase" : ""}`}>
           {enabled ? "Performance ON" : "Performance"}
         </span>
-        <span className={`relative inline-block w-8 h-4 rounded-full transition-colors ${enabled ? "bg-primary/30" : "bg-muted"}`}>
+        <span className={`relative inline-block w-8 h-4 rounded-full transition-colors ${enabled ? "bg-amber-400/40" : "bg-muted"}`}>
           <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${enabled ? "left-[18px]" : "left-0.5"}`} />
         </span>
       </button>
+
     </div>
   );
 }
