@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +45,7 @@ type LibraryVideo = { id: string; label: string; url: string | null };
 type LibraryAudio = { id: string; label: string; url: string | null };
 
 export default function FaqSection({ flowId }: { flowId: string }) {
+  const confirm = useConfirm();
   const [qas, setQas] = useState<QA[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [availableVideos, setAvailableVideos] = useState<LibraryVideo[]>([]);
@@ -136,7 +138,13 @@ export default function FaqSection({ flowId }: { flowId: string }) {
   };
 
   const seedDefaults = async () => {
-    if (!confirm(`Adicionar os ${OBJECTION_SHORTCUTS.length} atalhos padrão de objeção?\n\nAtalhos já existentes (mesmo nome) serão pulados.`)) return;
+    const ok = await confirm({
+      title: "Adicionar atalhos padrão de objeção?",
+      description: `Vamos adicionar ${OBJECTION_SHORTCUTS.length} respostas prontas para as objeções mais comuns. Atalhos com o mesmo nome serão preservados.`,
+      confirmText: "Adicionar atalhos",
+      tone: "success",
+    });
+    if (!ok) return;
     setSeeding(true);
     let added = 0, skipped = 0;
     try {
@@ -170,7 +178,13 @@ export default function FaqSection({ flowId }: { flowId: string }) {
   };
 
   const deleteQA = async (id: string) => {
-    if (!confirm("Excluir esta dúvida?")) return;
+    const ok = await confirm({
+      title: "Excluir esta dúvida?",
+      description: "A resposta automática vinculada a essa pergunta será removida permanentemente.",
+      confirmText: "Excluir dúvida",
+      tone: "danger",
+    });
+    if (!ok) return;
     await supabase.from("bot_flow_qa").delete().eq("id", id);
     setQas((cur) => cur.filter((q) => q.id !== id));
   };
