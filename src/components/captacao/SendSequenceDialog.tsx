@@ -23,7 +23,7 @@ interface Props {
   customerId: string;
   customerName?: string | null;
   steps: SequenceStep[]; // só passos pendentes (em ordem)
-  variant?: "A" | "B" | "C";
+  variant?: "A" | "B" | "C" | "D" | "E";
   onStepSent: (stepKey: string) => void;
   onAskName?: () => void;
 }

@@ -28,7 +28,7 @@ import { ptBR } from "date-fns/locale";
 import { resetLeadConversation } from "@/services/resetConversation";
 import { ManualStepDialog } from "./ManualStepDialog";
 
-type Variant = "A" | "B" | "C";
+type Variant = "A" | "B" | "C" | "D" | "E";
 
 type Row = {
   id: string;

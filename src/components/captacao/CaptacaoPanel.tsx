@@ -51,7 +51,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
   const [phone, setPhone] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState<string | null>(null);
-  const [variant, setVariant] = useState<"A" | "B" | "C" | "D" | "E">("A");
+  const [variant, setVariant] = useState<"A" | "B" | "C" | "D" | "E" | "D" | "E">("A");
   const [mismatch, setMismatch] = useState<{ flag: boolean; bill: string; doc: string; acked: boolean }>({ flag: false, bill: "", doc: "", acked: false });
   const [missionsVersion, setMissionsVersion] = useState(0);
   const [showAside, setShowAside] = useState(false);
@@ -117,7 +117,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
       setPhone(row?.phone_whatsapp || null);
       setCustomerName(row?.name || null);
       const v = String(row?.flow_variant || "A").toUpperCase();
-      setVariant((["A", "B", "C"].includes(v) ? v : "A") as "A" | "B" | "C");
+      setVariant((["A", "B", "C"].includes(v) ? v : "A") as "A" | "B" | "C" | "D" | "E");
       setMismatch({
         flag: !!row?.name_mismatch_flag,
         bill: row?.bill_holder_name || "",
@@ -127,7 +127,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
     })();
   }, [selectedId]);
 
-  const changeVariant = async (next: "A" | "B" | "C") => {
+  const changeVariant = async (next: "A" | "B" | "C" | "D" | "E") => {
     if (!selectedId || next === variant) return;
     setVariant(next);
     await supabase.from("customers").update({ flow_variant: next, updated_at: new Date().toISOString() }).eq("id", selectedId);

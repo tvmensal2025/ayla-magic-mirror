@@ -7,7 +7,7 @@ import { toast as sonnerToast } from "sonner";
 interface Props {
   consultantId: string;
   customerId: string;
-  variant?: "A" | "B" | "C";
+  variant?: "A" | "B" | "C" | "D" | "E";
   missing: string[];
   isComplete: boolean;
   allStepsSent: boolean;
