@@ -593,74 +593,95 @@ export default function FluxoCamila() {
           </div>
         </Card>
 
-        {/* Teste A/B/C */}
+        {/* Fluxos ativos (A..E) */}
         <Card className="p-4 sm:p-5 border-purple-500/30 bg-purple-500/5">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-start justify-between gap-4 flex-wrap mb-3">
             <div className="flex-1 min-w-[220px]">
               <div className="flex items-center gap-2 mb-1">
                 <FlaskConical className="h-4 w-4 text-purple-500" />
-                <Label className="text-base font-semibold">Teste A/B/C (áudio × só texto × vídeo inicial)</Label>
+                <Label className="text-base font-semibold">Fluxos ativos no round-robin</Label>
               </div>
               <p className="text-sm text-muted-foreground">
-                Quando ligado, novos leads alternam entre os 3 fluxos: 1º <strong>A</strong> (com áudio), 2º <strong>B</strong> (sem áudio, só texto), 3º <strong>C</strong> (com vídeo no início), 4º A, 5º B, 6º C... Cada fluxo é editado de forma independente.
+                Marque quais variantes participam do sorteio. Novos leads alternam ciclicamente entre as marcadas. Edite cada uma na aba abaixo. Você pode ter até 5 variantes (A–E).
               </p>
             </div>
-            <Switch checked={abEnabled} onCheckedChange={toggleAbTest} disabled={!hasFlowB || !hasFlowC} />
-          </div>
-
-          <div className="mt-4 pt-4 border-t border-border/60 flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-3 text-sm flex-wrap">
-              <span>Leads:</span>
-              <Badge variant="secondary">A: {variantCounts.A}</Badge>
-              <Badge variant="secondary">B: {variantCounts.B}</Badge>
-              <Badge variant="secondary">C: {variantCounts.C}</Badge>
-              {(!hasFlowB || !hasFlowC) && (
-                <span className="text-xs text-muted-foreground">
-                  — crie os Fluxos {!hasFlowB ? "B" : ""}{!hasFlowB && !hasFlowC ? " e " : ""}{!hasFlowC ? "C" : ""} para habilitar o teste
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button variant="outline" size="sm" onClick={cloneFlowB} disabled={cloneBusy}>
-                {cloneBusy ? "Clonando…" : hasFlowB ? "Recriar B a partir do A" : "Criar Fluxo B (sem áudio)"}
-              </Button>
-              <Button variant="outline" size="sm" onClick={cloneFlowC} disabled={cloneCBusy}>
-                {cloneCBusy ? "Clonando…" : hasFlowC ? "Recriar C a partir do A" : "Criar Fluxo C (com vídeo)"}
-              </Button>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Rodando agora:</span>
+              <Badge className={activeVariants.length > 1 ? "bg-emerald-500 text-white" : "bg-muted text-foreground"}>
+                {activeVariants.filter((v) => existingVariants.includes(v)).join(" + ") || "A"}
+              </Badge>
             </div>
           </div>
 
-          {(hasFlowB || hasFlowC) && (
-            <div className="mt-4 pt-4 border-t border-border/60 flex items-center gap-3 flex-wrap">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-2">
+            {ALL_VARIANTS.map((v) => {
+              const exists = existingVariants.includes(v);
+              const isActive = activeVariants.includes(v);
+              return (
+                <div
+                  key={v}
+                  className={`flex items-center justify-between gap-2 rounded-md border p-2.5 ${
+                    isActive && exists ? "border-emerald-500/60 bg-emerald-500/5" : "border-border bg-background/50"
+                  } ${!exists ? "opacity-70" : ""}`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Checkbox
+                      id={`av-${v}`}
+                      checked={isActive}
+                      disabled={!exists}
+                      onCheckedChange={(c) => toggleActiveVariant(v, !!c)}
+                    />
+                    <label htmlFor={`av-${v}`} className="text-sm cursor-pointer min-w-0">
+                      <div className="font-semibold truncate">Fluxo {VARIANT_LABEL[v]}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {exists ? `Leads: ${variantCounts[v]}` : "Ainda não criado"}
+                      </div>
+                    </label>
+                  </div>
+                  {v !== "A" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      disabled={cloneBusy === v}
+                      onClick={() => cloneFlowAs(v)}
+                    >
+                      {cloneBusy === v ? "…" : exists ? "Recriar" : "+ Criar"}
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {existingVariants.length > 1 && (
+            <div className="mt-4 pt-4 border-t border-border/60 flex items-center gap-2 flex-wrap">
               <Label className="text-sm">Editando:</Label>
-              <div className="inline-flex rounded-md border border-border overflow-hidden">
-                <button
-                  type="button"
-                  className={`px-3 py-1.5 text-sm ${editingVariant === "A" ? "bg-primary text-primary-foreground" : "bg-background"}`}
-                  onClick={() => setEditingVariant("A")}
-                >Fluxo A (com áudio)</button>
-                <button
-                  type="button"
-                  disabled={!hasFlowB}
-                  className={`px-3 py-1.5 text-sm border-l border-border ${editingVariant === "B" ? "bg-primary text-primary-foreground" : "bg-background"} disabled:opacity-50`}
-                  onClick={() => setEditingVariant("B")}
-                >Fluxo B (sem áudio)</button>
-                <button
-                  type="button"
-                  disabled={!hasFlowC}
-                  className={`px-3 py-1.5 text-sm border-l border-border ${editingVariant === "C" ? "bg-primary text-primary-foreground" : "bg-background"} disabled:opacity-50`}
-                  onClick={() => setEditingVariant("C")}
-                >Fluxo C (vídeo inicial)</button>
+              <div className="inline-flex rounded-md border border-border overflow-hidden flex-wrap">
+                {existingVariants.map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className={`px-3 py-1.5 text-sm border-l first:border-l-0 border-border ${
+                      editingVariant === v ? "bg-primary text-primary-foreground" : "bg-background"
+                    }`}
+                    onClick={() => setEditingVariant(v)}
+                  >
+                    Fluxo {v}
+                  </button>
+                ))}
               </div>
               {editingVariant === "B" && (
-                <span className="text-xs text-muted-foreground">No Fluxo B, cada áudio é enviado como texto usando a transcrição (editável em cada passo).</span>
+                <span className="text-xs text-muted-foreground">Fluxo B: áudios são ignorados — use o texto de cada passo.</span>
               )}
               {editingVariant === "C" && (
-                <span className="text-xs text-muted-foreground">No Fluxo C, adicione um vídeo no primeiro passo para começar a conversa com um vídeo de apresentação.</span>
+                <span className="text-xs text-muted-foreground">Fluxo C: adicione um vídeo no primeiro passo.</span>
               )}
             </div>
           )}
         </Card>
+
+
 
 
         {showMigrationBanner && (
