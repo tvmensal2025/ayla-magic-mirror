@@ -214,7 +214,7 @@ export default function FluxoCamila() {
   const reload = useCallback(async (uid: string, variant: Variant = "A") => {
     const [{ data: cons }, { data: flows }, { count }, { data: allFlows }, { data: allCustomers }] = await Promise.all([
       supabase.from("consultants").select("conversational_flow_enabled, active_variants").eq("id", uid).maybeSingle(),
-      (supabase as any).from("bot_flows").select("id, initial_delay_seconds").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
+      (supabase as any).from("bot_flows").select("id").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
       supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("conversational_flow_enabled", true),
       supabase.from("bot_flows").select("variant").eq("consultant_id", uid).eq("is_active", true),
       supabase.from("customers").select("flow_variant").eq("consultant_id", uid),
@@ -246,8 +246,9 @@ export default function FluxoCamila() {
       fid = (data as string) ?? null;
     }
     setFlowId(fid);
-    // Carrega o delay inicial configurado no fluxo
-    setInitialDelaySec(Number((flows?.[0] as any)?.initial_delay_seconds ?? 0));
+    // Carrega os passos mesmo quando o banco ainda não tem a coluna nova de delay.
+    // Antes o select de initial_delay_seconds falhava e a tela ficava sem passos.
+    setInitialDelaySec(0);
     if (fid) {
       const { data: rows } = await supabase
         .from("bot_flow_steps").select("*").eq("flow_id", fid).order("position");
