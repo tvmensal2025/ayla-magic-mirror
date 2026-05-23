@@ -186,32 +186,40 @@ export default function FluxoCamila() {
   const [showMigrationBanner, setShowMigrationBanner] = useState(
     () => typeof window !== "undefined" && !localStorage.getItem("camila_migration_v2_dismissed")
   );
-  // A/B/C test state
-  const [editingVariant, setEditingVariant] = useState<"A" | "B" | "C">("A");
-  const [hasFlowB, setHasFlowB] = useState(false);
-  const [hasFlowC, setHasFlowC] = useState(false);
-  const [abEnabled, setAbEnabled] = useState(false);
-  const [variantCounts, setVariantCounts] = useState<{ A: number; B: number; C: number }>({ A: 0, B: 0, C: 0 });
-  const [cloneBusy, setCloneBusy] = useState(false);
-  const [cloneCBusy, setCloneCBusy] = useState(false);
+  // Variantes dinâmicas A..E
+  const [editingVariant, setEditingVariant] = useState<Variant>("A");
+  const [existingVariants, setExistingVariants] = useState<Variant[]>(["A"]);
+  const [activeVariants, setActiveVariantsState] = useState<Variant[]>(["A"]);
+  const [variantCounts, setVariantCounts] = useState<Record<Variant, number>>({ A: 0, B: 0, C: 0, D: 0, E: 0 });
+  const [cloneBusy, setCloneBusy] = useState<Variant | null>(null);
 
-  const reload = useCallback(async (uid: string, variant: "A" | "B" | "C" = "A") => {
-    const [{ data: cons }, { data: flows }, { count }, { data: flowB }, { data: flowC }, vAResp, vBResp, vCResp] = await Promise.all([
-      supabase.from("consultants").select("conversational_flow_enabled, ab_test_enabled").eq("id", uid).maybeSingle(),
+  const reload = useCallback(async (uid: string, variant: Variant = "A") => {
+    const [{ data: cons }, { data: flows }, { count }, { data: allFlows }, { data: allCustomers }] = await Promise.all([
+      supabase.from("consultants").select("conversational_flow_enabled, active_variants").eq("id", uid).maybeSingle(),
       (supabase as any).from("bot_flows").select("id, initial_delay_seconds").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
       supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("conversational_flow_enabled", true),
-      supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("variant", "B").limit(1),
-      supabase.from("bot_flows").select("id").eq("consultant_id", uid).eq("variant", "C").limit(1),
-      supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "A"),
-      supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "B"),
-      supabase.from("customers").select("id", { count: "exact", head: true }).eq("consultant_id", uid).eq("flow_variant", "C"),
+      supabase.from("bot_flows").select("variant").eq("consultant_id", uid).eq("is_active", true),
+      supabase.from("customers").select("flow_variant").eq("consultant_id", uid),
     ]);
     setGlobalAtivo(!!cons?.conversational_flow_enabled);
-    setAbEnabled(!!(cons as any)?.ab_test_enabled);
+    const av = (((cons as any)?.active_variants as string[] | null) || ["A"]).filter(
+      (x): x is Variant => ALL_VARIANTS.includes(x as Variant)
+    );
+    setActiveVariantsState(av.length ? av : ["A"]);
     setTestCount(count ?? 0);
-    setHasFlowB((flowB?.length ?? 0) > 0);
-    setHasFlowC((flowC?.length ?? 0) > 0);
-    setVariantCounts({ A: (vAResp as any)?.count ?? 0, B: (vBResp as any)?.count ?? 0, C: (vCResp as any)?.count ?? 0 });
+
+    const ex = new Set<Variant>(["A"]);
+    for (const r of ((allFlows as any[]) || [])) {
+      if (ALL_VARIANTS.includes(r.variant)) ex.add(r.variant);
+    }
+    setExistingVariants(ALL_VARIANTS.filter((v) => ex.has(v)));
+
+    const counts: Record<Variant, number> = { A: 0, B: 0, C: 0, D: 0, E: 0 };
+    for (const r of ((allCustomers as any[]) || [])) {
+      const fv = (r.flow_variant || "A") as Variant;
+      if (ALL_VARIANTS.includes(fv)) counts[fv]++;
+    }
+    setVariantCounts(counts);
 
     let fid = flows?.[0]?.id ?? null;
     if (!fid && variant === "A") {
