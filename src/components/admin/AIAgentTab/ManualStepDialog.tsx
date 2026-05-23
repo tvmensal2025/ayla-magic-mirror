@@ -16,7 +16,23 @@ type Step = {
   slot_key: string | null;
   message_text: string | null;
   position: number;
+  captures?: any;
 };
+
+function extractStepButtons(step: Step | undefined | null): { id: string; title: string }[] {
+  if (!step) return [];
+  try {
+    const caps = Array.isArray((step as any).captures) ? (step as any).captures : [];
+    const found = caps.find((c: any) => c?.field === "_buttons" && c?.enabled !== false);
+    if (found && Array.isArray(found.value)) {
+      return found.value
+        .map((b: any) => ({ id: String(b?.id || "").trim(), title: String(b?.title || "").trim() }))
+        .filter((b: any) => b.id && b.title)
+        .slice(0, 3);
+    }
+  } catch {}
+  return [];
+}
 
 type Media = { id: string; kind: string; url: string; slot_key: string | null };
 
