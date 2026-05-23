@@ -827,6 +827,16 @@ async function buildContinuationPatch(supabase: any, sender: any, remoteJid: str
     patch.conversation_step = step.id;
   }
 
+  // FIX: Se o passo clicado JÁ é uma captura/confirmação/finalização, NUNCA
+  // encadear automaticamente — o lead precisa responder antes. Sem este return,
+  // o loop abaixo passa por cima do passo de captura (ex.: capture_documento)
+  // e acaba enviando o passo de finalizar, sobrescrevendo o cursor pra
+  // "finalizando" e pulando o pedido do documento.
+  if (clickedType !== "message") {
+    console.log(`[manual-step-send] clickedType=${clickedType} é captura — não encadeia, mantém cursor=${patch.conversation_step}`);
+    return patch;
+  }
+
   let cursorPos = Number(step.position) || 0;
   const MAX_CHAIN = 20; // cobre fluxos grandes (10+ passos) sem loop infinito.
 
