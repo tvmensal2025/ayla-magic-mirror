@@ -977,8 +977,24 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           console.log(`[dispatch:${stepKey}] AI answer enviada (conf=${ai.confidence.toFixed(2)} handoff=${ai.shouldHandoff})`);
           return true;
         } catch (e) {
-          console.warn(`[dispatch:${stepKey}] AI answer falhou — caindo no texto estático:`, (e as Error).message);
-          // segue fluxo padrão abaixo
+          console.warn(`[dispatch:${stepKey}] AI answer falhou — enviando fallback texto puro (sem mídia):`, (e as Error).message);
+          // GUARD ABSOLUTO: passos de dúvida NUNCA enviam áudio/vídeo/imagem.
+          // Se a IA falhou, manda texto seguro e retorna — não cai no envio de mídia.
+          try {
+            const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
+            const fallbackText = firstName
+              ? `${firstName}, pode mandar sua dúvida que eu te explico tudo agora 😊`
+              : "Pode mandar sua dúvida que eu te explico tudo agora 😊";
+            await sendText(remoteJid, fallbackText);
+            await supabase.from("conversations").insert({
+              customer_id: customer.id,
+              message_direction: "outbound",
+              message_text: fallbackText,
+              message_type: "text",
+              conversation_step: stepKey,
+            });
+          } catch (_) { /* best-effort */ }
+          return true;
         }
       }
 
