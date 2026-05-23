@@ -70,7 +70,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Confirmar dados",
         icon: "msg",
         message_text:
-          "Show {{nome}}! Sua economia vai ser de {{economia_range}} por mês 🎉\nPra cadastrar, preciso confirmar: este WhatsApp ({{telefone}}) é o melhor pra contato?",
+          "Show, {{nome}}! 🎉\n\nSua economia vai ser de *{{economia_range}}* por mês. 💚\n\nPra cadastrar, só preciso confirmar uma coisinha 👇\n\nEste WhatsApp (*{{telefone}}*) é o *melhor número* pra contato?",
         slot_key: "pre_cadastro",
         captures: [{ field: "_buttons", enabled: true, value: [
           { id: "sim", title: "✅ Sim" },
