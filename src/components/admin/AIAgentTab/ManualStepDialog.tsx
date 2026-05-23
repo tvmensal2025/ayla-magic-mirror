@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Send, Play } from "lucide-react";
+import { Loader2, Send, Play, Zap } from "lucide-react";
 import { StepPartPreview, type PartKind } from "@/components/whatsapp/StepPartPreview";
 import { normalizeSendStepError } from "@/lib/whatsapp/send";
 
