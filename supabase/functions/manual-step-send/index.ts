@@ -423,6 +423,21 @@ Deno.serve(async (req) => {
 
 
 
+    // Botões Whapi (quick_reply) — opcionais, configurados em captures._buttons.
+    // Mesma normalização do bot-flow.ts (linha ~1003).
+    let _buttons: { id: string; title: string }[] = [];
+    try {
+      const caps = Array.isArray((step as any).captures) ? (step as any).captures : [];
+      const found = caps.find((c: any) => c?.field === "_buttons" && c?.enabled !== false);
+      if (found && Array.isArray(found.value)) {
+        _buttons = found.value
+          .map((b: any) => ({ id: String(b?.id || "").trim(), title: String(b?.title || "").trim() }))
+          .filter((b: any) => b.id && b.title)
+          .slice(0, 3);
+      }
+    } catch (_) { /* noop */ }
+    const applyVarsBtn = (s: string) => Object.entries(vars).reduce((acc, [k, v]) => acc.split(k).join(v), s);
+
     // Build items list per part request
     type Item = { kind: string; text?: string; media?: any };
     const allItems: Item[] = [];
