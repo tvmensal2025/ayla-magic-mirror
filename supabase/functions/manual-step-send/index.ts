@@ -25,7 +25,7 @@ interface Body {
   part: Part;        // which piece to send (or "all")
   mediaId?: string;  // when there are multiple medias of same kind, target one
   continueFlow?: boolean; // resume flow after sending the selected full step
-  variant?: "A" | "B" | "C"; // override de variante (consultor escolheu nos chips)
+  variant?: "A" | "B" | "C" | "D" | "E"; // override de variante (consultor escolheu nos chips)
   force?: boolean;   // ignora trava awaiting_inbound (reenvio explícito)
 }
 
