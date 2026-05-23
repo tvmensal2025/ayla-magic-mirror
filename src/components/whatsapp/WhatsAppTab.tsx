@@ -228,7 +228,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
       </div>
 
       {/* Content area */}
-      <div className="flex-1 border border-t-0 border-border rounded-b-lg overflow-hidden bg-background">
+      <div className="flex-1 min-h-0 border border-t-0 border-border rounded-b-lg overflow-hidden bg-background flex flex-col">
         {activeSubTab === "dashboard" && (
           <Suspense fallback={<LazyFallback />}>
             <WhatsAppDashboard consultantId={userId} />
@@ -270,7 +270,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
                     >
                       ← Voltar às conversas
                     </button>
-                    <div className="flex-1 min-h-0">
+                    <div className="flex-1 min-h-0 flex flex-col">
                       <ChatView
                         instanceName={instanceName}
                         chat={selectedChat}
@@ -305,7 +305,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
                     />
                   </div>
                   <DragResizer storageKey="whatsapp-side" cssVar="wa-side-w" defaultPx={300} minPx={220} maxPx={520} />
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 min-h-0 flex flex-col">
                     <ChatView
                       instanceName={instanceName}
                       chat={selectedChat}
