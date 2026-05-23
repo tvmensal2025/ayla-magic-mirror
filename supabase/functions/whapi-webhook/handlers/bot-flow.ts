@@ -1149,6 +1149,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       let sent = false;
       let videoFailed = false;
       let hadVideo = false;
+      let buttonsSent = false;
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
         const isLast = i === items.length - 1;
