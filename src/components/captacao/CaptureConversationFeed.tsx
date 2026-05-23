@@ -132,7 +132,7 @@ export function CaptureConversationFeed({ customerId, limit = 12 }: Props) {
         </span>
         <span className="text-[9px] text-muted-foreground tabular-nums">{rows.length}</span>
       </div>
-      <div ref={scrollRef} className="flex-1 min-h-[280px] md:min-h-[360px] overflow-y-auto p-3 space-y-2 bg-[#0b141a]/40">
+      <div ref={scrollRef} className="flex-1 min-h-[140px] overflow-y-auto p-2.5 space-y-2 bg-[#0b141a]/40">
 
         {loading && (
           <div className="flex items-center justify-center py-4 text-muted-foreground text-[10px] gap-1.5">
