@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Send, Loader2, Check, Mic, ImageIcon, Video, Search } from "lucide-react";
 import { CaptureStepPreview } from "./CaptureStepPreview";
+import { HelpHint } from "@/components/ui/help-hint";
 
 interface Props {
   consultantId: string;
