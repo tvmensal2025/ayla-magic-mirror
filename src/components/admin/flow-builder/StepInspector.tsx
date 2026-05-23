@@ -164,6 +164,18 @@ export default function StepInspector({
               />
             </div>
 
+            {flowId && (
+              <div className="rounded-lg border bg-muted/10 p-3">
+                <StepSuggestions
+                  consultantId={consultantId}
+                  stepId={step.id}
+                  flowId={flowId}
+                  currentMaxPosition={maxPosition ?? step.position}
+                  onAdded={() => onReload?.()}
+                />
+              </div>
+            )}
+
             <button
               type="button"
               onClick={() => setAdvancedOpen((v) => !v)}
