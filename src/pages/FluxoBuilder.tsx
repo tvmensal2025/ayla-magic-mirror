@@ -2,10 +2,8 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
 import { ArrowLeft, Plus, AlertTriangle, ExternalLink, Loader2, Sparkles, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -21,6 +19,7 @@ import StepCard from "@/components/admin/flow-builder/StepCard";
 import StepInspector from "@/components/admin/flow-builder/StepInspector";
 import WhatsAppPreview from "@/components/admin/flow-builder/WhatsAppPreview";
 import FlowTemplatesDialog from "@/components/admin/flow-builder/FlowTemplatesDialog";
+import VariantDistributionBar from "@/components/admin/flow-builder/VariantDistributionBar";
 import { useFlowValidation } from "@/components/admin/flow-builder/useFlowValidation";
 import {
   Step, Variant, ALL_VARIANTS, VARIANT_LABEL,
@@ -43,7 +42,7 @@ export default function FluxoBuilder() {
   const [flowId, setFlowId] = useState<string | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(true);
-  const [globalAtivo, setGlobalAtivo] = useState(false);
+  
   const [editingVariant, setEditingVariant] = useState<Variant>("A");
   const [existingVariants, setExistingVariants] = useState<Variant[]>(["A"]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -60,7 +59,7 @@ export default function FluxoBuilder() {
       (supabase as any).from("bot_flows").select("id").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
       supabase.from("bot_flows").select("variant").eq("consultant_id", uid).eq("is_active", true),
     ]);
-    setGlobalAtivo(!!(cons as any)?.conversational_flow_enabled);
+    
     setConsultantName((cons as any)?.name ?? "");
     const ex = new Set<Variant>(["A"]);
     for (const r of ((allFlows as any[]) || [])) {
@@ -252,14 +251,6 @@ export default function FluxoBuilder() {
     toast.success("Passo removido");
   }
 
-  async function toggleGlobal(v: boolean) {
-    if (!userId) return;
-    setGlobalAtivo(v);
-    const { error } = await supabase.from("consultants")
-      .update({ conversational_flow_enabled: v }).eq("id", userId);
-    if (error) { toast.error(error.message); setGlobalAtivo(!v); }
-    else toast.success(v ? "Fluxo ativo para todos os leads" : "Fluxo desligado");
-  }
 
   if (loading && !steps.length) {
     return (
@@ -303,12 +294,6 @@ export default function FluxoBuilder() {
               <Sparkles className="mr-1 h-3 w-3" />
               Templates
             </Button>
-            <div className="flex items-center gap-2 rounded-lg border px-3 py-1.5">
-              <Switch checked={globalAtivo} onCheckedChange={toggleGlobal} id="global" />
-              <label htmlFor="global" className="cursor-pointer text-xs font-medium">
-                Fluxo ativo
-              </label>
-            </div>
             <Button variant="outline" size="sm" onClick={() => navigate("/admin/fluxos-legado")}>
               <ExternalLink className="mr-1 h-3 w-3" />
               Editor antigo
@@ -316,19 +301,15 @@ export default function FluxoBuilder() {
           </div>
         </div>
 
-        {/* Variantes */}
-        {existingVariants.length > 1 && (
-          <div className="mx-auto max-w-7xl px-4 pb-2">
-            <Tabs value={editingVariant} onValueChange={(v) => setEditingVariant(v as Variant)}>
-              <TabsList>
-                {existingVariants.map((v) => (
-                  <TabsTrigger key={v} value={v} className="text-xs">
-                    {VARIANT_LABEL[v]}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-          </div>
+        {/* Distribuição entre variantes (ativar/pausar/criar) */}
+        {userId && (
+          <VariantDistributionBar
+            consultantId={userId}
+            existingVariants={existingVariants}
+            editingVariant={editingVariant}
+            onSelectVariant={setEditingVariant}
+            onChanged={() => userId && reload(userId, editingVariant)}
+          />
         )}
       </header>
 
@@ -338,20 +319,8 @@ export default function FluxoBuilder() {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium text-muted-foreground">
-              {steps.length} {steps.length === 1 ? "passo" : "passos"}
+              Editando variante <span className="font-semibold text-foreground">{editingVariant}</span> — {VARIANT_LABEL[editingVariant].replace(/^[A-E]\s*/, "")} · {steps.length} {steps.length === 1 ? "passo" : "passos"}
             </h2>
-            <Select value={editingVariant} onValueChange={(v) => setEditingVariant(v as Variant)}>
-              <SelectTrigger className="h-8 w-auto text-xs lg:hidden">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {existingVariants.map((v) => (
-                  <SelectItem key={v} value={v} className="text-xs">
-                    {VARIANT_LABEL[v]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
 
           {steps.length === 0 ? (
