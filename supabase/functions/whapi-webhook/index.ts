@@ -518,7 +518,7 @@ Deno.serve(async (req) => {
             .from("customers")
             .update({
               conversation_step: null,
-              capture_mode: null,
+              capture_mode: "auto",
               custom_step_retries: 0,
               custom_step_retries_step: null,
               last_custom_prompt_at: null,
@@ -528,11 +528,12 @@ Deno.serve(async (req) => {
             })
             .eq("id", customer.id);
           (customer as any).conversation_step = null;
-          (customer as any).capture_mode = null;
+          (customer as any).capture_mode = "auto";
           (customer as any).custom_step_retries = 0;
           (customer as any).last_custom_prompt_at = null;
           (customer as any).ai_followups_count = 0;
           (customer as any).previous_conversation_step = prevStep;
+
         }
       } catch (e) {
         console.warn("[re-welcome] falhou:", (e as Error).message);
