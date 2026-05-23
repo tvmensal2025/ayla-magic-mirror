@@ -59,60 +59,69 @@ Deno.serve(async (req) => {
     // Despausa para garantir envio
     await supabase.from("customers").update({ bot_paused: false }).eq("id", customerId);
 
-    const map: any[] = [];
     const FN_URL = `${SUPABASE_URL}/functions/v1/manual-step-send`;
-
-    // dispara cada passo via manual-step-send (system bypass)
     const allToFire = [...messageSteps, ...captureSteps];
-    for (const step of allToFire) {
-      const t0 = Date.now();
-      const payload = {
-        consultantId: customer.consultant_id,
-        customerId,
-        stepId: step.id,
-        stepKey: step.step_key,
-        part: "all",
-        continueFlow: false,
-        variant,
-        force: true,
-      };
-      let result: any;
-      try {
-        const r = await fetch(FN_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${SERVICE_KEY}`,
-          },
-          body: JSON.stringify(payload),
-        });
-        const text = await r.text();
-        try { result = JSON.parse(text); } catch { result = { raw: text }; }
-        result.__status = r.status;
-      } catch (e) {
-        result = { error: String((e as Error).message || e) };
+
+    const plan = allToFire.map((s: any) => ({
+      position: s.position,
+      step_type: s.step_type,
+      step_key: s.step_key,
+      step_id: s.id,
+      text_preview: String(s.message_text || s.title || "").slice(0, 60),
+    }));
+
+    // grava plano + status numa tabela leve para inspeção
+    const runId = crypto.randomUUID();
+
+    // dispara em background — não trava resposta HTTP
+    const fireAll = async () => {
+      for (const step of allToFire) {
+        const t0 = Date.now();
+        const payload = {
+          consultantId: customer.consultant_id,
+          customerId,
+          stepId: step.id,
+          stepKey: step.step_key,
+          part: "all",
+          continueFlow: false,
+          variant,
+          force: true,
+        };
+        let result: any;
+        let httpStatus = 0;
+        try {
+          const r = await fetch(FN_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${SERVICE_KEY}`,
+            },
+            body: JSON.stringify(payload),
+          });
+          httpStatus = r.status;
+          const text = await r.text();
+          try { result = JSON.parse(text); } catch { result = { raw: text.slice(0, 200) }; }
+        } catch (e) {
+          result = { error: String((e as Error).message || e) };
+        }
+        const dt = Date.now() - t0;
+        console.log(`[dev-fire-all-steps] run=${runId} pos=${step.position} type=${step.step_type} step=${step.step_key} status=${httpStatus} elapsed=${dt}ms result=${JSON.stringify(result).slice(0,300)}`);
+        await new Promise((res) => setTimeout(res, 2000));
       }
-      const dt = Date.now() - t0;
-      map.push({
-        position: step.position,
-        step_type: step.step_type,
-        step_key: step.step_key,
-        step_id: step.id,
-        text_preview: String(step.message_text || step.title || "").slice(0, 60),
-        elapsed_ms: dt,
-        ok: result?.ok !== false && (result?.__status ?? 0) < 400,
-        result,
-      });
-      // pequena folga entre passos para o WhatsApp ordenar
-      await new Promise((res) => setTimeout(res, 1500));
-    }
+      console.log(`[dev-fire-all-steps] run=${runId} DONE total=${allToFire.length}`);
+    };
+
+    // @ts-ignore EdgeRuntime presente no Supabase Edge
+    (globalThis as any).EdgeRuntime?.waitUntil ? (globalThis as any).EdgeRuntime.waitUntil(fireAll()) : fireAll();
 
     return json({
       ok: true,
+      run_id: runId,
       customer: { id: customer.id, phone: phoneDigits, name: customer.name },
       flow: { id: flow.id, variant },
-      total: map.length,
-      map,
+      total: plan.length,
+      plan,
+      note: "Disparado em background. Acompanhe nos logs (dev-fire-all-steps / manual-step-send) ou na tabela conversations.",
     });
   } catch (e) {
     return json({ ok: false, error: String((e as Error).message || e) }, 500);
