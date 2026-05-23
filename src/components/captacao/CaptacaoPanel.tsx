@@ -31,6 +31,16 @@ import { DragResizer } from "@/components/layout/DragResizer";
 
 
 import { PortalStatusTracker } from "@/components/captacao/PortalStatusTracker";
+import { HelpHint } from "@/components/ui/help-hint";
+
+const STEPS_HELP = {
+  title: "Painel de Passos do fluxo",
+  summary: "Clique no avião ✈️ para enviar um passo isolado ao lead",
+  details:
+    "Cada linha é um passo do fluxo configurado em /admin/fluxos, na ordem 1→10. O avião verde envia somente aquele passo (texto + mídias) para o lead. O círculo com ✓ marca passos já enviados. O badge A/B/C mostra a variante do teste sendo usada com este lead.",
+  example:
+    "Use quando o lead pediu para repetir o áudio do passo 3 ou quando você quer pular direto para o passo de confirmação.",
+} as const;
 
 interface Props { consultantId: string; onOpenChat?: (phone: string) => void; instanceName?: string | null; isWhapi?: boolean; }
 
