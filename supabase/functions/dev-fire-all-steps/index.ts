@@ -56,11 +56,38 @@ Deno.serve(async (req) => {
     const messageSteps = allSteps.filter((s: any) => s.step_type === "message");
     const captureSteps = allSteps.filter((s: any) => String(s.step_type).startsWith("capture_") || s.step_type === "finalizar_cadastro");
 
-    // Despausa + limpa debounce de capture
-    await supabase
-      .from("customers")
-      .update({ bot_paused: false, last_custom_prompt_at: null })
-      .eq("id", customerId);
+    // Reset opcional: vira o cliente em "virgem" para testar end-to-end completo
+    const reset = !!body?.reset;
+    const resetPayload: Record<string, unknown> = {
+      bot_paused: false,
+      last_custom_prompt_at: null,
+    };
+    if (reset) {
+      Object.assign(resetPayload, {
+        conversation_step: null,
+        bill_data_confirmed_at: null,
+        doc_data_confirmed_at: null,
+        bill_holder_name: null,
+        doc_holder_name: null,
+        bill_requested_at: null,
+        electricity_bill_value: null,
+        electricity_bill_photo_url: null,
+        document_front_url: null,
+        document_back_url: null,
+        document_type: null,
+        document_front_base64: null,
+        bill_base64: null,
+        bill_message_id: null,
+        name_mismatch_flag: false,
+        name_mismatch_reason: null,
+        name_mismatch_acknowledged_at: null,
+        facial_confirmed_at: null,
+        ocr_doc_attempts: 0,
+        assigned_human_id: null,
+        flow_variant: variant,
+      });
+    }
+    await supabase.from("customers").update(resetPayload).eq("id", customerId);
 
     const FN_URL = `${SUPABASE_URL}/functions/v1/manual-step-send`;
     const runId = crypto.randomUUID();
