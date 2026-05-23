@@ -123,8 +123,8 @@ export function DragResizer({
         locked
           ? "pointer-events-none opacity-0"
           : isX
-            ? "cursor-col-resize bg-border/40 hover:bg-primary/70"
-            : "cursor-row-resize bg-border/40 hover:bg-primary/70",
+            ? "cursor-col-resize bg-primary/25 hover:bg-primary/70"
+            : "cursor-row-resize bg-primary/25 hover:bg-primary/70",
         dragging && "bg-primary/80",
         className,
       )}

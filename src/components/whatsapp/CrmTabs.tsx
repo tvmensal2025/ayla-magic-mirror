@@ -31,7 +31,7 @@ export function CrmTabs({ consultantId, instanceName, onOpenChat }: CrmTabsProps
             </TabsTrigger>
           </TabsList>
         </div>
-        <TabsContent value="funil" className="flex-1 mt-2 overflow-hidden data-[state=inactive]:hidden">
+        <TabsContent value="funil" className="flex-1 mt-2 overflow-auto data-[state=inactive]:hidden">
           <SalesFunnelBoard consultantId={consultantId} onOpenChat={onOpenChat} />
         </TabsContent>
         <TabsContent value="posvenda" className="flex-1 mt-2 overflow-auto data-[state=inactive]:hidden">
