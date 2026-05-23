@@ -276,6 +276,31 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
               <div className="flex items-center justify-center py-6"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>
             ) : steps.length === 0 ? (
               <p className="text-xs text-muted-foreground text-center py-6 px-3">Nenhum passo configurado neste consultor.</p>
+            ) : variant === "D" ? (
+              <div className="px-3 py-4 space-y-3">
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  ⚡ O <strong className="text-foreground">Fluxo D</strong> é automático por botões. Você só precisa <strong>iniciar</strong> — o bot conduz o resto conforme o cliente responde.
+                </p>
+                <Button
+                  className="w-full gap-2"
+                  disabled={!!seq || !!sendingId}
+                  onClick={async () => {
+                    const first = steps[0];
+                    if (!first) return;
+                    setSendingId(first.id);
+                    setOpen(false);
+                    const res = await invokeStep(first.id);
+                    setSendingId(null);
+                    if (res.ok) toast({ title: "▶️ Fluxo D iniciado", description: "Agora o bot continua sozinho conforme o cliente responder." });
+                  }}
+                >
+                  {sendingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  Iniciar Fluxo D (automático)
+                </Button>
+                <p className="text-[10px] text-muted-foreground text-center">
+                  Primeiro passo: <strong>{steps[0]?.title || steps[0]?.step_key}</strong>
+                </p>
+              </div>
             ) : (
               steps.map((s, i) => {
                 const isSending = sendingId === s.id;
