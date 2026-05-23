@@ -355,10 +355,18 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       </div>
                     )}
                   </div>
+                  {/* Mobile tabs */}
+                  <div className="md:hidden shrink-0 grid grid-cols-3 border-b border-border/60 bg-card/40 text-[11px] font-bold">
+                    {(["passos","conversa","ficha"] as const).map((t) => (
+                      <button key={t} onClick={() => setMobileTab(t)} className={`py-2 uppercase tracking-wider transition ${mobileTab === t ? "text-primary border-b-2 border-primary" : "text-muted-foreground"}`}>
+                        {t === "passos" ? "Passos" : t === "conversa" ? "Conversa" : "Ficha"}
+                      </button>
+                    ))}
+                  </div>
                   <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                    {/* Passos — fixo no topo */}
-                    <div className="shrink-0 p-2 border-b border-border/40">
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">10 Passos · clique para enviar <HelpHint {...STEPS_HELP} /></h3>
+                    {/* Passos */}
+                    <div className={`shrink-0 p-2 border-b border-border/40 ${mobileTab !== "passos" ? "hidden md:block" : ""}`}>
+                      <h3 className="hidden md:flex text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5 items-center gap-1">10 Passos · clique para enviar <HelpHint {...STEPS_HELP} /></h3>
                       <CaptureStepsGrid
                         consultantId={consultantId}
                         customerId={selectedId}
@@ -368,15 +376,15 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       />
                     </div>
 
-                    {/* Conversa — flex-1 com scroll interno */}
-                    <div className="flex-1 min-h-0 overflow-hidden flex flex-col p-2 gap-2">
+                    {/* Conversa */}
+                    <div className={`flex-1 min-h-0 overflow-hidden flex-col p-2 gap-2 ${mobileTab !== "conversa" ? "hidden md:flex" : "flex"}`}>
                       <CaptureConversationFeed customerId={selectedId} gameOn />
+                    </div>
 
-                      {/* Ficha + Achievements aparecem no fim do scroll em mobile (quando expandidos) */}
-                      <div className={`md:hidden ${showAside ? "block" : "hidden"} space-y-3`}>
-                        <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} embedded />
-                        <AchievementsRail progress={progress} />
-                      </div>
+                    {/* Ficha (mobile tab) */}
+                    <div className={`md:hidden flex-1 min-h-0 overflow-y-auto p-2 space-y-3 ${mobileTab !== "ficha" ? "hidden" : ""}`}>
+                      <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} embedded />
+                      <AchievementsRail progress={progress} />
                     </div>
                   </div>
 
