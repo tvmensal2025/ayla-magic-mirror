@@ -186,7 +186,7 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
           {/* Chips A/B/C — troca o fluxo da conversa */}
           <div className="flex items-center gap-2 pt-2">
             <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Fluxo:</span>
-            {(["A", "B", "C"] as const).map((v) => {
+            {(["A", "B", "C", "D", "E"] as const).map((v) => {
               const enabled = variantsAvailable.includes(v);
               const active = variant === v;
               return (
@@ -204,7 +204,7 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
               );
             })}
             <span className="text-[10px] text-muted-foreground ml-1">
-              {variant === "A" ? "com áudio" : variant === "B" ? "só texto" : "com vídeo"}
+              {variant === "A" ? "com áudio" : variant === "B" ? "só texto" : variant === "C" ? "com vídeo" : variant === "D" ? "botões/auto" : "custom"}
             </span>
           </div>
         </DialogHeader>
