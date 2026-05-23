@@ -326,7 +326,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                           <ExternalLink className="w-3 h-3" />
                         </Button>
                       )}
-                      <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setShowAside((s) => !s)} title="Ficha">
+                      <Button size="icon" variant="ghost" className="hidden h-8 w-8 shrink-0" onClick={() => setShowAside((s) => !s)} title="Ficha">
                         <ChevronDown className={`w-4 h-4 transition-transform ${showAside ? "rotate-180" : ""}`} />
                       </Button>
                     </div>
