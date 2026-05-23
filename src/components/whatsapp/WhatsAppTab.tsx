@@ -305,7 +305,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
                     />
                   </div>
                   <DragResizer storageKey="whatsapp-side" cssVar="wa-side-w" defaultPx={300} minPx={220} maxPx={520} />
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 min-h-0 flex flex-col">
                     <ChatView
                       instanceName={instanceName}
                       chat={selectedChat}
