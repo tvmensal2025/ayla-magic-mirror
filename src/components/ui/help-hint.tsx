@@ -57,39 +57,49 @@ export function HelpHint({
     </button>
   );
 
-  const popover = (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent
-        align={align}
-        side={side}
-        className="w-72 p-3 text-xs z-[100]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <p className="font-semibold text-sm text-foreground mb-1.5 leading-tight">{title}</p>
-        <p className="text-muted-foreground leading-snug whitespace-pre-line">{details}</p>
-        {example && (
-          <div className="mt-2 pt-2 border-t border-border">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-primary/80 mb-0.5">
-              Exemplo
-            </p>
-            <p className="text-muted-foreground/90 leading-snug">{example}</p>
-          </div>
-        )}
-      </PopoverContent>
-    </Popover>
+  const content = (
+    <PopoverContent
+      align={align}
+      side={side}
+      className="w-72 p-3 text-xs z-[100]"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <p className="font-semibold text-sm text-foreground mb-1.5 leading-tight">{title}</p>
+      <p className="text-muted-foreground leading-snug whitespace-pre-line">{details}</p>
+      {example && (
+        <div className="mt-2 pt-2 border-t border-border">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-primary/80 mb-0.5">
+            Exemplo
+          </p>
+          <p className="text-muted-foreground/90 leading-snug">{example}</p>
+        </div>
+      )}
+    </PopoverContent>
   );
 
-  if (isMobile) return popover;
+  if (isMobile) {
+    return (
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+        {content}
+      </Popover>
+    );
+  }
 
   return (
-    <TooltipProvider delayDuration={250}>
-      <Tooltip>
-        <TooltipTrigger asChild>{popover}</TooltipTrigger>
-        <TooltipContent side={side} align={align} className="max-w-[220px] text-xs">
-          {summary}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Popover open={open} onOpenChange={setOpen}>
+      <TooltipProvider delayDuration={250}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent side={side} align={align} className="max-w-[220px] text-xs">
+            {summary}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      {content}
+    </Popover>
   );
 }
+
