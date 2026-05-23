@@ -313,8 +313,8 @@ const AdminContent = () => {
       </nav>
 
       {/* Content */}
-      <main className={activeTab === "captacao"
-        ? "w-full px-2 sm:px-3 lg:px-4 py-2 sm:py-3 space-y-3 overflow-x-hidden"
+      <main className={activeTab === "captacao" || activeTab === "whatsapp" || activeTab === "crm"
+        ? "w-full px-2 sm:px-3 lg:px-4 py-2 space-y-2 overflow-x-hidden"
         : "max-w-[1760px] mx-auto px-3 sm:px-6 lg:px-8 xl:px-12 py-4 sm:py-6 space-y-6 overflow-x-hidden"}>
         {/* OCR Review Banner — aparece quando há leads aguardando o consultor
             decidir entre "Eu confirmo" / "Pedir ao cliente" os dados extraídos
