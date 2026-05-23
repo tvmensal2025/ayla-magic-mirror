@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Send, Play } from "lucide-react";
+import { Loader2, Send, Play, Zap } from "lucide-react";
 import { StepPartPreview, type PartKind } from "@/components/whatsapp/StepPartPreview";
 import { normalizeSendStepError } from "@/lib/whatsapp/send";
 
@@ -16,7 +16,23 @@ type Step = {
   slot_key: string | null;
   message_text: string | null;
   position: number;
+  captures?: any;
 };
+
+function extractStepButtons(step: Step | undefined | null): { id: string; title: string }[] {
+  if (!step) return [];
+  try {
+    const caps = Array.isArray((step as any).captures) ? (step as any).captures : [];
+    const found = caps.find((c: any) => c?.field === "_buttons" && c?.enabled !== false);
+    if (found && Array.isArray(found.value)) {
+      return found.value
+        .map((b: any) => ({ id: String(b?.id || "").trim(), title: String(b?.title || "").trim() }))
+        .filter((b: any) => b.id && b.title)
+        .slice(0, 3);
+    }
+  } catch {}
+  return [];
+}
 
 type Media = { id: string; kind: string; url: string; slot_key: string | null };
 
@@ -95,7 +111,7 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
       setLoading(true);
       const { data } = await supabase
         .from("bot_flow_steps")
-        .select("id, step_key, title, slot_key, message_text, position")
+        .select("id, step_key, title, slot_key, message_text, position, captures")
         .eq("flow_id", flowId).eq("is_active", true)
         .order("position", { ascending: true });
       if (!mounted) return;
@@ -214,40 +230,73 @@ export function ManualStepDialog({ open, onOpenChange, consultantId, customerId,
           <div className="space-y-2">
             {loading ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> :
               steps.length === 0 ? <p className="text-sm text-muted-foreground">Nenhum passo configurado.</p> :
-              variant === "D" ? (
-                <div className="space-y-3 p-2">
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    ⚡ O <strong className="text-foreground">Fluxo D</strong> é automático por botões. Clique abaixo para <strong>iniciar</strong> — o bot conduz o resto conforme o cliente clicar.
-                  </p>
-                  <Button
-                    className="w-full gap-2"
-                    disabled={sending}
-                    onClick={async () => {
-                      const first = steps[0];
-                      if (!first) return;
-                      setSending(true);
-                      try {
-                        const { data, error } = await supabase.functions.invoke("manual-step-send", {
-                          body: { consultantId, customerId, stepId: first.id, part: "all", variant },
-                        });
-                        if (error || (data as any)?.error || (data as any)?.ok === false) {
-                          throw new Error(normalizeSendStepError(error, data).message);
-                        }
-                        toast({ title: "▶️ Fluxo D iniciado", description: "Bot continua sozinho conforme o cliente responder." });
-                        onOpenChange(false);
-                      } catch (e: any) {
-                        toast({ title: "Erro", description: e?.message, variant: "destructive" });
-                      } finally { setSending(false); }
-                    }}
-                  >
-                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    Iniciar Fluxo D (automático)
-                  </Button>
-                  <p className="text-[11px] text-muted-foreground text-center">
-                    Primeiro passo: <strong>{steps[0]?.title || steps[0]?.step_key}</strong>
-                  </p>
-                </div>
-              ) :
+              variant === "D" ? (() => {
+                const first = steps[0];
+                const btns = extractStepButtons(first);
+                const preview = (first?.message_text || "").trim();
+                return (
+                  <div className="space-y-3 p-1">
+                    <div className="rounded-xl border border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-4 space-y-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className="inline-flex items-center justify-center h-9 w-9 rounded-full bg-primary/20 text-primary">
+                          <Zap className="w-4 h-4" />
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-foreground leading-tight">Fluxo D — automático por botões</p>
+                          <p className="text-[11px] text-muted-foreground leading-tight">O cliente clica, o bot conduz sozinho</p>
+                        </div>
+                      </div>
+
+                      {preview && (
+                        <div className="rounded-md bg-background/60 border border-border/50 p-3">
+                          <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Prévia da 1ª mensagem</p>
+                          <p className="text-xs text-foreground/90 leading-relaxed line-clamp-5 whitespace-pre-wrap">{preview}</p>
+                        </div>
+                      )}
+
+                      {btns.length > 0 && (
+                        <div className="space-y-1.5">
+                          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Botões que o cliente verá</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {btns.map((b) => (
+                              <span key={b.id} className="inline-flex items-center px-2.5 py-1 rounded-md border border-primary/40 bg-primary/5 text-xs font-medium text-primary">
+                                {b.title}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <Button
+                      className="w-full gap-2 h-11 font-semibold shadow-md shadow-primary/20"
+                      disabled={sending || !first}
+                      onClick={async () => {
+                        if (!first) return;
+                        setSending(true);
+                        try {
+                          const { data, error } = await supabase.functions.invoke("manual-step-send", {
+                            body: { consultantId, customerId, stepId: first.id, part: "all", variant },
+                          });
+                          if (error || (data as any)?.error || (data as any)?.ok === false) {
+                            throw new Error(normalizeSendStepError(error, data).message);
+                          }
+                          toast({ title: "▶️ Fluxo D iniciado", description: "Bot continua sozinho conforme o cliente responder." });
+                          onOpenChange(false);
+                        } catch (e: any) {
+                          toast({ title: "Erro", description: e?.message, variant: "destructive" });
+                        } finally { setSending(false); }
+                      }}
+                    >
+                      {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                      Iniciar Fluxo D
+                    </Button>
+                    <p className="text-[11px] text-muted-foreground text-center">
+                      Depois disso o bot continua sozinho ✨
+                    </p>
+                  </div>
+                );
+              })() :
               steps.map((s, i) => (
                 <Card key={s.id} className="p-3 flex items-center gap-3 hover:bg-secondary/30 cursor-pointer"
                       onClick={() => loadStepParts(s)}>

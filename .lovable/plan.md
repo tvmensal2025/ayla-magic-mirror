@@ -1,32 +1,64 @@
-## Objetivo
+# Fluxo D — botões + redesign do card de início
 
-1. Corrigir o erro de build do `LiveConversationsPanel.tsx` (faltam entradas `D` e `E` no `Record<Variant, FlowBundle>`).
-2. Ajustar o disparo manual do Fluxo D para **apenas iniciar** — sem rajada sequencial. O resto do fluxo segue automático conforme o cliente clica nos botões (lógica já existente no `whapi-webhook`).
+## Diagnóstico
 
-## Passos
+Analisando o Fluxo D (variant `D` — flow `Fluxo Whapi (botões)`, 8 passos), encontrei **2 problemas**:
 
-### 1. Fix build — LiveConversationsPanel
-- Adicionar `D: { name: null, steps: [] }` e `E: { name: null, steps: [] }` nas duas inicializações (linhas 60-63 e 87-90) do `Record<Variant, FlowBundle>`.
+### 1. Bug crítico: botões não são enviados no disparo manual
 
-### 2. Comportamento do Fluxo D no envio manual
-Hoje `FlowQuickBar` e `ManualStepDialog` listam todos os passos da variante e o consultor escolhe qual mandar (já é 1-a-1, não em rajada). Mas o D foi pensado para ser **só iniciado**:
+O passo `d_welcome` tem botões configurados em `captures._buttons`:
 
-- Quando o consultor selecionar variante **D** nos chips:
-  - `FlowQuickBar`: esconder a lista de passos e mostrar **um único botão grande "▶ Iniciar fluxo D (automático)"** que dispara o **primeiro passo ativo** (menor `position`) via `manual-step-send` com `part: "all"`. Depois disso o webhook assume.
-  - `ManualStepDialog`: mesmo tratamento — auto-seleciona o primeiro passo e mostra CTA "Iniciar fluxo D".
-- Mensagem auxiliar curta: *"O Fluxo D segue automático conforme o cliente responde aos botões. Você só precisa iniciar."*
-- A/B/C/E mantêm o comportamento atual (lista de passos).
+- ▶ Quero simular
+- ❓ Como funciona
+- 👤 Falar com Rafael
 
-### 3. Sem mudanças no backend
-`manual-step-send` já aceita D (corrigido no turno anterior). O `whapi-webhook/handlers/bot-flow.ts` já roteia respostas de botões pela variante do customer. Nada a alterar lá.
+Mas a edge `manual-step-send` (linha 656) envia o texto via `sender.sendText(...)` — **ignora completamente** o array `_buttons` do passo. O handler automático `whapi-webhook/handlers/bot-flow.ts` (linha 1086) já lê `_buttons` e usa `sender.sendButtons()`; o manual nunca recebeu essa lógica. Por isso o cliente recebeu só a frase "Escolha uma das opções abaixo 👇" sem botão nenhum.
+
+### 2. UX feia no popover de Fluxo D
+
+A view atual (`FlowQuickBar.tsx` linhas 279-303 e `ManualStepDialog.tsx` equivalente) é um bloco genérico: parágrafo cinza + botão + linha "Primeiro passo: …". Não mostra prévia da mensagem, não mostra os botões que serão enviados, nem dá sensação de "automático guiado por botões".
+
+## Mudanças
+
+### A. Backend — `supabase/functions/manual-step-send/index.ts`
+
+No loop de envio (linhas 651-741), quando o item for **`text`** e for o **último item** (`isLast`) **de um passo `message`** que tenha `captures._buttons` válidos, trocar `sender.sendText()` por `sender.sendButtons()` com os botões renderizados (mesma normalização usada em `bot-flow.ts`: `{ id, title }`, máx. 3, fallback texto numerado já tratado dentro do sender).
+
+Aplica para **qualquer variant** (não só D) — corrige também passos com botões em A/B/C/E. Sem mudança de schema, sem mudança no fluxo automático.
+
+### B. UI — `src/components/whatsapp/FlowQuickBar.tsx` e `src/components/admin/AIAgentTab/ManualStepDialog.tsx`
+
+Redesenhar o bloco do Fluxo D usando tokens do design system (verde primary, glassmorphism leve já existente no projeto):
+
+```text
+┌─ Fluxo D — Automático por botões ─────────┐
+│ ⚡ ícone + título destacado                │
+│                                           │
+│ ┌─ Prévia da 1ª mensagem ────────────┐    │
+│ │ "Olá, seja muito bem-vindo(a) 😊…" │    │
+│ │ (texto cinza, max 3 linhas, fade)  │    │
+│ └────────────────────────────────────┘    │
+│                                           │
+│ Botões que o cliente vai ver:             │
+│ [▶ Quero simular] [❓ Como funciona]      │
+│ [👤 Falar com Rafael]                     │
+│ (chips verdes outline, lidos do step)     │
+│                                           │
+│ ╔══════════════════════════════════════╗  │
+│ ║  ▶ Iniciar Fluxo D                   ║  │
+│ ╚══════════════════════════════════════╝  │
+│ depois disso o bot conduz sozinho ✨      │
+└───────────────────────────────────────────┘
+```
+
+- Lê `steps[0].message_text` e `steps[0].captures` para preview real e chips de botões.
+- Mantém o mesmo `invokeStep(first.id)` já em uso (sem mudar lógica de envio do front).
+- Toast verde após sucesso. Sem alterar A/B/C/E.
 
 ## Arquivos
-- `src/components/admin/AIAgentTab/LiveConversationsPanel.tsx` (fix build)
-- `src/components/whatsapp/FlowQuickBar.tsx` (UI condicional para D)
-- `src/components/admin/AIAgentTab/ManualStepDialog.tsx` (UI condicional para D)
 
-## Critério de sucesso
-- Build limpo.
-- Ao escolher chip **D** no popover de envio, o consultor vê só um botão "Iniciar fluxo D" + nota explicativa, em vez da lista de 10 passos.
-- Clicar dispara o 1º passo; webhook conduz o resto automaticamente via botões.
-- A/B/C/E inalterados.
+- `supabase/functions/manual-step-send/index.ts` — usar `sendButtons` no último texto quando `captures._buttons` existir
+- `src/components/whatsapp/FlowQuickBar.tsx` — redesign do bloco D
+- `src/components/admin/AIAgentTab/ManualStepDialog.tsx` — redesign do bloco D (mesmo layout)
+
+Sem migrations. Sem mudar passos do Fluxo D no banco — eles já estão corretos.
