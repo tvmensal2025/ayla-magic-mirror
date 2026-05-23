@@ -368,14 +368,16 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           </div>
         </GameShell>
       ) : (
-        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+        <div data-resize-scope className="flex-1 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "16rem", "--cap-aside-w": "16rem" } as React.CSSProperties}>
           {/* Lista: full-width no mobile sem seleção; escondida no mobile com seleção; sidebar fixa em md+ */}
-          <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-64 md:shrink-0 overflow-hidden`}>
+          <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 overflow-hidden`}>
             <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
           </div>
+          <DragResizer storageKey="captacao-list" cssVar="cap-list-w" defaultPx={256} minPx={180} maxPx={420} />
 
           {/* Main: escondida no mobile sem seleção */}
-          <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden`}>
+          <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden min-w-0`}>
+
             {!selectedId ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
                 <ClipboardList className="w-12 h-12 text-muted-foreground/30" strokeWidth={1} />
