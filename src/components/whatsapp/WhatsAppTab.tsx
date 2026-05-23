@@ -6,6 +6,8 @@ import { useChats } from "@/hooks/useChats";
 import { ConnectionPanel } from "./ConnectionPanel";
 import { ChatSidebar } from "./ChatSidebar";
 import { ChatView } from "./ChatView";
+import { DragResizer } from "@/components/layout/DragResizer";
+
 import { BarChart3, MessageSquare, Send, FileText, Clock, Bot, History } from "lucide-react";
 
 // Heavy panels — load only when their sub-tab is opened
