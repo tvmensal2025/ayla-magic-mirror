@@ -41,8 +41,11 @@ export async function answerFaqWithAI(opts: {
   leadName?: string;
   currentStepLabel?: string;
   consultantId?: string;
+  recentHistory?: string;
+  model?: string;
   signal?: AbortSignal;
 }): Promise<FaqAnswer> {
+
   const q = (opts.question || "").trim();
   if (!q || q.length < 3) {
     return { text: "", confidence: 0, shouldHandoff: false, source: "skipped" };
