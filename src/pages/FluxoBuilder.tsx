@@ -285,11 +285,24 @@ export default function FluxoBuilder() {
           </div>
           <div className="flex items-center gap-2">
             {flowWarnings > 0 && (
-              <Badge variant="destructive" className="gap-1">
+              <Badge
+                variant={flowErrors > 0 ? "destructive" : "secondary"}
+                className="gap-1"
+              >
                 <AlertTriangle className="h-3 w-3" />
                 {flowWarnings} {flowWarnings === 1 ? "alerta" : "alertas"}
               </Badge>
             )}
+            {validation.autoFixablePatches.length > 0 && (
+              <Button variant="outline" size="sm" onClick={autoFixAll}>
+                <Wand2 className="mr-1 h-3 w-3" />
+                Auto-corrigir
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => setTemplatesOpen(true)} disabled={!flowId}>
+              <Sparkles className="mr-1 h-3 w-3" />
+              Templates
+            </Button>
             <div className="flex items-center gap-2 rounded-lg border px-3 py-1.5">
               <Switch checked={globalAtivo} onCheckedChange={toggleGlobal} id="global" />
               <label htmlFor="global" className="cursor-pointer text-xs font-medium">
