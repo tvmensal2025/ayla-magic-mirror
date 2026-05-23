@@ -668,7 +668,16 @@ Deno.serve(async (req) => {
       const isLast = i === toSend.length - 1;
       try {
         if (it.kind === "text" && it.text) {
-          await sender.sendText(remoteJid, it.text);
+          const useButtons = isLast && _buttons.length > 0;
+          if (useButtons) {
+            const renderedButtons = _buttons.map((b) => ({
+              id: b.id,
+              title: applyVarsBtn(b.title).slice(0, 20),
+            }));
+            await sender.sendButtons(remoteJid, it.text, renderedButtons);
+          } else {
+            await sender.sendText(remoteJid, it.text);
+          }
           await supabase.from("conversations").insert({
             customer_id: customer.id,
             message_direction: "outbound",
@@ -676,7 +685,7 @@ Deno.serve(async (req) => {
             message_type: "text",
             conversation_step: (step as any).step_key || null,
           });
-          sentLog.push({ kind: "text" });
+          sentLog.push({ kind: "text", buttons: useButtons || undefined });
         } else if (it.media?.url) {
           const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
           // Anti-duplicação de áudio/vídeo (mesma regra do bot automático).
