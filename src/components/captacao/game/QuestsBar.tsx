@@ -12,8 +12,8 @@ export function QuestsBar({ progress }: { progress: GameProgress }) {
   ];
 
   return (
-    <div className="rounded-lg border border-border/60 bg-card/50 backdrop-blur-sm p-2">
-      <div className="flex items-center gap-2 mb-1.5">
+    <div className="rounded-lg border border-border/60 bg-card/50 backdrop-blur-sm p-1.5">
+      <div className="flex items-center gap-2 mb-1">
         <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
           Metas do Dia
         </span>
@@ -25,7 +25,7 @@ export function QuestsBar({ progress }: { progress: GameProgress }) {
           return (
             <div
               key={g.id}
-              className={`relative overflow-hidden rounded-md border px-2 py-1.5 ${
+              className={`relative overflow-hidden rounded-md border px-2 py-1 ${
                 done
                   ? "border-amber-400/40 bg-gradient-to-br from-amber-400/8 to-transparent"
                   : "border-border/60 bg-background/40"
