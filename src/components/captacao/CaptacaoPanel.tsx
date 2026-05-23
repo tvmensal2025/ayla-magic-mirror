@@ -28,6 +28,8 @@ import { useCaptureSession } from "@/hooks/useCaptureSession";
 import { FinalizeButton } from "@/components/captacao/FinalizeButton";
 import { ResizableShell } from "@/components/layout/ResizableShell";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { DragResizer } from "@/components/layout/DragResizer";
+
 
 import { PortalStatusTracker } from "@/components/captacao/PortalStatusTracker";
 
