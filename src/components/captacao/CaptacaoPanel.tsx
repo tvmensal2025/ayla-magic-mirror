@@ -291,7 +291,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                         <p className="text-sm font-semibold truncate">{customerName || phone || "—"}</p>
                       </div>
                       <div className="hidden sm:flex items-center gap-1 rounded-md border border-border/60 p-0.5 bg-background/40">
-                        {(["A", "B", "C"] as const).map((v) => (
+                        {availableVariants.map((v) => (
                           <button
                             key={v}
                             onClick={() => changeVariant(v)}
