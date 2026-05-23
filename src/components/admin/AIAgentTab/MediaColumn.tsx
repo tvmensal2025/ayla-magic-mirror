@@ -181,6 +181,8 @@ export function MediaColumn({ userId }: { userId: string }) {
     if (!arr.length) return;
     setUploading(true);
     try {
+      const { sha256File, findExistingByHash } = await import("@/lib/mediaHash");
+      let dedupedCount = 0;
       for (const file of arr) {
         if (file.size + usedBytes > QUOTA_BYTES) {
           toast({
@@ -191,28 +193,50 @@ export function MediaColumn({ userId }: { userId: string }) {
           break;
         }
         const kind = detectKind(file);
-        const ext = file.name.split(".").pop() || "bin";
-        const safeName = file.name.replace(/\.[^.]+$/, "").replace(/\W+/g, "_").slice(0, 60);
-        const path = `${userId}/${Date.now()}-${safeName}.${ext}`;
-        const { error: upErr } = await supabase.storage
-          .from("ai-agent-media")
-          .upload(path, file, { upsert: false, contentType: file.type });
-        if (upErr) throw upErr;
-        const { data: pub } = supabase.storage.from("ai-agent-media").getPublicUrl(path);
+
+        // Dedupe por hash antes de subir
+        let contentHash: string | null = null;
+        let reuseUrl: string | null = null;
+        try {
+          contentHash = await sha256File(file);
+          const existing = await findExistingByHash(userId, contentHash);
+          if (existing?.url) reuseUrl = existing.url;
+        } catch (e) {
+          console.warn("[mediaHash] falhou:", e);
+        }
+
+        let publicUrl = reuseUrl;
+        if (!publicUrl) {
+          const ext = file.name.split(".").pop() || "bin";
+          const safeName = file.name.replace(/\.[^.]+$/, "").replace(/\W+/g, "_").slice(0, 60);
+          const path = `${userId}/${Date.now()}-${safeName}.${ext}`;
+          const { error: upErr } = await supabase.storage
+            .from("ai-agent-media")
+            .upload(path, file, { upsert: false, contentType: file.type });
+          if (upErr) throw upErr;
+          const { data: pub } = supabase.storage.from("ai-agent-media").getPublicUrl(path);
+          publicUrl = pub.publicUrl;
+        } else {
+          dedupedCount++;
+        }
+
         const { error: insErr } = await supabase.from("ai_media_library").insert({
           consultant_id: userId,
           is_public: false,
           kind,
           label: file.name,
-          url: pub.publicUrl,
+          url: publicUrl,
           step_tags: ["any"],
           intent_tags: [],
           active: true,
           priority: 10,
+          ...(contentHash ? { content_hash: contentHash } : {}),
         });
         if (insErr) throw insErr;
       }
-      toast({ title: "✅ Mídia adicionada" });
+      toast({
+        title: dedupedCount > 0 ? `✅ Mídia adicionada (${dedupedCount} reutilizada${dedupedCount > 1 ? "s" : ""})` : "✅ Mídia adicionada",
+      });
       await Promise.all([loadList(), loadUsage()]);
     } catch (e: any) {
       toast({ title: "Erro ao enviar", description: e.message, variant: "destructive" });

@@ -199,11 +199,31 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     let durationSec: number | null = null;
     let originalSize: number | null = file.size;
     let finalSize: number | null = file.size;
+    let deduplicated = false;
+
+    // === Dedupe por SHA-256: se já existir, reaproveita url/storage e evita reupload ===
+    let contentHash: string | null = null;
+    try {
+      const { sha256File, findExistingByHash } = await import("@/lib/mediaHash");
+      contentHash = await sha256File(file);
+      const existing = await findExistingByHash(consultantId, contentHash);
+      if (existing?.url) {
+        finalUrl = existing.url;
+        storagePath = existing.storage_path;
+        durationSec = existing.duration_sec;
+        originalSize = existing.original_size_bytes ?? originalSize;
+        finalSize = existing.final_size_bytes ?? finalSize;
+        deduplicated = true;
+        toast.success("Mídia já existia — reutilizada sem novo upload");
+      }
+    } catch (e) {
+      console.warn("[mediaHash] falhou, seguindo upload normal:", e);
+    }
 
     // === Vídeo: tenta comprimir via compress-worker (Easypanel) antes de salvar ===
     const compressUrl = import.meta.env.VITE_COMPRESS_WORKER_URL as string | undefined;
     const compressKey = import.meta.env.VITE_COMPRESS_WORKER_KEY as string | undefined;
-    if (kind === "video" && compressUrl) {
+    if (!finalUrl && kind === "video" && compressUrl) {
       try {
         const fd = new FormData();
         fd.append("file", file);
@@ -263,6 +283,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
         delay_before_ms: 1500,
         original_size_bytes: originalSize,
         final_size_bytes: finalSize,
+        ...(contentHash ? { content_hash: contentHash } : {}),
         ...(durationSec ? { duration_sec: durationSec } : {}),
       })
       .select("id, kind, label, url, storage_path, slot_key, send_order, duration_sec, delay_before_ms, original_size_bytes, final_size_bytes")
@@ -273,7 +294,7 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
       return;
     }
     if (row) setItems(prev => [...prev, row as Media]);
-    toast.success("Mídia adicionada");
+    if (!deduplicated) toast.success("Mídia adicionada");
   }
 
   async function removeMedia(m: Media) {
