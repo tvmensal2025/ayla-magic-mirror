@@ -467,7 +467,7 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
         customerId={customerId}
         customerName={customerName || phoneNumber}
         steps={pendingSteps}
-        variant={(((customer as any)?.flow_variant || "A").toUpperCase()) as "A" | "B" | "C"}
+        variant={(((customer as any)?.flow_variant || "A").toUpperCase()) as "A" | "B" | "C" | "D" | "E"}
         onStepSent={(key) => setSentSteps((s) => new Set(s).add(key))}
         onAskName={handleAskName}
       />

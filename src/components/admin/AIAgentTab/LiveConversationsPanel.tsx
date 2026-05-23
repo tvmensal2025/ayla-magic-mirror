@@ -28,7 +28,7 @@ import { ptBR } from "date-fns/locale";
 import { resetLeadConversation } from "@/services/resetConversation";
 import { ManualStepDialog } from "./ManualStepDialog";
 
-type Variant = "A" | "B" | "C";
+type Variant = "A" | "B" | "C" | "D" | "E";
 
 type Row = {
   id: string;
@@ -61,6 +61,8 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
     A: { name: null, steps: [] },
     B: { name: null, steps: [] },
     C: { name: null, steps: [] },
+    D: { name: null, steps: [] },
+    E: { name: null, steps: [] },
   });
   const [confirmReset, setConfirmReset] = useState<Row | null>(null);
   const [manualStepFor, setManualStepFor] = useState<Row | null>(null);
@@ -88,6 +90,8 @@ export function LiveConversationsPanel({ userId }: { userId: string }) {
       A: { name: null, steps: [] },
       B: { name: null, steps: [] },
       C: { name: null, steps: [] },
+    D: { name: null, steps: [] },
+    E: { name: null, steps: [] },
     };
 
     if (flows?.length) {
