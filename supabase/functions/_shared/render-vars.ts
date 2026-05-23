@@ -14,6 +14,7 @@
 export type RenderVars = {
   name?: string | null;
   phone?: string | null;
+  cpf?: string | null;
   representante?: string | null;
   valor_conta?: number | string | null;
   extra?: Record<string, string | number | null | undefined>;
@@ -28,7 +29,8 @@ const NAME_KEYS = new Set([
   "cliente",
 ]);
 
-const PHONE_KEYS = new Set(["telefone", "phone", "celular", "whatsapp"]);
+const PHONE_KEYS = new Set(["telefone", "phone", "celular", "whatsapp", "numero", "número"]);
+const CPF_KEYS = new Set(["cpf", "documento", "doc"]);
 const REP_KEYS = new Set([
   "representante",
   "consultor",
@@ -70,7 +72,16 @@ export function renderTemplateVars(text: string | null | undefined, vars: Render
   if (!text) return "";
   const name = String(vars.name || "").trim();
   const firstName = firstNameOf(name);
-  const phone = String(vars.phone || "").replace(/\D/g, "");
+  const phoneRaw = String(vars.phone || "").replace(/\D/g, "");
+  // Telefone "humano": (11) 99999-8888 quando possível
+  let phoneFmt = phoneRaw;
+  const pNoCc = phoneRaw.startsWith("55") && phoneRaw.length >= 12 ? phoneRaw.slice(2) : phoneRaw;
+  if (pNoCc.length === 11) phoneFmt = `(${pNoCc.slice(0,2)}) ${pNoCc.slice(2,7)}-${pNoCc.slice(7)}`;
+  else if (pNoCc.length === 10) phoneFmt = `(${pNoCc.slice(0,2)}) ${pNoCc.slice(2,6)}-${pNoCc.slice(6)}`;
+  const cpfRaw = String(vars.cpf || "").replace(/\D/g, "");
+  const cpfFmt = cpfRaw.length === 11
+    ? cpfRaw.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4")
+    : cpfRaw;
   const rep = String(vars.representante || "").trim();
   const billNum = typeof vars.valor_conta === "number"
     ? vars.valor_conta
@@ -81,16 +92,15 @@ export function renderTemplateVars(text: string | null | undefined, vars: Render
   const lookup = (rawKey: string): string | null => {
     const key = rawKey.trim().toLowerCase();
     if (NAME_KEYS.has(key)) {
-      // {nome_completo} retorna o nome inteiro; resto, primeiro nome.
       if (key === "nome_completo" || key === "name") return name;
       return firstName;
     }
-    if (PHONE_KEYS.has(key)) return phone;
+    if (PHONE_KEYS.has(key)) return phoneFmt;
+    if (CPF_KEYS.has(key)) return cpfFmt;
     if (REP_KEYS.has(key)) return rep;
     if (BILL_KEYS.has(key)) return billStr;
     if (key === "economia_mensal" && hasBill) return fmtBRL(billNum * 0.20);
     if (key === "economia_anual" && hasBill) return fmtBRL(billNum * 0.20 * 12);
-    // extras dinâmicos
     if (vars.extra && Object.prototype.hasOwnProperty.call(vars.extra, key)) {
       const v = vars.extra[key];
       return v == null ? "" : String(v);

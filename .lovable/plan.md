@@ -1,87 +1,45 @@
-# Auditoria de Layout — Painel Admin
-
-## Diagnóstico (o que está travando hoje)
-
-1. **Altura fixa quebra o scroll**
-   - `CaptacaoPanel.tsx` usa `h-[calc(100vh-150px)] min-h-[680px]` + `overflow-hidden`. Em telas pequenas/zoom alto isso esconde botões e força grids a comprimir.
-   - Vários painéis (`WhatsAppTab`, `CrmTabs`, `NetworkPanel`, `AdsCentralTab`, `DashboardTab`, `CustomerManager`) herdam contêineres `overflow-hidden` que impedem scroll vertical do conteúdo interno.
-
-2. **Botões “engolidos” ou sem opção de largura**
-   - Botões na grade de passos, no header do lead (A/B/C + Abrir conversa + Voltar/Ficha) e no FinalizeButton perdem texto/ícone quando a coluna fica estreita.
-   - `MessageComposer` na Captação não tem altura mínima garantida (some atrás do composer fixo).
-   - Cards do `DocumentsSection` (RG/Conta) têm tamanho fixo e não acompanham o resize da ficha.
-
-3. **Resize já criado mas só aplicado em 2 lugares**
-   - `DragResizer` está só em `CaptacaoPanel` e `WhatsAppTab`. CRM, Clientes, Rede, Anúncios e Dashboard não têm handle.
-   - Handles ficam invisíveis quando travados (✓), mas o lock global está ON por padrão → usuário pensa que não há ajuste.
-
-4. **Grids sem `min-w-0` causam overflow**
-   - `CaptureStepsGrid` corrigido. Faltam: `DocumentsSection`, `CrmKanban`, `NetworkPanel` (cards), `AdsCentralTab` (galeria), `DashboardTab` (HeroKpis/FunnelStrip).
-
----
-
 ## Plano de correção
 
-### A. Scroll global por aba
-Em cada painel principal trocar `overflow-hidden` por `overflow-y-auto` no contêiner raiz e remover `h-[calc(100vh-…)]` fixo, deixando `min-h-[600px]`:
-- `CaptacaoPanel.tsx` (root + ambos branches game/normal)
-- `WhatsAppTab.tsx` (split conversa)
-- `CrmTabs.tsx` (kanban scrolla horizontal, página scrolla vertical)
-- `CustomerManager.tsx`
-- `NetworkPanel.tsx`
-- `AdsCentralTab.tsx`
-- `DashboardTab.tsx`
+### Objetivo
+Garantir que o lead `11971254913` receba todos os passos corretamente, sem duplicar mensagens/mídias, com tempo realista entre envios e com variáveis como telefone e CPF funcionando em todos os caminhos: manual, bot, fluxo customizado, A/B/C e atalhos.
 
-### B. Padronização dos botões
-Aplicar regras consistentes em todos botões de coluna estreita:
-- `min-w-0` em flex pais, `truncate` no `<span>` interno, ícone com `shrink-0`.
-- `size="sm"` com `h-8` mínimo, `gap-1.5`, `px-2.5`.
-- Quando coluna < 200px → mostrar só ícone via `hidden xl:inline` no texto.
-- Componentes a revisar: `FinalizeButton`, header A/B/C, `Abrir conversa`, `DocumentsSection` upload, `CrmKanban` cards, `MaterialsTab` cards.
+### Correções propostas
 
-### C. Ampliar sistema de resize
-Adicionar `data-resize-scope` + `DragResizer` nos painéis ainda fixos:
-- **CRM**: lista de stages ↔ detalhe do deal (`--crm-side-w`).
-- **Clientes**: tabela ↔ ficha (`--cli-aside-w`).
-- **Rede**: árvore ↔ painel detalhe (`--net-side-w`).
-- **Central de Anúncios**: galeria ↔ wizard (`--ads-side-w`).
-- **Dashboard**: KPIs ↔ gráficos (`--dash-side-w`, opcional 2-col).
-- **Ficha do cliente (Captação)**: já tem aside resize; adicionar handle interno entre Documentos e Dados se útil.
+1. **Unificar variáveis de template**
+   - Expandir o helper `renderTemplateVars` para suportar `cpf`, `documento`, `telefone`, `valor_conta`, economia e extras.
+   - Usar esse helper também no `manual-step-send` em vez de mapas locais incompletos.
+   - Garantir que `{cpf}`, `{{cpf}}`, `{telefone}`, `{{telefone}}`, `{phone}` e variações com maiúsculas/espaços funcionem igualmente.
 
-### D. Lock global mais visível
-- Botão `LayoutLockToggle` ganha tooltip “Destrave para personalizar tamanhos” e um pulse sutil na 1ª visita (flag em localStorage).
-- Quando destravado, todos os `DragResizer` recebem `bg-primary/20` (em vez de invisível) para sinalizar zonas arrastáveis.
-- Adicionar atalho `Shift+L` para alternar.
+2. **Corrigir o número de destino em todos os caminhos**
+   - Padronizar o telefone do cliente como destino do envio, sempre derivado de `customers.phone_whatsapp`.
+   - Validar o caso `11971254913` para sair como `5511971254913@s.whatsapp.net`.
+   - Evitar que atalhos, envio manual, continuação e bot usem número do consultor por engano.
 
-### E. Persistência e reset
-- Adicionar item no menu Settings: “Resetar tamanhos das colunas” → limpa todas as chaves `igreen:dragsize:*` e recarrega.
+3. **Eliminar duplicação de envio manual e continuação**
+   - Reforçar debounce por customer + step + tipo + conteúdo, não só por `conversation_step`.
+   - Fazer `continueFlow` não reenviar o mesmo step quando ele acabou de ser enviado.
+   - Aplicar anti-duplicação também em mídias no `manual-step-send`, como já existe parcialmente no bot (`canSendMediaOnce`).
 
----
+4. **Ajustar o tempo entre mensagens/mídias**
+   - Substituir delays fixos muito curtos (`1200ms`, `2500ms`, `4500ms`) por cálculo baseado em tipo e duração real da mídia.
+   - Áudio/vídeo devem esperar proporcionalmente à duração antes do próximo item, evitando sobreposição e duplicação percebida.
+   - Texto deve usar tempo humano mínimo, sem estourar o timeout do client.
 
-## Arquivos previstos
+5. **Aplicar em todos os fluxos A/B/C**
+   - Respeitar a variante do lead em bot e dispatch customizado.
+   - Manter o comportamento atual: variante B remove áudio no bot; envio manual continua podendo mandar áudio se o consultor escolher.
+   - Garantir que fallback C→B não reenvie mídia já entregue.
 
-**Editar**
-- `src/components/captacao/CaptacaoPanel.tsx`
-- `src/components/captacao/CaptureLeadCard.tsx` (overflow + botões)
-- `src/components/captacao/FinalizeButton.tsx`
-- `src/components/captacao/DocumentsSection.tsx`
-- `src/components/whatsapp/WhatsAppTab.tsx`
-- `src/components/whatsapp/CrmTabs.tsx` (+ Kanban)
-- `src/components/whatsapp/CustomerManager.tsx`
-- `src/components/admin/NetworkPanel.tsx`
-- `src/components/admin/ads/AdsCentralTab.tsx`
-- `src/components/admin/DashboardTab.tsx`
-- `src/components/layout/DragResizer.tsx` (visual destravado mais visível)
-- `src/components/layout/LayoutLockToggle.tsx` (tooltip + pulse + atalho)
-- `src/pages/Admin.tsx` (menu reset)
+6. **Validar com logs e teste focado**
+   - Conferir nos logs do `manual-step-send` e `whapi-webhook` se não há novo `vars is not defined`.
+   - Testar o fluxo do cliente `11971254913` com um envio manual + seguir fluxo e verificar que não duplica.
+   - Confirmar que mensagens com CPF/telefone renderizam sem deixar `{cpf}` ou `{telefone}` no texto.
 
-**Criar**
-- `src/hooks/useResetLayoutSizes.ts`
+### Arquivos principais a alterar
+- `supabase/functions/_shared/render-vars.ts`
+- `supabase/functions/manual-step-send/index.ts`
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
+- Possivelmente `supabase/functions/_shared/whapi-api.ts` / `evolution-api.ts` apenas se o ajuste de tempo precisar ficar no sender compartilhado.
 
-## Fora de escopo
-Lógica de envio, IA, OCR, dados — apenas layout, scroll, botões e resize.
-
-## Notas técnicas
-- Manter todos os tokens semânticos (`bg-primary`, `border-border`).
-- Resize só em `md+`; mobile permanece empilhado e com scroll natural.
-- Nenhuma mudança em queries / Supabase / edge functions.
+### Resultado esperado
+O envio manual, o bot automático, o fluxo customizado, as variantes A/B/C e os atalhos passam a usar a mesma renderização de dados, o mesmo destino do cliente e travas consistentes contra reenvio duplicado.

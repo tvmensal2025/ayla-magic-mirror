@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
     // Resolve customer + phone
     const { data: customer } = await supabase
       .from("customers")
-      .select("id, name, name_source, phone_whatsapp, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at, electricity_bill_photo_url, document_front_url, document_back_url, last_inbound_media_url, last_inbound_media_kind, last_inbound_media_at, bill_data_confirmed_at, doc_data_confirmed_at, bill_holder_name, doc_holder_name, name_mismatch_flag, name_mismatch_acknowledged_at")
+      .select("id, name, name_source, phone_whatsapp, cpf, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at, electricity_bill_photo_url, document_front_url, document_back_url, last_inbound_media_url, last_inbound_media_kind, last_inbound_media_at, bill_data_confirmed_at, doc_data_confirmed_at, bill_holder_name, doc_holder_name, name_mismatch_flag, name_mismatch_acknowledged_at")
       .eq("id", body.customerId)
       .maybeSingle();
     if (!customer) return json({ ok: false, blocked: true, code: "customer_not_found", error: "customer_not_found", message: "Lead não encontrado (pode ter sido removido). Recarregue a lista." });
@@ -376,6 +376,7 @@ Deno.serve(async (req) => {
       ? renderTemplateVars(String((step as any).message_text), {
           name: (customer as any).name || "",
           phone: (customer as any).phone_whatsapp || "",
+          cpf: (customer as any).cpf || "",
           valor_conta: (customer as any).electricity_bill_value,
         })
       : "";
@@ -383,24 +384,33 @@ Deno.serve(async (req) => {
     // Vars map for ad-hoc placeholder substitution in fallback prompts
     const _name = String((customer as any).name || "").trim();
     const _firstName = _name.split(/\s+/)[0] || _name;
-    const _phone = String((customer as any).phone_whatsapp || "");
+    const _phoneRaw = String((customer as any).phone_whatsapp || "").replace(/\D/g, "");
+    const _phoneNoCc = _phoneRaw.startsWith("55") && _phoneRaw.length >= 12 ? _phoneRaw.slice(2) : _phoneRaw;
+    const _phoneFmt = _phoneNoCc.length === 11
+      ? `(${_phoneNoCc.slice(0,2)}) ${_phoneNoCc.slice(2,7)}-${_phoneNoCc.slice(7)}`
+      : _phoneNoCc.length === 10
+        ? `(${_phoneNoCc.slice(0,2)}) ${_phoneNoCc.slice(2,6)}-${_phoneNoCc.slice(6)}`
+        : _phoneRaw;
+    const _cpfRaw = String((customer as any).cpf || "").replace(/\D/g, "");
+    const _cpfFmt = _cpfRaw.length === 11
+      ? _cpfRaw.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4")
+      : _cpfRaw;
     const _bill = (customer as any).electricity_bill_value;
     const _billStr = _bill == null ? "" : String(_bill);
     const vars: Record<string, string> = {
-      "{{nome}}": _firstName,
-      "{nome}": _firstName,
-      "{{Nome}}": _firstName,
-      "{Nome}": _firstName,
-      "{{name}}": _firstName,
-      "{name}": _firstName,
-      "{{primeiro_nome}}": _firstName,
-      "{primeiro_nome}": _firstName,
-      "{{telefone}}": _phone,
-      "{telefone}": _phone,
-      "{{phone}}": _phone,
-      "{phone}": _phone,
-      "{{valor_conta}}": _billStr,
-      "{valor_conta}": _billStr,
+      "{{nome}}": _firstName, "{nome}": _firstName,
+      "{{Nome}}": _firstName, "{Nome}": _firstName,
+      "{{name}}": _firstName, "{name}": _firstName,
+      "{{primeiro_nome}}": _firstName, "{primeiro_nome}": _firstName,
+      "{{telefone}}": _phoneFmt, "{telefone}": _phoneFmt,
+      "{{phone}}": _phoneFmt, "{phone}": _phoneFmt,
+      "{{celular}}": _phoneFmt, "{celular}": _phoneFmt,
+      "{{whatsapp}}": _phoneFmt, "{whatsapp}": _phoneFmt,
+      "{{cpf}}": _cpfFmt, "{cpf}": _cpfFmt,
+      "{{CPF}}": _cpfFmt, "{CPF}": _cpfFmt,
+      "{{documento}}": _cpfFmt, "{documento}": _cpfFmt,
+      "{{valor_conta}}": _billStr, "{valor_conta}": _billStr,
+      "{{valor}}": _billStr, "{valor}": _billStr,
     };
 
 
@@ -628,6 +638,7 @@ Deno.serve(async (req) => {
       }, 400);
     }
 
+    const { canSendMediaOnce } = await import("../_shared/media-dedupe.ts");
     const sentLog: any[] = [];
     for (let i = 0; i < toSend.length; i++) {
       const it = toSend[i];
@@ -645,6 +656,21 @@ Deno.serve(async (req) => {
           sentLog.push({ kind: "text" });
         } else if (it.media?.url) {
           const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
+          // Anti-duplicação de áudio/vídeo (mesma regra do bot automático).
+          if (!body.force) {
+            const canSend = await canSendMediaOnce(supabase, {
+              consultantId: body.consultantId,
+              customerId: customer.id,
+              mediaId: it.media.id,
+              slotKey: it.media.slot_key || slotKey,
+              kind,
+            });
+            if (!canSend) {
+              console.log(`[manual-step-send] ⏭️ ${kind} (${it.media.id}) já enviado — pulando`);
+              sentLog.push({ kind, mediaId: it.media.id, skipped: "already_sent" });
+              continue;
+            }
+          }
           await sender.sendMedia(remoteJid, it.media.url, "", kind, Number(it.media.duration_sec || 0) || undefined);
           await supabase.from("conversations").insert({
             customer_id: customer.id,
@@ -658,7 +684,6 @@ Deno.serve(async (req) => {
       } catch (sendErr) {
         const msg = (sendErr as Error)?.message || "erro desconhecido";
         console.error(`[manual-step-send] whapi send failed (kind=${it.kind}):`, msg);
-        // Se o primeiro item já falhou: erro fatal. Se já mandou algo, retorna parcial.
         if (sentLog.length === 0) {
           const lower = msg.toLowerCase();
           const code = lower.includes("not on whatsapp") || lower.includes("phone not registered") || lower.includes("not a whatsapp")
@@ -677,7 +702,6 @@ Deno.serve(async (req) => {
                 : `Whapi recusou o envio: ${msg}`;
           return json({ code, error: code, message: friendly, whapi_error: msg }, 502);
         }
-        // Parcial: avisa mas mantém o que já foi.
         return json({
           ok: false,
           code: "partial_send",
@@ -687,14 +711,23 @@ Deno.serve(async (req) => {
         }, 207);
       }
       if (!isLast) {
-        const delayByKind: Record<string, number> = {
-          audio: 4500,
-          video: 5000,
-          image: 2500,
-          document: 2500,
-          text: 1500,
-        };
-        const delay = delayByKind[it.kind] ?? 1500;
+        // Delay proporcional à duração real do item enviado:
+        //  - áudio/vídeo: espera a mídia "tocar" (até 90s) antes da próxima
+        //  - imagem/doc:  2.5s
+        //  - texto:       1.5s
+        let delay: number;
+        if (it.kind === "audio" || it.kind === "video") {
+          const durSec = Number(it.media?.duration_sec || 0);
+          if (durSec > 0) {
+            delay = Math.min(Math.max(durSec * 1000, 3000), 90_000);
+          } else {
+            delay = it.kind === "audio" ? 6000 : 8000;
+          }
+        } else if (it.kind === "image" || it.kind === "document") {
+          delay = 2500;
+        } else {
+          delay = 1500;
+        }
         await new Promise((r) => setTimeout(r, delay));
       }
     }
@@ -888,6 +921,7 @@ async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string,
     return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
   });
 
+  const { canSendMediaOnce } = await import("../_shared/media-dedupe.ts");
   let sent = false;
   for (let i = 0; i < items.length; i++) {
     const it: any = items[i];
@@ -897,11 +931,25 @@ async function sendConfiguredStep(supabase: any, sender: any, remoteJid: string,
       sent = true;
     } else if (it.media?.url) {
       const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
+      const canSend = await canSendMediaOnce(supabase, {
+        consultantId, customerId, mediaId: it.media.id,
+        slotKey: it.media.slot_key || slotKey, kind,
+      });
+      if (!canSend) { continue; }
       await sender.sendMedia(remoteJid, it.media.url, "", kind, Number(it.media.duration_sec || 0) || undefined);
       await supabase.from("conversations").insert({ customer_id: customerId, message_direction: "outbound", message_text: `[${kind}:${it.media.slot_key || slotKey}] (continue)`, message_type: kind, conversation_step: step.step_key || step.id });
       sent = true;
     }
-    if (i < items.length - 1) await new Promise((r) => setTimeout(r, 1200));
+    if (i < items.length - 1) {
+      let d = 1200;
+      if (it.kind === "audio" || it.kind === "video") {
+        const durSec = Number(it.media?.duration_sec || 0);
+        d = durSec > 0 ? Math.min(Math.max(durSec * 1000, 3000), 90_000) : (it.kind === "audio" ? 6000 : 8000);
+      } else if (it.kind === "image" || it.kind === "document") {
+        d = 2500;
+      }
+      await new Promise((r) => setTimeout(r, d));
+    }
   }
   return sent;
 }
