@@ -3137,18 +3137,50 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
           });
         }
-        // SAFETY-BELT: após SIM, NUNCA enviar outro passo informativo (message).
-        // O fluxo correto é avançar direto para captura de documento/finalização.
-        if (nextCustom && nextCustom.step_type === "message") {
-          const forwardCapture = await findNextActiveFlowStep(supabase, customer.consultant_id, {
-            afterPosition: _captureContaPos > 0 ? _captureContaPos : undefined,
-            stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
-          });
-          if (forwardCapture) {
-            console.warn(`[post-confirm-conta] pulando message "${nextCustom.step_key}" → ${forwardCapture.step_key} (${forwardCapture.step_type})`);
-            nextCustom = forwardCapture;
+        // CHAIN: despacha todos os passos `message` ativos entre o capture_conta
+        // e o próximo capture/finalizar (ex.: d_resultado com a simulação) ANTES
+        // de pedir o documento. Atualiza nextCustom para apontar para esse
+        // próximo passo de captura/finalização.
+        if (nextCustom && nextCustom.step_type === "message" && _captureContaPos > 0) {
+          try {
+            const { data: _flowRow2 } = await supabase
+              .from("bot_flows").select("id")
+              .eq("consultant_id", customer.consultant_id).eq("is_active", true)
+              .eq("variant", (customer as any)?.flow_variant || "A").maybeSingle();
+            if (_flowRow2?.id) {
+              const { data: _allSteps } = await supabase
+                .from("bot_flow_steps")
+                .select("position, step_key, step_type, is_active")
+                .eq("flow_id", (_flowRow2 as any).id).eq("is_active", true)
+                .gt("position", _captureContaPos)
+                .order("position", { ascending: true });
+              const stepsAfter = (_allSteps as any[]) || [];
+              const _stopIdx = stepsAfter.findIndex((s) =>
+                s.step_type === "capture_documento" || s.step_type === "capture_doc" ||
+                s.step_type === "capture_email" || s.step_type === "confirm_phone" ||
+                s.step_type === "finalizar_cadastro"
+              );
+              const messagesBetween = _stopIdx >= 0
+                ? stepsAfter.slice(0, _stopIdx)
+                : stepsAfter;
+              const messagesOnly = messagesBetween.filter((s) => s.step_type === "message");
+              for (const m of messagesOnly) {
+                console.log(`[post-confirm-conta] despachando msg intermediária ${m.step_key}`);
+                await dispatchStepFromFlow(m.step_key, _vars);
+                await new Promise((r) => setTimeout(r, 1800));
+              }
+              if (_stopIdx >= 0) {
+                nextCustom = stepsAfter[_stopIdx];
+              } else {
+                // Sem próximo capture/finalizar — força fallback de doc adiante.
+                nextCustom = null;
+              }
+            }
+          } catch (chainErr) {
+            console.warn(`[post-confirm-conta] chain de mensagens falhou: ${(chainErr as Error)?.message}`);
           }
         }
+
         const DOC_FALLBACK = `Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH, o que estiver mais à mão.`;
         const FINAL_FALLBACK_TEXT = `✅ *Tudo pronto!*\n\nSeus dados foram preenchidos. Vamos finalizar seu cadastro no portal iGreen?`;
         const sendFallback = async (text: string, stepStr: string) => {
