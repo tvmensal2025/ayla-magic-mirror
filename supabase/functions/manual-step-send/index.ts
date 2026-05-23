@@ -638,6 +638,7 @@ Deno.serve(async (req) => {
       }, 400);
     }
 
+    const { canSendMediaOnce } = await import("../_shared/media-dedupe.ts");
     const sentLog: any[] = [];
     for (let i = 0; i < toSend.length; i++) {
       const it = toSend[i];
@@ -655,6 +656,21 @@ Deno.serve(async (req) => {
           sentLog.push({ kind: "text" });
         } else if (it.media?.url) {
           const kind = ["audio", "video", "image"].includes(it.kind) ? it.kind : "document";
+          // Anti-duplicação de áudio/vídeo (mesma regra do bot automático).
+          if (!body.force) {
+            const canSend = await canSendMediaOnce(supabase, {
+              consultantId: body.consultantId,
+              customerId: customer.id,
+              mediaId: it.media.id,
+              slotKey: it.media.slot_key || slotKey,
+              kind,
+            });
+            if (!canSend) {
+              console.log(`[manual-step-send] ⏭️ ${kind} (${it.media.id}) já enviado — pulando`);
+              sentLog.push({ kind, mediaId: it.media.id, skipped: "already_sent" });
+              continue;
+            }
+          }
           await sender.sendMedia(remoteJid, it.media.url, "", kind, Number(it.media.duration_sec || 0) || undefined);
           await supabase.from("conversations").insert({
             customer_id: customer.id,
@@ -668,7 +684,6 @@ Deno.serve(async (req) => {
       } catch (sendErr) {
         const msg = (sendErr as Error)?.message || "erro desconhecido";
         console.error(`[manual-step-send] whapi send failed (kind=${it.kind}):`, msg);
-        // Se o primeiro item já falhou: erro fatal. Se já mandou algo, retorna parcial.
         if (sentLog.length === 0) {
           const lower = msg.toLowerCase();
           const code = lower.includes("not on whatsapp") || lower.includes("phone not registered") || lower.includes("not a whatsapp")
@@ -687,7 +702,6 @@ Deno.serve(async (req) => {
                 : `Whapi recusou o envio: ${msg}`;
           return json({ code, error: code, message: friendly, whapi_error: msg }, 502);
         }
-        // Parcial: avisa mas mantém o que já foi.
         return json({
           ok: false,
           code: "partial_send",
@@ -697,14 +711,23 @@ Deno.serve(async (req) => {
         }, 207);
       }
       if (!isLast) {
-        const delayByKind: Record<string, number> = {
-          audio: 4500,
-          video: 5000,
-          image: 2500,
-          document: 2500,
-          text: 1500,
-        };
-        const delay = delayByKind[it.kind] ?? 1500;
+        // Delay proporcional à duração real do item enviado:
+        //  - áudio/vídeo: espera a mídia "tocar" (até 90s) antes da próxima
+        //  - imagem/doc:  2.5s
+        //  - texto:       1.5s
+        let delay: number;
+        if (it.kind === "audio" || it.kind === "video") {
+          const durSec = Number(it.media?.duration_sec || 0);
+          if (durSec > 0) {
+            delay = Math.min(Math.max(durSec * 1000, 3000), 90_000);
+          } else {
+            delay = it.kind === "audio" ? 6000 : 8000;
+          }
+        } else if (it.kind === "image" || it.kind === "document") {
+          delay = 2500;
+        } else {
+          delay = 1500;
+        }
         await new Promise((r) => setTimeout(r, delay));
       }
     }
