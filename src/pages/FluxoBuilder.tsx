@@ -20,6 +20,8 @@ import {
 import StepCard from "@/components/admin/flow-builder/StepCard";
 import StepInspector from "@/components/admin/flow-builder/StepInspector";
 import WhatsAppPreview from "@/components/admin/flow-builder/WhatsAppPreview";
+import FlowTemplatesDialog from "@/components/admin/flow-builder/FlowTemplatesDialog";
+import { useFlowValidation } from "@/components/admin/flow-builder/useFlowValidation";
 import {
   Step, Variant, ALL_VARIANTS, VARIANT_LABEL,
   parseTransitions, parseCaptures, parseFallback,
