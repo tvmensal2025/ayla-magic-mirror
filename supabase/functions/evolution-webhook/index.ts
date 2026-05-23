@@ -1131,25 +1131,24 @@ Deno.serve(async (req) => {
         reply_was_set: reply !== "",
         v2_flag: v2Flag,
       });
-      // Persist a single outbound row so the analytics view of the
-      // conversation reflects this turn. The handler's own inline
-      // sendMedia / sendText paths already insert their own rows
-      // (`[image:slot]`, `[audio:slot]`, etc.), so this row captures
-      // either the textual reply that was emitted inline OR a marker
-      // when the handler only sent media.
-      try {
-        await supabase.from("conversations").insert({
-          customer_id: customer.id,
-          message_direction: "outbound",
-          message_text: reply || "[inline-sent]",
-          message_type: "text",
-          conversation_step: updates.conversation_step || stepBefore,
-        });
-      } catch (logErr) {
-        jsonLog("warn", "inline_sent_log_failed", {
-          customer_id: customer.id,
-          message: logErr instanceof Error ? logErr.message : String(logErr),
-        });
+      // Persiste uma linha de log apenas quando o handler enviou SOMENTE mídia
+      // (reply vazio). Quando reply !== "", o handler já inseriu suas próprias
+      // linhas via sendStepMedia/sendText — inserir aqui duplicaria o histórico.
+      if (!reply) {
+        try {
+          await supabase.from("conversations").insert({
+            customer_id: customer.id,
+            message_direction: "outbound",
+            message_text: "[inline-sent]",
+            message_type: "text",
+            conversation_step: updates.conversation_step || stepBefore,
+          });
+        } catch (logErr) {
+          jsonLog("warn", "inline_sent_log_failed", {
+            customer_id: customer.id,
+            message: logErr instanceof Error ? logErr.message : String(logErr),
+          });
+        }
       }
       return new Response(JSON.stringify({ ok: true, mode: "inline_sent" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

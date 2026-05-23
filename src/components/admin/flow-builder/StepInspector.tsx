@@ -77,11 +77,15 @@ export default function StepInspector({
   function getButtonGoto(buttonId: string): string {
     const btn = buttons.find((b) => b.id === buttonId);
     if (!btn) return "none";
+    // Busca por buttonId primeiro (mais específico), depois por título.
+    // Evita que dois botões com títulos similares retornem a transição errada.
     const t = step!.transitions.find(
       (x) =>
         x.trigger_intent === buttonId ||
+        x.trigger_phrases.includes(buttonId) ||
         x.trigger_phrases.includes(btn.title) ||
-        x.trigger_phrases.includes(buttonId),
+        // Título sem emoji (ex: "Quero simular" de "📸 Quero simular")
+        x.trigger_phrases.includes(btn.title.replace(/^\S+\s/, "").trim()),
     );
     if (!t) return "none";
     if (t.goto_special) return `special:${t.goto_special}`;
