@@ -34,6 +34,8 @@ import { PortalStatusTracker } from "@/components/captacao/PortalStatusTracker";
 interface Props { consultantId: string; onOpenChat?: (phone: string) => void; instanceName?: string | null; isWhapi?: boolean; }
 
 export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, isWhapi = false }: Props) {
+  const isMobile = useIsMobile();
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sentSteps, setSentSteps] = useState<Set<string>>(new Set());
   const [phone, setPhone] = useState<string | null>(null);
