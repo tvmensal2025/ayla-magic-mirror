@@ -56,46 +56,57 @@ Deno.serve(async (req) => {
     const messageSteps = allSteps.filter((s: any) => s.step_type === "message");
     const captureSteps = allSteps.filter((s: any) => String(s.step_type).startsWith("capture_") || s.step_type === "finalizar_cadastro");
 
-    // Despausa para garantir envio
-    await supabase.from("customers").update({ bot_paused: false }).eq("id", customerId);
+    // Despausa + limpa debounce de capture
+    await supabase
+      .from("customers")
+      .update({ bot_paused: false, last_custom_prompt_at: null })
+      .eq("id", customerId);
 
     const FN_URL = `${SUPABASE_URL}/functions/v1/manual-step-send`;
-    const allToFire = [...messageSteps, ...captureSteps];
-
-    const plan = allToFire.map((s: any) => ({
-      position: s.position,
-      step_type: s.step_type,
-      step_key: s.step_key,
-      step_id: s.id,
-      text_preview: String(s.message_text || s.title || "").slice(0, 60),
-    }));
-
-    // grava plano + status numa tabela leve para inspeção
     const runId = crypto.randomUUID();
 
-    // dispara em background — não trava resposta HTTP
+    // PLANO: 1 disparo de mensagem com chain ON (chega até último message)
+    //        + N disparos de capture sequenciais (cada um pede o input)
+    const firstMessage = messageSteps[0];
+    const sequence: Array<{ step: any; continueFlow: boolean; waitAfterMs: number }> = [];
+    if (firstMessage) {
+      // estima tempo de cadeia: ~12s por message step
+      sequence.push({ step: firstMessage, continueFlow: true, waitAfterMs: Math.max(messageSteps.length * 12_000, 30_000) });
+    }
+    for (const cap of captureSteps) {
+      sequence.push({ step: cap, continueFlow: false, waitAfterMs: 8_000 });
+    }
+
+    const plan = sequence.map((s) => ({
+      position: s.step.position,
+      step_type: s.step.step_type,
+      step_key: s.step.step_key,
+      step_id: s.step.id,
+      continue_flow: s.continueFlow,
+      wait_after_ms: s.waitAfterMs,
+      text_preview: String(s.step.message_text || s.step.title || "").slice(0, 60),
+    }));
+
     const fireAll = async () => {
-      for (const step of allToFire) {
+      for (const item of sequence) {
         const t0 = Date.now();
         const payload = {
           consultantId: customer.consultant_id,
           customerId,
-          stepId: step.id,
-          stepKey: step.step_key,
+          stepId: item.step.id,
+          stepKey: item.step.step_key,
           part: "all",
-          continueFlow: false,
+          continueFlow: item.continueFlow,
           variant,
           force: true,
+          skipNameGuard: true,
         };
         let result: any;
         let httpStatus = 0;
         try {
           const r = await fetch(FN_URL, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${SERVICE_KEY}`,
-            },
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
             body: JSON.stringify(payload),
           });
           httpStatus = r.status;
@@ -105,13 +116,15 @@ Deno.serve(async (req) => {
           result = { error: String((e as Error).message || e) };
         }
         const dt = Date.now() - t0;
-        console.log(`[dev-fire-all-steps] run=${runId} pos=${step.position} type=${step.step_type} step=${step.step_key} status=${httpStatus} elapsed=${dt}ms result=${JSON.stringify(result).slice(0,300)}`);
-        await new Promise((res) => setTimeout(res, 2000));
+        console.log(`[dev-fire-all-steps] run=${runId} pos=${item.step.position} type=${item.step.step_type} chain=${item.continueFlow} status=${httpStatus} elapsed=${dt}ms result=${JSON.stringify(result).slice(0,200)}`);
+        // limpa debounce antes do próximo capture
+        await supabase.from("customers").update({ last_custom_prompt_at: null, bot_paused: false }).eq("id", customerId);
+        await new Promise((res) => setTimeout(res, item.waitAfterMs));
       }
-      console.log(`[dev-fire-all-steps] run=${runId} DONE total=${allToFire.length}`);
+      console.log(`[dev-fire-all-steps] run=${runId} DONE`);
     };
 
-    // @ts-ignore EdgeRuntime presente no Supabase Edge
+    // @ts-ignore EdgeRuntime
     (globalThis as any).EdgeRuntime?.waitUntil ? (globalThis as any).EdgeRuntime.waitUntil(fireAll()) : fireAll();
 
     return json({
@@ -120,8 +133,8 @@ Deno.serve(async (req) => {
       customer: { id: customer.id, phone: phoneDigits, name: customer.name },
       flow: { id: flow.id, variant },
       total: plan.length,
+      strategy: "1 message with chain + N captures individuais (zero duplicação)",
       plan,
-      note: "Disparado em background. Acompanhe nos logs (dev-fire-all-steps / manual-step-send) ou na tabela conversations.",
     });
   } catch (e) {
     return json({ ok: false, error: String((e as Error).message || e) }, 500);
