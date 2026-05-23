@@ -3038,38 +3038,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }
 
           updates.conversation_step = "confirmando_dados_conta";
-          const _merged = { ...customer, ...updates };
 
-          // 🟡 Gate de presença do consultor (super admin no Whapi).
-          // Mesma lógica do evolution-webhook: se Rafael está olhando o
-          // painel, pausa a confirmação ao cliente e mostra o OcrReviewCard.
-          let consultantOnline = false;
-          try {
-            const { data: presOk } = await supabase.rpc("is_consultant_online", {
-              p_consultant: customer.consultant_id,
-            });
-            consultantOnline = presOk === true;
-          } catch (presErr) {
-            console.warn("[ocr-bill/whapi] presence check failed (default offline):", (presErr as Error)?.message);
-          }
-
-          if (consultantOnline) {
-            console.log(`[ocr-bill/whapi] 👀 super admin online — pausando confirmação para review (customer=${customer.id})`);
-            updates.ocr_review_pending = "bill";
-            updates.ocr_review_started_at = new Date().toISOString();
-            updates.ocr_review_decided_at = null;
-            updates.ocr_review_decided_by = null;
-            reply = "";
-            break;
-          }
-
-          reply = buildConfirmacaoConta(_merged);
-          await sendOptions(remoteJid, reply, [
-            { id: "sim_conta", title: "✅ SIM" },
-            { id: "nao_conta", title: "❌ NÃO" },
-            { id: "editar_conta", title: "✏️ EDITAR" },
-          ]);
+          // Sempre pausa pro card de revisão no painel. O cron
+          // `ocr-review-timeout` (5 min) libera automaticamente se o
+          // consultor não decidir — não dependemos mais de presença.
+          console.log(`[ocr-bill/whapi] 📥 marcando review pendente (customer=${customer.id})`);
+          updates.ocr_review_pending = "bill";
+          updates.ocr_review_started_at = new Date().toISOString();
+          updates.ocr_review_decided_at = null;
+          updates.ocr_review_decided_by = null;
           reply = "";
+          break;
+
 
         } else {
           console.error("❌ OCR conta falhou:", ocrData.erro);
@@ -3651,43 +3631,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
           updates.conversation_step = "confirmando_dados_doc";
 
-          // 🟡 Gate de presença — mesma lógica da conta. Se super admin online,
-          // OcrReviewCard decide entre confirmar ou mandar pro cliente.
-          let consultantOnlineDoc = false;
-          try {
-            const { data: presOk } = await supabase.rpc("is_consultant_online", {
-              p_consultant: customer.consultant_id,
-            });
-            consultantOnlineDoc = presOk === true;
-          } catch (presErr) {
-            console.warn("[ocr-doc/whapi] presence check failed (default offline):", (presErr as Error)?.message);
-          }
+          // Sempre pausa pro card de revisão no painel. Cron de 5 min
+          // libera automaticamente se o consultor não decidir.
+          console.log(`[ocr-doc/whapi] 📥 marcando review pendente (customer=${customer.id})`);
+          updates.ocr_review_pending = "doc";
+          updates.ocr_review_started_at = new Date().toISOString();
+          updates.ocr_review_decided_at = null;
+          updates.ocr_review_decided_by = null;
+          reply = "";
+          break;
 
-          if (consultantOnlineDoc) {
-            console.log(`[ocr-doc/whapi] 👀 super admin online — pausando confirmação para review (customer=${customer.id})`);
-            updates.ocr_review_pending = "doc";
-            updates.ocr_review_started_at = new Date().toISOString();
-            updates.ocr_review_decided_at = null;
-            updates.ocr_review_decided_by = null;
-            reply = "";
-            break;
-          }
-
-          const mismatchWarn = updates.name_mismatch_flag
-            ? `\n\n━━━━━━━━━━━━━━━\n⚠️ *Atenção: notei uma diferença de nome*\n\n📄 Conta de luz: *${customer.bill_holder_name || updates.bill_holder_name}*\n🪪 Documento: *${d.nome}*\n\nPara o cadastro no portal iGreen funcionar, o documento precisa ser do *mesmo titular da conta de luz*.\n\nSe for cônjuge, pai/mãe ou outro parente, tudo bem 💚 — eu confirmo isso com você antes de finalizar.\n━━━━━━━━━━━━━━━`
-            : "";
-          reply = "📋 *Confirme seus dados pessoais:*\n\n" +
-            `👤 *Nome:* ${d.nome || "❌ não encontrado"}\n` +
-            `🆔 *CPF:* ${d.cpf || "❌ não encontrado"}\n` +
-            `📄 *RG:* ${d.rg || "❌ não encontrado"}\n` +
-            `🎂 *Data Nasc:* ${d.dataNascimento || "❌ não encontrado"}` +
-            mismatchWarn +
-            "\n\nEstá tudo correto?";
-          await sendOptions(remoteJid, reply, [
-            { id: "sim_doc", title: "✅ SIM" },
-            { id: "nao_doc", title: "❌ NÃO" },
-            { id: "editar_doc", title: "✏️ EDITAR" },
-          ]);
           reply = "";
         } else {
           console.error("❌ OCR doc falhou:", ocrData.erro);
