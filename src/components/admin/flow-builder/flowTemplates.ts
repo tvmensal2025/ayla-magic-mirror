@@ -107,7 +107,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         step_type: "capture_conta",
         title: "Captar conta",
         icon: "file",
-        message_text: "Pode mandar a foto da conta 📸",
+        message_text: "📸 Pode mandar a *foto da conta* aqui mesmo. 💚",
         slot_key: "aguardando_conta",
       },
       {
