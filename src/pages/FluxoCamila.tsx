@@ -22,6 +22,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { toast } from "sonner";
 import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
 import { HelpHint } from "@/components/ui/help-hint";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 import { simulateMatch, detectRuleConflicts } from "@/lib/flowSimulator";
 
@@ -189,6 +190,7 @@ function parseFallback(raw: unknown, transitions: unknown): Fallback {
 
 export default function FluxoCamila() {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [userId, setUserId] = useState<string | null>(null);
   const [flowId, setFlowId] = useState<string | null>(null);
   const [globalAtivo, setGlobalAtivo] = useState(false);
@@ -317,7 +319,13 @@ export default function FluxoCamila() {
   const [seedDBusy, setSeedDBusy] = useState(false);
   async function seedFlowD() {
     if (!userId) return;
-    if (!confirm("Criar/Recriar Fluxo D com botões Whapi (welcome → Simular / Como funciona / Falar com humano) e deixar D como ÚNICO ativo?")) return;
+    const ok = await confirm({
+      title: "Criar Fluxo D com botões interativos?",
+      description: "Vamos montar o Fluxo D (welcome → Simular / Como funciona / Falar com humano) e deixá-lo como ÚNICO ativo no round-robin. Os outros fluxos continuam salvos, mas saem do sorteio.",
+      confirmText: "Criar e ativar",
+      tone: "success",
+    });
+    if (!ok) return;
     setSeedDBusy(true);
     try {
       const { error } = await supabase.rpc("seed_flow_d" as any, { _consultant_id: userId });
@@ -336,7 +344,15 @@ export default function FluxoCamila() {
   async function cloneFlowAs(v: Variant) {
     if (!userId || v === "A") return;
     const exists = existingVariants.includes(v);
-    if (exists && !confirm(`Já existe Fluxo ${v}. Recriar (apaga e copia do A novamente)?`)) return;
+    if (exists) {
+      const ok = await confirm({
+        title: `Recriar o Fluxo ${v}?`,
+        description: `Já existe um Fluxo ${v}. Recriar vai apagar o atual e copiar tudo do Fluxo A novamente. Essa ação não pode ser desfeita.`,
+        confirmText: "Sim, recriar",
+        tone: "danger",
+      });
+      if (!ok) return;
+    }
     setCloneBusy(v);
     try {
       const { error } = await supabase.rpc("clone_bot_flow_as" as any, { _consultant_id: userId, _variant: v });
@@ -410,7 +426,13 @@ export default function FluxoCamila() {
   }
 
   async function deleteStep(id: string) {
-    if (!confirm("Apagar este passo? A Camila não vai mais usar essa etapa.")) return;
+    const ok = await confirm({
+      title: "Remover este passo do fluxo?",
+      description: "A assistente não vai mais usar essa etapa nas conversas. As transições que apontavam para ela serão limpas automaticamente.",
+      confirmText: "Remover passo",
+      tone: "danger",
+    });
+    if (!ok) return;
     const { error } = await supabase.from("bot_flow_steps").delete().eq("id", id);
     if (error) { toast.error(error.message); return; }
     setSteps((prev) => prev.filter((s) => s.id !== id));
@@ -460,7 +482,13 @@ export default function FluxoCamila() {
 
   async function clearTestNumbers() {
     if (!userId) return;
-    if (!confirm("Desligar o fluxo para todos os leads de teste?")) return;
+    const ok = await confirm({
+      title: "Desligar o fluxo de teste?",
+      description: "O fluxo será desativado para todos os números marcados como teste. Os leads regulares continuam normalmente.",
+      confirmText: "Desligar testes",
+      tone: "info",
+    });
+    if (!ok) return;
     const { error, count } = await supabase
       .from("customers").update({ conversational_flow_enabled: false }, { count: "exact" })
       .eq("consultant_id", userId).eq("conversational_flow_enabled", true);
