@@ -182,7 +182,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         title: "Boas-vindas pós-cadastro",
         icon: "sparkle",
         message_text:
-          "{{nome}}, parabéns por entrar pra iGreen! 🎉\nEm até 2 faturas você já vê a economia de até 20%. Qualquer dúvida me chama aqui.",
+          "{{nome}}, *parabéns* por entrar pra *iGreen*! 🎉\n\nEm até *2 faturas* você já vê a *economia de até 20%* na sua conta. 💚\n\nQualquer dúvida, é só me *chamar aqui*. 🙌",
         slot_key: "welcome",
       },
       {
