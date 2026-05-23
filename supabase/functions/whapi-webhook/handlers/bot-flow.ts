@@ -892,10 +892,11 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
       const { data: stepRow } = await supabase
         .from("bot_flow_steps")
-        .select("step_key, slot_key, message_text, media_order, captures")
+        .select("step_key, slot_key, message_text, media_order, captures, fallback")
         .eq("flow_id", (flow as any).id)
         .eq("step_key", stepKey)
         .maybeSingle();
+
       if (!stepRow) {
         console.log(`[dispatch:${stepKey}] step não configurado no Flow Builder — nada para enviar`);
         return false;
@@ -912,12 +913,83 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         _slot === "esclarecer_duvidas" ||
         (/duvid/.test(_sk) && _sk !== "duvidas_pos_club");
       if (isAiAnswerStep) {
+        // ── Limite de perguntas (fallback: { mode: "ai_limit", max_questions, then })
+        try {
+          const fb: any = (stepRow as any)?.fallback ?? null;
+          if (fb && fb.mode === "ai_limit") {
+            const maxQ = Math.max(1, Number(fb.max_questions ?? 3));
+            const since = (customer as any)?.last_step_advanced_at || null;
+            let q = supabase
+              .from("conversations")
+              .select("id", { count: "exact", head: true })
+              .eq("customer_id", customer.id)
+              .eq("message_direction", "inbound")
+              .eq("conversation_step", stepKey);
+            if (since) q = q.gte("created_at", since);
+            const { count } = await q;
+            const askedCount = Number(count || 0);
+            console.log(`[dispatch:${stepKey}] ai_limit check: ${askedCount}/${maxQ} perguntas (then=${fb.then})`);
+            if (askedCount >= maxQ) {
+              const then = String(fb.then || "humano");
+              if (then === "humano") {
+                await supabase
+                  .from("customers")
+                  .update({ bot_paused: true, bot_paused_reason: "ai_limit_atingido" })
+                  .eq("id", customer.id);
+                try {
+                  const { notifyHandoff } = await import("../../_shared/notify-consultant.ts");
+                  await notifyHandoff(supabase, customer, `Limite de ${maxQ} perguntas IA atingido no passo "${stepKey}"`).catch(() => {});
+                } catch (_) { /* best-effort */ }
+                const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
+                const msg = firstName
+                  ? `${firstName}, vou te conectar com um especialista agora para tirar suas dúvidas com calma 🙌`
+                  : "Vou te conectar com um especialista agora para tirar suas dúvidas com calma 🙌";
+                await sendText(remoteJid, msg);
+                await supabase.from("conversations").insert({
+                  customer_id: customer.id,
+                  message_direction: "outbound",
+                  message_text: msg,
+                  message_type: "text",
+                  conversation_step: stepKey,
+                });
+                return true;
+              }
+              if (then === "next") {
+                const { data: nextStep } = await supabase
+                  .from("bot_flow_steps")
+                  .select("step_key, position")
+                  .eq("flow_id", (flow as any).id)
+                  .eq("is_active", true)
+                  .gt("position", 0)
+                  .order("position", { ascending: true });
+                const current = (nextStep as any[])?.find((s) => s.step_key === stepKey);
+                const next = current
+                  ? (nextStep as any[])?.find((s) => s.position > current.position)
+                  : null;
+                if (next?.step_key) {
+                  console.log(`[dispatch:${stepKey}] ai_limit → next=${next.step_key}`);
+                  await supabase
+                    .from("customers")
+                    .update({ conversation_step: next.step_key, last_step_advanced_at: new Date().toISOString() })
+                    .eq("id", customer.id);
+                  // dispatch do próximo passo na sequência será feito pelo webhook na próxima inbound
+                  return true;
+                }
+              }
+              // "repeat" cai pro fluxo normal abaixo
+            }
+          }
+        } catch (e) {
+          console.warn(`[dispatch:${stepKey}] ai_limit check falhou:`, (e as Error).message);
+        }
+
         try {
           const { data: lastInbound } = await supabase
             .from("conversations")
             .select("message_text, created_at")
             .eq("customer_id", customer.id)
             .eq("message_direction", "inbound")
+
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle();

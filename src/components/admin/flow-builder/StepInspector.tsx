@@ -8,12 +8,13 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Plus, Trash2, ChevronDown, ChevronRight, ScanLine } from "lucide-react";
+import { Plus, Trash2, ChevronDown, ChevronRight, ScanLine, Sparkles } from "lucide-react";
 import StepMediaPanel from "@/components/admin/fluxo/StepMediaPanel";
 import StepSuggestions from "./StepSuggestions";
 import {
-  Step, Transition, Capture, BUTTON_PRESETS, STEP_TYPE_OPTIONS, getButtons, isOcrStep,
+  Step, Transition, Capture, BUTTON_PRESETS, STEP_TYPE_OPTIONS, getButtons, isOcrStep, isAiAnswerStep,
 } from "./flowTypes";
+
 
 
 interface Props {
@@ -107,6 +108,60 @@ export default function StepInspector({
 
           {/* BÁSICO */}
           <TabsContent value="basico" className="space-y-4 pt-4">
+            {isAiAnswerStep(step) && (
+              <div className="space-y-2 rounded-lg border border-purple-500/40 bg-purple-500/10 p-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-purple-500" />
+                  <Label className="text-sm">Este passo usa IA livre (Gemini)</Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  O texto que você digitar abaixo é <strong>ignorado</strong>. O bot responde cada pergunta do lead com Gemini + a sua FAQ. Para o lead sair desse passo, ele precisa clicar em <strong>um dos botões</strong> (ex: "Quero simular", "Falar com humano"). Sem botões, vira loop infinito.
+                </p>
+                {(() => {
+                  const btns = getButtons(step);
+                  if (btns.length > 0) return null;
+                  return (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        const target = steps.find(
+                          (s) => /capture_(conta|documento)/.test(s.step_type) || /pedir_(conta|documento)/i.test(s.step_key ?? "") || /conta|fatura|luz/i.test(s.step_key ?? ""),
+                        );
+                        const defaults: { id: string; title: string }[] = [
+                          { id: "simular", title: "📸 Quero simular" },
+                          { id: "humano", title: "👤 Falar com humano" },
+                        ];
+                        const newTrans: Transition[] = [
+                          {
+                            trigger_intent: "palavra_chave",
+                            trigger_phrases: ["📸 Quero simular", "Quero simular", "simular"],
+                            goto_step_id: target?.id ?? null,
+                            goto_special: target ? null : "cadastro",
+                          },
+                          {
+                            trigger_intent: "palavra_chave",
+                            trigger_phrases: ["👤 Falar com humano", "Falar com humano", "humano"],
+                            goto_step_id: null,
+                            goto_special: "humano",
+                          },
+                        ];
+                        const others = step.captures.filter((c) => c.field !== "_buttons");
+                        onPatch({
+                          captures: [...others, { field: "_buttons", enabled: true, value: defaults } as Capture],
+                          transitions: [...step.transitions, ...newTrans],
+                        });
+                      }}
+                    >
+                      ✨ Adicionar saídas padrão (simular + humano)
+                    </Button>
+                  );
+                })()}
+              </div>
+            )}
+
+
             <div className="space-y-1.5">
               <Label htmlFor="title">Nome do passo</Label>
               <Input
@@ -197,6 +252,71 @@ export default function StepInspector({
                 </div>
               );
             })()}
+
+            {isAiAnswerStep(step) && (() => {
+              const fb = (step.fallback ?? {}) as any;
+              const isLimit = fb.mode === "ai_limit";
+              const max = isLimit ? Number(fb.max_questions ?? 3) : 3;
+              const then = isLimit ? (fb.then ?? "humano") : "humano";
+              return (
+                <div className="space-y-2 rounded-lg border p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-sm">Limite de IA</Label>
+                      <p className="text-xs text-muted-foreground">Evita loop infinito de perguntas.</p>
+                    </div>
+                    <Switch
+                      checked={isLimit}
+                      onCheckedChange={(v) =>
+                        onPatch({
+                          fallback: v
+                            ? ({ mode: "ai_limit", max_questions: max, then } as any)
+                            : ({ mode: "repeat" } as any),
+                        })
+                      }
+                    />
+                  </div>
+                  {isLimit && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Após X perguntas</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={20}
+                          value={max}
+                          onChange={(e) =>
+                            onPatch({
+                              fallback: { mode: "ai_limit", max_questions: Math.max(1, Number(e.target.value) || 3), then } as any,
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Faz o quê?</Label>
+                        <Select
+                          value={then}
+                          onValueChange={(v) =>
+                            onPatch({
+                              fallback: { mode: "ai_limit", max_questions: max, then: v as any } as any,
+                            })
+                          }
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="humano">👤 Falar com humano</SelectItem>
+                            <SelectItem value="next">⏭ Avançar próximo passo</SelectItem>
+                            <SelectItem value="repeat">🔁 Continuar respondendo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+
 
 
             {flowId && (

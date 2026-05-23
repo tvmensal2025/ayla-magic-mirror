@@ -7,9 +7,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils";
 import {
   GripVertical, Pencil, Trash2, Copy, AlertTriangle,
-  Mic, Image as ImageIcon, Video, MessageSquare, ScanLine,
+  Mic, Image as ImageIcon, Video, MessageSquare, ScanLine, Sparkles,
 } from "lucide-react";
-import { Step, STEP_TYPE_OPTIONS, getButtons, resolveGotoLabel, renderVarsPreview, isOcrStep } from "./flowTypes";
+import { Step, STEP_TYPE_OPTIONS, getButtons, resolveGotoLabel, renderVarsPreview, isOcrStep, isAiAnswerStep } from "./flowTypes";
+
 
 
 interface Props {
@@ -91,7 +92,17 @@ export default function StepCard({
 
           {/* Badges */}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            {(() => {
+            {isAiAnswerStep(step) && (
+              <Badge
+                variant="secondary"
+                className="h-5 gap-1 text-[10px] bg-purple-500/15 text-purple-600 dark:text-purple-300"
+              >
+                <Sparkles className="h-3 w-3" />
+                IA livre · Gemini
+              </Badge>
+            )}
+            {!isAiAnswerStep(step) && (() => {
+
               const ocr = isOcrStep(step);
               if (!ocr) return null;
               const on = step.auto_detect_doc_type !== false;
