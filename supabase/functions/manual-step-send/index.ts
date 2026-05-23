@@ -670,6 +670,7 @@ Deno.serve(async (req) => {
 
     const { canSendMediaOnce } = await import("../_shared/media-dedupe.ts");
     const sentLog: any[] = [];
+    let buttonsSentManual = false;
     for (let i = 0; i < toSend.length; i++) {
       const it = toSend[i];
       const isLast = i === toSend.length - 1;
