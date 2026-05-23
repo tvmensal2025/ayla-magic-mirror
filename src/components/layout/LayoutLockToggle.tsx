@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
-import { Lock, Unlock } from "lucide-react";
+import { Lock, Unlock, RotateCcw } from "lucide-react";
 import { useLayoutLock } from "@/hooks/useLayoutLock";
+import { useResetLayoutSizes } from "@/hooks/useResetLayoutSizes";
 import { cn } from "@/lib/utils";
 
 const HINT_KEY = "igreen:layout-lock-hint-seen";
 
 export function LayoutLockToggle({ className }: { className?: string }) {
   const { locked, toggle } = useLayoutLock();
+  const resetSizes = useResetLayoutSizes();
   const [pulse, setPulse] = useState(false);
 
   // Pulso sutil na 1ª visita para sinalizar que o ajuste existe.
