@@ -327,20 +327,8 @@ export default function FluxoBuilder() {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium text-muted-foreground">
-              {steps.length} {steps.length === 1 ? "passo" : "passos"}
+              Editando variante <span className="font-semibold text-foreground">{editingVariant}</span> — {VARIANT_LABEL[editingVariant].replace(/^[A-E]\s*/, "")} · {steps.length} {steps.length === 1 ? "passo" : "passos"}
             </h2>
-            <Select value={editingVariant} onValueChange={(v) => setEditingVariant(v as Variant)}>
-              <SelectTrigger className="h-8 w-auto text-xs lg:hidden">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {existingVariants.map((v) => (
-                  <SelectItem key={v} value={v} className="text-xs">
-                    {VARIANT_LABEL[v]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
 
           {steps.length === 0 ? (
