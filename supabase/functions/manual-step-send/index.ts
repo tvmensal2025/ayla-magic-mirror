@@ -287,8 +287,13 @@ Deno.serve(async (req) => {
     // ─── DEBOUNCE manual (5s) por (customer, step, part) — evita double-click duplicando áudio/texto
     if (!body.force) {
       try {
-        const sinceIso = new Date(Date.now() - 5_000).toISOString();
         const targetStepKey = (step as any).step_key || String((step as any).id);
+        // Dedupe estendido (3 min) pra passos de welcome — consultor clicando
+        // o botão "Iniciar" várias vezes não deve enviar boas-vindas em loop.
+        const isWelcomeStep = /welcome|boas[_-]?vindas/i.test(String(targetStepKey))
+          || Number((step as any).position) === 1;
+        const debounceMs = isWelcomeStep ? 180_000 : 5_000;
+        const sinceIso = new Date(Date.now() - debounceMs).toISOString();
         const { data: recentManual } = await supabase
           .from("conversations")
           .select("id, message_type, created_at")
@@ -304,12 +309,14 @@ Deno.serve(async (req) => {
             : recentManual.some((r: any) => String(r.message_type) === body.part);
           if (partMatch) {
             const ageMs = Date.now() - new Date(recentManual[0].created_at).getTime();
-            console.log(`[manual-step-send] debounce — step="${targetStepKey}" part=${body.part} idade=${ageMs}ms`);
+            console.log(`[manual-step-send] debounce — step="${targetStepKey}" part=${body.part} idade=${ageMs}ms (welcome=${isWelcomeStep})`);
             return json({
               ok: true,
               sent: [],
               debounced: true,
-              message: "Mesma ação enviada há poucos segundos — ignorada para não duplicar.",
+              message: isWelcomeStep
+                ? `Boas-vindas já enviadas há ${Math.round(ageMs/1000)}s — aguarde 3 min para reenviar.`
+                : "Mesma ação enviada há poucos segundos — ignorada para não duplicar.",
             });
           }
         }
