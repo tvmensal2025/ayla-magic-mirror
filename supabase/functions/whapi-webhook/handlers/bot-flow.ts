@@ -2439,6 +2439,51 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           const stype = String(stepRow.step_type || "message");
           console.log(`[custom-step-resolver] step="${step}" → type=${stype} pos=${stepRow.position}`);
 
+          // 🔁 RE-ENTRADA POR BOTÃO: quando o lead clica um botão que leva a um
+          // passo de captura (ex.: "📸 Quero simular" → d_pedir_conta), precisamos
+          // RE-EMITIR o prompt do passo, mesmo que já tenha sido enviado há
+          // poucos minutos. Caso contrário, o anti-dup silencia e o lead acha
+          // que o botão não fez nada.
+          const _isCaptureType = stype === "capture_conta"
+            || stype === "capture_documento" || stype === "capture_doc"
+            || stype === "capture_email" || stype === "confirm_phone";
+          if (isButton && _isCaptureType) {
+            try {
+              const { data: stepFull } = await supabase
+                .from("bot_flow_steps")
+                .select("step_key, message_text")
+                .eq("flow_id", flow.id).eq("id", stepRow.id).maybeSingle();
+              const rawText = String((stepFull as any)?.message_text || "").trim();
+              if (rawText) {
+                const _fmtBRL = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const _valor = Number((customer as any).electricity_bill_value || 0);
+                const _first = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
+                const _vars: Record<string, string> = {
+                  "{{nome}}": _first, "{nome}": _first,
+                  "{{representante}}": nomeRepresentante || "", "{representante}": nomeRepresentante || "",
+                  "{{valor}}": _fmtBRL(_valor), "{valor}": _fmtBRL(_valor),
+                  "{{valor_conta}}": _fmtBRL(_valor), "{valor_conta}": _fmtBRL(_valor),
+                  "{{economia_mensal}}": _fmtBRL(_valor * 0.20), "{economia_mensal}": _fmtBRL(_valor * 0.20),
+                };
+                let rendered = rawText;
+                for (const [k, v] of Object.entries(_vars)) rendered = rendered.split(k).join(v);
+                await sendText(remoteJid, rendered);
+                await supabase.from("conversations").insert({
+                  customer_id: customer.id, message_direction: "outbound",
+                  message_text: rendered, conversation_step: `flow:${(stepFull as any).step_key}`,
+                });
+                // Marca para o legacy silenciar o re-prompt duplicado logo abaixo.
+                await supabase.from("customers")
+                  .update({ last_custom_prompt_at: new Date().toISOString() })
+                  .eq("id", customer.id);
+                (customer as any).last_custom_prompt_at = new Date().toISOString();
+                console.log(`[custom-step-resolver] button→capture: re-emitido step=${(stepFull as any).step_key}`);
+              }
+            } catch (e) {
+              console.warn(`[custom-step-resolver] button→capture re-emit falhou:`, (e as any)?.message);
+            }
+          }
+
           if (stype === "capture_conta") step = "aguardando_conta";
           else if (stype === "capture_documento" || stype === "capture_doc") step = "aguardando_doc_auto";
           else if (stype === "capture_email") step = "ask_email";
