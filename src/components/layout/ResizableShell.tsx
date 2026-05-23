@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef } from "react";
+import { Fragment, useEffect, useMemo, useRef } from "react";
 import { PanelGroup, Panel, PanelResizeHandle, type ImperativePanelGroupHandle } from "react-resizable-panels";
 import { GripVertical, GripHorizontal } from "lucide-react";
 import { useLayoutLock } from "@/hooks/useLayoutLock";
 import { cn } from "@/lib/utils";
+
 
 export type ResizablePane = {
   id: string;
@@ -69,9 +70,8 @@ export function ResizableShell({ storageKey, panels, direction = "horizontal", c
       className={cn("h-full w-full", className)}
     >
       {panels.map((p, i) => (
-        <>
+        <Fragment key={p.id}>
           <Panel
-            key={p.id}
             id={p.id}
             order={i}
             defaultSize={initial?.[i] ?? p.defaultSize}
@@ -106,8 +106,9 @@ export function ResizableShell({ storageKey, panels, direction = "horizontal", c
               )}
             </PanelResizeHandle>
           )}
-        </>
+        </Fragment>
       ))}
+
     </PanelGroup>
   );
 }
