@@ -42,7 +42,7 @@ export default function FluxoBuilder() {
   const [flowId, setFlowId] = useState<string | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(true);
-  const [globalAtivo, setGlobalAtivo] = useState(false);
+  
   const [editingVariant, setEditingVariant] = useState<Variant>("A");
   const [existingVariants, setExistingVariants] = useState<Variant[]>(["A"]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
