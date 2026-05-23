@@ -314,6 +314,25 @@ export default function FluxoCamila() {
     void setActiveVariants(ALL_VARIANTS.filter((x) => set.has(x)));
   }
 
+  const [seedDBusy, setSeedDBusy] = useState(false);
+  async function seedFlowD() {
+    if (!userId) return;
+    if (!confirm("Criar/Recriar Fluxo D com botões Whapi (welcome → Simular / Como funciona / Falar com humano) e deixar D como ÚNICO ativo?")) return;
+    setSeedDBusy(true);
+    try {
+      const { error } = await supabase.rpc("seed_flow_d" as any, { _consultant_id: userId });
+      if (error) throw error;
+      toast.success("Fluxo D criado. D agora é o único ativo no round-robin.");
+      await reload(userId, "D" as Variant);
+    } catch (e: any) {
+      toast.error(e?.message || "Erro ao criar Fluxo D");
+    } finally {
+      setSeedDBusy(false);
+    }
+  }
+
+
+
   async function cloneFlowAs(v: Variant) {
     if (!userId || v === "A") return;
     const exists = existingVariants.includes(v);
