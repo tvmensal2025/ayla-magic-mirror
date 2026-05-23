@@ -32,7 +32,7 @@ interface Props {
  * da aba "Avançado" pra um leigo nunca precisar abrir.
  */
 export default function StepInspector({
-  step, steps, consultantId, variant, onClose, onPatch,
+  step, steps, consultantId, variant, flowId, maxPosition, onClose, onPatch, onReload,
 }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
