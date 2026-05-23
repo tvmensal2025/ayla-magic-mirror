@@ -66,7 +66,7 @@ export function ReaquecimentoLeadList({
 
   async function loadLeads(p: number) {
     setLoading(true);
-    const { data, error } = await supabase.rpc("list_stuck_leads", {
+    const { data, error } = await (supabase as any).rpc("list_stuck_leads", {
       p_consultant: consultantId,
       p_step: stepFilter,
       p_limit: PAGE_SIZE,
@@ -77,7 +77,7 @@ export function ReaquecimentoLeadList({
       setLoading(false);
       return;
     }
-    const rows = (data as StuckLead[]) || [];
+    const rows = (data as unknown as StuckLead[]) || [];
     setLeads(rows);
     setTotalCount(rows[0]?.total_count != null ? Number(rows[0].total_count) : 0);
     setLoading(false);

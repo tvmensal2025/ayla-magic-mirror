@@ -46,9 +46,9 @@ export default function AdminReaquecimento() {
   }, []);
 
   async function loadGrouped(uid: string) {
-    const { data, error } = await supabase.rpc("stuck_leads_grouped_by_step", { p_consultant: uid });
+    const { data, error } = await (supabase as any).rpc("stuck_leads_grouped_by_step", { p_consultant: uid });
     if (error) { console.error(error); return; }
-    setGrouped((data as any[]) || []);
+    setGrouped((data as unknown as any[]) || []);
   }
 
   const totalStuck = useMemo(
