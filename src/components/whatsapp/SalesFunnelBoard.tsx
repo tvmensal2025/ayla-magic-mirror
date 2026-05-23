@@ -73,7 +73,7 @@ export function SalesFunnelBoard({ consultantId, onOpenChat }: SalesFunnelBoardP
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 p-2 sm:p-3 border-b border-border bg-background/50 sticky top-0 z-10">
         <div className="relative flex-1 min-w-[160px] order-1">
@@ -105,9 +105,9 @@ export function SalesFunnelBoard({ consultantId, onOpenChat }: SalesFunnelBoardP
 
 
       {/* Board */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden" data-resize-scope style={{ "--funnel-col-w": "288px" } as React.CSSProperties}>
-        <div className="flex gap-3 p-3 h-full min-w-max items-stretch">
-          <DragResizer storageKey="funnel-col" cssVar="funnel-col-w" defaultPx={288} minPx={220} maxPx={520} />
+      <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden" data-resize-scope style={{ "--funnel-col-w": "248px" } as React.CSSProperties}>
+        <div className="flex gap-2 p-2 h-full min-w-max items-stretch">
+          <DragResizer storageKey="funnel-col" cssVar="funnel-col-w" defaultPx={248} minPx={200} maxPx={480} />
           {SALES_PHASES.map((phase) => {
             const items = byPhase.get(phase.key) || [];
             const isDragOver = draggedId !== null;
