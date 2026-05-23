@@ -153,8 +153,14 @@ function parseCaptures(raw: unknown): Capture[] {
   if (!Array.isArray(raw)) return [];
   return (raw as any[])
     .filter((c) => c && typeof c.field === "string")
-    .map((c) => ({ field: c.field as CaptureField, enabled: c.enabled !== false }));
+    .map((c) => {
+      // Preserva campos extras (ex.: _buttons.value) sem perder tipagem básica
+      const base: any = { field: c.field, enabled: c.enabled !== false };
+      if (c.field === "_buttons" && Array.isArray(c.value)) base.value = c.value;
+      return base as Capture;
+    });
 }
+
 
 function parseFallback(raw: unknown, transitions: unknown): Fallback {
   // 1) usa coluna nova se preenchida
