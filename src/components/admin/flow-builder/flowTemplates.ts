@@ -144,7 +144,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
         step_type: "message",
         title: "Tirar dúvidas",
         icon: "msg",
-        message_text: "Ficou alguma dúvida sobre o Conexão Club? Posso te explicar 👇",
+        message_text: "Ficou alguma *dúvida* sobre o *Conexão Club*? 🤔\n\nPode mandar aqui que eu te explico 👇",
         slot_key: "duvidas_pos_club",
       },
     ],
