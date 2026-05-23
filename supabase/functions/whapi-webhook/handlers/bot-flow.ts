@@ -901,6 +901,88 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         return false;
       }
 
+      // ─── AI ANSWER MODE: passos de "esclarecer dúvidas" ──────────────
+      // Qualquer passo cujo step_key contenha "duvid" OU cujo slot_key
+      // seja "esclarecer_duvidas" passa a responder via IA (texto puro,
+      // sem áudio/vídeo/imagem). Usa a última pergunta do lead +
+      // base de conhecimento da iGreen.
+      const _slot = String((stepRow as any).slot_key || "").toLowerCase();
+      const _sk = String((stepRow as any).step_key || stepKey).toLowerCase();
+      const isAiAnswerStep =
+        _slot === "esclarecer_duvidas" ||
+        (/duvid/.test(_sk) && _sk !== "duvidas_pos_club");
+      if (isAiAnswerStep) {
+        try {
+          const { data: lastInbound } = await supabase
+            .from("conversations")
+            .select("message_text, created_at")
+            .eq("customer_id", customer.id)
+            .eq("message_direction", "inbound")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          const question = String((lastInbound as any)?.message_text || extraVars["pergunta"] || "").trim();
+
+          const { data: hist } = await supabase
+            .from("conversations")
+            .select("message_direction, message_text, created_at")
+            .eq("customer_id", customer.id)
+            .order("created_at", { ascending: false })
+            .limit(8);
+          const recentHistory = ((hist as any[]) || [])
+            .slice()
+            .reverse()
+            .map((r) => `${r.message_direction === "inbound" ? "Lead" : "Bot"}: ${String(r.message_text || "").slice(0, 240)}`)
+            .join("\n");
+
+          const { answerFaqWithAI } = await import("../../_shared/ai-faq-answerer.ts");
+          const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
+          const ai = await answerFaqWithAI({
+            supabase,
+            question: question || "O lead chegou no passo de esclarecer dúvidas. Convide-o gentilmente a fazer a pergunta dele e tranquilize-o de que vamos esclarecer tudo.",
+            leadName: firstName,
+            currentStepLabel: stepKey,
+            consultantId: customer.consultant_id,
+            recentHistory,
+            model: "google/gemini-3.1-pro-preview",
+          });
+
+          let answerText = (ai.text || "").trim();
+          if (!answerText) {
+            answerText = firstName
+              ? `${firstName}, pode mandar sua dúvida que eu te explico tudo agora 😊`
+              : "Pode mandar sua dúvida que eu te explico tudo agora 😊";
+          }
+
+          await sendText(remoteJid, answerText);
+          await supabase.from("conversations").insert({
+            customer_id: customer.id,
+            message_direction: "outbound",
+            message_text: answerText,
+            message_type: "text",
+            conversation_step: stepKey,
+          });
+
+          if (ai.shouldHandoff) {
+            try {
+              await supabase
+                .from("customers")
+                .update({ bot_paused: true, bot_paused_reason: "ai_handoff_duvidas" })
+                .eq("id", customer.id);
+              const { notifyHandoff } = await import("../../_shared/notify-consultant.ts");
+              await notifyHandoff(supabase, customer, "Dúvida exigiu humano (passo esclarecer_duvidas)").catch(() => {});
+            } catch (_e) { /* best-effort */ }
+          }
+
+          console.log(`[dispatch:${stepKey}] AI answer enviada (conf=${ai.confidence.toFixed(2)} handoff=${ai.shouldHandoff})`);
+          return true;
+        } catch (e) {
+          console.warn(`[dispatch:${stepKey}] AI answer falhou — caindo no texto estático:`, (e as Error).message);
+          // segue fluxo padrão abaixo
+        }
+      }
+
+
       // Botões Whapi (quick_reply) — opcionais, configurados em captures._buttons
       let _buttons: { id: string; title: string }[] = [];
       try {
