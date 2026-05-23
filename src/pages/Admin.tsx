@@ -36,6 +36,8 @@ const PanfletoModal = lazy(() => import("@/components/admin/PanfletoModal").then
 const AdsCentralTab = lazy(() => import("@/components/admin/ads/AdsCentralTab").then(m => ({ default: m.AdsCentralTab })));
 const CaptacaoPanel = lazy(() => import("@/components/captacao/CaptacaoPanel").then(m => ({ default: m.CaptacaoPanel })));
 const InstallPwaButton = lazy(() => import("@/components/admin/InstallPwaButton").then(m => ({ default: m.InstallPwaButton })));
+import { LayoutLockToggle } from "@/components/layout/LayoutLockToggle";
+
 import { SupportChatButton } from "@/components/support/SupportChatButton";
 
 const AdminContent = () => {
@@ -246,6 +248,8 @@ const AdminContent = () => {
               <Sparkles className="h-5 w-5" />
             </button>
             <Suspense fallback={null}><InstallPwaButton /></Suspense>
+            <LayoutLockToggle />
+
             <Suspense fallback={<div className="w-9 h-9" />}>
               <NotificationCenter
                 notifications={notifications}
