@@ -22,6 +22,8 @@ import { validateAiFallbackChoice } from "../../../_shared/grounding.ts";
 import { aiInCooldown, setAiCooldown } from "../../../_shared/bot/ai-cooldown.ts";
 import { checkAndMarkWebhookDedupe } from "../../../_shared/bot/dedupe.ts";
 import { matchTransition as matchTransitionShared } from "../../../_shared/flow-router.ts";
+import { matchButtonIntent, extractStepButtons } from "../../../_shared/ai-button-intent.ts";
+import { notifyHandoff } from "../../../_shared/notify-consultant.ts";
 
 export { CONVERSATIONAL_STEPS };
 
