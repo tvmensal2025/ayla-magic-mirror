@@ -195,9 +195,9 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   };
 
   return (
-    <div className={`flex flex-col h-[calc(100vh-130px)] min-h-[520px] rounded-lg border ${gameOn ? "border-primary/30" : "border-border"} overflow-hidden bg-background/60 exec-ambient`}>
+    <div className={`flex flex-col flex-1 min-h-0 rounded-lg border ${gameOn ? "border-primary/30" : "border-border"} overflow-hidden bg-background/60 exec-ambient`}>
       {/* Header */}
-      <header className="flex items-center justify-between px-3 py-2 border-b border-border bg-card/60 backdrop-blur-sm gap-3 flex-wrap">
+      <header className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-card/60 backdrop-blur-sm gap-3 flex-wrap shrink-0">
         <div className="flex items-center gap-2">
           <ClipboardList className="w-5 h-5 text-primary" strokeWidth={1.5} />
           <div>
@@ -220,18 +220,18 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
 
       {gameOn ? (
         <GameShell>
-          <div className="px-2 py-1.5 space-y-1.5">
+          <div className="px-2 py-1 space-y-1 shrink-0">
             <PlayerHud progress={progress} />
             <QuestsBar progress={progress} />
           </div>
-          <div data-resize-scope className="flex-1 flex flex-col md:flex-row overflow-hidden md:h-[calc(100vh-280px)] md:min-h-[440px]" style={{ "--cap-list-w": "16rem", "--cap-aside-w": "16rem" } as React.CSSProperties}>
+          <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "14rem", "--cap-aside-w": "18rem" } as React.CSSProperties}>
             {/* Mobile: lead list visível só quando NÃO há lead selecionado. Desktop: sempre. */}
             <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 md:border-r border-border overflow-hidden`}>
 
               <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
             </div>
             <DragResizer storageKey="captacao-list" cssVar="cap-list-w" defaultPx={256} minPx={180} maxPx={420} />
-            <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden min-w-0`}>
+            <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden min-w-0 min-h-0`}>
 
               {!selectedId ? (
                 <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
@@ -243,7 +243,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                 </div>
               ) : (
                 <>
-                  <div className="px-3 md:px-4 py-2 md:py-3 border-b border-border/60 bg-card/40 flex flex-col gap-2">
+                  <div className="px-3 py-1.5 border-b border-border/60 bg-card/40 flex flex-col gap-1.5 shrink-0">
                     <div className="flex items-center justify-between gap-2">
                       <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setSelectedId(null)} title="Voltar">
                         <ChevronLeft className="w-4 h-4" />
@@ -300,7 +300,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       </div>
                     )}
                   </div>
-                  <div className="flex-1 overflow-y-auto p-2 md:p-3 space-y-3">
+                  <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
                     <div>
                       <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">10 Passos · clique para enviar</h3>
                       <CaptureStepsGrid
@@ -352,7 +352,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                 </>
               )}
             </main>
-            <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={256} minPx={200} maxPx={520} invert />
+              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={288} minPx={220} maxPx={520} invert />
             {/* Desktop aside: ficha quando há lead, achievements quando não */}
             <div className="hidden md:flex md:flex-col md:w-[var(--cap-aside-w)] md:border-l border-border/60 overflow-hidden">
 
@@ -367,7 +367,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           </div>
         </GameShell>
       ) : (
-        <div data-resize-scope className="flex-1 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "16rem", "--cap-aside-w": "16rem" } as React.CSSProperties}>
+        <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "14rem", "--cap-aside-w": "18rem" } as React.CSSProperties}>
           {/* Lista: full-width no mobile sem seleção; escondida no mobile com seleção; sidebar fixa em md+ */}
           <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 overflow-hidden`}>
             <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
@@ -375,7 +375,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           <DragResizer storageKey="captacao-list" cssVar="cap-list-w" defaultPx={256} minPx={180} maxPx={420} />
 
           {/* Main: escondida no mobile sem seleção */}
-          <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden min-w-0`}>
+            <main className={`${!selectedId ? "hidden md:flex" : "flex"} flex-1 flex-col overflow-hidden min-w-0 min-h-0`}>
 
             {!selectedId ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
@@ -387,7 +387,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
               </div>
             ) : (
               <>
-                <div className="px-3 md:px-4 py-2 md:py-3 border-b border-border bg-card/40 flex items-center justify-between gap-2">
+                <div className="px-3 py-1.5 border-b border-border bg-card/40 flex items-center justify-between gap-2 shrink-0">
                   <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setSelectedId(null)} title="Voltar">
                     <ChevronLeft className="w-4 h-4" />
                   </Button>
@@ -406,7 +406,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                     <ChevronDown className={`w-4 h-4 transition-transform ${showAside ? "rotate-180" : ""}`} />
                   </Button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-2 md:p-3 space-y-3">
+                <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-2">10 Passos · clique para enviar</h3>
                     <CaptureStepsGrid

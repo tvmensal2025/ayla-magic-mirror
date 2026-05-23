@@ -212,7 +212,7 @@ const AdminContent = () => {
   const effectivePhotoPreview = localPhotoPreview || photoPreview;
 
   return (
-    <div className="min-h-screen bg-background relative overflow-x-hidden">
+    <div className="h-[100dvh] bg-background relative overflow-hidden flex flex-col">
       {/* Ambient gradient for ultrawide screens — evita fundo preto vazio nas laterais */}
       <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 opacity-60">
         <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-primary/10 blur-[120px]" />
@@ -220,8 +220,8 @@ const AdminContent = () => {
         <div className="absolute bottom-0 left-1/4 w-[500px] h-[500px] rounded-full bg-green-500/[0.05] blur-[120px]" />
       </div>
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-border bg-card/80 backdrop-blur-xl">
-        <div className="max-w-[1760px] mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
+      <header className="shrink-0 z-50 border-b border-border bg-card/80 backdrop-blur-xl">
+        <div className="max-w-[1760px] mx-auto px-3 sm:px-5 lg:px-6 py-2 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src="/images/logo-colorida-igreen.png" alt="iGreen" className="w-20 sm:w-24" />
             <div className="hidden sm:block">
@@ -282,8 +282,8 @@ const AdminContent = () => {
       <OnboardingGate form={form} saving={saving} onFormChange={handleFormChange} onSave={handleSave}>
 
       {/* Tab Navigation */}
-      <nav className="border-b border-border bg-card/50 backdrop-blur-sm">
-        <div className="max-w-[1760px] mx-auto px-2 sm:px-6 lg:px-8">
+      <nav className="shrink-0 border-b border-border bg-card/50 backdrop-blur-sm">
+        <div className="max-w-[1760px] mx-auto px-2 sm:px-5 lg:px-6">
           <div className="flex overflow-x-auto no-scrollbar -mx-2 sm:mx-0" style={{ WebkitOverflowScrolling: 'touch' }}>
             {tabs.map((tab) => {
               const Icon = tab.icon;
@@ -296,7 +296,7 @@ const AdminContent = () => {
                   }
                   setActiveTab(tab.id);
                 }}
-                  className={`flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 px-2.5 sm:px-4 py-2 sm:py-3 text-[10px] sm:text-sm font-medium whitespace-nowrap border-b-2 transition-all duration-200 shrink-0 min-w-[56px] sm:min-w-0 ${
+                  className={`flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 text-[10px] sm:text-sm font-medium whitespace-nowrap border-b-2 transition-all duration-200 shrink-0 min-w-[56px] sm:min-w-0 ${
                     isActive 
                       ? "border-primary text-primary" 
                       : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
@@ -314,8 +314,8 @@ const AdminContent = () => {
 
       {/* Content */}
       <main className={activeTab === "captacao" || activeTab === "whatsapp" || activeTab === "crm"
-        ? "w-full px-2 sm:px-3 lg:px-4 py-2 space-y-2 overflow-x-hidden"
-        : "max-w-[1760px] mx-auto px-3 sm:px-6 lg:px-8 xl:px-12 py-4 sm:py-6 space-y-6 overflow-x-hidden"}>
+        ? "w-full flex-1 min-h-0 px-1.5 sm:px-2 lg:px-3 py-1.5 overflow-hidden flex flex-col gap-1.5"
+        : "flex-1 min-h-0 overflow-y-auto max-w-[1760px] mx-auto px-3 sm:px-6 lg:px-8 xl:px-12 py-4 sm:py-6 space-y-6 overflow-x-hidden"}>
         {/* OCR Review Banner — aparece quando há leads aguardando o consultor
             decidir entre "Eu confirmo" / "Pedir ao cliente" os dados extraídos
             da conta de luz ou do documento. Sempre no topo, em qualquer aba. */}

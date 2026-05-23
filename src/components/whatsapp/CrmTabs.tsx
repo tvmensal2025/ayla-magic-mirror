@@ -17,8 +17,8 @@ export function CrmTabs({ consultantId, instanceName, onOpenChat }: CrmTabsProps
   const [tab, setTab] = useState<"funil" | "posvenda">("funil");
 
   return (
-    <div className="flex flex-col h-full">
-      <Tabs value={tab} onValueChange={(v) => setTab(v as "funil" | "posvenda")} className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as "funil" | "posvenda")} className="flex flex-col flex-1 min-h-0">
         <div className="px-3 pt-3">
           <TabsList className="bg-muted/30">
             <TabsTrigger value="funil" className="gap-1.5">
@@ -31,10 +31,10 @@ export function CrmTabs({ consultantId, instanceName, onOpenChat }: CrmTabsProps
             </TabsTrigger>
           </TabsList>
         </div>
-        <TabsContent value="funil" className="flex-1 mt-2 overflow-auto data-[state=inactive]:hidden">
+        <TabsContent value="funil" className="flex-1 min-h-0 mt-2 overflow-auto data-[state=inactive]:hidden">
           <SalesFunnelBoard consultantId={consultantId} onOpenChat={onOpenChat} />
         </TabsContent>
-        <TabsContent value="posvenda" className="flex-1 mt-2 overflow-auto data-[state=inactive]:hidden">
+        <TabsContent value="posvenda" className="flex-1 min-h-0 mt-2 overflow-auto data-[state=inactive]:hidden">
           <Suspense fallback={<div className="flex justify-center py-12"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>}>
             <KanbanBoard consultantId={consultantId} instanceName={instanceName} />
           </Suspense>

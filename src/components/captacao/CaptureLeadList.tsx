@@ -80,8 +80,8 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect }: Props) {
   };
 
   return (
-    <aside className="w-full md:w-72 md:shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border bg-card/40 backdrop-blur-sm">
-      <div className="p-3 border-b border-border space-y-2">
+    <aside className="w-full md:w-auto md:shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-border bg-card/40 backdrop-blur-sm min-h-0">
+      <div className="p-2 border-b border-border space-y-1.5 shrink-0">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">Em captação</h3>
           <span className="text-xs text-muted-foreground tabular-nums">{leads.length}</span>
@@ -109,7 +109,7 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect }: Props) {
               <li key={l.id}>
                 <button
                   onClick={() => onSelect(l.id)}
-                  className={`w-full text-left px-3 py-2.5 hover:bg-secondary/60 transition-colors ${
+                  className={`w-full text-left px-2.5 py-2 hover:bg-secondary/60 transition-colors ${
                     active ? "bg-primary/10 border-l-2 border-primary" : ""
                   } ${ready ? "ring-1 ring-amber-400/50 bg-amber-400/5" : ""}`}
                 >
@@ -135,7 +135,7 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect }: Props) {
           })}
         </ul>
       </div>
-      <div className="p-2 border-t border-border space-y-1.5">
+      <div className="p-2 border-t border-border space-y-1.5 shrink-0">
         <Button size="sm" variant="default" className="w-full text-xs gap-1.5" onClick={async () => {
           const phone = window.prompt("Telefone do lead (com DDD) para entrar em captação:");
           if (!phone) return;
