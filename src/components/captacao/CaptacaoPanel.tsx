@@ -227,33 +227,49 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   return (
     <div className={`flex flex-col flex-1 min-h-0 rounded-lg border ${gameOn ? "exec-border-gold exec-radial-bg" : "border-border"} overflow-hidden bg-background/60 exec-ambient`}>
       {/* Header */}
-      <header className={`flex items-center justify-between px-3 py-1.5 border-b ${gameOn ? "border-amber-400/20" : "border-border"} bg-card/60 backdrop-blur-sm gap-3 flex-wrap shrink-0`}>
-        <div className="flex items-center gap-2">
-          <ClipboardList className={`w-5 h-5 ${gameOn ? "text-amber-400" : "text-primary"}`} strokeWidth={1.5} />
-          <div>
-            <h2 className={`text-sm font-bold ${gameOn ? "uppercase tracking-wider" : ""}`}>Painel de Captação</h2>
-            <p className="text-[11px] text-muted-foreground">
+      <header className={`flex items-center justify-between px-3 py-1.5 border-b ${gameOn ? "border-amber-400/20" : "border-border"} bg-card/60 backdrop-blur-sm gap-2 sm:gap-3 sm:flex-wrap shrink-0`}>
+        <div className="flex items-center gap-2 min-w-0">
+          <ClipboardList className={`w-5 h-5 shrink-0 ${gameOn ? "text-amber-400" : "text-primary"}`} strokeWidth={1.5} />
+          <div className="min-w-0">
+            <h2 className={`text-sm font-bold truncate ${gameOn ? "uppercase tracking-wider" : ""}`}>Captação</h2>
+            <p className="text-[11px] text-muted-foreground truncate">
               {gameOn ? (
-                <span className="flex items-center gap-1.5">
-                  <span className="exec-shimmer font-black tracking-wider">MODO PERFORMANCE</span>
-                  <span className="opacity-60">·</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="exec-shimmer font-black tracking-wider hidden sm:inline">PERFORMANCE</span>
                   <span className={`font-bold ${progress.rank.color}`}>{progress.rank.label}</span>
                   <span className="opacity-60">· Nv {progress.level}</span>
                 </span>
-              ) : "Registre clientes e acompanhe seu desempenho"}
+              ) : (
+                <>
+                  <span className="hidden sm:inline">Registre clientes e acompanhe seu desempenho</span>
+                  <span className="sm:hidden">Hoje {today} · Semana {week} · {streak}d</span>
+                </>
+              )}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 sm:gap-3 sm:flex-wrap shrink-0">
           {!gameOn && (
-            <>
+            <div className="hidden sm:flex items-center gap-3">
               <CaptureMissionsPanel consultantId={consultantId} streak={streak} bumpVersion={missionsVersion} />
               <CaptureScoreboard today={today} week={week} streak={streak} />
-            </>
+            </div>
           )}
           <GameModeToggle enabled={gameOn} onToggle={toggleGame} sound={sound} onToggleSound={toggleSound} />
         </div>
       </header>
+      {!gameOn && (
+        <details className="sm:hidden border-b border-border/40 bg-card/30">
+          <summary className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground cursor-pointer select-none flex items-center gap-2">
+            <span>📊 Metas e estatísticas</span>
+            <span className="ml-auto text-primary tabular-nums">{today}/3 · {week}/10 · {streak}d</span>
+          </summary>
+          <div className="px-3 py-2 flex flex-wrap items-center gap-3">
+            <CaptureMissionsPanel consultantId={consultantId} streak={streak} bumpVersion={missionsVersion} />
+            <CaptureScoreboard today={today} week={week} streak={streak} />
+          </div>
+        </details>
+      )}
 
       {gameOn ? (
         <GameShell>
