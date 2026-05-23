@@ -1673,6 +1673,98 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const configuredQaResult = await trySendConfiguredQa();
       if (configuredQaResult) return configuredQaResult;
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 🤖 AI FALLBACK GLOBAL — IA ativa a qualquer momento
+    // Se o lead manda uma pergunta em QUALQUER passo (exceto coleta de dados
+    // sem "?"), a IA responde com base no knowledge base, sem alterar o step.
+    // Anti-loop: máx 3 respostas IA consecutivas → handoff humano.
+    // ═══════════════════════════════════════════════════════════════════
+    try {
+      const NO_AI_COLLECT_STEPS = new Set([
+        "aguardando_conta", "aguardando_doc_auto", "aguardando_doc_frente", "aguardando_doc_verso",
+        "ask_email", "ask_cep", "ask_name", "ask_cpf", "ask_birth_date", "ask_phone", "ask_phone_confirm",
+        "ask_bill_value", "ask_installation_number", "ask_number", "ask_complement", "ask_rg", "ask_tipo_documento",
+        "editing_conta_menu", "editing_conta_nome", "editing_conta_endereco", "editing_conta_cep",
+        "editing_conta_distribuidora", "editing_conta_instalacao", "editing_conta_valor",
+        "editing_doc_menu", "editing_doc_nome", "editing_doc_rg", "editing_doc_cpf", "editing_doc_nascimento",
+        "confirmando_dados_conta", "confirmando_dados_doc", "confirmar_titularidade",
+        "validacao_facial", "aguardando_facial", "finalizando", "finalizar_cadastro",
+      ]);
+      const RE_QUESTION_WORD = /^(como|quanto|qual|quando|onde|por\s?que|pq|posso|tem|é|funciona|cobra|paga|cancel|seguro|garantia|risco|fidelidade|multa|preciso|precisa|vale|d[aá]|consigo|aceita|atende|distribuidor|conta|d[uú]vida|me\s+(explica|conta|tira)|sera|ser[áa]|e\s+(se|quando|caso))/i;
+      const hasQuestionMark = /\?/.test(txt);
+      const isQuestionWord = RE_QUESTION_WORD.test(txt);
+      const wordCount = txt.split(/\s+/).filter(Boolean).length;
+      const inCollectStep = NO_AI_COLLECT_STEPS.has(step);
+
+      // Em step de coleta, SÓ ativa se for pergunta explícita (tem ? ou palavra-pergunta)
+      // Em qualquer outro step, ativa para perguntas OU mensagens com 3+ palavras
+      const shouldAnswerAI = !customer.bot_paused && (
+        (inCollectStep && (hasQuestionMark || isQuestionWord)) ||
+        (!inCollectStep && (hasQuestionMark || isQuestionWord || wordCount >= 3))
+      );
+
+      if (shouldAnswerAI) {
+        // Skip "yes/no" type micro replies
+        const isMicroReply = /^(sim|n[aã]o|ok|tudo bem|beleza|joia|certo|claro|combinado|valeu|obrigad[oa]|partiu|bora|vamos)\b/i.test(txt) && wordCount <= 2;
+        if (!isMicroReply) {
+          const { data: hist } = await supabase
+            .from("conversations")
+            .select("message_direction, message_text, created_at")
+            .eq("customer_id", customer.id)
+            .order("created_at", { ascending: false })
+            .limit(8);
+          const recentHistory = ((hist as any[]) || [])
+            .slice()
+            .reverse()
+            .map((r) => `${r.message_direction === "inbound" ? "Lead" : "Bot"}: ${String(r.message_text || "").slice(0, 240)}`)
+            .join("\n");
+
+          const { answerFaqWithAI } = await import("../../_shared/ai-faq-answerer.ts");
+          const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
+          const ai = await answerFaqWithAI({
+            supabase,
+            question: messageText,
+            leadName: firstName,
+            currentStepLabel: step,
+            consultantId: customer.consultant_id,
+            recentHistory,
+            model: "google/gemini-3.1-pro-preview",
+          });
+
+          if (ai.text && ai.confidence >= 0.55) {
+            console.log(`[ai-global] respondeu step=${step} conf=${ai.confidence.toFixed(2)} handoff=${ai.shouldHandoff}`);
+
+            // Anti-loop: incrementa contador
+            const prevCount = Number((customer as any).ai_followups_count || 0);
+            const newCount = prevCount + 1;
+            const tooManyFollowups = newCount >= 3;
+
+            const baseUpdates: Record<string, any> = {
+              ai_followups_count: newCount,
+            };
+
+            if (ai.shouldHandoff || tooManyFollowups) {
+              baseUpdates.bot_paused = true;
+              baseUpdates.bot_paused_reason = tooManyFollowups ? "muitas_duvidas_ia" : "ai_handoff_duvidas";
+              baseUpdates.bot_paused_at = new Date().toISOString();
+              try {
+                const { notifyHandoff } = await import("../../_shared/notify-consultant.ts");
+                await notifyHandoff(supabase, customer, tooManyFollowups
+                  ? "Lead fez 3+ perguntas seguidas (IA acionou handoff)"
+                  : "IA detectou necessidade de humano").catch(() => {});
+              } catch (_) { /* best-effort */ }
+            }
+
+            return { reply: ai.text, updates: baseUpdates };
+          } else {
+            console.log(`[ai-global] confidence baixa (${ai.confidence.toFixed(2)}) — segue fluxo padrão`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[ai-global] falhou — segue fluxo padrão:", (e as Error).message);
+    }
   }
 
   if (
