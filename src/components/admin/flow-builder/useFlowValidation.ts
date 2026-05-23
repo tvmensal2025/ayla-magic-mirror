@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { Step, getButtons } from "./flowTypes";
+import { Step, getButtons, isOcrStep } from "./flowTypes";
+
 
 export type FlowWarning = {
   id: string;                       // chave única estável (stepId + tipo + alvo)
@@ -12,8 +13,10 @@ export type FlowWarning = {
     | "button_no_rule"
     | "orphan_step"
     | "unresolved_var"
-    | "empty_message";
+    | "empty_message"
+    | "ocr_without_confirm";
   message: string;
+
   /** Sugestão de correção automática (se aplicável). */
   autoFix?: () => Partial<Step> | null;
 };
@@ -154,8 +157,28 @@ export function useFlowValidation(steps: Step[]): FlowValidation {
           kind: "orphan_step",
           message: "Nenhum passo leva até aqui",
         });
+      // OCR sem passo de confirmação logo depois
+      if (isOcrStep(s) && s.auto_detect_doc_type !== false) {
+        const next = steps
+          .filter((x) => x.position > s.position && x.is_active)
+          .sort((a, b) => a.position - b.position)[0];
+        const isConfirm =
+          !!next &&
+          (/(confirm|conferir|revisar)/i.test(next.step_key ?? "") ||
+            /(está tudo certo|confirma os dados|tudo certo)/i.test(next.message_text ?? ""));
+        if (!isConfirm) {
+          warnings.push({
+            id: `${s.id}:ocr_without_confirm`,
+            stepId: s.id,
+            level: "warn",
+            kind: "ocr_without_confirm",
+            message:
+              "OCR ativo, mas não há passo de confirmação logo depois. Aplique o template \"Confirmação pós-OCR\".",
+          });
+        }
       }
     }
+
 
     const byStep: Record<string, FlowWarning[]> = {};
     for (const w of warnings) {
