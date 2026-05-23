@@ -54,26 +54,26 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
   const [confirmFrom, setConfirmFrom] = useState<number | null>(null);
   const [fromParts, setFromParts] = useState<Record<string, Part[]>>({});
   const [oneByOneStepId, setOneByOneStepId] = useState<string | null>(null);
-  const [variant, setVariant] = useState<"A" | "B" | "C">("A");
-  const [variantsAvailable, setVariantsAvailable] = useState<Array<"A" | "B" | "C">>(["A"]);
-  const [byVariant, setByVariant] = useState<Map<"A" | "B" | "C", string>>(new Map());
+  const [variant, setVariant] = useState<"A" | "B" | "C" | "D" | "E">("A");
+  const [variantsAvailable, setVariantsAvailable] = useState<Array<"A" | "B" | "C" | "D" | "E">>(["A"]);
+  const [byVariant, setByVariant] = useState<Map<"A" | "B" | "C" | "D" | "E", string>>(new Map());
 
   // Efeito 1 — inicialização: roda quando o popover abre ou o cliente muda.
   // Define a variante default a partir de customers.flow_variant SEM ouvir mudanças
-  // posteriores em `variant` (senão o clique manual em A/B/C seria revertido).
+  // posteriores em `variant` (senão o clique manual em A/B/C/D/E seria revertido).
   useEffect(() => {
     if (!open || !consultantId) return;
     let mounted = true;
     (async () => {
       setLoading(true);
 
-      let custVariant: "A" | "B" | "C" = "A";
+      let custVariant: "A" | "B" | "C" | "D" | "E" = "A";
       if (customerId) {
         const { data: cust } = await supabase
           .from("customers").select("flow_variant")
           .eq("id", customerId).maybeSingle();
         const v = String((cust as { flow_variant?: string } | null)?.flow_variant || "A").toUpperCase();
-        if (v === "A" || v === "B" || v === "C") custVariant = v;
+        if (v === "A" || v === "B" || v === "C" || v === "D" || v === "E") custVariant = v;
       }
 
       const { data: flowsAll } = await supabase
@@ -81,17 +81,17 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
         .eq("consultant_id", consultantId).eq("is_active", true)
         .order("created_at", { ascending: false });
       const flowsList = ((flowsAll as Array<{ id: string; variant: string }> | null) || []);
-      const byVariant = new Map<"A" | "B" | "C", string>();
+      const byVariant = new Map<"A" | "B" | "C" | "D" | "E", string>();
       flowsList.forEach((f) => {
-        const v = String(f.variant || "A").toUpperCase() as "A" | "B" | "C";
-        if (["A", "B", "C"].includes(v) && !byVariant.has(v)) byVariant.set(v, f.id);
+        const v = String(f.variant || "A").toUpperCase() as "A" | "B" | "C" | "D" | "E";
+        if (["A", "B", "C", "D", "E"].includes(v) && !byVariant.has(v)) byVariant.set(v, f.id);
       });
       setByVariant(byVariant);
-      const available = (["A", "B", "C"] as const).filter((v) => byVariant.has(v));
+      const available = (["A", "B", "C", "D", "E"] as const).filter((v) => byVariant.has(v));
       if (!mounted) return;
       setVariantsAvailable(available.length > 0 ? available : ["A"]);
 
-      const selected: "A" | "B" | "C" = byVariant.has(custVariant)
+      const selected: "A" | "B" | "C" | "D" | "E" = byVariant.has(custVariant)
         ? custVariant
         : (available[0] || "A");
       setVariant(selected);
