@@ -12,6 +12,7 @@ export type FlowWarning = {
     | "transition_dest_inactive"
     | "button_no_rule"
     | "orphan_step"
+    | "loop_detected"
     | "unresolved_var"
     | "empty_message"
     | "ocr_without_confirm"
@@ -37,6 +38,46 @@ export type FlowValidation = {
   autoFixablePatches: { stepId: string; patch: Partial<Step> }[];
 };
 
+/** Detecta ciclos no grafo de transitions. Retorna pares [from, to] que formam ciclos. */
+function detectCycles(steps: Step[]): Array<{ fromId: string; toId: string }> {
+  const cycles: Array<{ fromId: string; toId: string }> = [];
+  const visited = new Set<string>();
+  const inStack = new Set<string>();
+
+  const stepMap = new Map(steps.map((s) => [s.id, s]));
+
+  function dfs(id: string, path: string[]): void {
+    if (inStack.has(id)) {
+      // Encontrou ciclo — registra a aresta que fecha o ciclo
+      const cycleStart = path.indexOf(id);
+      if (cycleStart >= 0) {
+        cycles.push({ fromId: path[path.length - 1], toId: id });
+      }
+      return;
+    }
+    if (visited.has(id)) return;
+    visited.add(id);
+    inStack.add(id);
+
+    const step = stepMap.get(id);
+    if (step) {
+      for (const t of step.transitions) {
+        if (t.goto_step_id) dfs(t.goto_step_id, [...path, id]);
+      }
+      if (step.fallback?.mode === "goto" && step.fallback.goto_step_id) {
+        dfs(step.fallback.goto_step_id, [...path, id]);
+      }
+    }
+
+    inStack.delete(id);
+  }
+
+  for (const s of steps) {
+    if (!visited.has(s.id)) dfs(s.id, []);
+  }
+  return cycles;
+}
+
 export function useFlowValidation(steps: Step[]): FlowValidation {
   return useMemo(() => {
     const warnings: FlowWarning[] = [];
@@ -56,6 +97,23 @@ export function useFlowValidation(steps: Step[]): FlowValidation {
       if (s.transitions.length === 0) {
         const next = steps.find((x) => x.position === s.position + 1);
         if (next) reachable.add(next.id);
+      }
+    }
+
+    // Detecta ciclos (loops A → B → A)
+    const cycles = detectCycles(steps);
+    const cycleEdges = new Set(cycles.map((c) => `${c.fromId}→${c.toId}`));
+    for (const { fromId, toId } of cycles) {
+      const fromStep = steps.find((s) => s.id === fromId);
+      const toStep = steps.find((s) => s.id === toId);
+      if (fromStep && toStep) {
+        warnings.push({
+          id: `${fromId}:loop:${toId}`,
+          stepId: fromId,
+          level: "warn",
+          kind: "loop_detected",
+          message: `Loop detectado: "${fromStep.title}" → "${toStep.title}" → volta para cá. Pode travar o lead.`,
+        });
       }
     }
 

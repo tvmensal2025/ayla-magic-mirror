@@ -725,12 +725,15 @@ Deno.serve(async (req) => {
 
     // ─── 7.1) AI AGENT MODE — Camila assume conversa livre ─────────────
     // Steps onde a IA conduz (resto fica no bot hardcoded com BOTÕES intactos).
+    // IMPORTANTE: "aguardando_conta" foi removido desta lista — qualquer mensagem
+    // nesse step (texto OU arquivo) deve ir para o pipeline determinístico de OCR
+    // (bot-flow.ts). Antes, texto livre em aguardando_conta ia para o AI agent
+    // router e ignorava o OCR, causando silêncio ou resposta errada.
     const CONVERSATIONAL_STEPS = new Set([
       "welcome",
       "menu_inicial",
       "pos_video",
       "aguardando_humano",
-      "aguardando_conta",
       "qualificacao",
       "apresentacao",
       "objecoes",

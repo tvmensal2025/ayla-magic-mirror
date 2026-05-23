@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-import { ArrowLeft, Plus, AlertTriangle, ExternalLink, Loader2, Sparkles, Wand2 } from "lucide-react";
+import { ArrowLeft, Plus, AlertTriangle, ExternalLink, Loader2, Sparkles, Wand2, GitBranch } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 
@@ -47,6 +47,7 @@ export default function FluxoBuilder() {
   const [existingVariants, setExistingVariants] = useState<Variant[]>(["A"]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [inspectorId, setInspectorId] = useState<string | null>(null);
+  const [showConnections, setShowConnections] = useState(true);
   const [mediaCounts, setMediaCounts] = useState<Record<string, { audio: number; image: number; video: number }>>({});
   const [templatesOpen, setTemplatesOpen] = useState(false);
 
@@ -340,10 +341,18 @@ export default function FluxoBuilder() {
                       steps={steps}
                       selected={selectedId === s.id}
                       mediaCount={s.slot_key ? mediaCounts[s.slot_key] : undefined}
+                      showConnections={true}
                       onSelect={() => setSelectedId(s.id)}
                       onEdit={() => { setSelectedId(s.id); setInspectorId(s.id); }}
                       onDelete={() => deleteStep(s.id)}
                       onDuplicate={() => duplicateStep(s.id)}
+                      onJumpTo={(targetId) => {
+                        setSelectedId(targetId);
+                        // Scroll suave até o card destino
+                        setTimeout(() => {
+                          document.getElementById(`step-card-${targetId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }, 50);
+                      }}
                     />
                   ))}
                 </div>
@@ -359,7 +368,7 @@ export default function FluxoBuilder() {
 
         {/* Coluna direita — preview WhatsApp */}
         <aside className="hidden lg:block">
-          <WhatsAppPreview step={selected} consultantName={consultantName} />
+          <WhatsAppPreview step={selected} steps={steps} consultantName={consultantName} />
         </aside>
       </main>
 

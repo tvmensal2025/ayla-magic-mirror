@@ -18,9 +18,9 @@ import { ensureAudioTranscript } from "../../../_shared/audio-transcript.ts";
 import { isStrictScriptMode } from "../../../_shared/ai-decisions.ts";
 import { validateAiFallbackChoice } from "../../../_shared/grounding.ts";
 // Sprint 2.6 — helpers compartilhados (cooldown e dedupe)
-import { aiInCooldown, setAiCooldown } from "../../../_shared/bot/ai-cooldown.ts";
+import { aiInCooldown, setAiCooldown, aiInCooldownPersistent, setAiCooldownPersistent } from "../../../_shared/bot/ai-cooldown.ts";
 import { checkAndMarkWebhookDedupe } from "../../../_shared/bot/dedupe.ts";
-import { matchTransition as matchTransitionShared } from "../../../_shared/flow-router.ts";
+import { matchTransition as matchTransitionShared, CADASTRO_STEPS } from "../../../_shared/flow-router.ts";
 
 export { CONVERSATIONAL_STEPS };
 
@@ -60,23 +60,9 @@ interface DbStep {
   media_order?: string[] | null;
 }
 
-// Steps the bot must NEVER override (cadastro pipeline owns them)
-export const CADASTRO_STEPS = new Set([
-  "aguardando_conta", "processando_ocr_conta", "confirmando_dados_conta",
-  "ask_tipo_documento", "aguardando_doc_auto", "aguardando_doc_frente", "aguardando_doc_verso",
-  "confirmando_dados_doc", "confirmar_titularidade", "ask_name", "ask_cpf", "ask_rg", "ask_birth_date",
-  "ask_phone_confirm", "ask_phone", "ask_email", "ask_cep", "ask_number",
-  "ask_complement", "ask_installation_number", "ask_bill_value",
-  "ask_doc_frente_manual", "ask_doc_verso_manual", "ask_finalizar",
-  "finalizando", "portal_submitting", "aguardando_otp", "validando_otp",
-  "aguardando_facial", "aguardando_assinatura", "cadastro_em_analise", "complete", "aguardando_humano",
-  // Edição pós-OCR (conta de luz)
-  "editing_conta_menu","editing_conta_nome","editing_conta_endereco",
-  "editing_conta_cep","editing_conta_distribuidora","editing_conta_instalacao","editing_conta_valor",
-  // Edição pós-OCR (documento)
-  "editing_doc_menu","editing_doc_nome","editing_doc_cpf","editing_doc_rg",
-  "editing_doc_nascimento","editing_doc_pai","editing_doc_mae",
-]);
+// Re-exporta CADASTRO_STEPS do _shared para que evolution-webhook/index.ts
+// continue importando daqui sem quebrar. Fonte única de verdade: flow-router.ts.
+export { CADASTRO_STEPS };
 
 interface LoadedFlow { flowId: string; steps: DbStep[]; strictMode: boolean; }
 
@@ -149,7 +135,19 @@ export async function matchQA(
       .in("qa_id", qaIds);
     const hit = ((triggers as any[]) || []).find((t) => {
       const phrase = _norm(t.phrase);
-      return phrase && (normalized === phrase || normalized.includes(phrase) || phrase.includes(normalized));
+      if (!phrase || phrase.length < 2) return false;
+      // Matching preciso: evita que frases curtas como "não" ou "sim" disparem
+      // FAQ em qualquer mensagem que as contenha. Regras:
+      //   1. Igualdade exata (mais confiável)
+      //   2. Frase longa (≥ 6 chars): verifica se a mensagem contém a frase
+      //   3. Mensagem curta (≤ 8 chars): verifica se a frase contém a mensagem
+      //      (ex: lead manda "simular" e a phrase é "quero simular")
+      // A condição `phrase.includes(normalized)` foi removida pois causava
+      // falsos positivos com frases curtas como "não", "sim", "ok".
+      if (normalized === phrase) return true;
+      if (phrase.length >= 6 && normalized.includes(phrase)) return true;
+      if (normalized.length <= 8 && phrase.includes(normalized)) return true;
+      return false;
     });
     if (!hit) return null;
 
@@ -245,9 +243,15 @@ async function aiDecideFallback(
   candidates: { id: string; step_key: string; title?: string }[],
   geminiApiKey: string | undefined,
   cooldownKey: string,
+  supabase?: any,
 ): Promise<string | null> {
   if (!geminiApiKey || !prompt) return null;
-  if (aiInCooldown(cooldownKey)) {
+  // Verifica cooldown: persistente (banco, multi-container) se supabase disponível,
+  // senão usa apenas o cache local.
+  const inCooldown = supabase
+    ? await aiInCooldownPersistent(supabase, cooldownKey)
+    : aiInCooldown(cooldownKey);
+  if (inCooldown) {
     console.warn("[conversational] AI fallback skipped (cooldown active)");
     return null;
   }
@@ -291,7 +295,15 @@ Responda em JSON: {"next_step_key": "<um_dos_passos_válidos>", "reason": "breve
           signal: ctrl.signal,
         },
       );
-      if (res.status === 429) { setAiCooldown(cooldownKey); return null; }
+      if (res.status === 429) {
+        // 429 → seta cooldown persistente para todos os containers
+        if (supabase) {
+          await setAiCooldownPersistent(supabase, cooldownKey, "gemini_429");
+        } else {
+          setAiCooldown(cooldownKey);
+        }
+        return null;
+      }
       if (!res.ok) return null;
       const json: any = await res.json();
       const txt = (json?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
@@ -834,14 +846,14 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       if (captured.length === 0) return cur;
       const allFilled = captured.every((f) => isFieldAlreadyCaptured(f, ctx.customer));
       if (!allFilled) return cur;
-      // Regra de pulo: o passo de NOME pode ser pulado SEMPRE que o nome já
-      // estiver capturado (mesmo se tiver texto/slot — é só uma pergunta).
-      // Para os demais campos, preservamos passos com mídia/texto para não
-      // perder áudios como boas_vindas/como_funciona.
+      // Regra de pulo: o passo de NOME pode ser pulado quando o nome já
+      // estiver capturado, MAS apenas se o passo não tiver mídia configurada
+      // (slot_key). Passos com áudio/vídeo de boas-vindas que também capturam
+      // nome devem ser exibidos mesmo assim — o áudio é o conteúdo principal.
       const onlyAsksName = captured.length === 1 && captured[0] === "name";
-      if (!onlyAsksName) {
-        const hasMediaSlot = !!(cur.slot_key && String(cur.slot_key).trim());
-        const hasText = !!(cur.message_text && String(cur.message_text).trim());
+      const hasMediaSlot = !!(cur.slot_key && String(cur.slot_key).trim());
+      const hasText = !!(cur.message_text && String(cur.message_text).trim());
+      if (!onlyAsksName || hasMediaSlot) {
         if (hasMediaSlot || hasText) {
           console.log(`[skip-step] mantendo ${cur.step_key} (tem slot_key/texto) mesmo com captura preenchida`);
           return cur;
@@ -1232,13 +1244,21 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   }
 
   // ─── Restart por saudação ──────────────────────────────────────────
-  // Se o lead manda "Oi/Olá/Bom dia/..." e já está em qualquer step que
-  // NÃO seja o primeiro ativo do fluxo, reinicia no Passo 1 e cascateia
-  // a partir dali. Isso garante que TODOS os passos sejam executados em
-  // ordem (áudio de Boas-vindas, pergunta do valor da conta, etc.) ao
+  // Se o lead manda "Oi/Olá/Bom dia/..." E a mensagem é APENAS uma saudação
+  // (sem dados capturáveis junto), reinicia no Passo 1 e cascateia a partir
+  // dali. Isso garante que TODOS os passos sejam executados em ordem ao
   // invés de retomar do meio do funil.
+  //
+  // GUARD: só reinicia se a mensagem for predominantemente uma saudação —
+  // frases como "Boa tarde, meu CPF é 123..." NÃO devem reiniciar o fluxo.
+  // Critério: saudação detectada E mensagem curta (≤ 40 chars) OU a saudação
+  // ocupa mais de 60% do texto (sem dados capturáveis).
   const saudacaoRegex = /\b(oi+|ol[áa]|bom dia|boa tarde|boa noite|opa|e a[íi]|eai|hello|hi)\b/i;
-  const isSaudacao = cls.intent === "saudacao" || saudacaoRegex.test(ctx.messageText || "");
+  const rawMsg = (ctx.messageText || "").trim();
+  const isSaudacaoIntent = cls.intent === "saudacao";
+  const isSaudacaoText = saudacaoRegex.test(rawMsg);
+  // Considera saudação "pura" apenas quando: intent=saudacao OU (texto curto E sem captura)
+  const isSaudacao = (isSaudacaoIntent || isSaudacaoText) && !hasCapture && rawMsg.length <= 40;
   if (isSaudacao && currentStep.id !== firstActive.id) {
     console.log(`[conversational] 🔁 saudação detectada em step=${currentStep.step_key} → restart no Passo 1 (${firstActive.step_key})`);
     const restartVars = {
@@ -1954,7 +1974,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   }
   if (fb.mode === "ai" && fb.ai_prompt && !strictMode) {
     const candidates = dbSteps.filter(s => s.is_active && s.id !== currentStep.id).map(s => ({ id: s.id, step_key: s.step_key }));
-    const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey, consultantId || "global");
+    const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey, consultantId || "global", ctx.supabase);
     if (choice) {
       // Cláusula 2.19 + 2.31: rebaixar para REPEAT se a escolha do LLM
       // não for alcançável a partir do passo atual (transitions + goto_special)

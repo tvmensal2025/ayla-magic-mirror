@@ -1,10 +1,11 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { Step, renderVarsPreview, getButtons } from "./flowTypes";
-import { Mic, Image as ImageIcon, Video, CheckCheck } from "lucide-react";
+import { Step, renderVarsPreview, getButtons, resolveGotoLabel } from "./flowTypes";
+import { Mic, Image as ImageIcon, Video, CheckCheck, ArrowRight } from "lucide-react";
 
 interface Props {
   step: Step | null;
+  steps?: Step[];
   consultantName?: string;
 }
 
@@ -13,10 +14,22 @@ interface Props {
  * como bolhas verdes do bot, com variáveis substituídas por exemplos.
  * Mídia aparece como placeholders (chip de áudio, miniatura de imagem,
  * caixa de vídeo) sem precisar carregar o arquivo real.
+ * Abaixo das bolhas, mostra as transições configuradas (pergunta → resposta).
  */
-export default function WhatsAppPreview({ step, consultantName }: Props) {
+export default function WhatsAppPreview({ step, steps = [], consultantName }: Props) {
   const renderedText = useMemo(() => renderVarsPreview(step?.message_text), [step?.message_text]);
   const buttons = useMemo(() => (step ? getButtons(step) : []), [step]);
+
+  // Transições com destino resolvido para mostrar o mapa pergunta→resposta
+  const transitions = useMemo(() => {
+    if (!step || !steps.length) return [];
+    return step.transitions
+      .filter((t) => t.goto_step_id || t.goto_special)
+      .map((t) => ({
+        trigger: t.trigger_phrases[0] || t.trigger_intent || "→",
+        dest: resolveGotoLabel(steps, t),
+      }));
+  }, [step, steps]);
 
   return (
     <div className="sticky top-4 mx-auto w-full max-w-[380px] overflow-hidden rounded-[2rem] border-8 border-zinc-900 bg-zinc-900 shadow-2xl">
@@ -91,6 +104,31 @@ export default function WhatsAppPreview({ step, consultantName }: Props) {
         </div>
         <Mic className="h-4 w-4 text-[#075E54]" />
       </div>
+
+      {/* Mapa de transições: pergunta → resposta */}
+      {transitions.length > 0 && (
+        <div className="border-t bg-zinc-800 px-3 py-2">
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+            Quando o lead responder…
+          </p>
+          <div className="space-y-1">
+            {transitions.map((t, i) => (
+              <div key={i} className="flex items-center gap-1.5 text-[11px]">
+                <span className="max-w-[110px] truncate rounded bg-zinc-700 px-1.5 py-0.5 text-zinc-200">
+                  "{t.trigger.slice(0, 20)}{t.trigger.length > 20 ? "…" : ""}"
+                </span>
+                <ArrowRight className="h-3 w-3 shrink-0 text-zinc-500" />
+                <span className={cn(
+                  "truncate",
+                  t.dest.missing ? "text-red-400" : "text-emerald-400",
+                )}>
+                  {t.dest.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -513,22 +513,28 @@ Deno.serve(async (req) => {
 
         if (shouldRewelcome) {
           const prevStep = (customer as any).conversation_step;
-          console.log(`[re-welcome] customer=${customer.id} inatividade=${hoursSinceBot === Infinity ? "∞" : hoursSinceBot.toFixed(1)}h step_anterior="${prevStep}" greeting=${isGreeting} msg="${trimmed.slice(0, 40)}"`);
-          await supabase
-            .from("customers")
-            .update({
-              conversation_step: null,
-              capture_mode: "auto",
-              custom_step_retries: 0,
-              custom_step_retries_step: null,
-              last_custom_prompt_at: null,
-              ai_followups_count: 0,
-              previous_conversation_step: prevStep,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", customer.id);
+          const wasManual = (customer as any).capture_mode === "manual";
+          console.log(`[re-welcome] customer=${customer.id} inatividade=${hoursSinceBot === Infinity ? "∞" : hoursSinceBot.toFixed(1)}h step_anterior="${prevStep}" greeting=${isGreeting} msg="${trimmed.slice(0, 40)}" capture_mode_was=${wasManual ? "manual" : "auto"}`);
+
+          // GUARD: não reseta capture_mode se o consultor configurou "manual"
+          // intencionalmente. Resetar silenciosamente desfaz a configuração
+          // do consultor sem aviso. Só reseta se já estava em "auto".
+          const patch: Record<string, any> = {
+            conversation_step: null,
+            custom_step_retries: 0,
+            custom_step_retries_step: null,
+            last_custom_prompt_at: null,
+            ai_followups_count: 0,
+            previous_conversation_step: prevStep,
+            updated_at: new Date().toISOString(),
+          };
+          if (!wasManual) {
+            patch.capture_mode = "auto";
+          }
+
+          await supabase.from("customers").update(patch).eq("id", customer.id);
           (customer as any).conversation_step = null;
-          (customer as any).capture_mode = "auto";
+          if (!wasManual) (customer as any).capture_mode = "auto";
           (customer as any).custom_step_retries = 0;
           (customer as any).last_custom_prompt_at = null;
           (customer as any).ai_followups_count = 0;
