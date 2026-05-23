@@ -961,6 +961,16 @@ function StepCard(props: {
         />
       </div>
 
+      {/* Botões de resposta rápida (Whapi) — apenas para passos do tipo mensagem */}
+      {(step.step_type || "message") === "message" && (
+        <ButtonsEditor
+          captures={step.captures as any}
+          onChange={(novas) => onPatch({ captures: novas as any })}
+        />
+      )}
+
+
+
 
       {/* BLOCO 1 — REGRAS */}
       <BlockShell
