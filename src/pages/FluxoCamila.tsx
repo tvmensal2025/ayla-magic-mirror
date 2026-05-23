@@ -1074,6 +1074,98 @@ function StepCard(props: {
 }
 
 // ---------------------------------------------------------------------------
+// ButtonsEditor — botões de resposta rápida (Whapi quick_reply, máx 3)
+// Persiste em bot_flow_steps.captures como { field:"_buttons", value:[{id,title}] }
+// ---------------------------------------------------------------------------
+type QuickButton = { id: string; title: string };
+
+function ButtonsEditor({
+  captures,
+  onChange,
+}: {
+  captures: Capture[];
+  onChange: (caps: Capture[]) => void;
+}) {
+  const entry = (captures as any[]).find((c) => c?.field === "_buttons");
+  const enabled = !!entry?.enabled;
+  const buttons: QuickButton[] = Array.isArray(entry?.value) ? entry.value : [];
+
+  const updateButtons = (next: QuickButton[]) => {
+    const others = (captures as any[]).filter((c) => c?.field !== "_buttons");
+    if (!enabled && next.length === 0) { onChange(others as any); return; }
+    onChange([...others, { field: "_buttons", enabled: true, value: next.slice(0, 3) }] as any);
+  };
+
+  const toggle = (v: boolean) => {
+    const others = (captures as any[]).filter((c) => c?.field !== "_buttons");
+    if (!v) { onChange(others as any); return; }
+    onChange([...others, { field: "_buttons", enabled: true, value: buttons.length ? buttons : [{ id: "opcao_1", title: "Opção 1" }] }] as any);
+  };
+
+  return (
+    <div className="mt-4 rounded-md border border-violet-500/20 bg-violet-500/[0.04] p-3">
+      <label className="flex items-center gap-2 cursor-pointer">
+        <Checkbox checked={enabled} onCheckedChange={(v) => toggle(!!v)} />
+        <span className="text-sm font-medium">📲 Mostrar botões de resposta rápida (Whapi)</span>
+      </label>
+      <p className="text-[11px] text-muted-foreground mt-1 ml-6">
+        Até 3 botões. O <code>id</code> precisa bater com uma <em>frase</em> de uma regra acima
+        (ex.: id <code>simular</code> → regra com frase <code>simular</code>) para o clique levar pro passo certo.
+      </p>
+      {enabled && (
+        <div className="mt-3 space-y-2">
+          {buttons.map((b, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Input
+                placeholder="Título (máx 20)"
+                value={b.title}
+                maxLength={20}
+                onChange={(e) => {
+                  const next = [...buttons];
+                  next[i] = { ...next[i], title: e.target.value };
+                  updateButtons(next);
+                }}
+                className="h-8 flex-1"
+              />
+              <Input
+                placeholder="id (ex: simular)"
+                value={b.id}
+                onChange={(e) => {
+                  const next = [...buttons];
+                  next[i] = { ...next[i], id: e.target.value.replace(/\s+/g, "_").toLowerCase() };
+                  updateButtons(next);
+                }}
+                className="h-8 w-32 font-mono text-xs"
+              />
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                onClick={() => updateButtons(buttons.filter((_, idx) => idx !== i))}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+          {buttons.length < 3 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[11px]"
+              onClick={() => updateButtons([...buttons, { id: `opcao_${buttons.length + 1}`, title: `Opção ${buttons.length + 1}` }])}
+            >
+              <Plus className="h-3 w-3 mr-1" /> Adicionar botão
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+// ---------------------------------------------------------------------------
 // BlockShell — visual wrapper para os 3 blocos
 // ---------------------------------------------------------------------------
 function BlockShell({
