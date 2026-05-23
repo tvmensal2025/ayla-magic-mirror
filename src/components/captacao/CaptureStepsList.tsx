@@ -229,6 +229,12 @@ export function CaptureStepsList({ consultantId, customerId, sentSteps, onSent, 
         >
           Pendentes
         </Button>
+        <HelpHint
+          title="Filtro Pendentes"
+          summary="Mostra só passos que ainda não foram enviados"
+          details="Quando ativo, esconde os passos já enviados (✓) e deixa visíveis apenas os que faltam. Útil para enxergar rápido o que ainda precisa disparar para este lead."
+          align="end"
+        />
       </div>
 
       <ul className="space-y-0.5">
