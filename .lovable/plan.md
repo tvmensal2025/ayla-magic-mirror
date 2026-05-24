@@ -1,272 +1,152 @@
+# 🛠️ Plano de Execução — Baseado na Auditoria
 
-# 🔍 Auditoria Completa — Sistema iGreen (somente leitura)
-
-> Nenhum arquivo, código, banco, variável ou configuração foi alterado.
-> Este documento é só diagnóstico + plano de melhoria.
+Plano acionável derivado do relatório em `.lovable/plan.md`. Cada fase é independente e pode ser aprovada/executada isoladamente.
 
 ---
 
-## 1. Visão geral do sistema
+## Fase 0 — Operacional (rápido, 1 sessão)
 
-- **Stack**: Vite + React 18 + TS + Tailwind + shadcn, Supabase (Postgres + Edge Functions Deno), MinIO, Evolution API (WhatsApp), Whapi (legado), Gemini/Lovable AI Gateway, Meta Ads, Stripe, Sentry.
-- **Tamanho**: ~127k linhas TS/TSX, **20 páginas**, **45 hooks**, **99 edge functions**, **367 migrations**, **32 entradas em `config.toml`**.
-- **Domínio**: plataforma multi-tenant para consultores iGreen (landing pages + CRM WhatsApp + Meta Ads + captação por OCR de conta de luz).
+**Objetivo**: destravar alertas e organizar a casa antes de mexer em código crítico.
 
----
+1. **Arquivar documentação solta** (P3)
+  - Criar `docs/archive/` e mover ~65 `.md` históricos da raiz (ANALISE_*, CORRECAO_*, DEPLOY_*, RESUMO_*, STATUS_*, TESTE_*, IMPLEMENTACAO_*, MIGRACAO_*, PASSO_*, COMANDOS_*, GUIA_*, INDICE_*, INICIO_*, INSTALAR_*, SIMULADO_*, SOLUCAO_*, SUPABASE_CLI_*, TROUBLESHOOTING_*, URGENTE_*, VERIFICAR_*, VISUAL_*, WEBHOOK_*, EXEMPLOS_*, EXECUTANDO_*, FLUXO_*, CHANGELOG_*, ATUALIZACOES_*, ACESSO_*, CORRIGIR_*, ESTRUTURA_*, KIRO_AUDIT, MAPA_*, NOMENCLATURA_*, PLANO_*, PORTAL_*, PROXIMOS_*, RESUMO_*).
+  - Manter na raiz: `README.md`, `DOCUMENTATION.md`, `LAUNCH_OPS.md`, `ANALISE_COMPLETA_CODIGO.md` (mais recente).
+  - Criar `docs/README.md` com índice por tema.
+2. **Criar `.env.example**` (P7)
+  - `supabase/functions/.env.example` documentando os ~25 secrets (MINIO_*, EVOLUTION_*, WHAPI_*, GEMINI_*, LOVABLE_API_KEY, PORTAL_WORKER_URL, WORKER_SECRET, FACEBOOK_*, SENTRY_DSN).
+  - Sem valores reais — só nomes + descrição + "obrigatório/opcional".
+3. **Padronizar nome de variável duplicada** (P7)
+  - Buscar `WORKER_PORTAL_URL` vs `PORTAL_WORKER_URL` em edge functions; criar issue/comentário marcando para unificar (sem renomear ainda — risco em prod).
+4. **Documentar pendências de cron** (P12)
+  - Adicionar nota no topo do `LAUNCH_OPS.md` lembrando de rodar `cron_setup.sql` e preencher `super_admin_phone`. (não dá pra rodar pg_cron via migration sem chaves; fica como instrução manual).
 
-## 2. Saúde geral
-
-| Área | Status |
-|---|---|
-| Funcionalidade núcleo (WhatsApp bot, OCR, CRM) | 🟢 funcionando, com muitas camadas |
-| Arquitetura backend (edge functions) | 🟠 madura, mas inchada e duplicada |
-| Banco / RLS | 🟠 RLS habilitado, mas com 112 issues no linter |
-| Segurança | 🟠 vários SECURITY DEFINER expostos, buckets públicos |
-| Documentação interna | 🔴 ~70 arquivos `.md` soltos na raiz, sem hierarquia |
-| Frontend / UX | 🟢 design system consistente (Tailwind tokens) |
-| Performance | 🟠 arquivos enormes (>4k linhas) sem split |
-| Testes | 🟠 cobertura pontual (Vitest + Playwright), sem suite E2E real |
-| Mobile / responsivo | 🟢 layout responsivo declarado (viewport user em 781px) |
-| Escalabilidade | 🟠 documentada (LAUNCH_OPS.md), mas com gargalos identificados |
+**Critério de pronto**: raiz limpa (≤10 `.md`), `.env.example` versionado, `LAUNCH_OPS.md` com aviso no topo.
 
 ---
 
-## 3. Problemas encontrados (no formato pedido)
+## Fase 1 — Segurança SQL (alto valor, médio risco)
 
-### 🔴 CRÍTICO
+**Objetivo**: zerar findings críticos do Supabase Linter (112 atualmente).
 
-#### P1 — Duplicação massiva do motor do bot WhatsApp
-1. **Local**: `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (4 788 linhas) e `supabase/functions/evolution-webhook/handlers/bot-flow.ts` (4 442 linhas). Idem para `conversational/index.ts` (2 178 vs 2 067 linhas).
-2. **O que acontece**: dois engines quase idênticos, um para cada provedor (Whapi e Evolution). Mudanças precisam ser feitas em dois lugares.
-3. **Risco**: divergência silenciosa de comportamento entre canais; bugs corrigidos em um lado e não no outro.
-4. **Impacto**: dobra o custo de manutenção, multiplica risco de regressão a cada release.
-5. **Gravidade**: **CRÍTICO**.
-6. **Como corrigir (futuro)**: extrair `runBotFlow` para `_shared/bot-engine/` com adapter pattern (já existe a base em `_shared/channels/`); deprecar progressivamente Whapi e manter Evolution como canal único.
+1. **Inventário** (read-only)
+  - Listar via `supabase--read_query` todas as funções `SECURITY DEFINER` no schema `public` com seus `EXECUTE` grantees.
+  - Listar 10 tabelas com RLS sem policy.
+  - Listar buckets públicos com policy de SELECT aberta.
+  - Listar 3 policies `USING (true)` / `WITH CHECK (true)`.
+2. **Migration 1 — Revoke SECURITY DEFINER públicos** (P2)
+  - Para cada função não destinada a ser chamada via PostgREST: `REVOKE EXECUTE ON FUNCTION ... FROM anon, authenticated`.
+  - Para helpers internos: marcar como `SECURITY INVOKER` se não dependem de bypass RLS.
+3. **Migration 2 — Tabelas órfãs de policy** (P2)
+  - Para as 10 tabelas: adicionar policy "deny by default" explícita ou policy real baseada em `tenant_id`/`consultant_id`.
+4. **Migration 3 — Buckets públicos** (P2)
+  - Trocar `USING (true)` por filtro de prefixo de pasta por consultor (`(storage.foldername(name))[1] = consultant_slug`).
+  - Manter público só `igreen` (assets de LP).
+5. **Migration 4 — Policies permissivas** (P2)
+  - Substituir `WITH CHECK (true)` em UPDATE/DELETE/INSERT por filtros reais (`auth.uid() = user_id` ou `has_role`).
+6. **Validação**: rodar `supabase--linter` antes e depois; meta: < 20 findings.
 
-#### P2 — 112 findings no Supabase Linter
-1. **Local**: schema `public` (banco).
-2. **O que acontece**:
-   - 10× RLS habilitado **sem nenhuma policy** (tabela exposta como “bloqueada”, mas sem rota de acesso definida — leitura via service_role só, e qualquer release que aliviar isso explode).
-   - 3× policy `USING (true)` / `WITH CHECK (true)` em UPDATE/DELETE/INSERT.
-   - 6× buckets de Storage públicos com listing aberto.
-   - ~90× funções `SECURITY DEFINER` executáveis por `anon` ou `authenticated` (escalada de privilégio potencial).
-3. **Risco**: superfície de ataque grande; um single bug em função `SECURITY DEFINER` pode dar acesso a dados de outros tenants.
-4. **Impacto**: vazamento multi-tenant, manipulação de leads/CRM, escalada para admin.
-5. **Gravidade**: **CRÍTICO**.
-6. **Como corrigir (futuro)**: auditar cada função (`REVOKE EXECUTE FROM anon, authenticated` onde aplicável), trocar para `SECURITY INVOKER` quando possível, fechar buckets públicos com policy de pasta por consultor, criar policies explícitas nas 10 tabelas órfãs.
+**Risco**: migration pode quebrar features se função for chamada de algum hook RPC do front. **Mitigação**: rodar `rg "\.rpc\(['\"]<fn_name>" src/` antes de cada `REVOKE`.
 
-#### P3 — Documentação interna fora de controle
-1. **Local**: raiz do projeto.
-2. **O que acontece**: **70+ arquivos `.md`** soltos (ANALISE_*, CORRECAO_*, DEPLOY_*, RESUMO_*, STATUS_*, TESTE_*…). Muitos descrevem o mesmo assunto em fases diferentes (ex.: `ANALISE_ERROS_SISTEMA_COMPLETA.md` já lista 9 problemas conhecidos não tratados).
-3. **Risco**: ninguém sabe qual documento é a verdade atual; onboarding impossível; decisões contraditórias.
-4. **Impacto**: lentidão de desenvolvimento, perda de conhecimento, retrabalho.
-5. **Gravidade**: **CRÍTICO** para escalar o time.
-6. **Como corrigir (futuro)**: mover histórico para `/docs/archive/`, manter só `README.md`, `DOCUMENTATION.md`, `LAUNCH_OPS.md`, `CHANGELOG.md` na raiz; consolidar em `docs/` por tema.
+**Critério de pronto**: linter abaixo de 20 issues; nenhum erro 403 novo em logs.
 
 ---
 
-### 🟠 ALTO
+## Fase 2 — Deduplicação do Bot Engine (refactor grande)
 
-#### P4 — `src/integrations/supabase/types.ts` com 5 242 linhas
-1. Arquivo auto-gerado já bate teto de hot reload, pesa em TS server.
-2. **Risco**: lentidão crescente do tsserver / IDE.
-3. **Impacto**: DX ruim, build lento.
-4. **Gravidade**: alto.
-5. **Como corrigir**: dividir o schema em domínios (campaigns/, crm/, whatsapp/) via geração custom; ou aceitar como custo do Supabase e isolar (já é o caso).
+**Objetivo**: matar a duplicação Whapi/Evolution (P1, P8).
 
-#### P5 — 367 migrations e crescendo
-1. **Local**: `supabase/migrations/`.
-2. **O que acontece**: muitas migrations corrigem migrations anteriores (`*flag*`, `*canonical*`, `*v2*`, `*v3*`).
-3. **Risco**: aplicar do zero (DR) leva muito tempo; risco de migration órfã quebrar.
-4. **Impacto**: disaster recovery lento; novos ambientes (staging) custosos.
-5. **Gravidade**: alto.
-6. **Como corrigir**: gerar snapshot consolidado (`pg_dump --schema-only`) periódico como "baseline" e arquivar migrations antigas.
+1. **Decisão prévia** (precisa do usuário): manter Whapi vivo ou cutover total para Evolution?
+  - Memória atual diz Whapi = ativo, Evolution = espelho futuro. Vou assumir **manter ambos**
+2. **Extração do engine** (não-quebra)
+  - Criar `supabase/functions/_shared/bot-engine/` com:
+    - `runBotFlow.ts` (lógica copiada do Whapi como fonte da verdade)
+    - `dispatchStep.ts`, `resolveStep.ts`, `captureHandler.ts`, `aiHandler.ts`
+    - `types.ts` (ParsedMessage, BotContext, ChannelAdapter)
+  - Mover `_shared/channels/` para usar o novo engine.
+3. **Adapter pattern**
+  - `WhapiAdapter` e `EvolutionAdapter` implementam `ChannelAdapter` (já existe base).
+  - Cada `index.ts` de webhook vira ~200 linhas: parse payload → seleciona adapter → `runBotFlow(ctx, adapter)`.
+4. **Migração progressiva**
+  - Whapi-webhook passa a delegar para `_shared/bot-engine/` (mantém shim de compatibilidade).
+  - Evolution-webhook passa a delegar também.
+  - Deletar handlers duplicados quando paridade comprovada por 1 semana de logs.
+5. **Testes**
+  - Suite Deno em `_shared/bot-engine/__tests__/` cobrindo: welcome, capture flow, OCR review, handoff, A/B/C variants.
+  - Smoke test no FlowSimulator (sandbox) com 4 variants.
 
-#### P6 — Edge functions com >1 000 linhas (god functions)
-1. **Local**: `evolution-webhook/index.ts` (1 640), `ai-sales-agent` (1 239), `manual-step-send` (1 138), `ai-agent-router` (999), `whapi-webhook/index.ts` (1 305).
-2. **O que acontece**: lógica de roteamento, validação, IA, persistência tudo num arquivo.
-3. **Risco**: cold start maior, difícil testar, qualquer alteração tem efeito colateral.
-4. **Impacto**: bugs sutis no fluxo crítico de captação.
-5. **Gravidade**: alto.
-6. **Como corrigir**: extrair handlers por intent/etapa para `_shared/` e manter `index.ts` só como dispatcher.
+**Critério de pronto**: ambos webhooks com <500 linhas; logs idênticos para mesmo input; testes verdes.
 
-#### P7 — Estrutura de variáveis de ambiente confusa
-1. **Local**: `.env` (root) + `ANALISE_ERROS_SISTEMA_COMPLETA.md` lista lacunas históricas.
-2. **O que acontece**: `.env` do front contém só chaves públicas; o lado backend (edge) depende de 25+ secrets (`MINIO_*`, `EVOLUTION_*`, `WHAPI_*`, `WORKER_*`, `PORTAL_WORKER_URL` vs `WORKER_PORTAL_URL` — variações redundantes), sem `.env.example` para conferência.
-3. **Risco**: deploy esquecer secret ⇒ função quebra silenciosamente.
-4. **Impacto**: outages em features (OCR, MinIO upload, notificações).
-5. **Gravidade**: alto.
-6. **Como corrigir**: criar `supabase/functions/.env.example` documentando todas as secrets; padronizar nome único `PORTAL_WORKER_URL`; adicionar guard `assertEnv()` no boot de cada função.
+**Risco**: 🔴 alto. Requer flag de rollback (`use_shared_engine`) em `app_settings`.
 
 ---
 
-### 🟡 MÉDIO
+## Fase 3 — God Functions & Componentes Grandes
 
-#### P8 — Bot flow com dois webhooks ativos
-- Memória do projeto diz “whapi-webhook é o ativo, evolution-webhook é espelho futuro”. Mas ambos estão deployados com `verify_jwt = false`. Risco de tráfego duplicado e race condition em `customers`. **Correção futura**: marcar Evolution como dark/shadow até cutover; gate via feature flag em `app_settings`.
+**Objetivo**: P6 + P10.
 
-#### P9 — `service_role_key` usado em muitas edge functions
-- 60+ funções usam `SUPABASE_SERVICE_ROLE_KEY`. Está correto (server-side), mas sem helper centralizado para auditoria. **Correção futura**: criar `_shared/admin-client.ts` que loga origem da chamada e sirva de ponto único.
+1. **Edge functions >1k linhas**
+  - `evolution-webhook/index.ts` (1 640) → dispatcher + handlers por tipo de evento.
+  - `ai-sales-agent` (1 239) → separar prompts, retrieval, post-processing.
+  - `manual-step-send` (1 138) → engine de step + sender + capture trigger.
+  - `whapi-webhook/index.ts` (1 305) → idem ao evolution.
+2. **Componentes React >700 linhas**
+  - `CreateCampaignWizard.tsx` → um arquivo por step do wizard.
+  - `NetworkPanel.tsx`, `BulkSendPanel.tsx`, `ContactImporter.tsx`, `useWhatsApp.ts` → splitar por preocupação.
+3. **Padrão**: cada extração vem com teste mínimo (Vitest snapshot) para não regredir.
 
-#### P10 — Arquivos React grandes (>700 linhas)
-- `CreateCampaignWizard.tsx` (1 355), `NetworkPanel.tsx` (878), `ContactImporter.tsx` (794), `useWhatsApp.ts` (781), `AdminFaq.tsx` (673), `BulkSendPanel.tsx` (727). Difíceis de testar. **Correção futura**: dividir em subcomponents + hooks por seção.
-
-#### P11 — `console.log` espalhados (37 ocorrências) e 104 usos de `any`
-- Reduz qualidade dos tipos e polui prod. **Correção futura**: rodar `eslint --fix`, trocar por `logger.ts` (já existe), banir `any` com regra ESLint.
-
-#### P12 — Bot Global Kill Switch e cron jobs ainda **pendentes** (LAUNCH_OPS.md)
-- `super_admin_phone` não preenchido ⇒ alertas SuperAdmin não disparam.
-- `cron_setup.sql` ainda não rodado ⇒ `minio-quota-check`, `super-admin-alerts` não estão agendados.
-- **Correção futura**: rodar SQL manualmente (instruções já no `LAUNCH_OPS.md`).
-
-#### P13 — `flow-simulate` (legado) coexiste com `flow-simulate-run` (novo)
-- Mantém duas implementações de simulador. **Correção futura**: deprecar `flow-simulate` após validar `flow-simulate-run` por 1 semana.
+**Critério de pronto**: nenhum arquivo `.ts`/`.tsx` > 800 linhas (exceto `types.ts` autogen).
 
 ---
 
-### 🔵 BAIXO
+## Fase 4 — Qualidade & DX
 
-- P14 — `.kiro/specs/` contém 8 specs paralelas (algumas obsoletas); limpar.
-- P15 — `worker-portal/` tem 9 scripts `teste-*.mjs` redundantes; consolidar.
-- P16 — `dependabot/npm audit` não rodado nesta auditoria; recomenda-se rodar.
-- P17 — SEO/Meta tags por página: `SEOHead.tsx` existe mas só algumas páginas usam.
-- P18 — Sem `robots.txt` por tenant (todos os `/licenca` indexáveis).
-- P19 — PWA service worker corretamente bypassado em iframe; ok, só monitorar.
-- P20 — `pdfjs-dist@4.4.168` desatualizado vs últimas patches.
+1. **Migrations baseline** (P5)
+  - Gerar snapshot `0000_baseline_2026_05.sql` via `pg_dump --schema-only`.
+  - Mover 367 migrations antigas para `supabase/migrations/_archive/`.
+  - Manter só `0000_baseline_*` + novas migrations a partir dali.
+2. **Helper `admin-client.ts**` (P9)
+  - Wrapper único em `_shared/admin-client.ts` que cria client service_role + loga origem.
+  - Substituir uso direto de `createClient(...SERVICE_ROLE_KEY)` por `getAdminClient(functionName)`.
+3. **Lint hygiene** (P11)
+  - Rodar `eslint --fix` global.
+  - Trocar 37 `console.log` por `logger.ts`.
+  - Regra ESLint: `@typescript-eslint/no-explicit-any: warn`.
+4. **Deprecação de duplicatas** (P13, P15)
+  - Apagar `supabase/functions/flow-simulate/` (mantido só `flow-simulate-run`).
+  - Consolidar `worker-portal/teste-*.mjs` (9 scripts) em 1 só com flags.
+5. `**.kiro/specs` cleanup** (P14)
+  - Mover specs concluídas para `.kiro/specs/_done/`.
 
----
-
-## 4. O que está bem construído
-
-- **Design system tokenizado** (Tailwind + HSL semantic tokens) — consistência visual.
-- **Memory system** (`mem://`) — rastreia decisões de produto, evita re-trabalho.
-- **A/B/C/D test flow variants** com round-robin no `customers.flow_variant`.
-- **Sandbox simulator** (recente) — isola corretamente lado de produção via `is_sandbox` + triggers.
-- **Auto-takeover humano** (`bot_paused` + `assigned_human_id`) silencia todos os crons — bem desenhado.
-- **MinIO + compress-worker** — pipeline de mídia organizada (vídeo 720p) com fallback Supabase.
-- **Sentry** + `logger.ts` + `useTrackEvent` — observabilidade básica funcionando.
-- **PWA installer** com guards de preview/iframe — evita poluir builds de dev.
+**Critério de pronto**: ESLint sem warnings novos; migration count < 50; nenhum `console.log` em src/.
 
 ---
 
-## 5. Riscos principais antes de escalar (top 5)
+## Fase 5 — Polimento Final
 
-1. **Duplicação Whapi/Evolution** quebrando em produção pós-release (P1).
-2. **Privilégio escalado** via SECURITY DEFINER + bucket público (P2).
-3. **Secrets faltando** em deploy novo (P7).
-4. **Alertas SuperAdmin não disparam** porque cron + telefone não configurados (P12).
-5. **DR custoso** por 367 migrations + types.ts gigante (P4, P5).
+- SEO: aplicar `<SEOHead>` em todas as páginas públicas (P17).
+- `robots.txt` por tenant ou `noindex` em `/licenca/preview` (P18).
+- `bun audit` + atualizar `pdfjs-dist` (P16, P20).
+- Cobertura Playwright E2E do fluxo de captação completo (lead → OCR → aprovação).
+- Rate limit persistente em DB (substituir Map em memória).
 
 ---
 
-## 6. Ordem recomendada de correção
+## Sequência sugerida
 
 ```text
-Fase 0 — Operacional (1 dia)
-  1. Preencher super_admin_phone e rodar cron_setup.sql (P12)
-  2. Criar .env.example documentando todas as secrets (P7)
-  3. Mover docs antigos para docs/archive/ (P3)
-
-Fase 1 — Segurança (3-5 dias)
-  4. Auditar funções SECURITY DEFINER (P2)
-  5. Fechar buckets públicos / adicionar policies (P2)
-  6. Adicionar policies nas 10 tabelas RLS sem policy (P2)
-  7. Substituir USING(true)/WITH CHECK(true) por filtros reais (P2)
-
-Fase 2 — Arquitetura backend (2-3 semanas)
-  8. Definir Evolution como canal único; congelar Whapi (P1, P8)
-  9. Extrair bot-engine para _shared/ com adapter (P1)
- 10. Quebrar god functions (>1k linhas) em handlers menores (P6)
- 11. Helper centralizado de admin-client (P9)
-
-Fase 3 — Qualidade & DX (1-2 semanas)
- 12. Snapshot baseline + arquivar migrations antigas (P5)
- 13. Refatorar componentes React >700 linhas (P10)
- 14. Limpar console.log + banir any no ESLint (P11)
- 15. Deprecar flow-simulate antigo (P13)
-
-Fase 4 — Polimento (contínuo)
- 16. Resolver itens 🔵 baixos (P14–P20)
- 17. Subir cobertura de testes Playwright para fluxo de captação E2E
+Semana 1: Fase 0 + Fase 1 (operacional + segurança)
+Semana 2-4: Fase 2 (deduplicação engine) — requer flag de rollback
+Semana 5: Fase 3 (god functions)
+Semana 6: Fase 4 (qualidade/DX)
+Contínuo: Fase 5 (polimento)
 ```
 
 ---
 
-## 7. Checklist antes de **publicar** (release)
+## O que eu preciso de você antes de começar
 
-- [ ] Bot Global kill switch ATIVO e testado
-- [ ] `super_admin_phone` preenchido
-- [ ] Crons agendados (`minio-quota-check`, `super-admin-alerts`)
-- [ ] `.env.example` atualizado e todos secrets validados no Supabase
-- [ ] Migrations linter sem erros novos (`supabase db lint`)
-- [ ] Sentry recebendo eventos do front e edge
-- [ ] Cookie banner e Política de Privacidade publicados
-- [ ] Backup do banco confirmado (último < 24h)
-- [ ] Build do front sem warnings novos
-- [ ] Edge functions com `verify_jwt` revisado por função
+1. **Confirmar a Fase 0** (movimentação de docs + `.env.example`) — é segura, posso fazer agora.
+2. **Política para Whapi/Evolution na Fase 2**: continua ambos rodando 100% igual apenas evolution n tem botao e whapi sim
+3. **Janela de manutenção** para Fase 1 (migrations de segurança podem causar 403 transitório).
 
-## 8. Checklist antes de **escalar** (100+ consultores)
-
-- [ ] Whapi descontinuado, Evolution como único canal
-- [ ] Bot-engine deduplicado em `_shared/`
-- [ ] God functions quebradas
-- [ ] SECURITY DEFINER auditadas, buckets fechados, RLS sem buracos
-- [ ] Pool de instâncias Evolution dimensionado (16 GB RAM / 6 vCPU, ver LAUNCH_OPS)
-- [ ] MinIO com 500 GB livres + alerta < 85%
-- [ ] Worker-portal com 3 réplicas
-- [ ] Rate limit persistente (Redis ou DB) em vez de Map em memória
-- [ ] Snapshot baseline das migrations
-- [ ] Runbook de incidentes treinado com o time
-- [ ] Custos Gemini/Lovable AI monitorados (alerta de saldo)
-
----
-
-## 9. Sugestão de arquitetura ideal (alvo de 12 meses)
-
-```text
-┌────────────────────────────────────────────────────────────────┐
-│                       FRONT (Vite + React)                     │
-│  /licenca (LP)  /admin (CRM)  /super-admin (ops)  /assistente  │
-│  Tokens HSL · TanStack Query · Suspense · PWA (prod-only)      │
-└──────────────────────┬────────────────────────────────────────┘
-                       │ supabase-js (anon)
-┌──────────────────────▼────────────────────────────────────────┐
-│                       SUPABASE (Postgres + Edge)               │
-│  • Schema por domínio: crm, captacao, ads, infra, ai           │
-│  • RLS estrito · funções SECURITY INVOKER por padrão           │
-│  • pg_cron orquestra jobs                                      │
-│  • Storage: só metadados; binários em MinIO                    │
-└──────┬───────────────────────────────────┬────────────────────┘
-       │                                   │
-┌──────▼──────────┐               ┌────────▼────────┐
-│ Bot-engine v1   │               │ Meta Ads engine │
-│ (_shared, único)│               │ (edge functions)│
-│  ↕ Adapter      │               └─────────────────┘
-│  Evolution API  │
-│  (canal único)  │
-└──────┬──────────┘
-       │
-┌──────▼─────────┐   ┌──────────┐   ┌────────────┐
-│ Worker Portal  │   │ MinIO    │   │ AI Gateway │
-│ (Playwright)   │   │ (mídia)  │   │ (Gemini)   │
-└────────────────┘   └──────────┘   └────────────┘
-```
-
-Princípios:
-- **Um único canal WhatsApp** (Evolution) com adapter pluggable.
-- **Bot-engine único** em `_shared/bot-engine/`, consumido por qualquer adapter (Evolution / Simulator / futuro WABA oficial).
-- **Schemas por domínio** no Postgres, RLS estrita, `SECURITY INVOKER` padrão.
-- **Docs** consolidados em `/docs` com índice; histórico em `/docs/archive`.
-- **Migrations** com baseline anual + diffs.
-- **Observabilidade**: Sentry (front+edge) + tabela `bot_flow_logs` + dashboards no SuperAdmin.
-- **Feature flags** em `app_settings` para qualquer rollout (já parcialmente em uso com `flow_engine_v3_flag`).
-
----
-
-## 10. Resumo executivo
-
-O sistema é **funcional e ambicioso**, com boas escolhas (Tailwind tokens, sandbox simulator, feature flags, memory). Mas carrega **dívida técnica significativa** acumulada de migrações de canal (Whapi → Evolution), proliferação de documentação solta e uma camada de segurança SQL que precisa de auditoria séria antes de escalar para 100+ consultores.
-
-**Veredito**: 🟠 pode publicar para piloto controlado, **não recomendo escalar agressivamente sem cumprir a Fase 0 + Fase 1**.
-
-Nenhuma alteração foi feita. Quando quiser executar qualquer item, me peça e eu trabalho um por vez.
+Faça tudo com segurança e cuidado para não quebrar nada
