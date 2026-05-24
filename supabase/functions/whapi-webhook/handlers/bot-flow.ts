@@ -4399,9 +4399,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     case "portal_submitting": {
+      if (isTestMode()) {
+        // 🧪 Stub: simula portal aceito + OTP enviado ao WhatsApp
+        updates.conversation_step = "aguardando_otp";
+        updates.status = "awaiting_otp";
+        reply = "✅ *Cadastro enviado ao portal (modo teste)*\n\n📱 Te enviamos um *código de verificação* via WhatsApp. Digite o código aqui (qualquer 4-6 dígitos para testar):";
+        break;
+      }
       reply = "⏳ Estamos processando seu cadastro no portal...\n\n📱 Em breve você receberá um *código de verificação no WhatsApp*. Quando receber, *digite aqui*!\n\nAguarde alguns instantes...";
       break;
     }
+
 
     case "aguardando_otp": {
       const otpCode = messageText.replace(/\D/g, "");
@@ -4409,19 +4417,27 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         updates.otp_code = otpCode;
         updates.otp_received_at = new Date().toISOString();
         reply = `✅ Código *${otpCode}* recebido! ⏳ Validando no portal...\n\nEm instantes vou te enviar o link da *validação facial* (última etapa).`;
-        // Sprint A3: dispara submit-otp (fire-and-forget) para o worker validar de fato
-        try {
-          const baseUrl = Deno.env.get("SUPABASE_URL");
-          const srk = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-          if (baseUrl && srk) {
-            fetch(`${baseUrl}/functions/v1/submit-otp`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${srk}` },
-              body: JSON.stringify({ customer_id: customer.id, otp_code: otpCode }),
-            }).catch((e) => console.warn("[aguardando_otp] submit-otp dispatch falhou:", (e as Error).message));
+        if (isTestMode()) {
+          // 🧪 Stub: aceita qualquer código e avança direto para facial com link fake
+          updates.link_facial = "https://sandbox.igreen.cloud/facial/teste";
+          updates.conversation_step = "aguardando_facial";
+          updates.status = "awaiting_facial";
+          reply = `✅ Código *${otpCode}* validado (modo teste)!\n\n📸 *Última etapa: Validação Facial*\n\n👉 Abra este link no seu celular e siga as instruções:\nhttps://sandbox.igreen.cloud/facial/teste\n\nQuando terminar a selfie, me responda *PRONTO* aqui que finalizamos seu cadastro! ✅`;
+        } else {
+          // Sprint A3: dispara submit-otp (fire-and-forget) para o worker validar de fato
+          try {
+            const baseUrl = Deno.env.get("SUPABASE_URL");
+            const srk = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+            if (baseUrl && srk) {
+              fetch(`${baseUrl}/functions/v1/submit-otp`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${srk}` },
+                body: JSON.stringify({ customer_id: customer.id, otp_code: otpCode }),
+              }).catch((e) => console.warn("[aguardando_otp] submit-otp dispatch falhou:", (e as Error).message));
+            }
+          } catch (e) {
+            console.warn("[aguardando_otp] submit-otp dispatch erro:", (e as Error).message);
           }
-        } catch (e) {
-          console.warn("[aguardando_otp] submit-otp dispatch erro:", (e as Error).message);
         }
       } else {
         reply = "📱 Por favor, digite o *código numérico* que você recebeu no WhatsApp.\n\n(Geralmente são 4 a 6 dígitos)";
@@ -4434,6 +4450,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       reply = "⏳ Ainda estou analisando sua conta, só mais um instante...";
       break;
     }
+
+
+
 
     case "validando_otp": {
       reply = "⏳ Estamos validando seu código no portal. Aguarde um momento...\n\nSe já passou mais de 2 minutos, digite o código novamente.";
@@ -4469,7 +4488,11 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     case "aguardando_facial":
     case "aguardando_assinatura": {
-      const link = customer.link_facial || customer.link_assinatura;
+      // 🧪 Em modo teste, se ainda não tem link, injeta o sandbox
+      if (isTestMode() && !customer.link_facial && !customer.link_assinatura) {
+        updates.link_facial = "https://sandbox.igreen.cloud/facial/teste";
+      }
+      const link = updates.link_facial || customer.link_facial || customer.link_assinatura;
       const txt = (messageText || "").toLowerCase().trim();
       const confirmou = /\b(pronto|prontinho|conclu[ií]do|conclui|conclu[ií]|finalizei|terminei|terminado|finalizado|fiz|feito|feita|ok|okay|okk?|certo|sim|j[aá]\s+(assinei|fiz|tirei|validei|terminei|terminado)|assinei|tirei|validei|selfie|liberado|consegui)\b/i.test(txt);
       if (confirmou && link) {
@@ -4485,6 +4508,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       }
       break;
     }
+
 
     case "cadastro_em_analise": {
       // Lead já concluiu a selfie. Aguardando aprovação da iGreen (24-48h).
@@ -4688,9 +4712,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       updates.conversation_step = "portal_submitting";
 
       if (isTestMode()) {
-        reply = "✅ *Teste concluído:* todos os dados foram coletados e o lead chegou ao ponto de envio para o portal.";
+        // 🧪 Stub: simula portal aceito + OTP enviado, avança direto para aguardando_otp
+        updates.status = "awaiting_otp";
+        updates.conversation_step = "aguardando_otp";
+        reply = "✅ *Todos os dados coletados!*\n\n📲 *Cadastro enviado ao portal (modo teste)*\n\nTe enviamos um *código de verificação* via WhatsApp. Digite o código aqui (qualquer 4-6 dígitos):";
         return { reply, updates };
       }
+
 
       // ✅ Regenerar igreen_link a partir do cadastro_url do consultor dono
       // (impede o bug em que o lead é submetido com o link de outro consultor)
