@@ -3159,6 +3159,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
           updates.conversation_step = "confirmando_dados_conta";
 
+          // 🧪 testMode: pula a fila de revisão do consultor e envia a confirmação direto
+          if (isTestMode()) {
+            const merged = { ...customer, ...updates };
+            await sendOptions(remoteJid, buildConfirmacaoConta(merged), [
+              { id: "sim_conta", title: "✅ SIM" },
+              { id: "nao_conta", title: "❌ NÃO" },
+              { id: "editar_conta", title: "✏️ EDITAR" },
+            ]);
+            reply = "";
+            break;
+          }
+
           // Sempre pausa pro card de revisão no painel. O cron
           // `ocr-review-timeout` (5 min) libera automaticamente se o
           // consultor não decidir — não dependemos mais de presença.
@@ -3787,6 +3799,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
           updates.conversation_step = "confirmando_dados_doc";
 
+          // 🧪 testMode: pula a fila de revisão do consultor e envia a confirmação direto
+          if (isTestMode()) {
+            const merged = { ...customer, ...updates };
+            await sendOptions(remoteJid, buildConfirmacaoDoc(merged), [
+              { id: "sim_doc", title: "✅ SIM" },
+              { id: "nao_doc", title: "❌ NÃO" },
+              { id: "editar_doc", title: "✏️ EDITAR" },
+            ]);
+            reply = "";
+            break;
+          }
+
           // Sempre pausa pro card de revisão no painel. Cron de 5 min
           // libera automaticamente se o consultor não decidir.
           console.log(`[ocr-doc/whapi] 📥 marcando review pendente (customer=${customer.id})`);
@@ -4156,6 +4180,18 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     case "ask_phone_confirm": {
+      // 🧪 testMode: número sandbox (5500000xxx) tem 15 dígitos — inválido para o portal.
+      // Auto-confirma com um número fixo válido para não travar o fluxo.
+      if (isTestMode()) {
+        updates.phone_landline = "(11) 99999-8888";
+        updates.phone_contact_confirmed = true;
+        const merged = { ...customer, ...updates };
+        const next = await autoResolveCepIfNeeded(merged, updates);
+        updates.conversation_step = next;
+        reply = `📞 *Telefone confirmado (modo teste):* (11) 99999-8888\n\n${getReplyForStep(next, merged)}`;
+        break;
+      }
+
       const resp: string = isButton ? String(buttonId ?? "") : messageText.toLowerCase().trim();
       // Sprint D-B11: "1"/"2" só valem se vieram do botão. Texto livre exige palavra explícita.
       const sim = (isButton && (resp === "sim_phone" || resp === "1"))
@@ -4315,6 +4351,20 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "ask_cep": {
       const cepClean = messageText.replace(/\D/g, "");
       if (cepClean.length !== 8) { reply = "❌ CEP inválido. Informe os *8 números*:"; break; }
+      // 🧪 testMode: pula ViaCEP e usa os dados do OCR mock já salvos no customer
+      if (isTestMode()) {
+        updates.cep = cepClean;
+        // Preserva endereço já preenchido pelo OCR mock; se não tiver, usa fallback
+        updates.address_street = customer.address_street || "Rua das Flores";
+        updates.address_neighborhood = customer.address_neighborhood || "Centro";
+        updates.address_city = customer.address_city || "Sao Paulo";
+        updates.address_state = customer.address_state || "SP";
+        const merged = { ...customer, ...updates };
+        const next = await autoResolveCepIfNeeded(merged, updates);
+        updates.conversation_step = next;
+        reply = getReplyForStep(next, merged);
+        break;
+      }
       try {
         const viaCepRes = await fetchWithTimeout(`https://viacep.com.br/ws/${cepClean}/json/`, { timeout: TIMEOUT_VIA_CEP });
         const viaCep = await viaCepRes.json();
