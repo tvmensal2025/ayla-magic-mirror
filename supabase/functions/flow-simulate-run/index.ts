@@ -142,6 +142,45 @@ Deno.serve(async (req) => {
       patch.ai_followups_count = 0;
       patch.followup_count = 0;
       patch.chat_cleared_at = new Date().toISOString();
+      patch.status = "pending";
+      // Limpa todos os dados coletados do lead para simular um lead novo
+      patch.name = "Simulador Sandbox";
+      patch.name_source = null;
+      patch.cpf = null;
+      patch.rg = null;
+      patch.data_nascimento = null;
+      patch.email = null;
+      patch.phone_landline = null;
+      patch.phone_contact_confirmed = false;
+      patch.cep = null;
+      patch.address_street = null;
+      patch.address_number = null;
+      patch.address_neighborhood = null;
+      patch.address_city = null;
+      patch.address_state = null;
+      patch.distribuidora = null;
+      patch.numero_instalacao = null;
+      patch.electricity_bill_value = null;
+      patch.electricity_bill_photo_url = null;
+      patch.bill_image_url = null;
+      patch.bill_base64 = null;
+      patch.bill_holder_name = null;
+      patch.bill_data_raw = null;
+      patch.document_front_url = null;
+      patch.document_back_url = null;
+      patch.document_type = null;
+      patch.doc_holder_name = null;
+      patch.otp_code = null;
+      patch.otp_received_at = null;
+      patch.link_facial = null;
+      patch.link_assinatura = null;
+      patch.facial_confirmed_at = null;
+      patch.sales_phase = null;
+      patch.rescue_attempts = 0;
+      patch.ocr_conta_attempts = 0;
+      patch.bot_paused = false;
+      patch.bot_paused_reason = null;
+      patch.bot_paused_at = null;
     }
     await svc.from("customers").update(patch).eq("id", customer.id);
     Object.assign(customer as any, patch);
@@ -250,10 +289,9 @@ Deno.serve(async (req) => {
     // Janela curta: encerra assim que o turno estabiliza. Botão final fecha
     // mais rápido ainda (já é a última coisa que o passo manda).
     const events: UiEvent[] = [];
-    const deadline = Date.now() + 8_000;
+    const deadline = Date.now() + 12_000; // aumentado de 8s → 12s para cold starts
     const seen = new Set<string>();
     let stableSince = 0;
-    let sawButtons = false;
     while (Date.now() < deadline) {
       await sleep(250);
       const { data: rows } = await svc
@@ -266,7 +304,8 @@ Deno.serve(async (req) => {
       if (incoming.length === 0) {
         if (events.length > 0) {
           if (!stableSince) stableSince = Date.now();
-          const stableWindow = sawButtons ? 200 : 600;
+          // Janela maior: 600ms sempre (antes era 200ms com botões → fechava cedo demais)
+          const stableWindow = 600;
           if (Date.now() - stableSince > stableWindow) break;
         }
         continue;
@@ -275,7 +314,6 @@ Deno.serve(async (req) => {
       for (const r of incoming as any[]) {
         seen.add(r.id);
         const ev = mapOutbound(String(r.kind || ""), String(r.content || ""));
-        if (ev.kind === "buttons") sawButtons = true;
         events.push(ev);
       }
     }
@@ -288,7 +326,7 @@ Deno.serve(async (req) => {
 
     const { data: cnow } = await svc
       .from("customers")
-      .select("conversation_step, flow_variant, name, capture_mode, status")
+      .select("conversation_step, flow_variant, name, capture_mode, status, cpf, rg, data_nascimento, email, phone_landline, phone_contact_confirmed, cep, address_street, address_number, address_neighborhood, address_city, address_state, distribuidora, numero_instalacao, electricity_bill_value, electricity_bill_photo_url, document_front_url, document_back_url, otp_code, link_facial, link_assinatura")
       .eq("id", customer.id)
       .maybeSingle();
 

@@ -57,6 +57,8 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
   const [busy, setBusy] = useState(false);
   const [variant, setVariant] = useState<"A" | "B" | "C" | "D">("A");
   const [state, setState] = useState<any>(null);
+  const [diagnostic, setDiagnostic] = useState<any>(null);
+  const [showData, setShowData] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -81,9 +83,10 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
         body: { consultant_id: consultantId, variant, ...payload },
       });
       if (error) throw error;
-      const out = data as { events?: any[]; customer_state?: any };
+      const out = data as { events?: any[]; customer_state?: any; diagnostic?: any };
       appendEvents(out.events || []);
       if (out.customer_state) setState(out.customer_state);
+      if (out.diagnostic) setDiagnostic(out.diagnostic);
     } catch (e) {
       toast.error("Erro no simulador: " + (e as Error).message);
       setEvents((prev) => [...prev, { kind: "system", text: `⚠ ${(e as Error).message}`, key: k() }]);
@@ -95,6 +98,7 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
   async function handleReset(initial = false) {
     setEvents([]);
     setState(null);
+    setDiagnostic(null);
     if (!consultantId) return;
     setBusy(true);
     try {
@@ -155,7 +159,7 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
         </DialogHeader>
 
         <div className="flex items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-muted-foreground">Variante:</span>
             {VARIANTS.map((v) => (
               <Button
@@ -171,14 +175,81 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
             ))}
             {state?.conversation_step && (
               <Badge variant="outline" className="ml-2 text-[9px]">
-                step: {state.conversation_step}
+                📍 {state.conversation_step}
               </Badge>
             )}
+            {state?.status && (
+              <Badge
+                variant={state.status === "portal_submitting" || state.status === "awaiting_otp" || state.status === "awaiting_facial" || state.status === "cadastro_concluido" ? "default" : "secondary"}
+                className="text-[9px]"
+              >
+                {state.status}
+              </Badge>
+            )}
+            {diagnostic && !diagnostic.webhook_ok && (
+              <Badge variant="destructive" className="text-[9px]">⚠ webhook falhou</Badge>
+            )}
           </div>
-          <Button size="sm" variant="outline" onClick={() => handleReset(true)} disabled={busy}>
-            <RotateCw className="mr-1 h-3 w-3" /> Zerar
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowData((v) => !v)}
+              disabled={!state}
+              className="h-6 px-2 text-[10px]"
+              title="Ver dados coletados do lead"
+            >
+              {showData ? "🙈 Dados" : "👁 Dados"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => handleReset(true)} disabled={busy}>
+              <RotateCw className="mr-1 h-3 w-3" /> Zerar
+            </Button>
+          </div>
         </div>
+
+        {/* Painel de dados coletados — visível ao clicar em "Dados" */}
+        {showData && state && (
+          <div className="rounded-md border bg-muted/20 p-2 text-[10px] font-mono leading-relaxed">
+            <p className="mb-1 font-semibold text-xs text-muted-foreground">📋 Dados coletados do lead (sandbox)</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+              {[
+                ["Nome", state.name],
+                ["CPF", state.cpf],
+                ["RG", state.rg],
+                ["Nascimento", state.data_nascimento],
+                ["E-mail", state.email],
+                ["Telefone", state.phone_landline],
+                ["CEP", state.cep],
+                ["Endereço", state.address_street ? `${state.address_street}, ${state.address_number || ""}` : null],
+                ["Bairro", state.address_neighborhood],
+                ["Cidade/UF", state.address_city ? `${state.address_city}/${state.address_state}` : null],
+                ["Distribuidora", state.distribuidora],
+                ["Nº Instalação", state.numero_instalacao],
+                ["Valor conta", state.electricity_bill_value ? `R$ ${Number(state.electricity_bill_value).toFixed(2)}` : null],
+                ["Foto conta", state.electricity_bill_photo_url ? "✅ recebida" : "❌ pendente"],
+                ["Doc frente", state.document_front_url ? "✅ recebido" : "❌ pendente"],
+                ["Doc verso", state.document_back_url ? (state.document_back_url === "nao_aplicavel" ? "N/A (CNH)" : "✅ recebido") : "❌ pendente"],
+                ["OTP", state.otp_code || null],
+                ["Link facial", state.link_facial ? "✅ gerado" : null],
+              ]
+                .filter(([, v]) => v != null && v !== "")
+                .map(([label, value]) => (
+                  <div key={label} className="flex gap-1">
+                    <span className="text-muted-foreground shrink-0">{label}:</span>
+                    <span className="truncate">{String(value)}</span>
+                  </div>
+                ))}
+            </div>
+            {diagnostic && (
+              <p className="mt-1 text-muted-foreground">
+                🔀 step: <span className="text-foreground">{diagnostic.step_before || "—"}</span>
+                {" → "}
+                <span className={diagnostic.advanced ? "text-green-600" : "text-foreground"}>{diagnostic.step_after || "—"}</span>
+                {diagnostic.advanced ? " ✓" : " (sem avanço)"}
+              </p>
+            )}
+          </div>
+        )}
 
         <div
           ref={scrollRef}
@@ -337,7 +408,7 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
 
         <p className="flex items-start gap-1 text-[10px] text-muted-foreground">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-          Conversa sandbox — não polui CRM, métricas nem envia WhatsApp real. Use o anexo (📎) para mandar uma foto da conta de luz ou documento (PDF/JPG) e ver o OCR rodando de verdade.
+          Conversa sandbox — não polui CRM, métricas nem envia WhatsApp real. Use o anexo (📎) para simular envio de foto da conta de luz ou documento. O OCR roda em modo mock (dados fictícios pré-definidos). Clique em <strong>👁 Dados</strong> para ver o que foi coletado.
         </p>
       </DialogContent>
     </Dialog>
