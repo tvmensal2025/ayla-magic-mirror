@@ -2229,6 +2229,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   const safe = pn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
                   if (msgN === pn || new RegExp(`(^|\\W)${safe}(\\W|$)`).test(msgN)) {
                     if (t?.goto_step_id) return { matched: true, next: await _loadStepById(String(t.goto_step_id)) };
+                    if (t?.goto_special) return { matched: true, next: { __special: String(t.goto_special) } as any };
                   }
                 }
               }
@@ -2239,6 +2240,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 && t?.goto_step_id
               );
               if (def?.goto_step_id) return { matched: false, next: await _loadStepById(String(def.goto_step_id)) };
+              if (def?.goto_special) return { matched: false, next: { __special: String(def.goto_special) } as any };
               return { matched: false, next: null as any };
             };
 
@@ -2248,6 +2250,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             );
             const resolved = await _resolveNextFromTransitions(txnsNow, messageText);
             let nextCustom: any = resolved.next;
+
+            if (nextCustom?.__special) {
+              const sp = String(nextCustom.__special).toLowerCase().trim();
+              if (sp === "humano") {
+                return { reply: `Tranquilo! Vou chamar ${nomeRepresentante || "um consultor"} pra te ajudar por aqui 🙌`, updates: { conversation_step: "aguardando_humano", bot_paused: true, bot_paused_reason: "flow_button_humano", bot_paused_at: new Date().toISOString(), __inline_sent: emittedCurrent || undefined } as any };
+              }
+              if (sp === "cadastro") {
+                return { reply: "", updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __inline_sent: emittedCurrent || undefined } as any };
+              }
+              if (sp === "menu") {
+                nextCustom = await _loadStepById(String(stepRow.id));
+              } else {
+                nextCustom = null;
+              }
+            }
 
             // Se há perguntas (intent txns) e a resposta NÃO casou e não há default,
             // aguarda nova mensagem (não pula o passo) — mas só até 2 tentativas;
