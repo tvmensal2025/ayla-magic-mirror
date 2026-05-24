@@ -258,6 +258,7 @@ const SuperAdmin = () => {
     { id: "plataforma_fb" as const, label: "Plataforma FB", icon: Megaphone },
     { id: "templates_ads" as const, label: "Templates de Anúncio", icon: Sparkles },
     { id: "financeiro" as const, label: "Financeiro / P&L", icon: BarChart3 },
+    { id: "rollout" as const, label: "Rollout V3", icon: Activity },
   ];
 
   const formatActivity = (lastAct: string | null) => {
