@@ -103,4 +103,47 @@ export function isV2Enabled(flag: FlowReliabilityV2Flag): boolean {
 /** Test helper: drops the in-memory cache so tests start clean. */
 export function clearFeatureFlagCache(): void {
   cache.clear();
+  engineV3Cache.clear();
+}
+
+// ─── flow_engine_v3 (Phase C Task 20 do whatsapp-flow-architecture-v3) ──────
+//
+// Mesmo padrão do `flow_reliability_v2`. Cache 30s in-process.
+
+export type FlowEngineV3Flag = FlowReliabilityV2Flag;
+
+const engineV3Cache = new Map<string, CacheEntry>();
+
+export async function getFlowEngineV3(
+  supabase: SupabaseClient,
+  consultantId: string,
+): Promise<FlowEngineV3Flag> {
+  if (!consultantId) return DEFAULT_FLAG;
+
+  const now = Date.now();
+  const cached = engineV3Cache.get(consultantId);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  let resolved: FlowEngineV3Flag = DEFAULT_FLAG;
+  try {
+    const { data, error } = await supabase
+      .from("consultants")
+      .select("flow_engine_v3")
+      .eq("id", consultantId)
+      .single();
+
+    if (!error && data && isFlowReliabilityV2Flag((data as any).flow_engine_v3)) {
+      resolved = (data as any).flow_engine_v3 as FlowEngineV3Flag;
+    }
+  } catch {
+    resolved = DEFAULT_FLAG;
+  }
+
+  engineV3Cache.set(consultantId, {
+    value: resolved,
+    expiresAt: now + FEATURE_FLAG_CACHE_TTL_MS,
+  });
+  return resolved;
 }
