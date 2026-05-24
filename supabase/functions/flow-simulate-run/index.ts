@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
           phone_whatsapp: phone,
           name: "Simulador Sandbox",
           is_sandbox: true,
-          customer_origin: "sandbox",
+          customer_origin: "whatsapp_lead",
           flow_variant: variant || "A",
         })
         .select("*")
