@@ -75,7 +75,15 @@ export async function verifyState(state: string): Promise<{ consultantId: string
     const secret = Deno.env.get("FACEBOOK_APP_SECRET")!;
     const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
     const sigBytes = base64DecodeBytesFlexible(sigB64);
-    const ok = await crypto.subtle.verify("HMAC", key, sigBytes, enc.encode(payload));
+    // Cast para Uint8Array<ArrayBuffer> — Deno's Web Crypto rejeita ArrayBufferLike
+    // união com SharedArrayBuffer que vem do tipo padrão. Em runtime é o mesmo
+    // bytes; só satisfazemos o typecheck stricter.
+    const ok = await crypto.subtle.verify(
+      "HMAC",
+      key,
+      sigBytes as unknown as Uint8Array<ArrayBuffer>,
+      enc.encode(payload),
+    );
     if (!ok) return null;
     let returnOrigin: string | null = null;
     if (originEnc) {

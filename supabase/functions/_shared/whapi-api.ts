@@ -140,7 +140,11 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
   ): Promise<boolean> {
     const to = remoteJid.includes("@") ? remoteJid : `${remoteJid}@s.whatsapp.net`;
     const isAudio = mediatype === "audio" || mediatype === "voice";
-    const endpoint = mediatype === "video" ? "messages/video"
+    // Type widened para `string` para permitir comparação dinâmica com
+    // "messages/audio" (alternativa de endpoint para áudio WebM/Opus que
+    // o Whapi rejeita em messages/voice). Antes era literal union, o que
+    // gerava TS2367 nas comparações `endpoint !== "messages/audio"`.
+    const endpoint: string = mediatype === "video" ? "messages/video"
       : mediatype === "image" ? "messages/image"
       : isAudio ? "messages/voice"
       : "messages/document";
@@ -255,7 +259,11 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
       const dl = await downloadMediaBytes();
       if (!dl) return false;
       try {
-        const blob = new Blob([dl.bytes], { type: dl.mime });
+        // Cast para Uint8Array com ArrayBuffer concreto. Tipos novos do TS
+        // distinguem `ArrayBufferLike` (que pode ser `SharedArrayBuffer`) de
+        // `ArrayBuffer`, e `Blob` exige o segundo.
+        const bytes = dl.bytes as unknown as Uint8Array<ArrayBuffer>;
+        const blob = new Blob([bytes], { type: dl.mime });
         const form = new FormData();
         form.append("to", to);
         form.append("media", blob, fileName);
