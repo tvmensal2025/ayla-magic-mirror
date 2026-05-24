@@ -1829,7 +1829,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       if (_looksLikeQuestion(st)) return false;
       return true;
     };
-    for (let guard = 0; cursor && cursorCascades(cursor) && guard < 3; guard++) {
+    // 🛟 Anti-silêncio: se o primeiro emitStep não produziu texto NEM mídia
+    // (passo vazio configurado pelo consultor), força UMA cascata mesmo se
+    // wait_for !== 'none' — caso contrário o lead fica sem resposta nenhuma.
+    const forceFirstHop = !replyText && !inlineSent && cursor
+      && !_hasTextCapture(cursor) && !_looksLikeQuestion(cursor);
+    for (let guard = 0; cursor && (cursorCascades(cursor) || (guard === 0 && forceFirstHop)) && guard < 3; guard++) {
       const nextStep = findCascadeNext(cursor);
       if (!nextStep) {
         console.log(`[conversational] cascade parou em step=${cursor.step_key} (sem próximo step ativo)`);
