@@ -21,6 +21,7 @@ import { validateAiFallbackChoice } from "../../../_shared/grounding.ts";
 import { aiInCooldown, setAiCooldown, aiInCooldownPersistent, setAiCooldownPersistent } from "../../../_shared/bot/ai-cooldown.ts";
 import { checkAndMarkWebhookDedupe } from "../../../_shared/bot/dedupe.ts";
 import { matchTransition as matchTransitionShared, CADASTRO_STEPS } from "../../../_shared/flow-router.ts";
+import { extractStepButtons, matchButtonIntent } from "../../../_shared/ai-button-intent.ts";
 
 export { CONVERSATIONAL_STEPS };
 
@@ -1186,8 +1187,17 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     { customerId: ctx.customer?.id, consultantId: consultantId || null, traceId: ctx.messageId },
   );
 
+  const stepButtons = extractStepButtons(currentStep);
+  if (stepButtons.length > 0 && !ctx.buttonId) {
+    const intent = await matchButtonIntent(ctx.messageText || "", stepButtons, {
+      apiKey: Deno.env.get("LOVABLE_API_KEY"),
+    });
+    console.log(`[conversational/evo] button-intent: ${JSON.stringify(intent)}`);
+    if (intent.match) ctx.buttonId = intent.match;
+  }
+
   // Sprint 1.5: honra threshold de handoff (conf < 0.5) — pausa bot, consultor assume.
-  if (cls.action === "handoff" && cls.intent !== "tem_duvida") {
+  if (cls.action === "handoff" && cls.intent !== "tem_duvida" && !ctx.buttonId) {
     console.log(`[conversational/evo] 🤝 handoff por baixa confiança (conf=${cls.confidence})`);
     return _finalize(stepKey, {
       reply: "",
@@ -1351,6 +1361,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     transitions: currentStep.transitions ?? [],
     buttonId: ctx.buttonId,
     messageText: ctx.messageText,
+    buttons: stepButtons,
     intents: candidateIntents,
   });
 

@@ -79,7 +79,7 @@ Deno.serve(async (req) => {
     const consultantId = realSuperAdminId;
 
     const userMessage = String(body?.user_message || "").trim();
-    const buttonId = body?.button_id ? String(body.button_id) : null;
+    let buttonId = body?.button_id ? String(body.button_id) : null;
     const attach: { url?: string; kind?: "image" | "document" | "audio" | "video" } = body?.attach || {};
     const variant = String(body?.variant || "").toUpperCase();
     const fresh = body?.fresh === true; // sinaliza "Zerar" → resetar step
@@ -145,6 +145,10 @@ Deno.serve(async (req) => {
     }
     await svc.from("customers").update(patch).eq("id", customer.id);
     Object.assign(customer as any, patch);
+
+    if (!buttonId && /^\s*[1-9]\s*$/.test(userMessage)) {
+      buttonId = await resolveNumberedButtonId(svc, consultantId, String((customer as any).conversation_step || ""), variant || String((customer as any).flow_variant || "A"), userMessage);
+    }
 
     // ── 2) Cria bot_test_run em curso ──
     const { data: runRow, error: runErr } = await svc
@@ -322,6 +326,20 @@ function mapOutbound(kind: string, content: string): UiEvent {
     return { kind: k, url: url.trim(), caption: caption.trim() || undefined };
   }
   return { kind: "text", text: `[${kind}] ${content}` };
+}
+
+async function resolveNumberedButtonId(svc: any, consultantId: string, rawStep: string, variant: string, message: string): Promise<string | null> {
+  const idx = Number(message.trim()) - 1;
+  if (!Number.isInteger(idx) || idx < 0) return null;
+  const step = rawStep.replace(/^flow:/, "") || "welcome";
+  const { data: flow } = await svc.from("bot_flows").select("id").eq("consultant_id", consultantId).eq("is_active", true).eq("variant", variant || "A").order("created_at", { ascending: true }).limit(1).maybeSingle();
+  if (!flow?.id) return null;
+  const q = svc.from("bot_flow_steps").select("captures").eq("flow_id", flow.id).limit(1);
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(step)) q.eq("id", step); else q.eq("step_key", step);
+  const { data: row } = await q.maybeSingle();
+  const captures = Array.isArray(row?.captures) ? row.captures : [];
+  const buttons = captures.find((c: any) => c?.field === "_buttons" && c?.enabled !== false && Array.isArray(c?.value))?.value || [];
+  return buttons[idx]?.id ? String(buttons[idx].id) : null;
 }
 
 function sleep(ms: number) {

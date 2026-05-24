@@ -2443,14 +2443,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         if (stepIsUuid) {
           const { data } = await supabase
             .from("bot_flow_steps")
-            .select("id, step_key, step_type, position, transitions")
+            .select("id, step_key, step_type, position, transitions, captures")
             .eq("flow_id", flow.id).eq("id", step).maybeSingle();
           stepRow = data;
         }
         if (!stepRow) {
           const { data } = await supabase
             .from("bot_flow_steps")
-            .select("id, step_key, step_type, position, transitions")
+            .select("id, step_key, step_type, position, transitions, captures")
             .eq("flow_id", flow.id).eq("step_key", step).maybeSingle();
           stepRow = data;
         }
@@ -2552,6 +2552,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             const _resolveNextFromTransitions = async (txns: any[], msg: string) => {
               const arr = Array.isArray(txns) ? txns : [];
               const msgN = _norm(msg);
+              const candidates = new Set<string>([msgN, _norm(buttonId || "")].filter(Boolean));
+              const n = Number((msgN.match(/^([1-9])(?:\D|$)/) || [])[1] || 0);
+              const btns = (Array.isArray((stepRow as any).captures) ? (stepRow as any).captures : [])
+                .find((c: any) => c?.field === "_buttons" && Array.isArray(c?.value))?.value || [];
+              const selectedBtn = n > 0 ? btns[n - 1] : null;
+              if (selectedBtn?.id) candidates.add(_norm(selectedBtn.id));
+              if (selectedBtn?.title) candidates.add(_norm(selectedBtn.title));
               // 1) match por trigger_phrases (intents afirmacao/negacao/etc)
               for (const t of arr) {
                 const phrases = Array.isArray(t?.trigger_phrases) ? t.trigger_phrases : [];
@@ -2560,8 +2567,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   const pn = _norm(p);
                   if (!pn) continue;
                   const safe = pn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-                  if (msgN === pn || new RegExp(`(^|\\W)${safe}(\\W|$)`).test(msgN)) {
+                  const matched = Array.from(candidates).some((cand) => cand === pn || new RegExp(`(^|\\W)${safe}(\\W|$)`).test(cand));
+                  if (matched) {
                     if (t?.goto_step_id) return { matched: true, next: await _loadStepById(String(t.goto_step_id)) };
+                    if (t?.goto_special) return { matched: true, next: { __special: String(t.goto_special) } as any };
                   }
                 }
               }
@@ -2572,6 +2581,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 && t?.goto_step_id
               );
               if (def?.goto_step_id) return { matched: false, next: await _loadStepById(String(def.goto_step_id)) };
+              if (def?.goto_special) return { matched: false, next: { __special: String(def.goto_special) } as any };
               return { matched: false, next: null as any };
             };
 
@@ -2581,6 +2591,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             );
             const resolved = await _resolveNextFromTransitions(txnsNow, messageText);
             let nextCustom: any = resolved.next;
+
+            if (nextCustom?.__special) {
+              const sp = String(nextCustom.__special).toLowerCase().trim();
+              if (sp === "humano") {
+                return { reply: `Tranquilo! Vou chamar ${nomeRepresentante || "um consultor"} pra te ajudar por aqui 🙌`, updates: { conversation_step: "aguardando_humano", bot_paused: true, bot_paused_reason: "flow_button_humano", bot_paused_at: new Date().toISOString(), __inline_sent: emittedCurrent || undefined } as any };
+              }
+              if (sp === "cadastro") {
+                return { reply: "", updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __inline_sent: emittedCurrent || undefined } as any };
+              }
+              if (sp === "menu") {
+                nextCustom = await _loadStepById(String(stepRow.id));
+              } else {
+                nextCustom = null;
+              }
+            }
 
             // Se há perguntas (intent txns) e a resposta NÃO casou e não há default,
             // aguarda nova mensagem (não pula o passo) — mas só até 2 tentativas;

@@ -179,6 +179,8 @@ export interface MatchTransitionInput {
   buttonId?: string | null;
   /** Texto livre do cliente (mantido como fallback de matching). */
   messageText?: string | null;
+  /** Botões visíveis no passo atual, na mesma ordem em que foram enviados. */
+  buttons?: Array<{ id?: string | null; title?: string | null }> | null;
   /** Intents derivadas do classificador / regex; opcionais. */
   intents?: string[];
 }
@@ -208,14 +210,22 @@ export function matchTransition(input: MatchTransitionInput): FlowTransition | n
 
   const buttonId = _norm(input.buttonId);
   const messageText = _norm(input.messageText);
+  const visibleButtons = Array.isArray(input.buttons) ? input.buttons : [];
   const intents = input.intents ?? [];
 
+  let resolvedButtonId = buttonId;
+  if (!resolvedButtonId && messageText && visibleButtons.length) {
+    const n = Number((messageText.match(/^([1-9])(?:\D|$)/) || [])[1] || 0);
+    const btn = n > 0 ? visibleButtons[n - 1] : null;
+    if (btn?.id) resolvedButtonId = _norm(btn.id);
+  }
+
   // (a) buttonId em trigger_phrases.
-  if (buttonId) {
+  if (resolvedButtonId) {
     for (const t of transitions) {
       const phrases = Array.isArray(t.trigger_phrases) ? t.trigger_phrases : [];
       for (const p of phrases) {
-        if (_norm(p) === buttonId) return t;
+        if (_norm(p) === resolvedButtonId) return t;
       }
     }
 
@@ -223,7 +233,7 @@ export function matchTransition(input: MatchTransitionInput): FlowTransition | n
     for (const t of transitions) {
       const sp = _norm(t.goto_special);
       if (!sp) continue;
-      if (sp === buttonId && SPECIAL_GOTO_VALUES.has(sp)) return t;
+      if (sp === resolvedButtonId && SPECIAL_GOTO_VALUES.has(sp)) return t;
     }
   }
 
