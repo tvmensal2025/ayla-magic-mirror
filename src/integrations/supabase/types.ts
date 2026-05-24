@@ -48,6 +48,13 @@ export type Database = {
             referencedRelation: "consultants_public"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "ad_account_managers_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
         ]
       }
       ad_competitor_creatives: {
@@ -504,6 +511,13 @@ export type Database = {
             referencedRelation: "consultants_public"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "ad_spend_daily_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
         ]
       }
       ad_template_usages: {
@@ -879,6 +893,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "consultants_public"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_costs_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
           },
         ]
       }
@@ -1828,6 +1849,13 @@ export type Database = {
             referencedRelation: "consultants_public"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "capture_diagnostics_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
         ]
       }
       capture_field_events: {
@@ -2039,6 +2067,7 @@ export type Database = {
           created_at: string | null
           facebook_label_id: string | null
           facebook_pixel_id: string | null
+          flow_engine_v3: string
           flow_reliability_v2: string
           flow_step_media_order: Json
           google_analytics_id: string | null
@@ -2065,6 +2094,7 @@ export type Database = {
           created_at?: string | null
           facebook_label_id?: string | null
           facebook_pixel_id?: string | null
+          flow_engine_v3?: string
           flow_reliability_v2?: string
           flow_step_media_order?: Json
           google_analytics_id?: string | null
@@ -2091,6 +2121,7 @@ export type Database = {
           created_at?: string | null
           facebook_label_id?: string | null
           facebook_pixel_id?: string | null
+          flow_engine_v3?: string
           flow_reliability_v2?: string
           flow_step_media_order?: Json
           google_analytics_id?: string | null
@@ -2120,6 +2151,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "consultants_public"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consultants_referred_by_fkey"
+            columns: ["referred_by"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
           },
         ]
       }
@@ -2294,6 +2332,59 @@ export type Database = {
           utm_source?: string | null
         }
         Relationships: []
+      }
+      customer_flow_state: {
+        Row: {
+          assigned_human_id: string | null
+          current_step_id: string | null
+          customer_id: string
+          entered_step_at: string
+          expires_at: string | null
+          flow_id: string | null
+          last_inbound_at: string | null
+          last_outbound_at: string | null
+          pause_reason: string | null
+          retries: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_human_id?: string | null
+          current_step_id?: string | null
+          customer_id: string
+          entered_step_at?: string
+          expires_at?: string | null
+          flow_id?: string | null
+          last_inbound_at?: string | null
+          last_outbound_at?: string | null
+          pause_reason?: string | null
+          retries?: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_human_id?: string | null
+          current_step_id?: string | null
+          customer_id?: string
+          entered_step_at?: string
+          expires_at?: string | null
+          flow_id?: string | null
+          last_inbound_at?: string | null
+          last_outbound_at?: string | null
+          pause_reason?: string | null
+          retries?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_flow_state_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: true
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       customer_memory: {
         Row: {
@@ -2837,6 +2928,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "customers_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
+          {
             foreignKeyName: "customers_customer_referred_by_consultant_id_fkey"
             columns: ["customer_referred_by_consultant_id"]
             isOneToOne: false
@@ -2849,6 +2947,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "consultants_public"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customers_customer_referred_by_consultant_id_fkey"
+            columns: ["customer_referred_by_consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
           },
         ]
       }
@@ -3266,6 +3371,13 @@ export type Database = {
             referencedRelation: "consultants_public"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "flow_router_rules_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
         ]
       }
       gemini_quota_bucket: {
@@ -3670,6 +3782,13 @@ export type Database = {
             referencedRelation: "consultants_public"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "page_events_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
         ]
       }
       page_views: {
@@ -3717,6 +3836,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "consultants_public"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "page_views_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
           },
         ]
       }
@@ -4443,6 +4569,13 @@ export type Database = {
             referencedRelation: "consultants_public"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "consultants_referred_by_fkey"
+            columns: ["referred_by"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
         ]
       }
       customer_memory_active: {
@@ -4509,6 +4642,20 @@ export type Database = {
           phase: string | null
           selfcheck_blocks: number | null
           tool_called: string | null
+        }
+        Relationships: []
+      }
+      v_flow_engine_health: {
+        Row: {
+          consultant_id: string | null
+          consultant_name: string | null
+          converted_total: number | null
+          delegated_total: number | null
+          flag: string | null
+          last_tick_at: string | null
+          paused_total: number | null
+          state_rows_total: number | null
+          turns_24h: number | null
         }
         Relationships: []
       }

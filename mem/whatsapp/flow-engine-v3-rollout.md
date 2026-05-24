@@ -1,60 +1,57 @@
 ---
 name: Flow Engine V3 Rollout
-description: Cabeamento Semana 1 do engine v3 nos webhooks (whapi + evolution) e 4 crons; sequência dark→canary→on para Semanas 2-4
+description: Plano de 4 semanas para migrar runBotFlow legado → engine V3 puro. Status atual, gates de cada fase, comandos de rollback.
 type: feature
 ---
 
-# Flow Engine V3 — Rollout em andamento
+# Flow Engine V3 — Rollout
 
-## Semana 1 (cabeamento de código) — FEITO
+**Objetivo:** substituir `runBotFlow` imperativo por `tick(state, input) → EngineResult` puro + `customer_flow_state` como fonte de verdade.
 
-- Helper único `_shared/flow-engine/webhook-hook.ts` (`runEngineV3IfEnabled`).
-  Carrega `customer_flow_state`, loga `engine_dark_decision`, fail-open.
-- `whapi-webhook/index.ts` (PROD): hook chamado antes do `runEngine` (linha ~1121).
-- `evolution-webhook/index.ts` (espelho): bloco 7.6 substituído pelo mesmo helper.
-- Helper batch `_shared/cron-pause-batch.ts` (`filterSendableCustomers`).
-  Aplica filtro v3 (`customer_flow_state.status`) em N customers com 1 SELECT.
-- 4 crons migrados: `ai-followup-cron`, `bot-followup-checker`,
-  `bot-stuck-recovery`, `bot-loop-watchdog`. Todos fail-open.
+## Flags por consultor
+- `consultants.flow_reliability_v2` ∈ {off, dark, canary, on}
+- `consultants.flow_engine_v3` ∈ {off, dark, canary, on}
 
-## Comportamento atual
+## Status atual
 
-- `flow_engine_v3='off'` → helper retorna no-op.
-- `'dark' | 'canary' | 'on'` → helper LÊ `customer_flow_state` e loga
-  `engine_dark_decision`. **NÃO emite por v3 ainda** — o legado continua
-  emitindo até o ChannelAdapter v3 ser wired (Semana 4).
-- Crons filtram batch por v3 + legado (mais conservador na migração).
+### Semana 1 — Cabeamento (✅ feito)
+- `_shared/flow-engine/webhook-hook.ts` — fail-open, loga `engine_dark_decision`.
+- `_shared/cron-pause-batch.ts` — filterSendableCustomers em N+1 batch.
+- Webhooks `whapi-webhook` + `evolution-webhook` chamam o hook antes do legado.
+- Crons `ai-followup-cron`, `bot-followup-checker`, `bot-stuck-recovery`, `bot-loop-watchdog` migrados.
 
-## Semanas 2-4 (operacional via SQL)
+### Semana 2 — Dark mode (✅ ativado em 1 consultor)
+- Migration criou: coluna `consultants.flow_engine_v3`, tabela `customer_flow_state`, view `v_flow_engine_health` (security_invoker).
+- **Consultor de teste:** Rafael Ferreira (`0c2711ad-4836-41e6-afba-edd94f698ae3`)
+  - Volume: 966 leads/7d, 9 leads/24h
+  - Ativado: `flow_reliability_v2='dark'` + `flow_engine_v3='dark'`
+- **Gates para Semana 3** (validar em 48h):
+  - Zero `engine_v3_state_load_failed` em edge logs
+  - ≥99% paridade entre `engine_dark_decision` e ação legada
+  - p95 latência webhook ≤ baseline + 10%
+  - Zero duplicação de mensagem reportada
+  - ≥100 turnos shadow logados
+- **Observação:** `customer_flow_state` está vazia — leads atuais ainda não têm linha canônica. O hook V3 retorna NOOP até existir backfill ou criação on-demand. Os logs `engine_dark_decision` só aparecem quando houver estado; até lá, apenas confirma fail-open silencioso.
 
+### Semana 3 — Canary 5% (pendente)
+- Ativar `flow_engine_v3='canary'` em 3-5 consultores de baixo volume + 1 de alto.
+- Monitorar `v_flow_engine_health` 7 dias. Gates:
+  - `conversion_rate` ≥ baseline − 2pp
+  - `deterministic_fallback_pct` ≤ 5%
+  - `engine_delegate_legacy` < 30%
+  - Zero P1.
+
+### Semana 4 — Global + cleanup (pendente)
+- `flow_engine_v3='on'` global.
+- Após 30 dias estáveis: marcar `bot_paused` deprecated, remover branches mortos, Phase J cleanup.
+
+## Rollback (30s, qualquer momento)
 ```sql
--- Semana 2 dia 1: dark em 1 consultor
-UPDATE consultants SET flow_reliability_v2='dark' WHERE id='<id-teste>';
--- Semana 2 dia 2: global
-UPDATE consultants SET flow_reliability_v2='on';
--- Semana 2 dia 3: v3 em dark no consultor de teste
-UPDATE consultants SET flow_engine_v3='dark' WHERE id='<id-teste>';
-
--- Semana 3: canary 5%
-UPDATE consultants SET flow_engine_v3='canary' WHERE id IN (...);
-
--- Semana 4: global
-UPDATE consultants SET flow_engine_v3='on';
+UPDATE public.consultants
+SET flow_reliability_v2='off', flow_engine_v3='off'
+WHERE id='<consultant_id>';
 ```
 
-Rollback: `UPDATE consultants SET flow_engine_v3='off' WHERE id=...;` (cache 30s).
-
-## Próximos itens (não implementados)
-
-- ChannelAdapter v3 wrapper para `whapi-webhook` permitir `dispatch()` real
-  (transforma `tick()` action → `sender.sendText/Media`). Hoje engine v3 é
-  só observação.
-- Cenários extras em `bot-e2e-runner` para validar paridade dark.
-- Cleanup `customers.bot_paused` deprecation (Phase J, após 30d em `on`).
-
-## Critérios de paridade (gates)
-
-- `engine_dark_decision` vs decisão legada: ≥99% paridade em 48h dark.
-- `cron_pause_disagreement` < 1% das execuções de cron.
-- `engine_v3_fallback_to_legacy` ≈ 0 (não esperado em fluxo normal).
-- Latência p95 webhook ≤ baseline + 10%.
+## Próximo trabalho técnico necessário
+- Backfill / criação on-demand de `customer_flow_state` (trigger em `customers` INSERT/UPDATE) para que `loadFlowState` retorne dados reais.
+- Wire do `ChannelAdapter` ao webhook para Semana 4 (hoje o hook só observa).
