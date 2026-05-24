@@ -145,7 +145,7 @@ export default function AIBrainPanel({ consultantId }: { consultantId: string })
                     <Badge variant="outline" className="text-[10px]">{d.phase}</Badge>
                     {d.tool_called && <Badge variant="secondary" className="text-[10px]">{d.tool_called}</Badge>}
                     <span className="text-muted-foreground tabular-nums">{fmtDate(d.created_at)}</span>
-                    <span className="font-mono text-[10px] text-muted-foreground">{d.model.replace(/^.*\//, "")}</span>
+                    <span className="font-mono text-[10px] text-muted-foreground">{(d.model ?? "—").replace(/^.*\//, "")}</span>
                     <span className={`tabular-nums ${low ? "text-amber-600" : "text-emerald-600"}`}>
                       {(conf * 100).toFixed(0)}%
                     </span>
