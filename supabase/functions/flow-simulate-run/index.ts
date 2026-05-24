@@ -1,16 +1,15 @@
 // Edge: flow-simulate-run
 // Roda o MOTOR REAL de produção (whapi-webhook + bot-flow + conversational)
-// reaproveitando a infraestrutura testMode existente:
-//   • Telefone reservado 5500000xxxxxxx → isTestPhone() ativa modo teste.
-//   • Headers x-bot-test-run-id / x-bot-test-turn injetam o run id.
-//   • Sender real é trocado por wrapper que grava em bot_test_outbound.
+// reaproveitando a infraestrutura testMode existente.
 //
-// Fluxo:
-//   1. Garante customer sandbox (is_sandbox=true) com phone determinístico.
-//   2. Cria bot_test_runs (running).
-//   3. POST sintético no formato Whapi para whapi-webhook com headers.
-//   4. Lê bot_test_outbound desse run/turn.
-//   5. Mapeia para events para a UI.
+// Garantias de paridade com o WhatsApp real:
+//   • Customer sandbox SEMPRE pertence ao settings.superadmin_consultant_id
+//     (mesmo consultor que o webhook real usa).
+//   • capture_mode='auto' é forçado PÓS-insert para bypassar o trigger
+//     trg_customers_default_capture_mode que setaria 'manual' e travaria o
+//     fluxo no [manual-capture-stop].
+//   • bot_paused/assigned_human_id/do_not_contact sempre limpos antes do turno.
+//   • conversation_step não é resetado fora da ação "Zerar" (mantém continuidade).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 
@@ -38,7 +37,7 @@ function testPhoneFor(consultantId: string): string {
   let h = 0;
   for (const ch of consultantId) h = ((h << 5) - h + ch.charCodeAt(0)) | 0;
   const suffix = String(Math.abs(h)).padStart(8, "0").slice(0, 8);
-  return `5500000${suffix}`; // 15 dígitos (Brasil format)
+  return `5500000${suffix}`;
 }
 
 Deno.serve(async (req) => {
@@ -55,28 +54,40 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: "unauthenticated" }, 401);
 
     const body = await req.json().catch(() => ({}));
-    const consultantId = String(body?.consultant_id || user.id);
-
     const svc = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    // Authz: dono ou admin
-    if (consultantId !== user.id) {
+    // 🔑 Sempre rodar contra o consultor real do webhook (settings.superadmin_consultant_id).
+    // Isso garante que o motor carregue o fluxo/variant ativo correto.
+    const { data: sRow } = await svc
+      .from("settings")
+      .select("value")
+      .eq("key", "superadmin_consultant_id")
+      .maybeSingle();
+    const realSuperAdminId = String((sRow as any)?.value || "").trim();
+    if (!realSuperAdminId) return json({ error: "superadmin_consultant_id_missing" }, 500);
+
+    const requestedConsultantId = String(body?.consultant_id || user.id);
+    // Authz: usuário precisa ser dono OU admin
+    if (requestedConsultantId !== user.id) {
       const { data: roles } = await svc.from("user_roles").select("role").eq("user_id", user.id);
       const isAdmin = (roles || []).some((r: any) =>
         ["admin", "super_admin", "superadmin"].includes(String(r.role)),
       );
       if (!isAdmin) return json({ error: "forbidden" }, 403);
     }
+    // O sandbox sempre vai para o superadmin real (não importa quem chamou).
+    const consultantId = realSuperAdminId;
 
     const userMessage = String(body?.user_message || "").trim();
     const buttonId = body?.button_id ? String(body.button_id) : null;
     const attach: { url?: string; kind?: "image" | "document" | "audio" | "video" } = body?.attach || {};
     const variant = String(body?.variant || "").toUpperCase();
+    const fresh = body?.fresh === true; // sinaliza "Zerar" → resetar step
 
     const phone = testPhoneFor(consultantId);
     const chatId = `${phone}@s.whatsapp.net`;
 
-    // ── 1) Garante customer sandbox (is_sandbox=true bloqueia triggers de CRM/alertas) ──
+    // ── 1) Garante customer sandbox ──
     let { data: customer } = await svc
       .from("customers")
       .select("*")
@@ -93,19 +104,49 @@ Deno.serve(async (req) => {
           is_sandbox: true,
           customer_origin: "whatsapp_lead",
           flow_variant: variant || "A",
+          status: "pending",
+          conversation_step: "welcome",
         })
         .select("*")
         .single();
       if (createErr) return json({ error: "create_customer_failed", detail: createErr.message }, 500);
       customer = created;
-    } else if (variant && customer.flow_variant !== variant) {
-      await svc.from("customers").update({ flow_variant: variant, is_sandbox: true }).eq("id", customer.id);
-      customer.flow_variant = variant;
-    } else if (!customer.is_sandbox) {
-      await svc.from("customers").update({ is_sandbox: true }).eq("id", customer.id);
     }
 
-    // ── 2) Cria/usa bot_test_run em curso para este customer ──
+    // 🛡️ Force-fix do customer ANTES de chamar o webhook:
+    //  • capture_mode='auto' (bypassa trigger trg_customers_default_capture_mode
+    //    que seta 'manual' e faria o webhook abortar em [manual-capture-stop])
+    //  • bot_paused/assigned_human_id/do_not_contact desligados
+    //  • flow_variant correto
+    //  • status saudável
+    //  • consultant_id = superadmin real (caso sandbox antigo tenha outro)
+    const patch: Record<string, any> = {
+      capture_mode: "auto",
+      bot_paused: false,
+      bot_paused_until: null,
+      bot_paused_reason: null,
+      assigned_human_id: null,
+      do_not_contact: false,
+      is_sandbox: true,
+      consultant_id: consultantId,
+      status: customer.status === "complete" || customer.status === "active" ? "pending" : (customer.status || "pending"),
+      updated_at: new Date().toISOString(),
+    };
+    if (variant) patch.flow_variant = variant;
+    if (fresh) {
+      patch.conversation_step = "welcome";
+      patch.previous_conversation_step = null;
+      patch.custom_step_retries = 0;
+      patch.custom_step_retries_step = null;
+      patch.last_custom_prompt_at = null;
+      patch.ai_followups_count = 0;
+      patch.followup_count = 0;
+      patch.chat_cleared_at = new Date().toISOString();
+    }
+    await svc.from("customers").update(patch).eq("id", customer.id);
+    Object.assign(customer as any, patch);
+
+    // ── 2) Cria bot_test_run em curso ──
     const { data: runRow, error: runErr } = await svc
       .from("bot_test_runs")
       .insert({
@@ -193,9 +234,9 @@ Deno.serve(async (req) => {
       webhookErr = `webhook_fetch: ${(e as Error).message}`;
     }
 
-    // ── 5) Polling de bot_test_outbound (espera engine terminar) ──
+    // ── 5) Polling de bot_test_outbound ──
     const events: UiEvent[] = [];
-    const deadline = Date.now() + 10_000; // até 10s
+    const deadline = Date.now() + 15_000;
     const seen = new Set<string>();
     let stableSince = 0;
     while (Date.now() < deadline) {
@@ -206,33 +247,30 @@ Deno.serve(async (req) => {
         .eq("run_id", runId)
         .eq("turn", turn)
         .order("created_at", { ascending: true });
-      const fresh = (rows || []).filter((r: any) => !seen.has(r.id));
-      if (fresh.length === 0) {
+      const incoming = (rows || []).filter((r: any) => !seen.has(r.id));
+      if (incoming.length === 0) {
         if (events.length > 0) {
-          // Se já temos eventos e nada novo por 1.2s, encerra cedo.
           if (!stableSince) stableSince = Date.now();
-          else if (Date.now() - stableSince > 1200) break;
+          else if (Date.now() - stableSince > 1500) break;
         }
         continue;
       }
       stableSince = 0;
-      for (const r of fresh as any[]) {
+      for (const r of incoming as any[]) {
         seen.add(r.id);
         events.push(mapOutbound(String(r.kind || ""), String(r.content || "")));
       }
     }
 
-    // ── 6) Marca run como concluído ──
     await svc.from("bot_test_runs").update({
       status: "done",
       finished_at: new Date().toISOString(),
       summary: { events: events.length, webhook_ok: webhookOk, webhook_err: webhookErr },
     }).eq("id", runId);
 
-    // ── 7) Releitura do estado pra UI ──
     const { data: cnow } = await svc
       .from("customers")
-      .select("conversation_step, flow_variant, name, capture_mode")
+      .select("conversation_step, flow_variant, name, capture_mode, status")
       .eq("id", customer.id)
       .maybeSingle();
 
@@ -249,7 +287,21 @@ Deno.serve(async (req) => {
 function mapOutbound(kind: string, content: string): UiEvent {
   if (kind === "text") return { kind: "text", text: content };
   if (kind === "buttons") {
-    // formato gravado: "prompt\n[t1 | t2 | t3]"
+    // Formato novo (JSON): {"text":"prompt","buttons":[{"id":"...","title":"..."}]}
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed && Array.isArray(parsed.buttons)) {
+        return {
+          kind: "buttons",
+          text: String(parsed.text || ""),
+          buttons: parsed.buttons.map((b: any, i: number) => ({
+            id: String(b.id || `btn_${i}`),
+            title: String(b.title || b.id || ""),
+          })),
+        };
+      }
+    } catch (_) { /* fallback legacy */ }
+    // Formato legacy: "prompt\n[t1 | t2 | t3]" (sem ids reais)
     const m = content.match(/^([\s\S]*)\n\[([^\]]*)\]\s*$/);
     if (m) {
       const prompt = m[1];
