@@ -3996,6 +3996,177 @@ export type Database = {
         }
         Relationships: []
       }
+      rollout_alerts: {
+        Row: {
+          acknowledged: boolean
+          body: string
+          consultant_id: string | null
+          created_at: string
+          id: string
+          level: string
+          title: string
+        }
+        Insert: {
+          acknowledged?: boolean
+          body: string
+          consultant_id?: string | null
+          created_at?: string
+          id?: string
+          level?: string
+          title: string
+        }
+        Update: {
+          acknowledged?: boolean
+          body?: string
+          consultant_id?: string | null
+          created_at?: string
+          id?: string
+          level?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rollout_alerts_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rollout_alerts_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rollout_alerts_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
+        ]
+      }
+      rollout_audit: {
+        Row: {
+          consultant_id: string | null
+          created_at: string
+          flag_kind: string
+          from_state: string | null
+          id: string
+          metrics_snapshot: Json | null
+          reason: string | null
+          to_state: string
+        }
+        Insert: {
+          consultant_id?: string | null
+          created_at?: string
+          flag_kind: string
+          from_state?: string | null
+          id?: string
+          metrics_snapshot?: Json | null
+          reason?: string | null
+          to_state: string
+        }
+        Update: {
+          consultant_id?: string | null
+          created_at?: string
+          flag_kind?: string
+          from_state?: string | null
+          id?: string
+          metrics_snapshot?: Json | null
+          reason?: string | null
+          to_state?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rollout_audit_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rollout_audit_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rollout_audit_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
+        ]
+      }
+      rollout_config: {
+        Row: {
+          alert_consultant_id: string | null
+          autopilot_enabled: boolean
+          canary_min_hours: number
+          canary_percent: number
+          dark_min_hours: number
+          green_max_delegated_ratio: number
+          green_max_paused_ratio: number
+          green_min_turns_24h: number
+          id: boolean
+          notes: string | null
+          updated_at: string
+        }
+        Insert: {
+          alert_consultant_id?: string | null
+          autopilot_enabled?: boolean
+          canary_min_hours?: number
+          canary_percent?: number
+          dark_min_hours?: number
+          green_max_delegated_ratio?: number
+          green_max_paused_ratio?: number
+          green_min_turns_24h?: number
+          id?: boolean
+          notes?: string | null
+          updated_at?: string
+        }
+        Update: {
+          alert_consultant_id?: string | null
+          autopilot_enabled?: boolean
+          canary_min_hours?: number
+          canary_percent?: number
+          dark_min_hours?: number
+          green_max_delegated_ratio?: number
+          green_max_paused_ratio?: number
+          green_min_turns_24h?: number
+          id?: boolean
+          notes?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rollout_config_alert_consultant_id_fkey"
+            columns: ["alert_consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rollout_config_alert_consultant_id_fkey"
+            columns: ["alert_consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rollout_config_alert_consultant_id_fkey"
+            columns: ["alert_consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
+        ]
+      }
       scheduled_messages: {
         Row: {
           consultant_id: string
