@@ -84,3 +84,9 @@ verify_jwt = false
 
 
 
+
+[functions.inbound-media-retry-cron]
+verify_jwt = false
+
+[functions.outbound-media-flush-cron]
+verify_jwt = false

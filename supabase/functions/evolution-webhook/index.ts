@@ -130,6 +130,33 @@ Deno.serve(async (req) => {
 
     const sender = createEvolutionSender(EVOLUTION_API_URL, EVOLUTION_API_KEY, instanceName);
 
+    // Phase A — Task 8 (whatsapp-flow-architecture-v3): instancia o adapter
+    // em paralelo SEM trocar o sender legado. Apenas confirma que `getAdapter`
+    // expõe `capabilities` e que poderia ser usado pelos motores. O wiring real
+    // (passar o adapter para handlers) acontece nas próximas phases. Isso evita
+    // qualquer regressão neste passo.
+    try {
+      const { getAdapter } = await import("../_shared/channels/index.ts");
+      const adapter = getAdapter({
+        kind: "evolution",
+        input: {
+          apiUrl: EVOLUTION_API_URL,
+          apiKey: EVOLUTION_API_KEY,
+          instanceName,
+          connectedPhone: instanceData.connected_phone,
+        },
+      });
+      jsonLog("debug", "channel_adapter_ready", {
+        channel: adapter.capabilities.channel,
+        instance_name: instanceName,
+        supports_buttons: adapter.capabilities.supportsButtons,
+        max_buttons: adapter.capabilities.maxButtons,
+        supports_list: adapter.capabilities.supportsList,
+      });
+    } catch (e: any) {
+      console.warn("[channel-adapter] smoke wiring falhou (não bloqueante):", e?.message);
+    }
+
     // ─── Feature flag: WhatsApp Flow Reliability v2 (per-consultant) ───
     // Controls the new dedup/rate-limit/customer-lock ordering described in
     // bugfix.md §2.6/§2.11/§2.33/§2.37 and design.md §5. Values:
@@ -175,9 +202,12 @@ Deno.serve(async (req) => {
     });
 
     const {
-      remoteJid, messageText, buttonId, hasImage, hasDocument, isFile, isButton,
-      imageMessage, documentMessage, key, message,
+      remoteJid, buttonId, hasImage, hasDocument, hasAudio, isFile, isButton, mediaKind,
+      imageMessage, documentMessage, audioMessage, key, message,
     } = parsed;
+    // messageText pode ser sobrescrito pela transcrição automática quando o
+    // inbound é áudio (Task 17). Por isso vai como `let` e não destructured.
+    let messageText: string = parsed.messageText;
 
     if (!messageText && !isFile && !isButton) {
       console.log("⏭️ Mensagem vazia");
@@ -700,6 +730,13 @@ Deno.serve(async (req) => {
     let fileUrl: string | null = null;
     let fileBase64: string | null = null;
     let inboundMediaMinioUrl: string | null = null;
+    // Task 14 (whatsapp-flow-reliability-fix): rastrear falhas de download
+    // explicitamente e responder ao cliente em vez de silenciar. Quando o
+    // download falha completamente (sem base64 e sem URL), registramos em
+    // `inbound_media_failures`, mandamos reply de cortesia e MANTEMOS o step
+    // atual — antes a thread continuava com `fileBase64=null` e o handler
+    // perguntava por foto de novo, ou pior, ficava mudo.
+    let mediaDownloadFailed = false;
     if (isFile) {
       console.log("📥 Baixando mídia via Evolution API (getBase64FromMediaMessage)...");
       fileBase64 = await sender.downloadMedia(key, message);
@@ -708,12 +745,21 @@ Deno.serve(async (req) => {
         fileUrl = `data:${mimeType};base64,${fileBase64}`;
         console.log(`✅ Mídia baixada via Evolution (${mimeType}, b64 len: ${fileBase64.length})`);
 
+        // Pre-declarado fora do try para o catch poder usar no enqueue de retry.
+        const kind: "image" | "audio" | "video" | "document" =
+          mimeType.startsWith("image/") ? "image"
+          : mimeType.startsWith("audio/") ? "audio"
+          : mimeType.startsWith("video/") ? "video"
+          : "document";
+
         // Background: upload to MinIO em whatsapp/{consultor}/{jid}/{kind}/{ts}.{ext}
         // Não bloqueia o fluxo do bot; apenas registra a URL pública para o histórico.
+        // Task 15 (whatsapp-flow-reliability-fix): em falha de upload, enfileirar
+        // em `inbound_media_retry` com base64 + mime para o cron de retry.
+        // O fluxo do bot continua normalmente porque o OCR já tem o base64 em mãos.
         try {
           const { uploadToMinioPath, base64ToBytes, buildConsultantSlug, sanitizeJid, normalizeName, extFromMime } =
             await import("../_shared/minio-upload.ts");
-          const kind = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("audio/") ? "audio" : mimeType.startsWith("video/") ? "video" : "document";
           const slug = buildConsultantSlug(consultorId || instanceData.consultant_id, nomeRepresentante);
           const jid = sanitizeJid(remoteJid || phone);
           const ext = extFromMime(mimeType);
@@ -734,16 +780,143 @@ Deno.serve(async (req) => {
               }).eq("id", lastConv.id);
             }
           } catch (e) { /* ignore */ }
-        } catch (e: any) {
-          console.warn(`📦⚠️ inbound media MinIO falhou: ${e?.message}`);
+        } catch (uploadErr: any) {
+          console.warn(`📦⚠️ inbound media MinIO falhou — enfileirando retry: ${uploadErr?.message}`);
+          // Task 15: enqueue retry em `inbound_media_retry` para o cron processar.
+          // base64 + mime ficam disponíveis para upload posterior. TTL default 1h.
+          try {
+            await supabase.from("inbound_media_retry").insert({
+              customer_id: customer.id,
+              consultant_id: instanceData.consultant_id,
+              message_id: messageId,
+              media_kind: kind,
+              base64: fileBase64,
+              mime_type: mimeType,
+            });
+            jsonLog("info", "inbound_media_retry_enqueued", {
+              customer_id: customer.id,
+              consultant_id: instanceData.consultant_id,
+              message_id: messageId,
+              media_kind: kind,
+              reason: uploadErr?.message ?? "minio_upload_failed",
+            });
+          } catch (enqueueErr: any) {
+            console.error("[inbound-media-retry] enqueue falhou:", enqueueErr?.message);
+          }
         }
       } else {
+        // Task 14: download retornou null. Tenta URL direta como fallback.
+        // Se também não houver URL, registra falha persistente, responde ao
+        // cliente e marca para preservar o step atual lá embaixo.
         fileUrl = extractMediaUrl(message);
         if (fileUrl) {
           console.warn("⚠️ downloadMedia falhou, usando URL direta como fallback:", fileUrl.substring(0, 80));
         } else {
+          mediaDownloadFailed = true;
           console.error("❌ Falha total ao baixar mídia — sem base64 e sem URL");
+          jsonLog("warn", "evolution_media_lost", {
+            customer_id: customer.id,
+            consultant_id: instanceData.consultant_id,
+            message_id: messageId,
+            v2_flag: v2Flag,
+            reason: "download_returned_null_no_fallback_url",
+          });
+          try {
+            await supabase.from("inbound_media_failures").insert({
+              customer_id: customer.id,
+              consultant_id: instanceData.consultant_id,
+              message_id: messageId,
+              reason: "download_returned_null_no_fallback_url",
+              raw_payload: {
+                has_image: hasImage,
+                has_document: hasDocument,
+                image_mime: imageMessage?.mimetype ?? null,
+                document_mime: documentMessage?.mimetype ?? null,
+                key: key ?? null,
+              },
+            });
+          } catch (logErr: any) {
+            console.error("[inbound-media-failures] insert falhou:", logErr?.message);
+          }
         }
+      }
+    }
+
+    // Task 14: se a mídia foi perdida em definitivo, manda reply de cortesia
+    // e retorna 200 SEM avançar/redirecionar o `conversation_step`. O cliente
+    // reenviar normalmente cai no mesmo step e refaz o caminho.
+    if (mediaDownloadFailed) {
+      try {
+        await sender.sendText(
+          remoteJid,
+          "Desculpa 😅 não consegui receber sua imagem. Pode reenviar, por favor?"
+        );
+        await supabase.from("conversations").insert({
+          customer_id: customer.id,
+          message_direction: "outbound",
+          message_text: "Desculpa 😅 não consegui receber sua imagem. Pode reenviar, por favor?",
+          message_type: "text",
+          conversation_step: customer.conversation_step,
+        });
+      } catch (sendErr: any) {
+        console.error("[evolution_media_lost] reply falhou:", sendErr?.message);
+      }
+      // Liberar customer lock antes do return (mesmo padrão do return final).
+      if (lockToken && lockCustomerId) {
+        try {
+          await supabase.rpc("release_customer_lock", {
+            p_customer: lockCustomerId, p_token: lockToken,
+          });
+        } catch (_) { /* noop */ }
+        lockToken = null;
+        lockCustomerId = null;
+      }
+      return new Response(JSON.stringify({ ok: true, mode: "media_lost" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ─── 7.5) Áudio → transcript (Task 17) ─────────────────────────────
+    // Se o cliente mandou áudio E o download deu certo, transcreve via
+    // ai-transcribe-media e injeta o texto como `messageText` para que os
+    // motores conversacionais (`runConversationalFlow`/`ai-agent-router`)
+    // tratem como se fosse texto. O áudio original já está em MinIO via
+    // bloco 7 acima. Se a transcrição falhar, mantemos o comportamento
+    // atual (handler de mídia recebe áudio bruto). Best-effort, never throws.
+    if (hasAudio && fileBase64 && !messageText) {
+      try {
+        const mt = audioMessage?.mimetype || "audio/ogg";
+        console.log(`🎙️ Transcrevendo áudio do cliente (${mt})...`);
+        const transRes = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-transcribe-media`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+            apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "",
+          },
+          body: JSON.stringify({ base64: fileBase64, mimeType: mt, kind: "audio", language: "pt-BR" }),
+        });
+        const tj = await transRes.json().catch(() => ({}));
+        const transcript = String(tj?.transcript || "").trim();
+        if (transcript) {
+          console.log(`✅ Transcrição (${transcript.length} chars): "${transcript.substring(0, 120)}"`);
+          messageText = transcript;
+          // Atualiza a última conversa inbound com o transcript para histórico/IA.
+          try {
+            const { data: lastConv } = await supabase.from("conversations")
+              .select("id").eq("customer_id", customer.id).eq("message_direction", "inbound")
+              .order("created_at", { ascending: false }).limit(1).maybeSingle();
+            if (lastConv?.id) {
+              await supabase.from("conversations").update({
+                message_text: `[áudio] ${transcript}`,
+              }).eq("id", lastConv.id);
+            }
+          } catch (_) { /* best-effort */ }
+        } else {
+          console.warn("⚠️ Transcrição vazia — seguindo com áudio bruto.");
+        }
+      } catch (e: any) {
+        console.warn("⚠️ Transcrição falhou — seguindo com áudio bruto:", e?.message);
       }
     }
 
@@ -955,6 +1128,37 @@ Deno.serve(async (req) => {
     let reply = "";
     let updates: Record<string, any> = {};
     let engineUsed: "sys" | "flow" = "sys";
+
+    // ─── 7.6) Engine v3 dark/canary/on (Phase C Task 21) ───────────────
+    // Quando `flow_engine_v3 ∈ {dark, canary, on}`, carrega o `EngineCustomerState`
+    // e chama `tick()` em paralelo. Em `dark` apenas loga; em `canary`/`on`
+    // o dispatcher v3 emite. Por enquanto NÃO substituímos o caminho legado —
+    // implementação completa do canary path acontece após canary E2E (task 39+).
+    //
+    // Este bloco fica fail-open: qualquer erro no engine v3 é logado e o
+    // caminho legado segue normalmente.
+    try {
+      const { getFlowEngineV3, isV2Enabled } = await import("../_shared/feature-flag.ts");
+      const engineFlag = await getFlowEngineV3(supabase, instanceData.consultant_id);
+      if (isV2Enabled(engineFlag)) {
+        const { loadFlowState } = await import("../_shared/customer-flow-state.ts");
+        const state = await loadFlowState(supabase, customer.id);
+        if (state && state.currentStepId) {
+          jsonLog("debug", "engine_v3_state_loaded", {
+            customer_id: customer.id,
+            consultant_id: instanceData.consultant_id,
+            engine_v3_flag: engineFlag,
+            current_step_id: state.currentStepId,
+            status: state.status,
+          });
+          // Em dark: log apenas. Em canary/on: chamada real fica para Task 39+
+          // após validação 48h em dark.
+        }
+      }
+    } catch (e: any) {
+      console.warn("[engine-v3-dark] erro não-bloqueante:", e?.message);
+    }
+
     try {
       const customerOverride = (customer as any).conversational_flow_enabled;
       const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
