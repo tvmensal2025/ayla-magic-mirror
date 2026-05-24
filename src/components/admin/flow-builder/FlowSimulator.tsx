@@ -1,14 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-
-import { Switch } from "@/components/ui/switch";
-import { Send, RotateCw, AlertTriangle, Loader2 } from "lucide-react";
-import { Step, getButtons, renderVarsPreview, isAiAnswerStep } from "./flowTypes";
-import { simulateStep } from "@/lib/flow-simulator/engine";
+import { Send, RotateCw, AlertTriangle, Loader2, Paperclip } from "lucide-react";
+import { Step } from "./flowTypes";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface Props {
   open: boolean;
@@ -18,54 +16,32 @@ interface Props {
   consultantName?: string | null;
 }
 
-type MediaEv =
-  | { kind: "audio"; url: string; duration?: number; key: string }
+type Ev =
+  | { kind: "text"; text: string; key: string }
+  | { kind: "buttons"; text: string; buttons: { id: string; title: string }[]; key: string }
+  | { kind: "audio"; url: string; key: string }
   | { kind: "image"; url: string; caption?: string; key: string }
-  | { kind: "video"; url: string; key: string }
-  | { kind: "text"; body: string; key: string }
-  | { kind: "buttons"; items: { id: string; title: string }[]; key: string }
-  | { kind: "system"; text: string; key: string }
-  | { kind: "lead"; text: string; key: string }
-  | { kind: "ai_typing"; key: string }
-  | { kind: "ai_reply"; body: string; key: string };
+  | { kind: "video"; url: string; caption?: string; key: string }
+  | { kind: "document"; url: string; caption?: string; key: string }
+  | { kind: "presence"; state: string; key: string }
+  | { kind: "lead"; text: string; attach?: { url: string; kind: string }; key: string }
+  | { kind: "system"; text: string; key: string };
 
-const PRESET_MESSAGES = [
-  "Quero simular",
-  "Tenho dúvida",
-  "Não tenho conta",
-  "Falar com humano",
-  "Outra coisa",
-];
+const VARIANTS: Array<"A" | "B" | "C" | "D"> = ["A", "B", "C", "D"];
+let _ctr = 0;
+const k = () => `ev_${Date.now()}_${++_ctr}`;
 
-let _evCounter = 0;
-const newKey = () => `ev_${Date.now()}_${++_evCounter}`;
-
-export default function FlowSimulator({
-  open,
-  onOpenChange,
-  steps,
-  consultantId,
-  consultantName,
-}: Props) {
-  const [currentStepId, setCurrentStepId] = useState<string | null>(null);
-  const [events, setEvents] = useState<MediaEv[]>([]);
-  const [visited, setVisited] = useState<Set<string>>(new Set());
+export default function FlowSimulator({ open, onOpenChange, consultantId }: Props) {
+  const [events, setEvents] = useState<Ev[]>([]);
   const [freeText, setFreeText] = useState("");
-  const [loopWarning, setLoopWarning] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [aiEnabled, setAiEnabled] = useState(true);
+  const [variant, setVariant] = useState<"A" | "B" | "C" | "D">("A");
+  const [state, setState] = useState<any>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const stepsRef = useRef(steps);
-  stepsRef.current = steps;
-
-  const aiHistoryRef = useRef<Array<{ role: string; content: string }>>([]);
-
-  const activeSteps = useMemo(() => steps.filter((s) => s.is_active), [steps]);
 
   useEffect(() => {
-    if (!open) return;
-    reset();
+    if (open) handleReset(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -74,167 +50,74 @@ export default function FlowSimulator({
     if (el) el.scrollTop = el.scrollHeight;
   }, [events]);
 
-  function reset() {
-    setLoadError(null);
-    setLoopWarning(null);
-    setEvents([]);
-    setVisited(new Set());
-    aiHistoryRef.current = [];
-    const first = activeSteps[0];
-    if (!first) {
-      setLoadError("Nenhum passo ativo no fluxo.");
-      setCurrentStepId(null);
-      return;
-    }
-    setCurrentStepId(first.id);
-    void renderStep(first.id, true);
+  function appendEvents(incoming: any[]) {
+    setEvents((prev) => [...prev, ...incoming.map((e) => ({ ...e, key: k() }))]);
   }
 
-  function append(ev: MediaEv) {
-    setEvents((prev) => [...prev, ev]);
-  }
-
-  async function fetchMedia(slotKey: string | null) {
-    if (!slotKey || !consultantId) return [];
+  async function callRun(payload: any) {
+    setBusy(true);
     try {
-      const { data, error } = await supabase.functions.invoke("flow-simulate", {
-        body: { action: "media", consultant_id: consultantId, slot_key: slotKey },
+      const { data, error } = await supabase.functions.invoke("flow-simulate-run", {
+        body: { consultant_id: consultantId, variant, ...payload },
       });
       if (error) throw error;
-      return (data as any)?.media || [];
+      const out = data as { events?: any[]; customer_state?: any };
+      appendEvents(out.events || []);
+      if (out.customer_state) setState(out.customer_state);
     } catch (e) {
-      console.warn("[simulator] media fetch failed", e);
-      return [];
+      toast.error("Erro no simulador: " + (e as Error).message);
+      setEvents((prev) => [...prev, { kind: "system", text: `⚠ ${(e as Error).message}`, key: k() }]);
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function renderStep(stepId: string, isFirst = false) {
-    const step = stepsRef.current.find((s) => s.id === stepId);
-    if (!step) return;
-
-    setVisited((prev) => {
-      if (prev.has(stepId) && !isFirst) {
-        setLoopWarning(`Loop detectado em "${step.title}"`);
-      }
-      const next = new Set(prev);
-      next.add(stepId);
-      return next;
-    });
-
-    append({
-      kind: "system",
-      key: newKey(),
-      text: `▶ ${step.step_key || step.id} · ${step.title}`,
-    });
-
-    // 1) Mídia real do slot
-    if (step.slot_key) {
-      const media = await fetchMedia(step.slot_key);
-      // Ordem do real: text → audio → video → image (humanPace ~2,2s + 55ms/char)
-      const byKind = (k: string) => media.filter((m: any) => m.kind === k);
-      const text = renderVarsPreview(step.message_text || "");
-      if (text) {
-        await sleep(800);
-        append({ kind: "text", body: text, key: newKey() });
-        aiHistoryRef.current.push({ role: "assistant", content: text });
-      }
-      for (const a of byKind("audio")) {
-        await sleep(700);
-        append({ kind: "audio", url: a.url, duration: a.duration_sec, key: newKey() });
-      }
-      for (const v of byKind("video")) {
-        await sleep(700);
-        append({ kind: "video", url: v.url, key: newKey() });
-      }
-      for (const img of byKind("image")) {
-        await sleep(700);
-        append({ kind: "image", url: img.url, caption: img.label || "", key: newKey() });
-      }
-    } else {
-      const text = renderVarsPreview(step.message_text || "");
-      if (text) {
-        await sleep(400);
-        append({ kind: "text", body: text, key: newKey() });
-        aiHistoryRef.current.push({ role: "assistant", content: text });
-      }
-    }
-
-    // 2) Botões
-    const buttons = getButtons(step);
-    if (buttons.length > 0) {
-      append({ kind: "buttons", items: buttons, key: newKey() });
-    }
-  }
-
-  async function handleLeadInput(text: string, buttonId?: string) {
-    if (!currentStepId) return;
-    const trimmed = text.trim();
-    if (!trimmed && !buttonId) return;
-    const display = trimmed || buttonId || "";
-    append({ kind: "lead", text: display, key: newKey() });
-    aiHistoryRef.current.push({ role: "user", content: display });
-    setFreeText("");
+  async function handleReset(initial = false) {
+    setEvents([]);
+    setState(null);
+    if (!consultantId) return;
     setBusy(true);
-
     try {
-      const step = stepsRef.current.find((s) => s.id === currentStepId);
-      if (!step) return;
-
-      const result = simulateStep({
-        step,
-        allSteps: stepsRef.current,
-        messageText: trimmed,
-        buttonId,
+      await supabase.functions.invoke("flow-simulate-reset", {
+        body: { consultant_id: consultantId },
       });
+    } catch (_) { /* noop */ }
+    setBusy(false);
+    if (initial) {
+      // Dispara o motor com mensagem vazia → ele envia boas-vindas
+      await callRun({ user_message: "oi" });
+      setEvents((prev) => [{ kind: "system", text: "▶ Conversa zerada — começando do início", key: k() }, ...prev]);
+    }
+  }
 
-      if (result.kind === "transition" && result.nextStepId) {
-        append({ kind: "system", key: newKey(), text: `→ ${result.via}` });
-        setCurrentStepId(result.nextStepId);
-        await renderStep(result.nextStepId);
-      } else if (result.kind === "special") {
-        append({ kind: "system", key: newKey(), text: `→ Saída: ${result.special}` });
-      } else if (result.kind === "fallback") {
-        // IA livre real
-        if ((result.fallbackMode === "ai" || result.fallbackMode === "ai_limit" || isAiAnswerStep(step)) && aiEnabled) {
-          append({ kind: "ai_typing", key: newKey() });
-          try {
-            const { data, error } = await supabase.functions.invoke("flow-simulate", {
-              body: {
-                action: "ai",
-                consultant_id: consultantId,
-                consultant_name: consultantName,
-                prompt: (step.fallback as any)?.ai_prompt || step.message_text || "",
-                user_message: trimmed || display,
-                history: aiHistoryRef.current.slice(-8),
-              },
-            });
-            // remove typing
-            setEvents((prev) => prev.filter((e) => e.kind !== "ai_typing"));
-            if (error) throw error;
-            const reply = (data as any)?.reply || "(sem resposta da IA)";
-            append({ kind: "ai_reply", body: reply, key: newKey() });
-            aiHistoryRef.current.push({ role: "assistant", content: reply });
-          } catch (e) {
-            setEvents((prev) => prev.filter((e) => e.kind !== "ai_typing"));
-            append({
-              kind: "system",
-              key: newKey(),
-              text: `⚠ Erro IA: ${(e as Error).message}`,
-            });
-          }
-        } else if (result.fallbackMode === "repeat" || result.nextStepId === step.id) {
-          append({ kind: "system", key: newKey(), text: "→ Repetindo passo" });
-          await renderStep(step.id);
-        } else if (result.nextStepId) {
-          append({ kind: "system", key: newKey(), text: "→ Fallback goto" });
-          setCurrentStepId(result.nextStepId);
-          await renderStep(result.nextStepId);
-        } else {
-          append({ kind: "system", key: newKey(), text: `→ Fallback: ${result.fallbackMode}` });
-        }
-      } else if (result.kind === "missing_step") {
-        append({ kind: "system", key: newKey(), text: `⚠ Passo destino inexistente (${result.missingId})` });
-      }
+  async function handleSend(text: string, button_id?: string) {
+    const trimmed = text.trim();
+    if (!trimmed && !button_id) return;
+    setEvents((prev) => [...prev, { kind: "lead", text: trimmed || (button_id || ""), key: k() }]);
+    setFreeText("");
+    await callRun({ user_message: trimmed, button_id });
+  }
+
+  async function handleFile(file: File) {
+    if (!consultantId) return;
+    setBusy(true);
+    try {
+      const ext = file.name.split(".").pop() || "bin";
+      const path = `${consultantId}/${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("simulator-uploads")
+        .upload(path, file, { upsert: false, contentType: file.type });
+      if (upErr) throw upErr;
+      const { data: pub } = supabase.storage.from("simulator-uploads").getPublicUrl(path);
+      const url = pub.publicUrl;
+      const kind: "image" | "document" = file.type.startsWith("image/") ? "image" : "document";
+      setEvents((prev) => [
+        ...prev,
+        { kind: "lead", text: kind === "image" ? "📷 Foto enviada" : "📄 Documento enviado", attach: { url, kind }, key: k() },
+      ]);
+      await callRun({ attach: { url, kind }, user_message: "" });
+    } catch (e) {
+      toast.error("Falha no upload: " + (e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -244,46 +127,47 @@ export default function FlowSimulator({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[760px]">
         <DialogHeader>
-          <DialogTitle>🎬 Simulador de Fluxo — modo real</DialogTitle>
+          <DialogTitle>🎬 Simulador de Fluxo — motor real de produção</DialogTitle>
           <DialogDescription>
-            Mídia real do MinIO + IA real (Gemini). Nada é enviado pelo WhatsApp.
+            Roda o mesmo runBotFlow/runConversationalFlow da produção num customer sandbox.
+            Nada toca o CRM, métricas, alertas ou WhatsApp real.
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
-            <Switch checked={aiEnabled} onCheckedChange={setAiEnabled} id="ai-real" />
-            <label htmlFor="ai-real" className="cursor-pointer">
-              IA real (consome créditos)
-            </label>
+            <span className="text-muted-foreground">Variante:</span>
+            {VARIANTS.map((v) => (
+              <Button
+                key={v}
+                size="sm"
+                variant={variant === v ? "default" : "outline"}
+                onClick={() => setVariant(v)}
+                disabled={busy}
+                className="h-6 px-2 text-[10px]"
+              >
+                {v}
+              </Button>
+            ))}
+            {state?.conversation_step && (
+              <Badge variant="outline" className="ml-2 text-[9px]">
+                step: {state.conversation_step}
+              </Badge>
+            )}
           </div>
-          <Button size="sm" variant="outline" onClick={reset} disabled={busy}>
-            <RotateCw className="mr-1 h-3 w-3" />
-            Zerar conversa
+          <Button size="sm" variant="outline" onClick={() => handleReset(true)} disabled={busy}>
+            <RotateCw className="mr-1 h-3 w-3" /> Zerar
           </Button>
         </div>
 
-        {loadError && (
-          <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-            <AlertTriangle className="mr-2 inline h-4 w-4" />
-            {loadError}
-          </div>
-        )}
-
-        {loopWarning && (
-          <div className="rounded-md bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
-            <AlertTriangle className="mr-1 inline h-3 w-3" />
-            {loopWarning}
-          </div>
-        )}
-
-        {/* Chat */}
         <div
           ref={scrollRef}
-          className="max-h-[460px] min-h-[300px] space-y-2 overflow-y-auto rounded-md border bg-[url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22><rect width=%2240%22 height=%2240%22 fill=%22%23ece5dd%22/></svg>')] p-3 dark:bg-muted/30"
+          className="max-h-[460px] min-h-[300px] space-y-2 overflow-y-auto rounded-md border bg-muted/30 p-3"
         >
           {events.length === 0 && (
-            <p className="text-center text-xs text-muted-foreground">Iniciando…</p>
+            <p className="text-center text-xs text-muted-foreground">
+              {busy ? <Loader2 className="inline h-3 w-3 animate-spin" /> : "Aguardando…"}
+            </p>
           )}
           {events.map((ev) => {
             if (ev.kind === "system") {
@@ -293,39 +177,51 @@ export default function FlowSimulator({
                 </p>
               );
             }
+            if (ev.kind === "presence") {
+              return (
+                <p key={ev.key} className="text-[10px] text-muted-foreground">
+                  ▸ {ev.state === "recording" ? "🎤 gravando áudio…" : "✍️ digitando…"}
+                </p>
+              );
+            }
             if (ev.kind === "lead") {
               return (
                 <div key={ev.key} className="flex justify-end">
                   <div className="max-w-[70%] rounded-2xl rounded-tr-sm bg-emerald-500/90 px-3 py-1.5 text-sm text-white shadow">
+                    {ev.attach?.kind === "image" ? (
+                      <img src={ev.attach.url} className="max-h-40 rounded-lg" />
+                    ) : ev.attach ? (
+                      <a href={ev.attach.url} target="_blank" rel="noreferrer" className="underline">
+                        {ev.text}
+                      </a>
+                    ) : (
+                      ev.text
+                    )}
+                  </div>
+                </div>
+              );
+            }
+            if (ev.kind === "text" || ev.kind === "buttons") {
+              return (
+                <div key={ev.key} className="flex justify-start">
+                  <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-tl-sm bg-card px-3 py-2 text-sm shadow">
                     {ev.text}
-                  </div>
-                </div>
-              );
-            }
-            if (ev.kind === "ai_typing") {
-              return (
-                <div key={ev.key} className="flex justify-start">
-                  <div className="flex items-center gap-2 rounded-2xl rounded-tl-sm bg-white px-3 py-2 text-xs text-muted-foreground shadow dark:bg-card">
-                    <Loader2 className="h-3 w-3 animate-spin" /> IA digitando…
-                  </div>
-                </div>
-              );
-            }
-            if (ev.kind === "ai_reply") {
-              return (
-                <div key={ev.key} className="flex justify-start">
-                  <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-white px-3 py-2 text-sm shadow dark:bg-card">
-                    <Badge variant="outline" className="mb-1 text-[9px]">IA</Badge>
-                    <p className="whitespace-pre-wrap">{ev.body}</p>
-                  </div>
-                </div>
-              );
-            }
-            if (ev.kind === "text") {
-              return (
-                <div key={ev.key} className="flex justify-start">
-                  <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-tl-sm bg-white px-3 py-2 text-sm shadow dark:bg-card">
-                    {ev.body}
+                    {ev.kind === "buttons" && ev.buttons.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {ev.buttons.map((b) => (
+                          <Button
+                            key={b.id}
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            className="h-7 rounded-full text-xs"
+                            onClick={() => handleSend(b.title, b.id)}
+                          >
+                            {b.title}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -333,11 +229,8 @@ export default function FlowSimulator({
             if (ev.kind === "audio") {
               return (
                 <div key={ev.key} className="flex justify-start">
-                  <div className="rounded-2xl rounded-tl-sm bg-white p-2 shadow dark:bg-card">
+                  <div className="rounded-2xl rounded-tl-sm bg-card p-2 shadow">
                     <audio controls src={ev.url} className="h-8 w-64" />
-                    {ev.duration ? (
-                      <p className="mt-0.5 text-[9px] text-muted-foreground">{ev.duration}s</p>
-                    ) : null}
                   </div>
                 </div>
               );
@@ -345,7 +238,7 @@ export default function FlowSimulator({
             if (ev.kind === "image") {
               return (
                 <div key={ev.key} className="flex justify-start">
-                  <div className="rounded-2xl rounded-tl-sm bg-white p-1 shadow dark:bg-card">
+                  <div className="rounded-2xl rounded-tl-sm bg-card p-1 shadow">
                     <img
                       src={ev.url}
                       alt={ev.caption || ""}
@@ -360,79 +253,73 @@ export default function FlowSimulator({
             if (ev.kind === "video") {
               return (
                 <div key={ev.key} className="flex justify-start">
-                  <div className="rounded-2xl rounded-tl-sm bg-white p-1 shadow dark:bg-card">
-                    <video
-                      src={ev.url}
-                      controls
-                      playsInline
-                      className="max-h-72 max-w-xs rounded-xl"
-                    />
+                  <div className="rounded-2xl rounded-tl-sm bg-card p-1 shadow">
+                    <video src={ev.url} controls playsInline className="max-h-72 max-w-xs rounded-xl" />
                   </div>
                 </div>
               );
             }
-            if (ev.kind === "buttons") {
+            if (ev.kind === "document") {
               return (
-                <div key={ev.key} className="flex flex-wrap justify-start gap-1.5">
-                  {ev.items.map((b) => (
-                    <Button
-                      key={b.id}
-                      size="sm"
-                      variant="outline"
-                      className="h-7 rounded-full bg-white text-xs dark:bg-card"
-                      disabled={busy}
-                      onClick={() => handleLeadInput(b.title, b.id)}
-                    >
-                      {b.title}
-                    </Button>
-                  ))}
+                <div key={ev.key} className="flex justify-start">
+                  <a
+                    href={ev.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-2xl rounded-tl-sm bg-card px-3 py-2 text-sm underline shadow"
+                  >
+                    📄 {ev.caption || "Documento"}
+                  </a>
                 </div>
               );
             }
             return null;
           })}
+          {busy && <p className="text-center text-[10px] text-muted-foreground"><Loader2 className="inline h-3 w-3 animate-spin" /> processando…</p>}
         </div>
 
-        {/* Presets */}
-        <div className="flex flex-wrap gap-1.5">
-          {PRESET_MESSAGES.map((p) => (
-            <Button
-              key={p}
-              size="sm"
-              variant="secondary"
-              disabled={busy}
-              onClick={() => handleLeadInput(p)}
-              className="h-7 text-[11px]"
-            >
-              {p}
-            </Button>
-          ))}
-        </div>
-
-        {/* Input livre */}
         <div className="flex gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*,application/pdf"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleFile(f);
+              e.currentTarget.value = "";
+            }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={() => fileRef.current?.click()}
+            disabled={busy}
+            title="Anexar foto da conta ou documento (PDF/JPG)"
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
           <Input
             value={freeText}
             onChange={(e) => setFreeText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && freeText.trim() && !busy) handleLeadInput(freeText);
+              if (e.key === "Enter" && freeText.trim() && !busy) handleSend(freeText);
             }}
             placeholder="Digite uma mensagem livre…"
             maxLength={1000}
             disabled={busy}
           />
-          <Button
-            onClick={() => handleLeadInput(freeText)}
-            disabled={!freeText.trim() || busy}
-          >
+          <Button onClick={() => handleSend(freeText)} disabled={!freeText.trim() || busy}>
             {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
           </Button>
         </div>
+
+        <p className="flex items-start gap-1 text-[10px] text-muted-foreground">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          Conversa sandbox — não polui CRM, métricas nem envia WhatsApp real. Use o anexo (📎) para mandar uma foto da conta de luz ou documento (PDF/JPG) e ver o OCR rodando de verdade.
+        </p>
       </DialogContent>
     </Dialog>
   );
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }
