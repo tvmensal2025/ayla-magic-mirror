@@ -7,7 +7,8 @@
 // - Se não souber responder com confiança → retorna null (bot mantém comportamento default: repete passo ou faz handoff)
 // - NUNCA inventa números, prazos ou taxas que não estejam no conhecimento.
 
-import { aiChat } from "./ai-gateway.ts";
+import { aiChatCascade } from "./ai-gateway.ts";
+import { trackAIUsage } from "./ai-cost-tracker.ts";
 
 export interface FaqAnswer {
   text: string;
