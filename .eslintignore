@@ -1,9 +1,0 @@
-whapi-analysis/
-worker-portal/
-screenshots/
-dist/
-build/
-node_modules/
-supabase/.temp/
-fixtures/
-*.min.js
