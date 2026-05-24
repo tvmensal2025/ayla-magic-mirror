@@ -4488,7 +4488,11 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     case "aguardando_facial":
     case "aguardando_assinatura": {
-      const link = customer.link_facial || customer.link_assinatura;
+      // 🧪 Em modo teste, se ainda não tem link, injeta o sandbox
+      if (isTestMode() && !customer.link_facial && !customer.link_assinatura) {
+        updates.link_facial = "https://sandbox.igreen.cloud/facial/teste";
+      }
+      const link = updates.link_facial || customer.link_facial || customer.link_assinatura;
       const txt = (messageText || "").toLowerCase().trim();
       const confirmou = /\b(pronto|prontinho|conclu[ií]do|conclui|conclu[ií]|finalizei|terminei|terminado|finalizado|fiz|feito|feita|ok|okay|okk?|certo|sim|j[aá]\s+(assinei|fiz|tirei|validei|terminei|terminado)|assinei|tirei|validei|selfie|liberado|consegui)\b/i.test(txt);
       if (confirmou && link) {
@@ -4504,6 +4508,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       }
       break;
     }
+
 
     case "cadastro_em_analise": {
       // Lead já concluiu a selfie. Aguardando aprovação da iGreen (24-48h).
