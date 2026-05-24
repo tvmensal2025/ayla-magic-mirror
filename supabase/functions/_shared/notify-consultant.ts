@@ -226,10 +226,14 @@ export async function notifyNewLead(
 
 export async function notifyHandoff(
   consultantId: string,
-  lead: { id?: string; name?: string | null; phone_whatsapp?: string | null; conversation_step?: string | null },
+  lead: { id?: string; name?: string | null; phone_whatsapp?: string | null; conversation_step?: string | null; is_sandbox?: boolean | null },
   lastQuestion: string,
   reason = "duvida_fora_faq",
 ): Promise<boolean> {
+  if (lead?.is_sandbox) {
+    console.log(`[notify-handoff] sandbox_skip lead=${lead.id}`);
+    return false;
+  }
   const memKey = `handoff:${consultantId}:${lead.id || lead.phone_whatsapp || ""}`;
   if (!shouldSend(memKey, 5 * 60_000)) return false;
   // Persistente: 30 min por lead
