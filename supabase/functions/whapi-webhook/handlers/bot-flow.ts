@@ -3786,7 +3786,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     // ─── 6b. CONFIRMAR TITULARIDADE (mismatch conta × RG) ─────────
     case "confirmar_titularidade": {
-      const resp = isButton ? buttonId : messageText.toLowerCase().trim();
+      const resp: string = isButton ? String(buttonId ?? "") : messageText.toLowerCase().trim();
       if (resp === "titular_mesmo" || /mesma|sou eu|é eu|eh eu|igual/i.test(resp)) {
         updates.name_mismatch_acknowledged_at = new Date().toISOString();
         const merged = { ...customer, ...updates };
@@ -4065,7 +4065,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     case "ask_phone_confirm": {
-      const resp = isButton ? buttonId : messageText.toLowerCase().trim();
+      const resp: string = isButton ? String(buttonId ?? "") : messageText.toLowerCase().trim();
       // Sprint D-B11: "1"/"2" só valem se vieram do botão. Texto livre exige palavra explícita.
       const sim = (isButton && (resp === "sim_phone" || resp === "1"))
         || (!isButton && /^(sim|s|isso|isso\s+mesmo|é\s+meu|eh\s+meu|confirmo|pode|certo|correto|positivo)\b/.test(resp));

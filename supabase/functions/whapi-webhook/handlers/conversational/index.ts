@@ -60,6 +60,8 @@ interface DbStep {
   fallback: DbFallback | null;
   auto_detect_doc_type: boolean | null;
   media_order?: string[] | null;
+  /** Título legível do step. Usado como fallback anti-pulo-silencioso. */
+  title?: string | null;
 }
 
 // Re-exporta CADASTRO_STEPS do _shared para que whapi-webhook/index.ts
@@ -1038,9 +1040,9 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       if (cursor.wait_for === "reply" || cursor.wait_for === "media") break;
       // Se este step já entregou conteúdo (texto OU mídia), só cascateia se
       // o próximo tipo for "none" sem espera — preserva a UX configurada.
-      const nextId = cursor.fallback?.mode === "goto" ? cursor.fallback?.goto_step_id : null;
+      const nextId: string | null = cursor.fallback?.mode === "goto" ? (cursor.fallback?.goto_step_id ?? null) : null;
       if (!nextId) break;
-      const next = dbSteps.find((s) => s.id === nextId && s.is_active);
+      const next: typeof cursor | undefined = dbSteps.find((s: any) => s.id === nextId && s.is_active);
       if (!next) break;
       // Continuamos cascateando enquanto não tivermos NADA para enviar OU
       // enquanto o consultor configurou cascata explícita (wait_for=none).

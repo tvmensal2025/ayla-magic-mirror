@@ -265,7 +265,7 @@ async function findNextActiveFlowStep(
   supabase: any,
   consultantId: string | null | undefined,
   opts: { afterPosition?: number; stepType?: string; stepTypeIn?: string[] } = {},
-): Promise<{ id: string; step_key: string; step_type: string; position: number; transitions: any[]; message_text: string } | null> {
+): Promise<{ id: string; step_key: string; step_type: string; position: number; transitions: any[]; message_text: string; slot_key: string | null } | null> {
   if (!consultantId) return null;
   try {
     const { data: flow } = await supabase
@@ -273,7 +273,7 @@ async function findNextActiveFlowStep(
       .eq("consultant_id", consultantId).eq("is_active", true).eq("variant", "A").maybeSingle();
     if (!flow?.id) return null;
     let q = supabase.from("bot_flow_steps")
-      .select("id, step_key, step_type, position, transitions, message_text")
+      .select("id, step_key, step_type, position, transitions, message_text, slot_key")
       .eq("flow_id", (flow as any).id).eq("is_active", true)
       .order("position", { ascending: true });
     if (typeof opts.afterPosition === "number") q = q.gt("position", opts.afterPosition);
@@ -281,7 +281,15 @@ async function findNextActiveFlowStep(
     if (opts.stepTypeIn && opts.stepTypeIn.length) q = q.in("step_type", opts.stepTypeIn);
     const { data } = await q.limit(1);
     const row = Array.isArray(data) ? data[0] : null;
-    return row ? { id: String(row.id), step_key: String(row.step_key), step_type: String(row.step_type), position: Number(row.position), transitions: Array.isArray((row as any).transitions) ? (row as any).transitions : [], message_text: String((row as any).message_text || "") } : null;
+    return row ? {
+      id: String(row.id),
+      step_key: String(row.step_key),
+      step_type: String(row.step_type),
+      position: Number(row.position),
+      transitions: Array.isArray((row as any).transitions) ? (row as any).transitions : [],
+      message_text: String((row as any).message_text || ""),
+      slot_key: (row as any).slot_key ? String((row as any).slot_key) : null,
+    } : null;
   } catch (e) {
     console.warn("[findNextActiveFlowStep] erro:", (e as any)?.message || e);
     return null;
@@ -3390,7 +3398,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     // ─── 6b. CONFIRMAR TITULARIDADE (mismatch conta × RG) ─────────
     case "confirmar_titularidade": {
-      const resp = isButton ? buttonId : messageText.toLowerCase().trim();
+      // resp pode ser string vazia (não null) — coerção defensiva via String()
+      // satisfaz o typecheck do regex.test() que exige string.
+      const resp: string = isButton ? String(buttonId ?? "") : messageText.toLowerCase().trim();
       if (resp === "titular_mesmo" || /mesma|sou eu|é eu|eh eu|igual/i.test(resp)) {
         updates.name_mismatch_acknowledged_at = new Date().toISOString();
         const merged = { ...customer, ...updates };
@@ -3669,7 +3679,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     case "ask_phone_confirm": {
-      const resp = isButton ? buttonId : messageText.toLowerCase().trim();
+      const resp: string = isButton ? String(buttonId ?? "") : messageText.toLowerCase().trim();
       // Sprint D-B11: "1"/"2" só valem se vieram do botão. Texto livre exige palavra explícita.
       const sim = (isButton && (resp === "sim_phone" || resp === "1"))
         || (!isButton && /^(sim|s|isso|isso\s+mesmo|é\s+meu|eh\s+meu|confirmo|pode|certo|correto|positivo)\b/.test(resp));

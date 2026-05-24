@@ -168,7 +168,10 @@ Deno.serve(async (req) => {
 
     // ─── 🛑 IA GLOBALMENTE DESLIGADA — silêncio total (antes de tudo) ──
     // Antes do parse/dedup/customer: se o switch está OFF, ignora e retorna ok.
-    if (await isConsultantAIDisabled(supabase, instanceData.consultant_id)) {
+    // `as any`: helper compartilhado pina @supabase/supabase-js@2.49.4 enquanto este
+    // arquivo pina @2; runtime idêntico mas TS vê duas shapes (mesmo padrão da linha
+    // que cuida de checkAndMarkProcessed abaixo).
+    if (await isConsultantAIDisabled(supabase as any, instanceData.consultant_id)) {
       console.log(`🛑 [global-off-silent] IA do consultor ${instanceData.consultant_id} desligada — ignorando inbound`);
       return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -1125,7 +1128,7 @@ Deno.serve(async (req) => {
     const stepBefore = stripPrefix(rawStep);
     (customer as any).conversation_step = stepBefore;
 
-    let reply = "";
+    let reply: string | null = "";
     let updates: Record<string, any> = {};
     let engineUsed: "sys" | "flow" = "sys";
 

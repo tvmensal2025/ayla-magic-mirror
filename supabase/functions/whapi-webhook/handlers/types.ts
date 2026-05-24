@@ -51,6 +51,7 @@ export interface BotContext {
 }
 
 export interface BotResult {
-  reply: string;
+  /** Texto a enviar. `null` = quiet hours / handler decidiu não enviar. */
+  reply: string | null;
   updates: Record<string, any>;
 }

@@ -52,7 +52,9 @@ Deno.serve(async (req) => {
     );
 
     // Kill switch global (Fase 0 auditoria). Fail-open: erros = habilitado.
-    if (!(await isBotGloballyEnabled(supabase))) {
+    // `as any`: helper compartilhado pina @supabase/supabase-js@2.49.4 enquanto este
+    // arquivo pina @2; runtime idêntico mas TS vê duas shapes diferentes.
+    if (!(await isBotGloballyEnabled(supabase as any))) {
       console.log("[whapi-webhook] bot_global_enabled=false → silenciado");
       return new Response(JSON.stringify({ ok: true, msg: "bot_globally_disabled" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -96,7 +98,10 @@ Deno.serve(async (req) => {
 
     // IA global OFF deve silenciar apenas respostas automáticas. O inbound ainda
     // precisa ser salvo e alimentar captura (ex.: cliente digitou o nome após "Pedir nome").
-    const globalAiDisabled = await isConsultantAIDisabled(supabase, superAdminConsultantId);
+    // Type cast: helpers compartilhados pinam @supabase/supabase-js@2.49.4 enquanto
+    // este arquivo pina @2; o runtime é idêntico mas TS vê duas shapes diferentes
+    // de protected property. Mesmo workaround usado em evolution-webhook/index.ts:191.
+    const globalAiDisabled = await isConsultantAIDisabled(supabase as any, superAdminConsultantId);
 
     // ─── Outbound humano (consultor digitou no WhatsApp Business/app) ─
     if ((parsed as any).outboundHuman) {
@@ -169,7 +174,7 @@ Deno.serve(async (req) => {
     }
 
     // ─── Deduplicação ──────────────────────────────────────────────────
-    if (messageId && await checkAndMarkProcessed(supabase, messageId, "whapi-superadmin")) {
+    if (messageId && await checkAndMarkProcessed(supabase as any, messageId, "whapi-superadmin")) {
       return new Response(JSON.stringify({ ok: true, msg: "duplicate" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -1020,7 +1025,7 @@ Deno.serve(async (req) => {
     // Sincroniza o customer em memória com o valor cru — engines mantêm sua lógica intacta.
     (customer as any).conversation_step = stepBefore;
 
-    let reply = "";
+    let reply: string | null = "";
     let updates: Record<string, any> = {};
     let engineUsed: "sys" | "flow" = "sys";
     try {
