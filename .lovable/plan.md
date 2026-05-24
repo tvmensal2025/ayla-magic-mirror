@@ -1,117 +1,173 @@
-## Daria bom?
 
-Sim — e é exatamente o padrão que grandes operações de chat usam: **um modelo "cabeça" (orquestrador) decide o que fazer; modelos "mão" (especialistas) executam**. OpenAI GPT-5.5 é hoje o melhor em raciocínio passo-a-passo e tool-calling; Gemini 3.1 Pro é o melhor em respostas longas com base em conhecimento + multimodal (lê PDF da conta, foto do documento). Combinar os dois cobre os dois eixos sem depender de um único fornecedor.
+# Rollout Flow Engine V3 — implantação cuidadosa em 4 semanas
 
-A única coisa que não pode acontecer é colocar OpenAI em cada turno de conversa — fica caro e lento. A solução é uma **cascata por intenção**: triagem barata → orquestrador GPT-5.5 só quando precisa decidir → especialista (Gemini Pro) executa.
+## O que está pronto vs o que falta
+
+Verificado no código:
+
+| Componente | Estado |
+|---|---|
+| `_shared/flow-engine/engine.ts` (`tick()`) | ✅ pronto + testes |
+| `_shared/flow-engine/dispatcher.ts` (`dispatch()`) | ✅ pronto, suporta `delegate_legacy_runBotFlow` |
+| `_shared/customer-flow-state.ts` (`loadFlowState`) | ✅ pronto |
+| `_shared/feature-flag.ts` (`getFlowEngineV3`, `isV2Enabled`) | ✅ pronto, cache 30s |
+| `_shared/customer-pause-filter.ts` | ✅ pronto, não usado pelos crons |
+| Tabelas `customer_flow_state`, `bot_flow_steps_canonical`, view `v_flow_engine_health` | ✅ no banco |
+| Bloco 7.6 do `evolution-webhook/index.ts` (linhas 1135-1163) | ⚠️ só loga, não chama `tick`/`dispatch` |
+| Bloco equivalente no `whapi-webhook` (ATIVO em produção) | ❌ não existe |
+| 4 crons leem `bot_paused` direto | ❌ `ai-followup-cron`, `bot-followup-checker`, `bot-loop-watchdog`, `bot-stuck-recovery` |
 
 ---
 
-## Arquitetura proposta
+## Semana 1 — Código (executo agora ao aprovar)
+
+### 1.1 Criar helper compartilhado `_shared/flow-engine/webhook-hook.ts`
+
+Função única `runEngineV3IfEnabled()` que:
 
 ```text
-                  ┌─────────────────────────────────────┐
-inbound msg ───►  │ 1. Triagem (gemini-3-flash-preview) │  classifica: botão? mídia?
-                  │    custo ~$0.0001/turno              │  pergunta? saudação? objeção?
-                  └────────────────┬─────────────────────┘
-                                   │
-              ┌────────────────────┴────────────────────┐
-              │                                         │
-              ▼                                         ▼
-   ┌─────────────────────┐                ┌──────────────────────────┐
-   │ Caminho determinístico│              │ 2. Orquestrador           │
-   │ (botão/mídia/passo   │               │    GPT-5.5 (reasoning med)│
-   │ esperado) — sem IA    │              │    Tool-calling:          │
-   └─────────────────────┘                │    - answer_faq           │
-                                          │    - escalate_human       │
-                                          │    - update_lead_field    │
-                                          │    - advance_step         │
-                                          │    - request_media        │
-                                          └─────────────┬─────────────┘
-                                                        │
-                            ┌───────────────────────────┼──────────────────────────┐
-                            ▼                           ▼                          ▼
-              ┌──────────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
-              │ 3a. Gemini 3.1 Pro       │  │ 3b. Gemini 2.5 Flash │  │ 3c. Ações diretas    │
-              │     answer_faq + RAG     │  │     extract_field    │  │     (SQL, send_text) │
-              │     (knowledge sections, │  │     (CPF, valor, CEP)│  │                      │
-              │     histórico, persona)  │  │                      │  │                      │
-              └──────────────────────────┘  └──────────────────────┘  └──────────────────────┘
+1. Lê flag flow_engine_v3 do consultor (cache 30s).
+2. Se 'off' → return { handled: false } (legado segue).
+3. Carrega EngineCustomerState via loadFlowState.
+4. Chama tick(state, input).
+5. Se modo 'dark':
+   - Loga engine_dark_decision com a action planejada.
+   - return { handled: false }  (legado emite de verdade).
+6. Se modo 'canary' ou 'on':
+   - Chama dispatch(actions, { legacyRunBotFlow: hookFn }).
+   - Se action = delegate_legacy_runBotFlow → return { handled: false }.
+   - Caso contrário → engine emitiu, return { handled: true, reply, updates }.
+7. Qualquer throw → log engine_v3_fallback_to_legacy + return { handled: false }.
+   (Fail-open: erro no v3 NUNCA quebra fluxo.)
 ```
 
-**Quem faz o quê:**
+### 1.2 Cabear no `whapi-webhook/index.ts` (PRODUÇÃO)
 
-| Camada | Modelo | Quando dispara | Custo relativo |
-|--------|--------|----------------|----------------|
-| 1. Triagem | `google/gemini-3-flash-preview` | Todo turno texto livre | 1× |
-| 2. Orquestrador | `openai/gpt-5.5` (reasoning=medium) | Triagem indicou ambiguidade / pergunta complexa / objeção | 30× |
-| 3a. FAQ deep | `google/gemini-3.1-pro-preview` | Orquestrador chamou `answer_faq` | 15× |
-| 3b. Extração | `google/gemini-2.5-flash` | Orquestrador chamou `extract_field` (CPF, valor da conta, etc) | 2× |
-| OCR | `google/gemini-2.5-flash` (multimodal) | Foto/PDF chegou | 3× |
-| Geração de copy passo (admin) | `openai/gpt-5.5-pro` | Botão "Gerar texto (IA)" no /admin/fluxos | sob demanda |
-
-Resultado: a IA "pensa" como GPT-5.5 em todo turno que importa, mas só paga GPT em ~15-25% dos turnos (o resto é botão ou Flash). Estimativa: hoje gastamos ~X em IA → com cascata fica ~1.6–1.8× o atual, com qualidade muito maior.
-
----
-
-## Plano de implementação
-
-### Fase 1 — Fundação (sem mudança visível, mas destrava tudo)
-1. **Novo helper `_shared/ai-orchestrator.ts`** com `runOrchestrator({ message, customer, step, history, tools })` que:
-   - Roda a triagem (Flash) primeiro.
-   - Se triagem retorna `route="deterministic"` → devolve direto sem chamar GPT.
-   - Caso contrário chama GPT-5.5 com tools registradas.
-   - Loga tudo em `ai_decisions` (modelo, latência, tool chamada, confiança, custo estimado).
-2. **Cascata de fallback automática**: 429/402/timeout em qualquer camada → tenta o próximo modelo da mesma família (Gemini 3.1 Pro → 2.5 Pro → 2.5 Flash; GPT-5.5 → 5.4 → 5-mini). Sem quebrar conversa.
-3. **Tabela `ai_costs`** (consultant_id, day, calls, input_tokens, output_tokens, usd_est) atualizada pelo helper — relatório semanal por consultor.
-
-### Fase 2 — Substituir os pontos de IA atuais pelo orquestrador
-4. `bot-flow.ts` linhas 1010 e 1822 (passos `duvidas_*`) → trocam para `runOrchestrator`. Resposta sai melhor sem mudar UX.
-5. `intent-classifier.ts` (hoje OpenAI direto) → vira ferramenta do orquestrador (`classify_intent`).
-6. `ai-button-intent.ts` → vira ferramenta `match_button`.
-7. Novo gancho: quando o lead manda **texto livre num passo `message`/`capture_*`** sem casar transição, chama o orquestrador antes do "não entendi". (Resolve o sintoma de "bot ignora pergunta do meio do fluxo".)
-
-### Fase 3 — Memória e personalização (tira o tom genérico)
-8. `consultants.ai_persona text` — 3-5 frases que o próprio consultor escreve em `/admin/saude-bot` ("Sou Rafael, piauiense, falo direto, sempre cito CEPISA"). Injetado no system prompt do orquestrador.
-9. **Resumo persistente da conversa** em `customers.conversation_summary` (já existe a coluna!) atualizado a cada 6 mensagens pelo Gemini 2.5 Flash. O orquestrador recebe resumo + últimas 8 msgs em vez de truncar histórico cru. Bot lembra o que o lead falou ontem.
-10. **Memória de objeção**: `customer_objections (customer_id, objection_type, raised_at, resolved_at)` — orquestrador consulta antes de responder; se já foi resolvida, não repete o discurso.
-
-### Fase 4 — Painel de tunagem (admin/saude-bot)
-11. Aba "Cérebro": vê últimas 50 decisões IA, com filtro por `confidence<0.6` (= candidatos a melhorar conhecimento), botão "👎 Marcar resposta ruim" → vira backlog de fine-tune da base.
-12. Aba "Custos": gráfico diário por consultor, breakdown por modelo, alerta quando passar de R$ X/dia.
-13. Modo "Sandbox": consultor digita uma frase → vê exatamente qual modelo foi chamado, qual ferramenta, qual resposta, em quanto tempo. Sem mandar pro lead.
-
----
-
-## Arquivos afetados
+Encontrar o ponto antes do `runBotFlow`/`runConversationalFlow` e adicionar:
 
 ```text
-Novos:
-  supabase/functions/_shared/ai-orchestrator.ts
-  supabase/functions/_shared/ai-cost-tracker.ts
-  supabase/functions/_shared/ai-summary.ts
-
-Editados:
-  supabase/functions/_shared/ai-gateway.ts             (cascata de fallback)
-  supabase/functions/_shared/ai-faq-answerer.ts        (wrapper, mantém compat)
-  supabase/functions/whapi-webhook/handlers/bot-flow.ts (2 chamadas + novo gancho)
-  supabase/functions/whapi-webhook/handlers/conversational/intent-classifier.ts
-  supabase/functions/whapi-webhook/handlers/conversational/index.ts
-  supabase/functions/_shared/ai-button-intent.ts
-  src/pages/SaudeBot.tsx                                (aba Cérebro + Sandbox + Custos)
-
-Migrations:
-  ai_costs (tabela)
-  customer_objections (tabela)
-  consultants.ai_persona text
-  ai_decisions: índice (customer_id, created_at desc)
+const v3 = await runEngineV3IfEnabled({ supabase, customer, consultantId, input });
+if (v3.handled) {
+  reply = v3.reply;
+  updates = v3.updates;
+} else {
+  // caminho legado atual continua igual
+}
 ```
+
+Variável `engineV3Handled` controla early-return para evitar duplicação.
+
+### 1.3 Espelhar no `evolution-webhook/index.ts`
+
+Substituir bloco 7.6 atual (linhas 1135-1163) pela mesma chamada do helper. Garante paridade quando evolution virar ativo.
+
+### 1.4 Migrar 4 crons para `customer-pause-filter.ts`
+
+Em cada um, trocar:
+
+```text
+.eq('bot_paused', false)
+.is('assigned_human_id', null)
+```
+
+por:
+
+```text
+.or(LEGACY_CAN_SEND_FILTER)
++ loop: await canSendToCustomer(supabase, customerId)
+```
+
+Arquivos:
+- `supabase/functions/ai-followup-cron/index.ts`
+- `supabase/functions/bot-followup-checker/index.ts`
+- `supabase/functions/bot-loop-watchdog/index.ts`
+- `supabase/functions/bot-stuck-recovery/index.ts`
+
+### 1.5 Adicionar 2 cenários em `bot-e2e-runner`
+
+- Cenário A: lead novo, v3='dark' → engine calcula sem emitir, legado emite.
+- Cenário B: lead em capture_bill, v3='on' → engine emite, legado NÃO é chamado.
+
+### 1.6 Salvar memória `mem://whatsapp/flow-engine-v3-rollout`
+
+Documenta o que ficou cabeado, helper compartilhado, ordem dark→canary→on.
 
 ---
 
-## Pontos a confirmar antes de eu codar
+## Semana 2 — Ativar reliability_v2 e dark mode (eu faço via SQL ao seu comando)
 
-1. **Custo OK?** Estimativa: ~R$30–80/mês por consultor ativo no plano (vs hoje ~R$10). Top em qualidade.
-2. **GPT-5.5 ou GPT-5.4 como orquestrador?** GPT-5.5 é o melhor; GPT-5.4 é 40% mais barato e quase tão bom. Posso deixar configurável por consultor.
-3. **Implementa tudo ou só Fase 1+2?** Fase 1+2 já entrega "IA não fica burra"; Fase 3+4 é polimento que dá pra fazer depois.
+Pré-requisito do v3 é v2 estar `on` (locks, idempotência, customer_flow_state).
 
-Quer que eu siga com Fase 1+2 com GPT-5.5 como orquestrador padrão?
+```sql
+-- Dia 1: dark em 1 consultor de teste
+UPDATE consultants SET flow_reliability_v2='dark' WHERE id = '<id-teste>';
+
+-- Dia 2 (se logs limpos): global
+UPDATE consultants SET flow_reliability_v2='on';
+
+-- Dia 3: engine v3 em dark em 1 consultor
+UPDATE consultants SET flow_engine_v3='dark' WHERE id = '<id-teste>';
+```
+
+Gates para passar de dark → canary:
+- Zero `engine_v3_state_load_failed` em 48h.
+- Paridade ≥ 99% entre `engine_dark_decision` e decisão real do legado.
+- Latência p95 do webhook ≤ baseline + 10%.
+
+---
+
+## Semana 3 — Canary 5%
+
+```sql
+UPDATE consultants SET flow_engine_v3='canary' WHERE id IN (<3-5 baixo volume + 1 alto>);
+```
+
+Monitorar via `v_flow_engine_health` por 7 dias:
+- `conversion_rate` canary ≥ baseline − 2 pp.
+- `deterministic_fallback_pct` ≤ 5%.
+- `engine_delegate_legacy` ratio < 30%.
+- Zero P1.
+
+Rollback em 30s: `UPDATE consultants SET flow_engine_v3='off' WHERE id = '<problema>';`
+
+---
+
+## Semana 4 — Global e cleanup
+
+```sql
+UPDATE consultants SET flow_engine_v3='on';
+```
+
+Após 30 dias estável: marcar `customers.bot_paused` como deprecated (mantém coluna), remover branches `engine === 'sys'` mortas do legado.
+
+---
+
+## Critérios de "100%" (o que você pediu)
+
+1. **Helper único** `webhook-hook.ts` — evita drift entre whapi e evolution.
+2. **Fail-open** — qualquer bug no v3 cai no legado, nunca quebra produção.
+3. **Idempotência** — `acquireOutboundSlot` já garante zero duplicação mesmo com whapi+evolution recebendo o mesmo webhook.
+4. **Rollback em 30s** — feature flag tem cache 30s, mudar coluna no banco propaga sozinho.
+5. **Testes** — 2 cenários no `bot-e2e-runner` cobrem ambos os modos.
+6. **Crons coerentes** — todos lendo da mesma fonte (`customer-pause-filter`).
+7. **Memória atualizada** — próxima sessão sabe o estado do rollout.
+
+## O que NÃO entra nesta Semana 1
+
+- Mudanças de SQL (só rodam nas Semanas 2-4 sob seu comando).
+- Deprecation de `bot_paused` (só após 30 dias em `on`).
+- Phase J (limpeza do legado) — só Semana 4+30 dias.
+
+## Riscos identificados e mitigação
+
+| Risco | Mitigação |
+|---|---|
+| Engine v3 emite + legado emite (duplicação) | `engineV3Handled` early-return + idempotência outbound |
+| Helper carrega state de leads sem flow → throw | `loadFlowState` retorna `null`, fail-open trata |
+| Cache 30s da flag deixa consultor "preso" no modo errado | Aceitável — em emergência, `UPDATE` + esperar 30s |
+| whapi-webhook e evolution-webhook recebendo mesmo evento | Já tratado por idempotência existente |
+| Helper compartilhado com bug afeta os dois webhooks | Testes E2E + fail-open garantem que legado segue |
+
+## Tempo estimado
+
+Semana 1 (código): 1 sessão de implementação (~6-8 edições de arquivo). Eu faço tudo em paralelo ao aprovar.
