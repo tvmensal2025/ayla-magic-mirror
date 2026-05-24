@@ -75,7 +75,7 @@ export function KanbanBoard({ consultantId, instanceName }: KanbanBoardProps) {
     const phone = resolveRecipient(deal.remote_jid);
     const displayName = customerName || phone;
 
-    let filteredMsgs = autoMsgs && autoMsgs.length > 0
+    const filteredMsgs = autoMsgs && autoMsgs.length > 0
       ? autoMsgs.filter((m: any) => {
           const reasonMatch = !m.rejection_reason || m.rejection_reason === rejectionReason;
           const originMatch = !m.deal_origin || m.deal_origin === (deal as any).deal_origin;

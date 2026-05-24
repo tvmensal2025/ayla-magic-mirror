@@ -36,7 +36,7 @@ export function AdImageLibraryPanel({ consultantId, format, selectedUrls, onPick
     catch (e: any) { toast({ title: "Falha ao listar imagens", description: e.message, variant: "destructive" }); }
     finally { setLoading(false); }
   }
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [consultantId]);
+  useEffect(() => { reload(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [consultantId]);
 
   async function handleRemove(it: AdImageLibraryItem) {
     if (!confirm("Excluir essa imagem da biblioteca?")) return;

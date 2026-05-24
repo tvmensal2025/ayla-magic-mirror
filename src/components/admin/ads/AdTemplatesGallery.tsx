@@ -38,7 +38,7 @@ export function AdTemplatesGallery({ consultantId, onPublished }: Props) {
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [isSuperAdmin]);
+  useEffect(() => { reload(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [isSuperAdmin]);
 
   async function handleToggle(t: AdTemplate) {
     const next = t.status === "published" ? "archived" : "published";

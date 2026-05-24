@@ -57,7 +57,7 @@ export function PlatformPnLCard() {
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [from, to]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [from, to]);
 
   async function saveSettings() {
     if (!settings) return;

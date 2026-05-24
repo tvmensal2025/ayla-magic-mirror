@@ -80,7 +80,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
 
       // Check media library for each step's slot_key to light up icons
       const slotKeys = rows.map((r) => r.step_key).filter(Boolean) as string[];
-      let mediaMap: Record<string, { audio: boolean; image: boolean; video: boolean }> = {};
+      const mediaMap: Record<string, { audio: boolean; image: boolean; video: boolean }> = {};
       if (slotKeys.length) {
         const { data: medias } = await supabase
           .from("ai_media_library")

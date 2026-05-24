@@ -84,7 +84,7 @@ export function useCaptureGameState({ filledCount, totalFields, sentStepsCount }
       pushEvent({ amount: 5, source: "step", label: "+5 pts" });
     }
     prevSteps.current = sentStepsCount;
-  }, [sentStepsCount]); // eslint-disable-line
+  }, [sentStepsCount]);  
 
   // detect level up
   useEffect(() => {

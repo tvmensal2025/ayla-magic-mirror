@@ -59,7 +59,7 @@ export function AIDecisionsPanel({ userId }: { userId: string }) {
 
       const rows = (data as any[]) || [];
       const ids = Array.from(new Set(rows.map((r) => r.customer_id).filter(Boolean)));
-      let names: Record<string, string> = {};
+      const names: Record<string, string> = {};
       if (ids.length) {
         const { data: cs } = await supabase
           .from("customers")

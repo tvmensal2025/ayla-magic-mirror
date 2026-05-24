@@ -391,7 +391,7 @@ export function CreateCampaignWizard({ open, onClose, consultantId, onCreated }:
       let totalAdded = 0;
       let stoppedAtCap = false;
       // Distribuição justa: divide o orçamento de cidades restantes entre os presets do tier
-      let remaining = 200 - cities.length - totalAdded;
+      const remaining = 200 - cities.length - totalAdded;
       const perPreset = Math.max(8, Math.floor(remaining / targets.length));
       for (const p of targets) {
         const left = 200 - (cities.length + totalAdded);
