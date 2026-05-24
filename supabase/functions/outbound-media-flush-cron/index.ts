@@ -65,6 +65,17 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
+  // Task 34: libera reservas órfãs em ai_slot_dispatch_log (>30s sem confirm).
+  // Best-effort: erro no sweeper não bloqueia o batch principal.
+  try {
+    const { data: swept } = await supabase.rpc("sweep_orphan_media_reservations", { p_max_age_seconds: 30 });
+    if (typeof swept === "number" && swept > 0) {
+      jsonLog("info", "media_reservations_swept", { count: swept });
+    }
+  } catch (e) {
+    console.warn("[outbound-media-flush-cron] sweep falhou:", (e as Error)?.message || e);
+  }
+
 
   // Pega lote: ainda não succeeded, scheduled_for já chegou.
   const { data: batch, error: fetchErr } = await supabase
