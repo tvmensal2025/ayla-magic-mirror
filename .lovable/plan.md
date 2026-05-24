@@ -1,133 +1,117 @@
+## Daria bom?
 
-# Captação Mobile — Auditoria + Redesenho
+Sim — e é exatamente o padrão que grandes operações de chat usam: **um modelo "cabeça" (orquestrador) decide o que fazer; modelos "mão" (especialistas) executam**. OpenAI GPT-5.5 é hoje o melhor em raciocínio passo-a-passo e tool-calling; Gemini 3.1 Pro é o melhor em respostas longas com base em conhecimento + multimodal (lê PDF da conta, foto do documento). Combinar os dois cobre os dois eixos sem depender de um único fornecedor.
 
-## Diagnóstico (com base nos 2 screenshots @ 344px)
-
-### Performance ON (1ª imagem)
-A tela inteira é consumida por **5 cabeçalhos empilhados antes de chegar nos passos**, e a conversa+composer ficam fora da viewport:
-
-| Bloco | Altura aprox. | Problema |
-|---|---|---|
-| Header "Painel de Captação · MODO PERFORMANCE · Iniciante · Nv 1" | 56 px | OK |
-| Bloco "PERFORMANCE ON" gigante (toggle quebra linha por `flex-wrap`) | 60 px | Toggle ocupa linha inteira — deveria virar ícone |
-| `ExecHudBar` "INICIANTE Nv 1 · 50/100 · 0 · 0" | 44 px | Duplica o subtítulo do header |
-| Sub-header "Alvo atual / JOSINETE NUNES… / chat / chevron" | 56 px | OK |
-| Linha "Fluxo: A B D" (rebaixada em mobile) | 36 px | Poderia ir no sub-header |
-| "10 PASSOS · CLIQUE PARA ENVIAR" | 24 px | Redundante com a próxima |
-| "PASSOS DO FLUXO 3/9" + barra | 28 px | **Mesmo título 2x** (linha interna do `CaptureStepsGrid`) |
-| Grid de tiles (3 colunas × 96 px) | 96 px | Cada tile tem nº, título, citação em itálico, 4 ícones, botão — pesado |
-| "Falta: CPF, RG, Nascimento +8" | 28 px | OK |
-| "FALTAM 11 ITEM(S)" finalize | 56 px | OK |
-| Composer | 56 px | Empurrado para fora da viewport |
-| **Conversa (`CaptureConversationFeed`)** | **~0 px** | **Some completamente — `flex-1` sem espaço** |
-
-### Modo Normal (2ª imagem)
-Mesmo padrão, com agravante:
-- Chips de scoreboard + missões (`0/3`, `0/5`, `0/5`, `Hoje 0`, `Semana 5`, `Sequência 0d`, toggle Performance) usam **2 linhas inteiras** por `flex-wrap`.
-- Sub-header "Conversando com" + tiles ocupam o resto.
-- Conversa e composer também invisíveis sem scroll.
-
-### Causa raiz
-1. `CaptacaoPanel` foi desenhado para desktop com 3 colunas; no mobile vira uma pilha vertical sem orçamento de altura.
-2. Métricas/gamificação são **always-visible** em mobile (deveriam ser opt-in).
-3. Tiles de passos têm `min-h-[96px]` e `minmax(100px,1fr)` → 3 tiles preenchem largura, mas com altura cheia roubam o espaço da conversa.
-4. Dois títulos "10 Passos" (no painel) e "Passos do fluxo" (dentro do grid).
-5. Composer é o elemento mais importante e fica **abaixo de tudo**, não fixo.
+A única coisa que não pode acontecer é colocar OpenAI em cada turno de conversa — fica caro e lento. A solução é uma **cascata por intenção**: triagem barata → orquestrador GPT-5.5 só quando precisa decidir → especialista (Gemini Pro) executa.
 
 ---
 
-## Proposta de redesenho (apenas mobile, `< md`)
-
-### 1. Header colapsado
-- Manter só: logo + título "Captação" + chip de nível (`Nv 1 · Iniciante`) + ícone-toggle de performance (32×32, sem texto).
-- Mover `CaptureMissionsPanel`/`CaptureScoreboard` para dentro de um `<details>` expansível com chip "Stats" (fechado por padrão em mobile).
-- `ExecHudBar`: ocultar em mobile (`hidden md:flex`); informação essencial (Nv, hoje, streak) entra no chip do header.
-
-### 2. Toggle Performance compacto
-- Em mobile, `GameModeToggle` vira **só o ícone `BarChart2`** com ring dourada quando ativo (40×40). Texto "PERFORMANCE ON" só em `sm:` para cima.
-
-### 3. Sub-header do lead consolidado
-- Uma linha só: `←` voltar · Nome (truncate) · pill da variante (A/B/D inline, não barra separada) · ícone de chat externo · ⋯ menu (com "Ficha", "Variante", "Reenviar tudo").
-- Remover linha duplicada de "Fluxo: A B D" no mobile (vai pro menu ⋯ ou pill compacto).
-
-### 4. Abas Passos / Conversa / Ficha (mobile only)
-- Acima do conteúdo principal, 3 abas (sticky):
-  - **Passos** (default quando entra no lead) — mostra grid compacto.
-  - **Conversa** — mostra `CaptureConversationFeed` em tela cheia.
-  - **Ficha** — mostra `CaptureLeadCard` (substitui o `showAside` atual).
-- Em `md+` continua o layout 3 colunas atual (sem mudança).
-
-### 5. Tiles de passos mais leves
-- Mobile: grid `grid-cols-2`, tile com altura ~72 px contendo só `Passo N` · título (1 linha) · 4 micro-ícones · status (✓ ou ●).
-- Remover a citação em itálico (`"Olá, seja muito Bem-Vindo(a)..."`) no mobile — fica no `CaptureStepPreview` modal.
-- Tap no tile inteiro abre o preview (botão "Ver e enviar" some).
-- Remover o título redundante "Passos do fluxo" dentro do grid quando o painel já tem "10 Passos · clique para enviar"; deixar só a barra de progresso + contador.
-
-### 6. Composer fixo no rodapé
-- Em mobile, `MessageComposer` vira `sticky bottom-0` com sombra sutil, sempre visível independente da aba.
-- "FALTAM N ITEM(S)" finalize button vira chip flutuante acima do composer (não bloco full-width).
-
-### 7. Conversa ganha espaço real
-- Quando a aba "Conversa" está ativa, o feed ocupa `flex-1` real (sem grid de passos disputando altura).
-
----
-
-## Detalhes técnicos
-
-**Arquivos a alterar:**
-
-- `src/components/captacao/CaptacaoPanel.tsx`
-  - Adicionar `useIsMobile()` (já existe em `src/hooks/use-mobile.tsx`).
-  - Novo estado `mobileTab: "passos" | "conversa" | "ficha"`; default `"passos"`.
-  - Reorganizar JSX do bloco `selectedId &&` em mobile para mostrar **apenas a aba ativa**; manter desktop intacto via `hidden md:flex` / `md:hidden`.
-  - Encapsular scoreboard/missions num `<details>` em mobile.
-  - Inserir `<TabBar>` sticky entre sub-header e conteúdo (component inline).
-  - Aplicar `sticky bottom-0 z-10` no wrapper do `MessageComposer` em mobile.
-
-- `src/components/captacao/CaptureStepsGrid.tsx`
-  - Detectar mobile (via hook) ou usar classes `md:` puras:
-    - `grid-cols-2 md:grid-cols-[repeat(auto-fill,minmax(100px,1fr))]`
-    - `min-h-[72px] md:min-h-[96px]`
-    - Esconder `inlinePreview` em mobile (`hidden md:block`).
-    - Botão "Ver e enviar" some em mobile; tile inteiro vira `<button>` que abre o preview.
-  - Remover o `<div>` "Passos do fluxo / 3/N" duplicado quando renderizado dentro do painel (o painel já tem o cabeçalho); manter só a barra de progresso fina.
-
-- `src/components/captacao/game/ExecHudBar.tsx`
-  - Wrapper: `hidden md:flex`. Em mobile o nível vira chip no header.
-
-- `src/components/captacao/game/GameModeToggle.tsx`
-  - Versão compacta `< sm`: só `BarChart2` 40×40 com ring dourada quando `enabled`. Texto e pílula só em `sm:` para cima.
-
-- `src/components/captacao/CaptureScoreboard.tsx` / `CaptureMissionsPanel.tsx`
-  - Sem mudança interna; o painel passa a renderizá-los dentro de um `<details>` colapsado em mobile.
-
-- `src/components/captacao/FinalizeButton.tsx`
-  - Em mobile, classe `fixed bottom-[64px] right-3` (acima do composer) como FAB compacto quando incompleto, ou banner full-width quando completo.
-
-**Sem mudanças de lógica/negócio.** Apenas presentation + responsividade. Nenhuma alteração de banco, edge function ou fluxo de envio.
-
----
-
-## Resultado esperado @ 344px
+## Arquitetura proposta
 
 ```text
-Antes (Performance ON)            Depois
-┌───────────────────┐             ┌───────────────────┐
-│ Painel · MODO PER │             │ Captação · Nv1 [⚡]│  ← 40px
-│ [PERFORMANCE ON ●]│             ├───────────────────┤
-│ INICIANTE Nv1 50/.│             │ ← JOSINETE [A B D]│  ← 44px
-│ Alvo atual / JOSI │             ├───────────────────┤
-│ Fluxo: A B D      │             │ Passos|Conversa|Fi│  ← 36px
-│ 10 PASSOS         │             ├───────────────────┤
-│ PASSOS DO FLUXO   │             │ ▓▓▓▓░░░░ 3/12     │
-│ [P1][P2][P3] →    │             │ ┌──┐┌──┐          │
-│ Falta: CPF…       │             │ │P1││P2│          │
-│ FALTAM 11 ITEM(S) │             │ └──┘└──┘ …        │
-│ [composer fora]   │             │ ┌──┐┌──┐          │
-│ (conversa vazia)  │             │ │P3││P4│          │
-└───────────────────┘             ├───────────────────┤
-                                  │ [composer sticky] │
-                                  └───────────────────┘
+                  ┌─────────────────────────────────────┐
+inbound msg ───►  │ 1. Triagem (gemini-3-flash-preview) │  classifica: botão? mídia?
+                  │    custo ~$0.0001/turno              │  pergunta? saudação? objeção?
+                  └────────────────┬─────────────────────┘
+                                   │
+              ┌────────────────────┴────────────────────┐
+              │                                         │
+              ▼                                         ▼
+   ┌─────────────────────┐                ┌──────────────────────────┐
+   │ Caminho determinístico│              │ 2. Orquestrador           │
+   │ (botão/mídia/passo   │               │    GPT-5.5 (reasoning med)│
+   │ esperado) — sem IA    │              │    Tool-calling:          │
+   └─────────────────────┘                │    - answer_faq           │
+                                          │    - escalate_human       │
+                                          │    - update_lead_field    │
+                                          │    - advance_step         │
+                                          │    - request_media        │
+                                          └─────────────┬─────────────┘
+                                                        │
+                            ┌───────────────────────────┼──────────────────────────┐
+                            ▼                           ▼                          ▼
+              ┌──────────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
+              │ 3a. Gemini 3.1 Pro       │  │ 3b. Gemini 2.5 Flash │  │ 3c. Ações diretas    │
+              │     answer_faq + RAG     │  │     extract_field    │  │     (SQL, send_text) │
+              │     (knowledge sections, │  │     (CPF, valor, CEP)│  │                      │
+              │     histórico, persona)  │  │                      │  │                      │
+              └──────────────────────────┘  └──────────────────────┘  └──────────────────────┘
 ```
 
-Conversa e composer passam a ser **sempre alcançáveis em 1 toque** em vez de exigir scroll por 5 cabeçalhos.
+**Quem faz o quê:**
+
+| Camada | Modelo | Quando dispara | Custo relativo |
+|--------|--------|----------------|----------------|
+| 1. Triagem | `google/gemini-3-flash-preview` | Todo turno texto livre | 1× |
+| 2. Orquestrador | `openai/gpt-5.5` (reasoning=medium) | Triagem indicou ambiguidade / pergunta complexa / objeção | 30× |
+| 3a. FAQ deep | `google/gemini-3.1-pro-preview` | Orquestrador chamou `answer_faq` | 15× |
+| 3b. Extração | `google/gemini-2.5-flash` | Orquestrador chamou `extract_field` (CPF, valor da conta, etc) | 2× |
+| OCR | `google/gemini-2.5-flash` (multimodal) | Foto/PDF chegou | 3× |
+| Geração de copy passo (admin) | `openai/gpt-5.5-pro` | Botão "Gerar texto (IA)" no /admin/fluxos | sob demanda |
+
+Resultado: a IA "pensa" como GPT-5.5 em todo turno que importa, mas só paga GPT em ~15-25% dos turnos (o resto é botão ou Flash). Estimativa: hoje gastamos ~X em IA → com cascata fica ~1.6–1.8× o atual, com qualidade muito maior.
+
+---
+
+## Plano de implementação
+
+### Fase 1 — Fundação (sem mudança visível, mas destrava tudo)
+1. **Novo helper `_shared/ai-orchestrator.ts`** com `runOrchestrator({ message, customer, step, history, tools })` que:
+   - Roda a triagem (Flash) primeiro.
+   - Se triagem retorna `route="deterministic"` → devolve direto sem chamar GPT.
+   - Caso contrário chama GPT-5.5 com tools registradas.
+   - Loga tudo em `ai_decisions` (modelo, latência, tool chamada, confiança, custo estimado).
+2. **Cascata de fallback automática**: 429/402/timeout em qualquer camada → tenta o próximo modelo da mesma família (Gemini 3.1 Pro → 2.5 Pro → 2.5 Flash; GPT-5.5 → 5.4 → 5-mini). Sem quebrar conversa.
+3. **Tabela `ai_costs`** (consultant_id, day, calls, input_tokens, output_tokens, usd_est) atualizada pelo helper — relatório semanal por consultor.
+
+### Fase 2 — Substituir os pontos de IA atuais pelo orquestrador
+4. `bot-flow.ts` linhas 1010 e 1822 (passos `duvidas_*`) → trocam para `runOrchestrator`. Resposta sai melhor sem mudar UX.
+5. `intent-classifier.ts` (hoje OpenAI direto) → vira ferramenta do orquestrador (`classify_intent`).
+6. `ai-button-intent.ts` → vira ferramenta `match_button`.
+7. Novo gancho: quando o lead manda **texto livre num passo `message`/`capture_*`** sem casar transição, chama o orquestrador antes do "não entendi". (Resolve o sintoma de "bot ignora pergunta do meio do fluxo".)
+
+### Fase 3 — Memória e personalização (tira o tom genérico)
+8. `consultants.ai_persona text` — 3-5 frases que o próprio consultor escreve em `/admin/saude-bot` ("Sou Rafael, piauiense, falo direto, sempre cito CEPISA"). Injetado no system prompt do orquestrador.
+9. **Resumo persistente da conversa** em `customers.conversation_summary` (já existe a coluna!) atualizado a cada 6 mensagens pelo Gemini 2.5 Flash. O orquestrador recebe resumo + últimas 8 msgs em vez de truncar histórico cru. Bot lembra o que o lead falou ontem.
+10. **Memória de objeção**: `customer_objections (customer_id, objection_type, raised_at, resolved_at)` — orquestrador consulta antes de responder; se já foi resolvida, não repete o discurso.
+
+### Fase 4 — Painel de tunagem (admin/saude-bot)
+11. Aba "Cérebro": vê últimas 50 decisões IA, com filtro por `confidence<0.6` (= candidatos a melhorar conhecimento), botão "👎 Marcar resposta ruim" → vira backlog de fine-tune da base.
+12. Aba "Custos": gráfico diário por consultor, breakdown por modelo, alerta quando passar de R$ X/dia.
+13. Modo "Sandbox": consultor digita uma frase → vê exatamente qual modelo foi chamado, qual ferramenta, qual resposta, em quanto tempo. Sem mandar pro lead.
+
+---
+
+## Arquivos afetados
+
+```text
+Novos:
+  supabase/functions/_shared/ai-orchestrator.ts
+  supabase/functions/_shared/ai-cost-tracker.ts
+  supabase/functions/_shared/ai-summary.ts
+
+Editados:
+  supabase/functions/_shared/ai-gateway.ts             (cascata de fallback)
+  supabase/functions/_shared/ai-faq-answerer.ts        (wrapper, mantém compat)
+  supabase/functions/whapi-webhook/handlers/bot-flow.ts (2 chamadas + novo gancho)
+  supabase/functions/whapi-webhook/handlers/conversational/intent-classifier.ts
+  supabase/functions/whapi-webhook/handlers/conversational/index.ts
+  supabase/functions/_shared/ai-button-intent.ts
+  src/pages/SaudeBot.tsx                                (aba Cérebro + Sandbox + Custos)
+
+Migrations:
+  ai_costs (tabela)
+  customer_objections (tabela)
+  consultants.ai_persona text
+  ai_decisions: índice (customer_id, created_at desc)
+```
+
+---
+
+## Pontos a confirmar antes de eu codar
+
+1. **Custo OK?** Estimativa: ~R$30–80/mês por consultor ativo no plano (vs hoje ~R$10). Top em qualidade.
+2. **GPT-5.5 ou GPT-5.4 como orquestrador?** GPT-5.5 é o melhor; GPT-5.4 é 40% mais barato e quase tão bom. Posso deixar configurável por consultor.
+3. **Implementa tudo ou só Fase 1+2?** Fase 1+2 já entrega "IA não fica burra"; Fase 3+4 é polimento que dá pra fazer depois.
+
+Quer que eu siga com Fase 1+2 com GPT-5.5 como orquestrador padrão?
