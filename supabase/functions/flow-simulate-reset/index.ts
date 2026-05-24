@@ -1,8 +1,7 @@
 // Edge: flow-simulate-reset
-// Apaga o customer sandbox do consultor (qualquer linha is_sandbox=true).
-// Os triggers garantem que não há lixo em outras tabelas — só o próprio
-// customer + linhas que referenciam direto (customer_memory, etc.) caem
-// via FK on delete cascade quando configurado.
+// Limpa o customer sandbox (phone range 5500000xxx) deste consultor + estados
+// derivados e runs de teste antigos. Não toca em dados reais.
+
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 
 const corsHeaders = {
@@ -15,12 +14,21 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 
+function testPhoneFor(consultantId: string): string {
+  let h = 0;
+  for (const ch of consultantId) h = ((h << 5) - h + ch.charCodeAt(0)) | 0;
+  const suffix = String(Math.abs(h)).padStart(8, "0").slice(0, 8);
+  return `5500000${suffix}`;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const auth = req.headers.get("Authorization") || "";
     if (!auth.startsWith("Bearer ")) return json({ error: "missing_auth" }, 401);
-    const userClient = createClient(SUPABASE_URL, ANON, { global: { headers: { Authorization: auth } } });
+    const userClient = createClient(SUPABASE_URL, ANON, {
+      global: { headers: { Authorization: auth } },
+    });
     const { data: userRes } = await userClient.auth.getUser();
     const user = userRes?.user;
     if (!user) return json({ error: "unauthenticated" }, 401);
@@ -38,23 +46,37 @@ Deno.serve(async (req) => {
       if (!isAdmin) return json({ error: "forbidden" }, 403);
     }
 
-    // Limpa todos os customers sandbox deste consultor
+    const phone = testPhoneFor(consultantId);
+
+    // Acha customers pelo phone determinístico (cobre runs antigas mesmo sem is_sandbox)
     const { data: list } = await svc
       .from("customers")
       .select("id")
-      .eq("consultant_id", consultantId)
-      .eq("is_sandbox", true);
-
+      .eq("phone_whatsapp", phone);
     const ids = (list || []).map((r: any) => r.id);
+
     if (ids.length > 0) {
-      // Apaga dependências comuns que NÃO têm trigger (estado de fluxo, memória).
-      await svc.from("customer_flow_state").delete().in("customer_id", ids).then(() => {}, () => {});
-      await svc.from("customer_memory").delete().in("customer_id", ids).then(() => {}, () => {});
-      await svc.from("customer_processing_lock").delete().in("customer_id", ids).then(() => {}, () => {});
-      await svc.from("whatsapp_message_buffer").delete().in("customer_id", ids).then(() => {}, () => {});
+      // Dependências sem cascade
+      const safeDelete = async (table: string, col: string) => {
+        await svc.from(table).delete().in(col, ids).then(() => {}, () => {});
+      };
+      await safeDelete("customer_flow_state", "customer_id");
+      await safeDelete("customer_memory", "customer_id");
+      await safeDelete("customer_processing_lock", "customer_id");
+      await safeDelete("whatsapp_message_buffer", "customer_id");
+      // bot_test_runs / bot_test_outbound do customer
+      const { data: oldRuns } = await svc
+        .from("bot_test_runs")
+        .select("id")
+        .in("customer_id", ids);
+      const runIds = (oldRuns || []).map((r: any) => r.id);
+      if (runIds.length > 0) {
+        await svc.from("bot_test_outbound").delete().in("run_id", runIds).then(() => {}, () => {});
+        await svc.from("bot_test_runs").delete().in("id", runIds).then(() => {}, () => {});
+      }
       await svc.from("customers").delete().in("id", ids);
     }
-    return json({ deleted: ids.length });
+    return json({ deleted: ids.length, phone });
   } catch (e) {
     return json({ error: "internal", detail: String((e as Error)?.message || e) }, 500);
   }
