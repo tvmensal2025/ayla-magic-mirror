@@ -225,7 +225,7 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
               return (
                 <div key={ev.key} className="flex justify-start">
                   <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-tl-sm bg-card px-3 py-2 text-sm shadow">
-                    {ev.text}
+                    {renderWhatsApp(ev.text)}
                     {ev.kind === "buttons" && ev.buttons.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {ev.buttons.map((b) => (
