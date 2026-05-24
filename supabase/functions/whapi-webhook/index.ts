@@ -1118,6 +1118,22 @@ Deno.serve(async (req) => {
           }
         : sender;
 
+      // ─── Engine v3 — hook compartilhado (Semana 1 do rollout v3) ──
+      // Mesma chamada do evolution-webhook. Fail-open: nunca bloqueia o
+      // caminho legado, apenas observa e loga para validação dark→canary→on.
+      try {
+        const { runEngineV3IfEnabled } = await import("../_shared/flow-engine/webhook-hook.ts");
+        await runEngineV3IfEnabled({
+          supabase,
+          customerId: customer.id,
+          consultantId: superAdminConsultantId,
+          legacyStep: stepBefore,
+          inboundKind: isButton ? "button_click" : (hasImage || hasDocument ? "media" : "text"),
+        });
+      } catch (e: any) {
+        console.warn("[engine-v3-hook] erro não-bloqueante:", e?.message);
+      }
+
       const runEngine = async () => engine === "flow"
         ? await runConversationalFlow({
             supabase, sender: engineSender, customer, consultorId, nomeRepresentante,

@@ -16,6 +16,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createWhapiSender } from "../_shared/whapi-api.ts";
 import { isQuietHourBRT, logQuietSkip } from "../_shared/quiet-hours.ts";
+import { filterSendableCustomers } from "../_shared/cron-pause-batch.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -71,8 +73,13 @@ Deno.serve(async (req) => {
       .is("assigned_human_id", null)
       .limit(50);
 
+    // Semana 1 do rollout v3: filtra batch por customer_flow_state.status.
+    const candidateAllowed = new Set(
+      await filterSendableCustomers(supabase, (candidates ?? []).map((c: any) => c.id), { cronName: "bot-followup-checker:candidates" }),
+    );
+
     let sent = 0;
-    for (const c of candidates || []) {
+    for (const c of (candidates || []).filter((c: any) => candidateAllowed.has(c.id))) {
       if (TERMINAL_STEPS.has(c.conversation_step || "")) continue;
       if (!c.phone_whatsapp) continue;
       const firstName = (c.name || "").split(" ")[0] || "";
@@ -109,8 +116,12 @@ Deno.serve(async (req) => {
       .is("assigned_human_id", null)
       .limit(50);
 
+    const coldAllowed = new Set(
+      await filterSendableCustomers(supabase, (cold ?? []).map((c: any) => c.id), { cronName: "bot-followup-checker:cold" }),
+    );
+
     let cooled = 0;
-    for (const c of cold || []) {
+    for (const c of (cold || []).filter((c: any) => coldAllowed.has(c.id))) {
       // Marca deal CRM como 'frio' se ainda não estiver finalizado
       const { data: deal } = await supabase
         .from("crm_deals")

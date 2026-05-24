@@ -129,10 +129,21 @@ Deno.serve(async (req) => {
     const { data: stuck, error } = await query;
     if (error) throw error;
 
-    stats.scanned = stuck?.length || 0;
+    // Semana 1 do rollout v3: aplica filtro batch só no caminho automático.
+    // No caminho manual (customerIds via UI), o operador escolheu — respeita.
+    let stuckList: any[] = stuck || [];
+    if (!customerIds || customerIds.length === 0) {
+      const { filterSendableCustomers } = await import("../_shared/cron-pause-batch.ts");
+      const allowed = new Set(
+        await filterSendableCustomers(supabase, stuckList.map((l: any) => l.id), { cronName: "bot-stuck-recovery" }),
+      );
+      stuckList = stuckList.filter((l: any) => allowed.has(l.id));
+    }
+
+    stats.scanned = stuckList.length;
     console.log(`🔍 ${stats.scanned} leads candidatos (cutoff ${cutoff})`);
 
-    for (const lead of stuck || []) {
+    for (const lead of stuckList) {
       const step = lead.conversation_step || "";
       if (!RESCUABLE_STEPS.has(step) || !lead.consultant_id) continue;
 

@@ -1132,34 +1132,21 @@ Deno.serve(async (req) => {
     let updates: Record<string, any> = {};
     let engineUsed: "sys" | "flow" = "sys";
 
-    // ─── 7.6) Engine v3 dark/canary/on (Phase C Task 21) ───────────────
-    // Quando `flow_engine_v3 ∈ {dark, canary, on}`, carrega o `EngineCustomerState`
-    // e chama `tick()` em paralelo. Em `dark` apenas loga; em `canary`/`on`
-    // o dispatcher v3 emite. Por enquanto NÃO substituímos o caminho legado —
-    // implementação completa do canary path acontece após canary E2E (task 39+).
-    //
-    // Este bloco fica fail-open: qualquer erro no engine v3 é logado e o
-    // caminho legado segue normalmente.
+    // ─── 7.6) Engine v3 — hook compartilhado (Semana 1 do rollout v3) ──
+    // Helper único em `_shared/flow-engine/webhook-hook.ts` evita drift
+    // entre whapi-webhook (produção) e evolution-webhook (espelho).
+    // Fail-open: erro no v3 nunca bloqueia o caminho legado.
     try {
-      const { getFlowEngineV3, isV2Enabled } = await import("../_shared/feature-flag.ts");
-      const engineFlag = await getFlowEngineV3(supabase, instanceData.consultant_id);
-      if (isV2Enabled(engineFlag)) {
-        const { loadFlowState } = await import("../_shared/customer-flow-state.ts");
-        const state = await loadFlowState(supabase, customer.id);
-        if (state && state.currentStepId) {
-          jsonLog("debug", "engine_v3_state_loaded", {
-            customer_id: customer.id,
-            consultant_id: instanceData.consultant_id,
-            engine_v3_flag: engineFlag,
-            current_step_id: state.currentStepId,
-            status: state.status,
-          });
-          // Em dark: log apenas. Em canary/on: chamada real fica para Task 39+
-          // após validação 48h em dark.
-        }
-      }
+      const { runEngineV3IfEnabled } = await import("../_shared/flow-engine/webhook-hook.ts");
+      await runEngineV3IfEnabled({
+        supabase,
+        customerId: customer.id,
+        consultantId: instanceData.consultant_id,
+        legacyStep: stepBefore,
+        inboundKind: isButton ? "button_click" : (hasImage || hasDocument ? "media" : "text"),
+      });
     } catch (e: any) {
-      console.warn("[engine-v3-dark] erro não-bloqueante:", e?.message);
+      console.warn("[engine-v3-hook] erro não-bloqueante:", e?.message);
     }
 
     try {
