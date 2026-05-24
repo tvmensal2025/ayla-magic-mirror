@@ -1146,12 +1146,27 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     // mesmo whatsapp_profile/freeform_multi anteriores — o nome digitado é mais confiável.
     const currentNameSource = String((ctx.customer as any).name_source || "");
     const weakNameSource = currentNameSource === "" || currentNameSource === "whatsapp_profile" || currentNameSource === "freeform_multi";
-    if (extracted.name && !nameLocked && (stepIsAskName || !ctx.customer.name || weakNameSource)) {
+    // 🔘 Clique de botão NUNCA é nome — quando ctx.buttonId está presente, o
+    // título do botão vinha sendo capturado como name (ex.: "Como funciona"
+    // virava nome) e o motor avançava silenciosamente. Skip total.
+    const isButtonClick = !!ctx.buttonId;
+    // Também ignora texto que bate com título/id de algum botão visível neste passo
+    // (lead que digitou em vez de clicar).
+    const stepButtonsForCapture = extractStepButtons(currentStep);
+    const msgNorm = String(ctx.messageText || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const matchesButtonText = stepButtonsForCapture.some((b) => {
+      const t = String(b.title || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      const i = String(b.id || "").toLowerCase().trim();
+      return (!!t && (msgNorm === t || msgNorm.includes(t) || t.includes(msgNorm))) || (!!i && msgNorm === i);
+    });
+    if (extracted.name && !nameLocked && !isButtonClick && !matchesButtonText && (stepIsAskName || !ctx.customer.name || weakNameSource)) {
       captureUpdates.name = extracted.name;
       captureUpdates.name_source = "self_introduced";
       if (stepIsAskName) {
         console.log(`[name-capture] override "${ctx.customer.name || ""}"(${currentNameSource}) → "${extracted.name}" (askName via ${lastOutboundWasNameQuestion ? "last-outbound" : "current-step"})`);
       }
+    } else if (extracted.name && (isButtonClick || matchesButtonText)) {
+      console.log(`[name-capture] skip — entrada é clique/título de botão (msg="${(ctx.messageText || "").slice(0,40)}" buttonId=${ctx.buttonId || "—"})`);
     }
 
     if (Object.keys(captureUpdates).length > 0 && ctx.customer.id) {
@@ -1814,7 +1829,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       if (_looksLikeQuestion(st)) return false;
       return true;
     };
-    for (let guard = 0; cursor && cursorCascades(cursor) && guard < 3; guard++) {
+    // 🛟 Anti-silêncio: se o primeiro emitStep não produziu texto NEM mídia
+    // (passo vazio configurado pelo consultor), força UMA cascata mesmo se
+    // wait_for !== 'none' — caso contrário o lead fica sem resposta nenhuma.
+    const forceFirstHop = !replyText && !inlineSent && cursor
+      && !_hasTextCapture(cursor) && !_looksLikeQuestion(cursor);
+    for (let guard = 0; cursor && (cursorCascades(cursor) || (guard === 0 && forceFirstHop)) && guard < 3; guard++) {
       const nextStep = findCascadeNext(cursor);
       if (!nextStep) {
         console.log(`[conversational] cascade parou em step=${cursor.step_key} (sem próximo step ativo)`);

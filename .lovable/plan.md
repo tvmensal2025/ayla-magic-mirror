@@ -1,64 +1,39 @@
-Plano de correção
+Plano para deixar o fluxo 100% real e fiel ao configurado
 
-1. Corrigir a causa da repetição
+1. Corrigir a causa do clique “Como funciona” sem resposta
+- O fluxo A está iniciando no passo “Captura do nome”, que tem botões, mas também tem `capture name` sem texto próprio.
+- Quando o cliente digita/clica algo como “Como funciona”, o motor captura isso como nome antes de processar o botão/transição, depois avança para “Boas-vindas” sem responder o botão.
+- Vou mudar a prioridade do motor: se houver `buttonId` real ou texto que bate com botão configurado, ele processa a transição do botão antes de capturar nome/texto livre.
 
-- Ajustar o roteador do `whapi-webhook` para não limpar `conversation_step` quando o lead já está em um passo válido do fluxo configurado.
-- Hoje ele força `conversation_step = null` em situações onde deveria continuar no step atual; isso explica o welcome repetindo após clicar em botões.
+2. Corrigir botões por ID e por título
+- Garantir que Whapi use exatamente o ID do botão (`como`, `simular`, `cadastrar`, etc.).
+- Melhorar o matching para aceitar também título e frase do botão quando o WhatsApp manda apenas texto.
+- Corrigir o fallback numérico do simulador para buscar os botões do passo atual, não cair em botão vazio ou errado.
 
-2. Fazer botões seguirem a configuração real
+3. Impedir repetição e “processando muito”
+- Ajustar o polling do simulador para encerrar quando o webhook já terminou mesmo sem outbound, mostrando diagnóstico claro em vez de ficar esperando.
+- Corrigir anti-repetição para não bloquear resposta legítima do próximo passo, mas continuar impedindo reenvio do mesmo welcome/mesma mídia.
+- Exibir no simulador o `run_id` e o diagnóstico do turno para validar cada clique.
 
-- Garantir que o clique do botão Whapi use o `buttonId` real salvo em `captures._buttons`.
-- Ajustar o matching para casar tanto por `buttonId` quanto pelo título/frases configuradas.
-- Para Rafael/Whapi, o simulador deve renderizar botões clicáveis; para Evolution, deve aceitar `1`, `2`, `3` como fallback numérico.
+4. Fluxo “Como funciona” fiel ao configurado
+- Clique “Como funciona” deve enviar o passo configurado de explicação com mídia/texto na ordem definida.
+- Depois deve parar no convite correto com os botões configurados, sem pular nem repetir.
+- Se o usuário responder “quero simular” ou clicar no botão, deve ir para pedir conta de luz.
 
-3. Respeitar 100% a sequência do fluxo
+5. Fluxo “Quero simular / Cadastrar” fiel ao processo real
+- “Quero simular” deve pedir a conta de luz e aguardar foto/PDF, sem inventar resultado antes do arquivo.
+- Ao receber conta, deve chamar o pipeline real de OCR do `bot-flow.ts`.
+- Após OCR, deve mostrar valor/economia e botões “Cadastrar agora / Dúvidas / Humano”.
+- “Cadastrar agora” deve pedir documento com foto e seguir o cadastro real até finalização/portal, respeitando dados faltantes.
 
-- No motor conversacional, seguir exatamente:
-  - step atual;
-  - transição do botão/regra;
-  - `goto_step_id` configurado;
-  - `fallback.goto_step_id`;
-  - ordem de mídia/texto configurada.
-- Não inventar resposta, não pular step, não repetir step já emitido no mesmo turno.
-- Se o step pede conta de luz, ele precisa parar esperando arquivo/imagem/documento antes de mostrar resultado/cadastro.
+6. Validar com teste real do motor
+- Criar/ajustar teste de regressão para simular: zerar, nome, como funciona, quero simular, anexar conta, resultado, cadastrar, anexar documento.
+- Validar que cada etapa muda para o step esperado, emite os botões esperados e não repete welcome.
+- Implantar as edge functions alteradas e conferir logs do `whapi-webhook` e do `flow-simulate-run`.
 
-4. Corrigir o caso “Cadastrar”
-
-- Quando clicar “Cadastrar agora”/“Cadastrar”, o fluxo deve ir para o passo que pede a conta de luz ou documento conforme configurado.
-- Depois do envio da conta, o pipeline real deve processar OCR/valor e só então mostrar a mensagem de resultado/economia e perguntar se deseja cadastrar.
-- Se faltar arquivo/valor necessário, o simulador deve pedir o dado correto em vez de avançar artificialmente.
-
-5. Reduzir o tempo de “processando”
-
-- No `flow-simulate-run`, encerrar o polling assim que o turno tiver terminado de verdade:
-  - recebeu botões finais;
-  - recebeu prompt de captura final;
-  - não há novos eventos após janela curta;
-  - webhook retornou sem eventos.
-- Manter uma janela maior só para casos com mídia pesada, sem travar todos os cliques.
-
-6. Melhorar validação do teste
-
-- Adicionar retorno de diagnóstico no simulador com `run_id`, step anterior, step final e eventos emitidos.
-- Usar isso para confirmar que cada clique avançou para o step esperado e não reiniciou no welcome.
-
-Validação
-
-- Testar variante D com Whapi:
-  1. Zerar conversa.
-  2. Ver welcome com áudio/texto/botões.
-  3. Clicar “Quero simular” e confirmar que vai para pedir conta, sem repetir welcome.
-  4. Clicar “Como funciona” e confirmar mídia/texto na ordem configurada e botões finais.
-  5. Clicar “Cadastrar” e confirmar que pede a conta/documento correto antes de resultado.
-  6. Verificar que `conversation_step` final bate com o step configurado.
-
-Arquivos envolvidos
-
-- `supabase/functions/whapi-webhook/index.ts`
+Arquivos previstos
 - `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
 - `supabase/functions/_shared/flow-router.ts`
-- `supabase/functions/_shared/ai-button-intent.ts`
 - `supabase/functions/flow-simulate-run/index.ts`
-- `src/components/admin/flow-builder/FlowSimulator.tsx`  
-  
-`JA LIGAR O FLUXO NOS PASSOS CERTOS FICANDO 100% CERTO`  
+- `src/components/admin/flow-builder/FlowSimulator.tsx`
+- Possível teste Deno dentro de `supabase/functions/whapi-webhook/` ou ajuste de teste existente, sem alterar banco estrutural.
