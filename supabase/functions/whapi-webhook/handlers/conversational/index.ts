@@ -1009,13 +1009,39 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       const tpl = (cursor.message_text || "").trim();
       const renderedText = tpl ? renderTemplate(tpl, vars) : "";
       const textDelay = Math.max(0, Number((cursor as any).text_delay_ms || 0));
+      // 🔘 Se o passo tem botões configurados (captures._buttons), envia o texto
+      // como mensagem interativa via sender.sendButtons() — assim o WhatsApp (e o
+      // simulador) renderizam os botões reais com IDs do fluxo. Sem isso, o
+      // welcome do fluxo D saía como texto puro e sumiam os 3 botões.
+      const restartStepButtons = extractStepButtons(cursor);
+      const restartWantsButtons = restartStepButtons.length > 0 && !!renderedText;
       const { mediaSent, textSentInline } = await sendStepMedia(
         ctx, cursor, consultantId, true,
-        renderedText ? { text: renderedText, delayMs: textDelay } : null,
+        renderedText && !restartWantsButtons ? { text: renderedText, delayMs: textDelay } : null,
       );
       if (mediaSent === true) anyMediaSent = true;
-      // Fallback: step sem mídia E sem ordem configurada → manda como texto puro.
-      if (renderedText && !textSentInline && !mediaSent) {
+      if (restartWantsButtons) {
+        try {
+          await ctx.sender.sendButtons(ctx.remoteJid, renderedText, restartStepButtons);
+          if (ctx.customer?.id) {
+            await ctx.supabase.from("conversations").insert({
+              customer_id: ctx.customer.id,
+              message_direction: "outbound",
+              message_text: renderedText,
+              message_type: "buttons",
+              conversation_step: cursor.step_key,
+            });
+          }
+          anyMediaSent = true;
+        } catch (e) {
+          console.error(`[restart-cascade] sendButtons falhou step=${cursor.step_key} — fallback texto:`, (e as Error)?.message || e);
+          try {
+            await ctx.sender.sendText(ctx.remoteJid, renderedText);
+            anyMediaSent = true;
+          } catch (_) { /* noop */ }
+        }
+      } else if (renderedText && !textSentInline && !mediaSent) {
+        // Fallback: step sem mídia E sem ordem configurada → manda como texto puro.
         try {
           await ctx.sender.sendText(ctx.remoteJid, renderedText);
           if (ctx.customer?.id) {

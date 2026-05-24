@@ -1,39 +1,32 @@
 ## Diagnóstico
 
-Comparei o último turno do simulador com o motor de produção:
+- O simulador está chamando `flow-simulate-run`, que por sua vez chama o motor real `whapi-webhook` em modo teste.
+- Para a variante D, o primeiro passo (`d_welcome`) tem botões configurados, mas está com `wait_for: none` e `media_order: [audio, image, video, text]`.
+- No caminho de restart (`conversation_step = welcome`), o código envia texto via `sendStepMedia` ou `sendText`, mas não usa `sendButtons`; por isso o banco registra `kind: text`, e o simulador não tem botões para renderizar.
+- O fluxo fica processando cerca de 8–9s porque `flow-simulate-run` sempre espera polling até estabilizar por 1,5s após o webhook, mesmo quando já recebeu um evento final.
+- A repetição ainda acontece porque o reset inicial apaga o customer, mas não limpa `conversations`/`ai_slot_dispatch_log`; e o caminho de restart não compartilha o mesmo anti-repetição/botões do `emitStep`, criando divergência entre “começo do fluxo” e “próximos passos”.
 
-1. **Sem botões.** `bot_test_outbound` do último run só tem 1 linha `kind:text` — nenhum `kind:buttons`. Causa: o `runConversationalFlow` (`supabase/functions/whapi-webhook/handlers/conversational/index.ts`) é o engine que roda os passos do `/admin/fluxos`. Ele já extrai os botões do step (`extractStepButtons` → `captures._buttons`) **só para fazer match de intent**, mas o `emitStep`/`goToStep` envia apenas `sender.sendText(...)` ou devolve `reply` string para o `whapi-webhook/index.ts`, que também chama `sender.sendText`. **Nenhum `sender.sendButtons` é chamado nesse caminho** — por isso o botão configurado no passo "Boas-vindas com botões" some no WhatsApp real e, por consequência, no simulador.
+## Plano de implementação
 
-2. **Negrito/espaços não renderizam.** O bubble do `FlowSimulator.tsx` (linha 207) imprime `{ev.text}` cru. Os `*…*`, `_…_`, `~…~` do WhatsApp aparecem como caracteres literais ("`*Bem-Vindo(a)*`", "`* *`"). O usuário quer ver exatamente como o WhatsApp renderiza.
+1. **Unificar o envio do passo inicial com o envio real de passos**
+   - Em `supabase/functions/whapi-webhook/handlers/conversational/index.ts`, ajustar o bloco `unknown step -> restart` para usar o mesmo helper de emissão que já trata mídia, texto, botões e ordem configurada.
+   - Quando o passo tiver `captures._buttons`, enviar `ctx.sender.sendButtons(...)` com os IDs reais, inclusive no primeiro welcome.
+   - Preservar a ordem configurada: áudio/imagem/vídeo/texto, mas se o texto final tem botões, o texto deve sair como mensagem interativa com botões e não como texto simples.
 
-3. **Nome do representante "vazio".** O webhook real lê `consultants.name` do `settings.superadmin_consultant_id` e usa só o primeiro nome (fallback `"iGreen Energy"`). Na tela 2 já apareceu "Rafael" corretamente — o que o usuário viu como `*  *` é o efeito colateral de (2): quando uma variável fica vazia, sobram dois asteriscos seguidos sem nada entre eles. Corrigindo (1) e (2) o sintoma some, mas também vou garantir que o renderer colapse `* *` órfão (variável vazia) para nada, pra nunca aparecer asterisco solto.
+2. **Evitar repetição no simulador sem mudar dados reais**
+   - Garantir que `flow-simulate-reset` limpe também os rastros do sandbox em `conversations` e `ai_slot_dispatch_log`, além dos `bot_test_runs`.
+   - No `fresh: true` de `flow-simulate-run`, aplicar a mesma limpeza leve do sandbox antes de rodar o fluxo, para não sobrar anti-dup/dedupe antigo causando pulo ou repetição.
 
-## Mudanças
+3. **Reduzir o “processando...” do simulador**
+   - Em `flow-simulate-run`, encerrar o polling mais cedo quando já houver evento de texto/botões final ou quando o webhook terminou e não há novos eventos por um intervalo curto.
+   - Manter margem suficiente para capturar áudio + texto + botões na ordem correta.
 
-### 1. `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
-- Em `emitStep`, depois de resolver `text`/`mediaResult`, se o step tiver `extractStepButtons(st).length > 0` **e** o texto for o último envio do turno (`asReply=true`), chamar `ctx.sender.sendButtons(ctx.remoteJid, text, buttons)` em vez de devolver `replyText`. Registrar em `conversations` como `message_type:"buttons"`. Retornar `{ replyText: "", inlineSent: true }`.
-- No caminho cascade (`asReply=false`) manter `sendText` (botão só faz sentido no passo final que aguarda resposta).
-- Limpar `__inline_sent: true` no `goToStep` quando os botões saírem inline para o `whapi-webhook/index.ts` não tentar reenviar o texto.
+4. **Renderizar botões exatamente como enviados pelo Whapi**
+   - Confirmar que o `bot_test_outbound` registre `kind: buttons` com JSON `{ text, buttons: [{ id, title }] }`.
+   - O `FlowSimulator.tsx` já renderiza `kind: buttons`; se necessário, ajustar apenas para preservar espaçamento/formatação WhatsApp sem inventar texto.
 
-### 2. `supabase/functions/_shared/render-vars.ts` (e `whapi-webhook/handlers/conversational/templates.ts`)
-- Após substituir variáveis, rodar uma limpeza extra: regex `\*\s*\*` → "" e `\b__\b` → "" para nunca sobrar negrito vazio quando a variável vier `""`.
-
-### 3. `src/components/admin/flow-builder/FlowSimulator.tsx`
-- Criar helper `renderWhatsAppText(text: string)` que mantém `whitespace-pre-wrap` e converte:
-  - `*texto*` → `<strong>texto</strong>`
-  - `_texto_` → `<em>texto</em>`
-  - `~texto~` → `<del>texto</del>`
-  - ` ```bloco``` ` e `` `inline` `` → `<code>`
-- Substituir `{ev.text}` (e o texto dentro do bloco `buttons`) por `renderWhatsAppText(ev.text)`.
-- Manter parsing seguro (escape de HTML antes da substituição) para evitar XSS no sandbox.
-
-### 4. Deploy + verificação
-- Deploy de `whapi-webhook`.
-- Curl no `flow-simulate-run` com `oi`+`fresh:true`+`variant:"D"` e checar `bot_test_outbound` → esperar 1 linha `kind:buttons` com `{text, buttons:[…3 ids…]}` no JSON.
-- No preview: clicar "Zerar" → confirmar bolinha de "Boas-vindas" com **negrito** real e 3 botões clicáveis.
-
-## Fora de escopo
-- `bot-flow.ts` (já manda botões corretamente).
-- Edição dos templates/textos do `/admin/fluxos`.
-- Mudanças no Evolution (mesmo motor, mas envia numérico 1/2/3 — já tratado).
-- Migrações de schema.
+5. **Validação final**
+   - Testar `flow-simulate-run` com variante D e `fresh: true`.
+   - Verificar que o retorno contém áudio quando configurado e depois `kind: buttons` com os 3 botões reais.
+   - Verificar que responder clicando no botão do simulador envia `button_id` real e avança para o passo configurado, sem repetir o welcome.
+   - Verificar logs do `whapi-webhook` para confirmar que o caminho Whapi real continua usando botões, enquanto Evolution segue aceitando `1`, `2`, `3`.
