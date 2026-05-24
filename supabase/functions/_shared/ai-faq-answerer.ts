@@ -83,7 +83,7 @@ PERGUNTA DO LEAD: "${q.slice(0, 600)}"`;
   try {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 15_000);
-    const res = await aiChat({
+    const res = await aiChatCascade({
       model: opts.model || "google/gemini-3.1-pro-preview",
       temperature: 0.35,
       maxTokens: 500,
@@ -108,6 +108,13 @@ PERGUNTA DO LEAD: "${q.slice(0, 600)}"`;
     });
     clearTimeout(to);
 
+    void trackAIUsage({
+      supabase: opts.supabase,
+      consultantId: opts.consultantId,
+      model: res.modelUsed,
+      phase: "faq",
+      usage: res.usage,
+    });
 
     const parsed = res.json;
     if (!parsed || typeof parsed.text !== "string") {
