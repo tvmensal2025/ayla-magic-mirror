@@ -101,8 +101,48 @@ async function fetchUrlToBase64(url: string, timeoutMs = 15_000): Promise<{ base
   }
 }
 
+// ── Resolve fallback de OCR a partir do step configurado no Flow Builder ──
+// Lê o campo `fallback` do bot_flow_step atual (capture_conta / capture_documento)
+// e retorna o retry_text configurado pelo consultor, ou null se não houver.
+// Quando `then === "humano"` e as tentativas esgotaram, pausa o bot.
+interface OcrFallbackResult {
+  retryText: string | null;
+  escalate: boolean; // true = pausa bot + notifica consultor
+}
+async function resolveOcrFallback(
+  supabase: any,
+  customerId: string,
+  consultantId: string | null | undefined,
+  stepType: "capture_conta" | "capture_documento",
+  attempts: number,
+  defaultRetryText: string,
+): Promise<OcrFallbackResult> {
+  try {
+    if (!consultantId) return { retryText: defaultRetryText, escalate: false };
+    const { data: flow } = await supabase
+      .from("bot_flows").select("id")
+      .eq("consultant_id", consultantId).eq("is_active", true)
+      .order("created_at", { ascending: true }).limit(1).maybeSingle();
+    if (!flow?.id) return { retryText: defaultRetryText, escalate: false };
+    const { data: stepRow } = await supabase
+      .from("bot_flow_steps").select("fallback")
+      .eq("flow_id", flow.id).eq("step_type", stepType).eq("is_active", true)
+      .order("position", { ascending: true }).limit(1).maybeSingle();
+    const fb = (stepRow as any)?.fallback;
+    if (!fb || fb.mode !== "retry") return { retryText: defaultRetryText, escalate: false };
+    const maxRetries = Math.max(1, Number(fb.max_retries ?? 2));
+    const retryText = String(fb.retry_text || defaultRetryText);
+    const escalate = attempts >= maxRetries && String(fb.then || "") === "humano";
+    return { retryText, escalate };
+  } catch (e) {
+    console.warn("[resolveOcrFallback] erro:", (e as any)?.message);
+    return { retryText: defaultRetryText, escalate: false };
+  }
+}
+
 // ── Auto-resolve CEP from address data (avoid asking user) ──
 async function autoResolveCepIfNeeded(merged: any, updates: any): Promise<string> {
+
   let step = getNextMissingStep(merged);
   if (step === "ask_cep" && merged.address_city && merged.address_state && merged.address_street) {
     console.log("🔍 Auto-resolvendo CEP via ViaCEP antes de perguntar ao usuário...");
@@ -3079,8 +3119,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           const confianca = typeof d.confianca === "number" ? d.confianca : 100;
           if (confianca < OCR_CONFIDENCE_THRESHOLD) {
             jsonLog("warn", "OCR conta abaixo do threshold", { customer_id: customer.id, confianca, threshold: OCR_CONFIDENCE_THRESHOLD });
-            updates.conversation_step = "aguardando_conta";
-            reply = `⚠️ Não consegui ler a conta com clareza suficiente (qualidade: ${confianca}%).\n\n📸 Por favor, envie uma *foto mais nítida e bem iluminada* da conta de energia.\n\nDicas:\n• Use boa iluminação\n• Evite reflexos\n• Foco nos dados principais\n• Tire em ambiente claro`;
+            const tries = (customer.ocr_conta_attempts || 0) + 1;
+            updates.ocr_conta_attempts = tries;
+            const { retryText, escalate } = await resolveOcrFallback(supabase, customer.id, customer.consultant_id, "capture_conta", tries,
+              `⚠️ Não consegui ler a conta com clareza suficiente (qualidade: ${confianca}%).\n\n📸 Por favor, envie uma *foto mais nítida e bem iluminada* da conta de energia.\n\nDicas:\n• Use boa iluminação\n• Evite reflexos\n• Foco nos dados principais\n• Tire em ambiente claro`);
+            if (escalate) {
+              updates.bot_paused = true; updates.bot_paused_reason = "ocr_conta_max_retries"; updates.bot_paused_at = new Date().toISOString();
+              reply = `${retryText}\n\nVou chamar ${nomeRepresentante} pra te ajudar pessoalmente 🙌`;
+            } else {
+              updates.conversation_step = "aguardando_conta";
+              reply = retryText;
+            }
             break;
           }
           // BLINDAGEM: OCR pode retornar sucesso=true com dados vazios.
@@ -3091,12 +3140,14 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             jsonLog("warn", "OCR conta com poucos campos válidos", { customer_id: customer.id, validos: criticos.length });
             const tries = (customer.ocr_conta_attempts || 0) + 1;
             updates.ocr_conta_attempts = tries;
-            if (tries < 2) {
-              updates.conversation_step = "aguardando_conta";
-              reply = "⚠️ Recebi a conta mas não consegui extrair os dados principais.\n\n📸 Envie uma *foto mais nítida* mostrando claramente:\n• Seu nome\n• Endereço\n• Distribuidora\n• Valor da conta";
+            const { retryText, escalate } = await resolveOcrFallback(supabase, customer.id, customer.consultant_id, "capture_conta", tries,
+              "⚠️ Recebi a conta mas não consegui extrair os dados principais.\n\n📸 Envie uma *foto mais nítida* mostrando claramente:\n• Seu nome\n• Endereço\n• Distribuidora\n• Valor da conta");
+            if (escalate) {
+              updates.bot_paused = true; updates.bot_paused_reason = "ocr_conta_max_retries"; updates.bot_paused_at = new Date().toISOString();
+              reply = `${retryText}\n\nVou chamar ${nomeRepresentante} pra te ajudar pessoalmente 🙌`;
             } else {
-              updates.conversation_step = "ask_name";
-              reply = "⚠️ Tive dificuldade em ler sua conta. Vou perguntar os dados manualmente.\n\nQual é o seu *nome completo*?";
+              updates.conversation_step = "aguardando_conta";
+              reply = retryText;
             }
             break;
           }
@@ -3187,25 +3238,28 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           console.error("❌ OCR conta falhou:", ocrData.erro);
           const tries = (customer.ocr_conta_attempts || 0) + 1;
           updates.ocr_conta_attempts = tries;
-          if (tries < 2) {
-            updates.conversation_step = "aguardando_conta";
-            reply = "⚠️ Não consegui ler a conta. Por favor, envie uma *foto mais nítida e bem iluminada* (sem reflexos).";
+          const { retryText, escalate } = await resolveOcrFallback(supabase, customer.id, customer.consultant_id, "capture_conta", tries,
+            "⚠️ Não consegui ler a conta. Por favor, envie uma *foto mais nítida e bem iluminada* (sem reflexos).");
+          if (escalate) {
+            updates.bot_paused = true; updates.bot_paused_reason = "ocr_conta_max_retries"; updates.bot_paused_at = new Date().toISOString();
+            reply = `${retryText}\n\nVou chamar ${nomeRepresentante} pra te ajudar pessoalmente 🙌`;
           } else {
-            console.warn(`⏭️ OCR conta falhou ${tries}x — pulando para coleta manual`);
-            updates.conversation_step = "ask_name";
-            reply = "⚠️ Não consegui ler sua conta de luz, mas tudo bem! Vou te perguntar os dados manualmente.\n\nQual é o seu *nome completo*?";
+            updates.conversation_step = "aguardando_conta";
+            reply = retryText;
           }
         }
       } catch (e) {
         console.error("❌ Erro OCR conta:", e);
         const tries = (customer.ocr_conta_attempts || 0) + 1;
         updates.ocr_conta_attempts = tries;
-        if (tries < 2) {
-          updates.conversation_step = "aguardando_conta";
-          reply = "⚠️ Erro ao processar a conta. Tente enviar novamente.";
+        const { retryText, escalate } = await resolveOcrFallback(supabase, customer.id, customer.consultant_id, "capture_conta", tries,
+          "⚠️ Erro ao processar a conta. Tente enviar novamente.");
+        if (escalate) {
+          updates.bot_paused = true; updates.bot_paused_reason = "ocr_conta_max_retries"; updates.bot_paused_at = new Date().toISOString();
+          reply = `${retryText}\n\nVou chamar ${nomeRepresentante} pra te ajudar pessoalmente 🙌`;
         } else {
-          updates.conversation_step = "ask_name";
-          reply = "⚠️ Tive um problema ao ler sua conta. Vou continuar perguntando os dados.\n\nQual é o seu *nome completo*?";
+          updates.conversation_step = "aguardando_conta";
+          reply = retryText;
         }
       }
       break;
@@ -3826,25 +3880,28 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           console.error("❌ OCR doc falhou:", ocrData.erro);
           const tries = (customer.ocr_doc_attempts || 0) + 1;
           updates.ocr_doc_attempts = tries;
-          if (tries < 2) {
-            updates.conversation_step = "aguardando_doc_verso";
-            reply = "⚠️ Não consegui ler o documento. Envie uma foto mais nítida do *VERSO*.";
+          const { retryText, escalate } = await resolveOcrFallback(supabase, customer.id, customer.consultant_id, "capture_documento", tries,
+            "⚠️ Não consegui ler o documento. Envie uma foto mais nítida do *VERSO*.");
+          if (escalate) {
+            updates.bot_paused = true; updates.bot_paused_reason = "ocr_doc_max_retries"; updates.bot_paused_at = new Date().toISOString();
+            reply = `${retryText}\n\nVou chamar ${nomeRepresentante} pra te ajudar pessoalmente 🙌`;
           } else {
-            console.warn(`⏭️ OCR doc falhou ${tries}x — pulando para coleta manual de RG/CPF/data nasc`);
-            updates.conversation_step = "ask_cpf";
-            reply = "⚠️ Não consegui extrair os dados do documento, mas vamos continuar.\n\nQual o seu *CPF*? (apenas números)";
+            updates.conversation_step = "aguardando_doc_verso";
+            reply = retryText;
           }
         }
       } catch (e) {
         console.error("❌ Erro OCR doc:", e);
         const tries = (customer.ocr_doc_attempts || 0) + 1;
         updates.ocr_doc_attempts = tries;
-        if (tries < 2) {
-          updates.conversation_step = "aguardando_doc_verso";
-          reply = "⚠️ Erro ao processar o documento. Tente enviar novamente.";
+        const { retryText, escalate } = await resolveOcrFallback(supabase, customer.id, customer.consultant_id, "capture_documento", tries,
+          "⚠️ Erro ao processar o documento. Tente enviar novamente.");
+        if (escalate) {
+          updates.bot_paused = true; updates.bot_paused_reason = "ocr_doc_max_retries"; updates.bot_paused_at = new Date().toISOString();
+          reply = `${retryText}\n\nVou chamar ${nomeRepresentante} pra te ajudar pessoalmente 🙌`;
         } else {
-          updates.conversation_step = "ask_cpf";
-          reply = "⚠️ Tive problemas para ler seu documento. Vamos seguir manualmente.\n\nQual o seu *CPF*? (apenas números)";
+          updates.conversation_step = "aguardando_doc_verso";
+          reply = retryText;
         }
       }
       break;
