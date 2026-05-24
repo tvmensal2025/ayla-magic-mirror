@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, Clock, ArrowLeft, MessageCircle, RefreshCw, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import BotHealthIntel from "@/components/admin/saude/BotHealthIntel";
+import AIBrainPanel from "@/components/admin/saude/AIBrainPanel";
 
 type Alert = {
   id: string;
@@ -170,6 +171,9 @@ export default function SaudeBot() {
 
         {/* IA — Análise Gemini 7d */}
         {userId && <BotHealthIntel consultantId={userId} />}
+
+        {/* Cérebro IA — decisões + custos */}
+        {userId && <AIBrainPanel consultantId={userId} />}
 
         {/* Resumo */}
         <div className="grid grid-cols-3 gap-3">

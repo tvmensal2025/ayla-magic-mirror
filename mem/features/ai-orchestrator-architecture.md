@@ -33,3 +33,13 @@ type: feature
 ## Custo
 
 GPT-5.5 só roda em ~15-25% dos turnos (resto: botão/mídia/triage-rejected). Estimativa: ~1.6-1.8× custo atual com qualidade muito maior. Tracking em `ai_costs` permite alertas e breakdown por consultor.
+
+## Phase 3 — Memória persistente
+
+- `_shared/ai-summary.ts` — `maybeUpdateSummary` chama `google/gemini-2.5-flash` a cada ~6 turnos inbound e atualiza `customers.conversation_summary` + `summary_updated_at`. Fire-and-forget após orchestrator no bot-flow (~linha 1832).
+- Orchestrator injeta `customer.conversation_summary` no system prompt do GPT-5.5 como "RESUMO DA CONVERSA (memória persistente)".
+- Persona: `consultants.ai_persona` já injetada via `buildOrchSystem(personaText)`.
+
+## Phase 4 — Painel de tunagem
+
+- `src/components/admin/saude/AIBrainPanel.tsx` em `/admin/saude-bot`: lista últimas 50 `ai_decisions` (filtro <60% confiança), barras de custo USD por dia (7d via `ai_costs`), expand-row mostra reasoning/user_input/ai_output.
