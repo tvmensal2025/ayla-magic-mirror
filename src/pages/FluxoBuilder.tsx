@@ -415,6 +415,8 @@ export default function FluxoBuilder() {
         open={simulatorOpen}
         onOpenChange={setSimulatorOpen}
         steps={steps}
+        consultantId={userId}
+        consultantName={consultantName}
       />
     </div>
   );
