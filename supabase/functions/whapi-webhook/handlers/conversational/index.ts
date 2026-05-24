@@ -1453,6 +1453,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     transitions: currentStep.transitions ?? [],
     buttonId: ctx.buttonId,
     messageText: ctx.messageText,
+    buttons: extractStepButtons(currentStep),
     intents: candidateIntents,
   });
 
