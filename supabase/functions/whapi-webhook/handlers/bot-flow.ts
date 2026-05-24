@@ -1819,20 +1819,22 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             .map((r) => `${r.message_direction === "inbound" ? "Lead" : "Bot"}: ${String(r.message_text || "").slice(0, 240)}`)
             .join("\n");
 
-          const { answerFaqWithAI } = await import("../../_shared/ai-faq-answerer.ts");
-          const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
-          const ai = await answerFaqWithAI({
+          const { runOrchestrator } = await import("../../_shared/ai-orchestrator.ts");
+          const orch = await runOrchestrator({
             supabase,
-            question: messageText,
-            leadName: firstName,
-            currentStepLabel: step,
+            customer,
             consultantId: customer.consultant_id,
-            recentHistory,
-            model: "google/gemini-3.1-pro-preview",
+            message: messageText,
+            step,
+            history: recentHistory,
+            isButton: false,
+            hasMedia: false,
           });
+          // Backward-compat: trata como o antigo "ai" object
+          const ai = { text: orch.reply, confidence: orch.confidence, shouldHandoff: orch.shouldHandoff };
 
           if (ai.text && ai.confidence >= 0.55) {
-            console.log(`[ai-global] respondeu step=${step} conf=${ai.confidence.toFixed(2)} handoff=${ai.shouldHandoff}`);
+            console.log(`[ai-orch] step=${step} chain=${orch.modelChain.join(",")} route=${orch.route} conf=${ai.confidence.toFixed(2)} latency=${orch.latencyMs}ms`);
 
             // Anti-loop: incrementa contador
             const prevCount = Number((customer as any).ai_followups_count || 0);

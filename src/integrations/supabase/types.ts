@@ -825,6 +825,63 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_costs: {
+        Row: {
+          calls: number
+          consultant_id: string | null
+          created_at: string
+          day: string
+          id: string
+          input_tokens: number
+          model: string
+          output_tokens: number
+          phase: string
+          updated_at: string
+          usd_est: number
+        }
+        Insert: {
+          calls?: number
+          consultant_id?: string | null
+          created_at?: string
+          day?: string
+          id?: string
+          input_tokens?: number
+          model: string
+          output_tokens?: number
+          phase: string
+          updated_at?: string
+          usd_est?: number
+        }
+        Update: {
+          calls?: number
+          consultant_id?: string | null
+          created_at?: string
+          day?: string
+          id?: string
+          input_tokens?: number
+          model?: string
+          output_tokens?: number
+          phase?: string
+          updated_at?: string
+          usd_est?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_costs_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_costs_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_decisions: {
         Row: {
           ai_output: Json | null
@@ -1975,6 +2032,7 @@ export type Database = {
           ab_test_counter: number
           ab_test_enabled: boolean
           active_variants: string[]
+          ai_persona: string | null
           approved: boolean | null
           cadastro_url: string
           conversational_flow_enabled: boolean
@@ -2000,6 +2058,7 @@ export type Database = {
           ab_test_counter?: number
           ab_test_enabled?: boolean
           active_variants?: string[]
+          ai_persona?: string | null
           approved?: boolean | null
           cadastro_url: string
           conversational_flow_enabled?: boolean
@@ -2025,6 +2084,7 @@ export type Database = {
           ab_test_counter?: number
           ab_test_enabled?: boolean
           active_variants?: string[]
+          ai_persona?: string | null
           approved?: boolean | null
           cadastro_url?: string
           conversational_flow_enabled?: boolean
