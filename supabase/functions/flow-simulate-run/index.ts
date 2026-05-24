@@ -146,6 +146,14 @@ Deno.serve(async (req) => {
     await svc.from("customers").update(patch).eq("id", customer.id);
     Object.assign(customer as any, patch);
 
+    if (fresh) {
+      // Limpa rastros de conversas anteriores no sandbox para garantir paridade
+      // com lead "novinho" (sem isso, anti-dup/anti-rep do motor podem suprimir
+      // o welcome ou pular passos no segundo "Zerar").
+      await svc.from("conversations").delete().eq("customer_id", customer.id).then(() => {}, () => {});
+      await svc.from("ai_slot_dispatch_log").delete().eq("customer_id", customer.id).then(() => {}, () => {});
+    }
+
     if (!buttonId && /^\s*[1-9]\s*$/.test(userMessage)) {
       buttonId = await resolveNumberedButtonId(svc, consultantId, String((customer as any).conversation_step || ""), variant || String((customer as any).flow_variant || "A"), userMessage);
     }
