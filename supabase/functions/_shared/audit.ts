@@ -72,3 +72,29 @@ export function jsonLog(level: LogLevel, message: string, context: LogContext = 
 export function generateCorrelationId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+// ─── Error capture ──────────────────────────────────────────────────
+// Wrapper estruturado para erros. Hoje só faz console.error com tags;
+// no futuro pode integrar com Sentry/Datadog sem mudar call-sites.
+export interface CaptureErrorOptions {
+  tags?: Record<string, string | number | boolean | undefined | null>;
+  extra?: Record<string, unknown>;
+}
+
+export function captureError(err: unknown, opts: CaptureErrorOptions = {}): void {
+  const message = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? err.stack : undefined;
+  const entry = {
+    ts: new Date().toISOString(),
+    level: "error" as const,
+    message,
+    stack,
+    tags: opts.tags ?? {},
+    extra: opts.extra ?? {},
+  };
+  try {
+    console.error(JSON.stringify(entry));
+  } catch {
+    console.error("[captureError]", message, stack);
+  }
+}
