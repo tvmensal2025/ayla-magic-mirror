@@ -546,6 +546,7 @@ const SuperAdmin = () => {
         {activeTab === "financeiro" && <PlatformPnLCard />}
         {activeTab === "saude_rede" && <NetworkHealthPanel />}
         {activeTab === "ia_aprendendo" && <AILearningHealthPanel />}
+        {activeTab === "rollout" && <RolloutPanel />}
         </Suspense>
       </main>
     </div>
