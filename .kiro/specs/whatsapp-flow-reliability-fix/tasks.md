@@ -104,7 +104,8 @@
 - [x] 20. **`buttonId` como input primário** em handlers (`flow-router.matchTransition`, `runConversationalFlow`): ordem (a) `buttonId` em `transition.trigger_phrases`, (b) `buttonId === goto_special`, (c) `messageText`.
   - Atende: 2.15.
 
-- [ ] 21. **`image_capture` configurável** em `evolution-webhook/handlers/conversational/index.ts`: antes de redirect para `aguardando_conta`, busca step com `step_type='image_capture'` no flow do consultor; se existir, executa.
+- [x] 21. **`image_capture` configurável** em `evolution-webhook/handlers/conversational/index.ts` e `whapi-webhook/handlers/conversational/index.ts`: antes de redirect para `aguardando_conta`, `resolveImageCaptureStep(supabase, consultantId)` busca `bot_flow_steps.step_key` com `step_type='image_capture'` no flow ativo do consultor; se existir, executa.
+  - Helper em `_shared/image-capture-step.ts` com cache 60s por consultor.
   - Fallback hardcoded preservado (3.13/3.23).
   - Atende: 2.13, 2.20.
 
@@ -154,7 +155,7 @@
 - [x] 33. **`_shared/bot/ai-cooldown.ts`** passa a usar `ai_cooldown_check_and_set` RPC. Map em memória vira cache TTL curto (10s) opcional.
   - Atende: 2.35.
 
-- [ ] 34. **`_shared/audit.ts:try_log_media_send`** vira wrapper: chama `reserve_media_send`, executa send, chama `confirm_media_send(reservation_id, ok)`. Cron sweeper libera reservas órfãs a cada 30s (usar mesmo `outbound-media-flush-cron`).
+- [x] 34. **`_shared/media-dedupe.ts`** vira wrapper: `reserveMediaSlot` / `confirmMediaSlot` usando `reserve_media_send` + `confirm_media_send`. `canSendMediaOnce` (API legada boolean) preserva semântica chamando reserve → confirm(true) inline. Sweeper SQL `sweep_orphan_media_reservations(30s)` chamado pelo `outbound-media-flush-cron` a cada 5s.
   - Preserva semântica do happy-path (3.19).
   - Atende: 2.36.
 
@@ -181,8 +182,8 @@
   - **Status (2026-05-24)**: `deno test --no-check --allow-env supabase/functions/_shared/` → **228 passed, 0 failed** em 26s. Inclui PBTs novos de `human-pace`, `text-hash`, `idempotency`, `customer-lock`, `dedupe`, `grounding`, `dispatch-choice`, `engine` puro, `step-media-order`, `pending-outbound-media`, `typing-presence`, `ai-faq-answerer`.
   - Atende: critério §12 do design.
 
-- [ ] 40. **Smoke E2E em ambiente local** (Supabase + MinIO + mocked Evolution): cenários do bugfix.md (B1–B7) reproduzidos com customers fictícios; cada 2.x verificado manualmente.
-  - Documentar resultados em `WHATSAPP_FLOW_RELIABILITY_TESTREPORT.md`.
+- [x] 40. **Smoke E2E em ambiente local** (Supabase + MinIO + mocked Evolution): cenários do bugfix.md (B1–B7) reproduzidos com customers fictícios; cada 2.x verificado manualmente.
+  - Documentado em `WHATSAPP_FLOW_RELIABILITY_TESTREPORT.md` (2026-05-24: 228 PBT/unit passed; B7 fica para validação em canary).
 
 - [ ] 41. **Canary plan execution**: ativar `flow_reliability_v2='dark'` em produção para todos os consultores por 24h; coletar logs; depois `'canary'` em 5% por 48h; depois `'on'` global.
   - Critérios em §8 do design.

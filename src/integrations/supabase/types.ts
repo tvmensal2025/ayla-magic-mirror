@@ -4906,6 +4906,10 @@ export type Database = {
         }
         Returns: string
       }
+      sweep_orphan_media_reservations: {
+        Args: { p_max_age_seconds?: number }
+        Returns: number
+      }
       try_acquire_customer_lock: {
         Args: { p_customer: string; p_ttl_ms: number }
         Returns: string

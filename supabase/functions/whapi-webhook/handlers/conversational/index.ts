@@ -759,24 +759,24 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     !(ctx.customer as any).electricity_bill_photo_url &&
     !CADASTRO_STEPS.has(stepKey)
   ) {
-    console.log(`[conversational] 📸 arquivo recebido em step="${stepKey}" → redirecionando para aguardando_conta`);
-    // Reprocessa a mesma mensagem como conta no próximo webhook
-    // (que será disparado quando o customer for atualizado).
-    // Alternativamente, chama o bot determinístico inline.
+    // Task 21: resolve step image_capture configurável do flow do consultor;
+    // fallback hardcoded "aguardando_conta" preservado (regressão 3.13/3.23).
+    const { resolveImageCaptureStep } = await import("../../../_shared/image-capture-step.ts");
+    const targetStep = await resolveImageCaptureStep(ctx.supabase, (ctx.customer as any).consultant_id);
+    console.log(`[conversational] 📸 arquivo recebido em step="${stepKey}" → redirecionando para ${targetStep}`);
     try {
       const { runBotFlow } = await import("../bot-flow.ts");
-      // Atualiza step em memória pra o bot-flow processar como aguardando_conta
-      (ctx.customer as any).conversation_step = "aguardando_conta";
+      (ctx.customer as any).conversation_step = targetStep;
       const result = await runBotFlow(ctx);
       return {
         reply: result.reply,
-        updates: { ...(result.updates || {}), conversation_step: result.updates?.conversation_step || "aguardando_conta", __inline_sent: true },
+        updates: { ...(result.updates || {}), conversation_step: result.updates?.conversation_step || targetStep, __inline_sent: true },
       };
     } catch (e) {
       console.error("[conversational] falha ao redirecionar p/ bot-flow:", (e as Error)?.message || e);
       return {
         reply: "",
-        updates: { conversation_step: "aguardando_conta", __inline_sent: true },
+        updates: { conversation_step: targetStep, __inline_sent: true },
       };
     }
   }
