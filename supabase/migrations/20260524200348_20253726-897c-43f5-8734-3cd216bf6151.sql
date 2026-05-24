@@ -1,0 +1,2 @@
+ALTER TABLE public.bot_handoff_alerts ADD COLUMN IF NOT EXISTS alert_type text NOT NULL DEFAULT 'handoff';
+CREATE INDEX IF NOT EXISTS idx_bot_handoff_alerts_type_created ON public.bot_handoff_alerts(alert_type, created_at DESC);

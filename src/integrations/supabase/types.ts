@@ -1533,6 +1533,7 @@ export type Database = {
       }
       bot_handoff_alerts: {
         Row: {
+          alert_type: string
           consultant_id: string
           created_at: string
           customer_id: string | null
@@ -1545,6 +1546,7 @@ export type Database = {
           user_message: string | null
         }
         Insert: {
+          alert_type?: string
           consultant_id: string
           created_at?: string
           customer_id?: string | null
@@ -1557,6 +1559,7 @@ export type Database = {
           user_message?: string | null
         }
         Update: {
+          alert_type?: string
           consultant_id?: string
           created_at?: string
           customer_id?: string | null

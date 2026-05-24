@@ -1,44 +1,44 @@
-# Deploy do Simulador + Auditoria de Funções Faltantes
+## Objetivo
+Deixar 100% verde — corrigir 3 falhas reais que aparecem nos logs.
 
-## Problema confirmado
+## Falhas detectadas
 
-O **Simulador de Fluxo** (`/admin/fluxos`) está retornando "Failed to send a request to the Edge Function" em todas as mensagens. Causa: as funções `flow-simulate-run` e `flow-simulate-reset` existem no código mas **nunca foram deployadas em produção** (zero logs).
+1. **`meta-ads-import` + `reactivation-send` → BootFailure**
+   Importam `captureError` de `_shared/audit.ts`, mas esse símbolo nunca foi exportado. As 2 funções estão **mortas em produção** (não bootam).
 
-## O que vou fazer
+2. **`flow-d-stuck-watchdog` → insert falha toda execução**
+   Faz `insert` em `bot_handoff_alerts.alert_type`, mas a coluna não existe (tabela só tem `reason`). Watchdog roda mas nunca registra alerta.
 
-### Passo 1 — Deploy imediato das 2 funções quebradas (zero risco)
+3. **Simulador `/admin/fluxos` → 404 (`flow-simulate-run/reset`)**
+   Funções importam de outra função (`../whapi-webhook/handlers/bot-flow.ts`), o que edge-runtime do Supabase não suporta — deploy quebra.
 
-Deploy de:
-- `flow-simulate-run`
-- `flow-simulate-reset`
+## Correções
 
-Por que é zero-risco: são ferramentas de QA isoladas. Não tocam em customer real, não enviam WhatsApp real, não mexem em CRM. Se quebrarem, o pior cenário é o simulador continuar como está agora (quebrado).
+### 1. Exportar `captureError` em `_shared/audit.ts`
+Adicionar wrapper mínimo (apenas `console.error` estruturado, sem Sentry). Zero risco, restaura boot das 2 funções.
 
-### Passo 2 — Auditoria de outras funções possivelmente não-deployadas
+### 2. Adicionar coluna `alert_type` em `bot_handoff_alerts`
+Migração:
+```sql
+ALTER TABLE bot_handoff_alerts
+  ADD COLUMN IF NOT EXISTS alert_type text NOT NULL DEFAULT 'handoff';
+CREATE INDEX IF NOT EXISTS idx_bot_handoff_alerts_type_created
+  ON bot_handoff_alerts(alert_type, created_at DESC);
+```
+Default `'handoff'` preserva linhas existentes; watchdog passa a inserir `'flow_d_stuck'`.
 
-Vou rodar um script que testa por HTTP cada uma das 98 edge functions locais e identifica quais retornam 404 (não deployadas) vs outros status. Levanto a lista completa **sem deployar nada ainda**.
+### 3. Simulador `flow-simulate-run/reset`
+Em vez do refactor pesado (mover `bot-flow.ts` pra `_shared/`, alto risco perto do go-live), substituir a estratégia: o simulador chama a função real `whapi-webhook` via HTTP interno com um payload sintético marcado `is_sandbox=true`, lendo o resultado pelos próprios registros que o bot grava. Mantém engine único, sem duplicação, deploy passa.
 
-### Passo 3 — Apresentar lista pra você decidir
+- `flow-simulate-run`: monta payload Whapi fake (`messages[0]` com `chat_id` sandbox), faz `fetch` para `whapi-webhook`, devolve as últimas mensagens geradas.
+- `flow-simulate-reset`: limpa `customer` sandbox (`phone` deterministico tipo `sim-<consultant_id>`) — só DELETE em `messages`/`customers` desse phone.
 
-Vou te mostrar a lista classificada em 3 grupos:
+## Verificação após build
+- Redeploy automático das 4 funções.
+- Conferir logs: `meta-ads-import`, `reactivation-send`, `flow-d-stuck-watchdog`, `flow-simulate-run` — todas sem BootFailure / sem erro de schema.
+- Curl em `flow-simulate-run` com payload de teste → 200.
+- Abrir `/admin/fluxos` simulador, mandar "oi" → resposta volta.
 
-- **Críticas** (cron jobs ou webhooks chamados pela produção) — precisam deploy urgente
-- **Auxiliares** (chamadas só por admin UI) — deploy quando você quiser
-- **Órfãs** (sem referência no código) — candidatas a deletar
-
-Você decide o que deployar.
-
-### Passo 4 — Validar simulador funcionando
-
-Depois do Passo 1, eu mesmo testo o simulador via `curl_edge_functions` (envio "oi" → confiro resposta). Se OK, fechamos.
-
-## O que NÃO vou fazer
-
-- Não vou migrar nada pro `getAdminClient` agora (decisão tua de adiar)
-- Não vou tocar em SQL, RLS ou migrations
-- Não vou deployar funções críticas (cron jobs, webhooks) sem te avisar antes
-- Não vou mexer em nenhum customer real
-
-## Estimativa
-
-5-10 min total. Resposta sua só é necessária no Passo 3 (se eu achar funções críticas faltando).
+## Fora do escopo
+- Sem mexer em `whapi-webhook`, crons de produção, RLS, ou qualquer outra função saudável.
+- Sem migração de `getAdminClient` (cosmético, já discutido).
