@@ -1,7 +1,21 @@
 # LAUNCH_OPS — Checklist operacional iGreen
 
 Documento vivo, atualizar a cada novo lote da auditoria.
-Última atualização: Lote 3 (F12, 3.5, 3.1).
+Última atualização: Auditoria 24/05/2026 — Fase 0 aplicada.
+
+> ## ⚠️ AÇÕES MANUAIS PENDENTES (P12 — auditoria 24/05/2026)
+>
+> Estas configs NÃO podem ser feitas via migration automática. Faça pelo painel:
+>
+> 1. **Preencher `super_admin_phone`** no painel Infra do SuperAdmin
+>    (WhatsApp do dono — formato `5511999999999`).
+>    Sem isso, a edge `super-admin-alerts` NÃO dispara nenhum alerta.
+> 2. **Rodar `/mnt/documents/cron_setup.sql`** no SQL Editor do Supabase
+>    (já vem com anon key + project_ref preenchidos).
+>    Sem isso, os crons `minio-quota-check` e `super-admin-alerts` ficam parados.
+> 3. **Validar `super_admin_instance_name`** = `Consutor-alertas` (já feito).
+>
+> Status pode ser conferido em `app_settings`.
 
 ---
 
