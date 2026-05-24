@@ -124,6 +124,33 @@ Deno.serve(async (req) => {
       variant = body.variant;
     }
 
+    // Safety net: se a variante do lead NÃO está mais habilitada para o
+    // consultor (active_variants), realinha para a primeira ativa com bot_flow
+    // publicado. Evita disparar Fluxo A quando o consultor só ativou D.
+    try {
+      const { data: coRow } = await supabase
+        .from("consultants").select("active_variants")
+        .eq("id", body.consultantId).maybeSingle();
+      const active: string[] = Array.isArray((coRow as any)?.active_variants)
+        ? (coRow as any).active_variants.map((v: string) => String(v).toUpperCase())
+        : [];
+      if (active.length > 0 && !active.includes(variant)) {
+        const { data: bf } = await supabase
+          .from("bot_flows").select("variant")
+          .eq("consultant_id", body.consultantId).eq("is_active", true)
+          .in("variant", active);
+        const ok = new Set(((bf as any[]) || []).map((r) => String(r.variant).toUpperCase()));
+        const target = active.find((v) => ok.has(v));
+        if (target && target !== variant) {
+          await supabase.from("customers")
+            .update({ flow_variant: target, updated_at: new Date().toISOString() })
+            .eq("id", customer.id);
+          variant = target;
+          (customer as any).flow_variant = target;
+        }
+      }
+    } catch (_e) { /* não-fatal */ }
+
     // Trava anti-disparo-em-massa: se o último outbound desse customer foi nos
     // últimos 25s e o lead ainda NÃO respondeu, bloqueia (force=true ignora).
     // Aplica só quando o consultor pede o "passo inteiro" (part==="all"); envios
