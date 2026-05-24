@@ -4399,9 +4399,17 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     case "portal_submitting": {
+      if (isTestMode()) {
+        // 🧪 Stub: simula portal aceito + OTP enviado ao WhatsApp
+        updates.conversation_step = "aguardando_otp";
+        updates.status = "awaiting_otp";
+        reply = "✅ *Cadastro enviado ao portal (modo teste)*\n\n📱 Te enviamos um *código de verificação* via WhatsApp. Digite o código aqui (qualquer 4-6 dígitos para testar):";
+        break;
+      }
       reply = "⏳ Estamos processando seu cadastro no portal...\n\n📱 Em breve você receberá um *código de verificação no WhatsApp*. Quando receber, *digite aqui*!\n\nAguarde alguns instantes...";
       break;
     }
+
 
     case "aguardando_otp": {
       const otpCode = messageText.replace(/\D/g, "");
