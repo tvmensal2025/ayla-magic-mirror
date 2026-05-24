@@ -58,8 +58,20 @@ Deno.serve(async (req) => {
 
     stats.scanned = candidates.length;
 
+    // Semana 1 do rollout v3: filtro batch para também pular customers já
+    // pausados via customer_flow_state (evita duplo-alerta na migração).
+    const { filterSendableCustomers } = await import("../_shared/cron-pause-batch.ts");
+    const candidateIds = candidates.map((c) => c.customer_id!).filter(Boolean);
+    const allowedIds = new Set(
+      await filterSendableCustomers(supabase, candidateIds, { cronName: "bot-loop-watchdog" }),
+    );
+
     for (const row of candidates) {
       try {
+        if (!row.customer_id || !allowedIds.has(row.customer_id)) {
+          stats.skipped_recent_alert++;
+          continue;
+        }
         // Carrega o cliente
         const { data: customer } = await supabase
           .from("customers")

@@ -7,6 +7,7 @@ import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { isQuietHourBRT, logQuietSkip } from "../_shared/quiet-hours.ts";
 import { isConsultantAIDisabled } from "../_shared/bot/paused.ts";
 import { isBotGloballyEnabled } from "../_shared/bot/global-flag.ts";
+import { filterSendableCustomers } from "../_shared/cron-pause-batch.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -47,9 +48,16 @@ Deno.serve(async (req) => {
 
     if (error) throw error;
 
+    // Semana 1 do rollout v3: também filtra por customer_flow_state.status.
+    // Fail-open: sem linha em customer_flow_state, passa (legado já aprovou).
+    const allowedIds = new Set(
+      await filterSendableCustomers(supabase, (leads ?? []).map((l: any) => l.id), { cronName: "ai-followup-cron" }),
+    );
+    const filteredLeads = (leads ?? []).filter((l: any) => allowedIds.has(l.id));
+
     const results: Array<{ id: string; ok: boolean; error?: string; reason?: string }> = [];
 
-    for (const lead of leads ?? []) {
+    for (const lead of filteredLeads) {
       // 🛑 Gate global: se a IA do consultor está desligada, pula sem disparar
       // mensagem. Limpa o slot pra não reprocessar a cada execução.
       if (await isConsultantAIDisabled(supabase, lead.consultant_id)) {
