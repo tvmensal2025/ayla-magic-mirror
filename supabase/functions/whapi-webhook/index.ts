@@ -241,7 +241,16 @@ Deno.serve(async (req) => {
             await logTestOutbound("text", text); return true;
           },
           sendButtons: async (_jid: string, message: string, buttons: any[]) => {
-            await logTestOutbound("buttons", `${message}\n[${buttons.map((b: any) => b.title || b.id).join(" | ")}]`);
+            // JSON com ids reais — simulador precisa do id original para reenviar
+            // exatamente o que o WhatsApp real mandaria de volta no buttons_reply.
+            const payload = JSON.stringify({
+              text: message,
+              buttons: (buttons || []).map((b: any) => ({
+                id: String(b?.id ?? ""),
+                title: String(b?.title ?? b?.id ?? ""),
+              })),
+            });
+            await logTestOutbound("buttons", payload);
             return true;
           },
           sendMedia: async (_jid: string, mediaUrl: string, caption: string, mediatype: string) => {
