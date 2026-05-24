@@ -1,80 +1,60 @@
-# Auto-Rollout V3 — Pilotagem Automática
+# Simulador de Fluxo "100% Real"
 
-Você não vai mais tocar em código. O sistema vai avançar/recuar o `flow_engine_v3` e `flow_reliability_v2` sozinho, com base nos gates de saúde já definidos.
+Substituir o simulador atual (mock client-side) por um que executa o **mesmo motor** do `whapi-webhook` em modo dry-run e renderiza tudo no painel: áudio tocável, vídeo tocável, imagem visível, e IA respondendo de verdade. Botão "Zerar" reseta a conversa.
 
-## O que vai ser criado
+## O que muda
 
-### 1. Edge function `flow-engine-rollout-cron`
-
-Roda a cada 6h via pg_cron. Em cada execução:
-
-1. **Lê `v_flow_engine_health**` dos últimos 24h por consultor.
-2. **Aplica gates** (mesmos do plano original):
-  - Zero `engine_v3_state_load_failed`
-  - `engine_v3_fallback_to_legacy` < 1%
-  - p95 latência ≤ baseline + 10%
-  - ≥100 turnos shadow (para sair do dark)
-3. **Decisão por consultor:**
-  ```text
-   Estado atual  →  Próximo (gates verdes)  →  Rollback (gates vermelhos)
-   off                dark                       (n/a)
-   dark (≥48h verde)  canary                     off  + alerta
-   canary (≥7d verde) on                         dark + alerta
-   on                 on (mantém)                canary + alerta
+### 1. Nova edge function `flow-simulate` (dry-run)
+Reaproveita os helpers do `whapi-webhook/handlers/bot-flow.ts`:
+- Resolve `bot_flow_steps` (texto, slot, transitions, captures, fallback, AI).
+- Resolve `ai_media_library` por `(consultant_id, slot_key)` para áudio/imagem/vídeo reais (URLs do MinIO).
+- Quando o passo dispara IA livre (FAQ, dúvida), chama `ai-faq-answerer` / `ai-gateway` de verdade — IA responde com o mesmo prompt e custo real.
+- **Nunca** chama Whapi/Evolution. Em vez de mandar, devolve um array de eventos:
+  ```json
+  [
+    { "kind": "text",  "body": "..." },
+    { "kind": "audio", "url": "https://...mp3", "duration": 7 },
+    { "kind": "image", "url": "https://...jpg", "caption": "..." },
+    { "kind": "video", "url": "https://...mp4" },
+    { "kind": "ai_thinking" },
+    { "kind": "ai_reply", "body": "..." },
+    { "kind": "transition", "to_step": "como_funciona", "via": "botão sim" },
+    { "kind": "capture", "field": "valor_conta", "value": "450" }
+  ]
   ```
-4. **Política de canary 5%**: quando promove de `dark→canary`, faz por lotes — primeiros 3 consultores de menor volume, depois +5 a cada 48h verdes, até atingir 5% do total, depois global.
-5. **Alertas**: rollback grava em `rollout_alerts` (nova tabela) e dispara `notify-consultant` para o número de suporte (você).
-6. **Auditoria**: cada transição grava em `rollout_audit` (nova tabela) com `consultant_id`, `from_state`, `to_state`, `reason`, `metrics_snapshot`.
+- Estado da sessão fica em memória (sem persistir): cada chamada recebe `session_id`, `consultant_id`, `flow_id`, `variant`, `current_step_id`, `lead_input` (texto ou botão) e devolve eventos + novo `current_step_id`.
 
-### 2. Tabelas novas
+### 2. Reescrita do `FlowSimulator.tsx`
+- Chat-style igual WhatsApp (já é o look). Envia mensagem → loading → renderiza eventos na ordem com delays naturais (humanPace 2,2s + 55ms/char) como no real.
+- **Áudio**: `<audio controls>` apontando direto para o MinIO.
+- **Imagem**: `<img>` com lightbox onClick.
+- **Vídeo**: `<video controls playsInline>`.
+- **IA "digitando…"**: bubble animada antes da resposta IA aparecer.
+- Botões inline aparecem como no WhatsApp Business.
+- Inputs do lead: texto livre + presets + botão "📷 Enviar foto fake" (envia URL de conta-luz exemplo p/ testar OCR).
+- **Botão "Zerar"** descarta a sessão e começa de novo no primeiro passo do flow ativo.
 
-- `rollout_audit` — histórico imutável (insert-only) de cada transição
-- `rollout_alerts` — fila de alertas pendentes (rollback, gate vermelho persistente)
-- RLS: só service-role escreve; SuperAdmin lê
+### 3. Variante / Consultor / Lead fake
+- Dropdown no topo do modal: **Variante** (A/B/C/D — já existe round-robin) — assim você testa cada uma.
+- Lead fake configurável (nome, valor_conta) — já tem defaults.
+- Toggle **"IA real (consome créditos)"** — default ligado; se desligar, IA volta a ser mock.
 
-### 3. Cron schedule
+### 4. Limitações honestas (que vão estar visíveis no modal)
+- Não envia pelo WhatsApp (nem para você nem para ninguém) — toca a mídia no navegador.
+- Não dispara cron de reaquecimento/follow-up (são jobs de tempo, não fazem sentido em teste interativo).
+- OCR de conta usa imagem fake que você anexar (ou um preset).
 
-- pg_cron job `flow-engine-rollout-tick` a cada 6h (00:00, 06:00, 12:00, 18:00 BRT)
-- Migration nova adiciona o schedule
+## Detalhes técnicos
 
-### 4. Painel mínimo `/admin/rollout` (SuperAdmin)
+- Edge function nova: `supabase/functions/flow-simulate/index.ts` (verify_jwt=false; auth via Bearer do usuário pra checar role consultor/super_admin).
+- Refatoração mínima em `whapi-webhook/handlers/bot-flow.ts`: extrair a parte "resolve passo → produz mensagens" para `_shared/flow-runner.ts` exportando `runStep({ consultantId, flowId, variant, stepId, leadInput, dryRun: true })`. O `whapi-webhook` passa a chamar essa função (sem mudança de comportamento, dryRun=false). O simulador passa `dryRun=true`.
+- UI: arquivo `FlowSimulator.tsx` reescrito (modal já abre via "Testar fluxo"). Engine client-side antiga (`src/lib/flow-simulator/engine.ts`) é removida.
 
-- Tabela: consultor, flag atual, turnos 24h, paridade, última transição, próximo gate
-- Botão "Pausar auto-rollout" (kill-switch que seta secret `ROLLOUT_AUTOPILOT_DISABLED=true`)
-- Botão "Forçar rollback global"
+## Riscos
 
-### 5. Memória atualizada
+- Refator do `bot-flow.ts` é o ponto sensível — toda a regressão precisa de cobertura. Já existem `bot-flow_test.ts`; vou adicionar testes específicos para `runStep({ dryRun: true })`.
+- IA livre real consome créditos do Gemini a cada teste. Toggle resolve.
 
-- `mem://whatsapp/flow-engine-v3-rollout` ganha seção "Autopilot" com como pausar e como ler `rollout_audit`
+## Cronograma
 
-## Cronograma esperado (autopilot)
-
-```text
-Hoje + 0h    Rafael (dark)
-Hoje + 48h   Demais consultores → dark global (se gates verdes)
-Hoje + 96h   Primeiros 3 → canary
-+48h         +5 consultores → canary (lotes)
-~7 dias      5% atingido → mantém em canary
-+7 dias      Global → on
-+30 dias     Cleanup branches mortos (manual review — você aprova)
-```
-
-Total: ~2 semanas até `on` global se nada vermelho aparecer. Qualquer rollback adiciona +48h.
-
-## Kill-switch (caso queira pausar)
-
-Painel `/admin/rollout` botão "Pausar autopilot" OU SQL:
-
-```sql
-UPDATE app_secrets SET value='true' WHERE key='ROLLOUT_AUTOPILOT_DISABLED';
-```
-
-## O que NÃO está no escopo
-
-- Cleanup final dos branches mortos (Semana 4 do design original) — exige review humano de uma vez quando 100% estiver em `on` por 30d. O autopilot vai te avisar via `rollout_alerts` quando estiver pronto pra essa última etapa.
-
-## Perguntas antes de implementar
-
-1. Telefone para receber alertas de rollback — uso o `notification_phone` do seu consultor (Rafael) ou tem outro número? 11989000650
-2. Painel `/admin/rollout` (SuperAdmin) — implementar agora junto, ou só o autopilot + tabelas e a gente vê o painel depois? agora
-3. Janela de quiet hours — autopilot pode promover/rollback a qualquer hora (inclusive 03:00),  qualquer hora
+1 entrega — assim que aprovar, eu implemento tudo e te aviso.
