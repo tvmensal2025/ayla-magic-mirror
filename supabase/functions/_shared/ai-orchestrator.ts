@@ -168,6 +168,7 @@ async function runOrchestratorBrain(input: OrchestratorInput): Promise<{
 NOME LEAD: ${String(input.customer?.name || "").split(/\s+/)[0] || "(?)"}
 VALOR CONTA: ${input.customer?.electricity_bill_value || "(?)"}
 ESTADO: ${input.customer?.address_state || "(?)"}
+${input.customer?.conversation_summary ? `\nRESUMO DA CONVERSA (memória persistente):\n${String(input.customer.conversation_summary).slice(0, 1000)}\n` : ""}
 HISTÓRICO RECENTE:
 ${(input.history || "").slice(-2400)}
 
