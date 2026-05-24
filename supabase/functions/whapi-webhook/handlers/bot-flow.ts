@@ -4417,31 +4417,29 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         updates.otp_code = otpCode;
         updates.otp_received_at = new Date().toISOString();
         reply = `✅ Código *${otpCode}* recebido! ⏳ Validando no portal...\n\nEm instantes vou te enviar o link da *validação facial* (última etapa).`;
-        // Sprint A3: dispara submit-otp (fire-and-forget) para o worker validar de fato
-        try {
-          const baseUrl = Deno.env.get("SUPABASE_URL");
-          const srk = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-          if (baseUrl && srk) {
-            fetch(`${baseUrl}/functions/v1/submit-otp`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${srk}` },
-              body: JSON.stringify({ customer_id: customer.id, otp_code: otpCode }),
-            }).catch((e) => console.warn("[aguardando_otp] submit-otp dispatch falhou:", (e as Error).message));
+        if (isTestMode()) {
+          // 🧪 Stub: aceita qualquer código e avança direto para facial com link fake
+          updates.link_facial = "https://sandbox.igreen.cloud/facial/teste";
+          updates.conversation_step = "aguardando_facial";
+          updates.status = "awaiting_facial";
+          reply = `✅ Código *${otpCode}* validado (modo teste)!\n\n📸 *Última etapa: Validação Facial*\n\n👉 Abra este link no seu celular e siga as instruções:\nhttps://sandbox.igreen.cloud/facial/teste\n\nQuando terminar a selfie, me responda *PRONTO* aqui que finalizamos seu cadastro! ✅`;
+        } else {
+          // Sprint A3: dispara submit-otp (fire-and-forget) para o worker validar de fato
+          try {
+            const baseUrl = Deno.env.get("SUPABASE_URL");
+            const srk = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+            if (baseUrl && srk) {
+              fetch(`${baseUrl}/functions/v1/submit-otp`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${srk}` },
+                body: JSON.stringify({ customer_id: customer.id, otp_code: otpCode }),
+              }).catch((e) => console.warn("[aguardando_otp] submit-otp dispatch falhou:", (e as Error).message));
+            }
+          } catch (e) {
+            console.warn("[aguardando_otp] submit-otp dispatch erro:", (e as Error).message);
           }
-        } catch (e) {
-          console.warn("[aguardando_otp] submit-otp dispatch erro:", (e as Error).message);
         }
-      } else {
-        reply = "📱 Por favor, digite o *código numérico* que você recebeu no WhatsApp.\n\n(Geralmente são 4 a 6 dígitos)";
-      }
-      break;
-    }
 
-    case "processando_ocr_conta": {
-      // Sprint A1: evita cair no default que reseta para aguardando_conta
-      reply = "⏳ Ainda estou analisando sua conta, só mais um instante...";
-      break;
-    }
 
     case "validando_otp": {
       reply = "⏳ Estamos validando seu código no portal. Aguarde um momento...\n\nSe já passou mais de 2 minutos, digite o código novamente.";
