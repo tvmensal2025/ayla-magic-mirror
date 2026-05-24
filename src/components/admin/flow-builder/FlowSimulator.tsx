@@ -28,6 +28,26 @@ type Ev =
   | { kind: "system"; text: string; key: string };
 
 const VARIANTS: Array<"A" | "B" | "C" | "D"> = ["A", "B", "C", "D"];
+
+// Renderiza formatação WhatsApp (*negrito*, _itálico_, ~strike~, `mono`)
+// preservando emojis, espaços e quebras de linha (o container já usa
+// whitespace-pre-wrap). Escapa HTML antes para evitar XSS no sandbox.
+function renderWhatsApp(text: string): JSX.Element | null {
+  if (!text) return null;
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let html = escape(text);
+  // Ordem importa: bloco de código primeiro pra não casar com * dentro
+  html = html.replace(/```([\s\S]+?)```/g, '<code class="rounded bg-muted/60 px-1 py-0.5 text-[0.85em]">$1</code>');
+  html = html.replace(/`([^`\n]+?)`/g, '<code class="rounded bg-muted/60 px-1 py-0.5 text-[0.85em]">$1</code>');
+  // Negrito: *texto* (não casa com ** ou início/fim de linha vazia)
+  html = html.replace(/(^|[^*\w])\*([^\s*][^*\n]*?[^\s*]|[^\s*])\*(?!\w)/g, "$1<strong>$2</strong>");
+  // Itálico: _texto_
+  html = html.replace(/(^|[^_\w])_([^\s_][^_\n]*?[^\s_]|[^\s_])_(?!\w)/g, "$1<em>$2</em>");
+  // Tachado: ~texto~
+  html = html.replace(/(^|[^~\w])~([^\s~][^~\n]*?[^\s~]|[^\s~])~(?!\w)/g, "$1<del>$2</del>");
+  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+}
 let _ctr = 0;
 const k = () => `ev_${Date.now()}_${++_ctr}`;
 
@@ -205,7 +225,7 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
               return (
                 <div key={ev.key} className="flex justify-start">
                   <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-tl-sm bg-card px-3 py-2 text-sm shadow">
-                    {ev.text}
+                    {renderWhatsApp(ev.text)}
                     {ev.kind === "buttons" && ev.buttons.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {ev.buttons.map((b) => (

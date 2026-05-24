@@ -1492,6 +1492,11 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   ): Promise<{ replyText: string; inlineSent: boolean }> => {
     const text = renderStepText(st);
     const textDelay = Math.max(0, Math.min(120_000, st.text_delay_ms ?? 1500));
+    // Botões configurados no passo (captures._buttons). Quando o passo é o
+    // reply final do turno, enviamos via sender.sendButtons em vez de texto puro
+    // para que o WhatsApp (e o simulador) mostrem os botões reais.
+    const stepButtons = asReply ? extractStepButtons(st) : [];
+    const wantButtons = stepButtons.length > 0 && !!text;
 
     // 🛡️ Anti-repetição: se o MESMO step (por step_key OU id) saiu como outbound
     // nos últimos 10 minutos, não reenvia (texto nem mídia). Evita os disparos
@@ -1558,9 +1563,10 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     // Texto entra inline (na posição certa) em qualquer caso, EXCETO quando:
     // - é o reply final E não há ordem configurada (mantém comportamento legado: texto vira reply)
     // - é o reply final E a ordem termina em "text" (texto fica por último → vira reply)
+    // - vamos enviar botões inline no fim (texto vira caption do sendButtons)
     const orderEndsWithText = Array.isArray(configuredOrder) && configuredOrder.length > 0
       && configuredOrder[configuredOrder.length - 1] === "text";
-    const sendTextInline = !!text && (!asReply || !orderEndsWithText && !!configuredOrder);
+    const sendTextInline = !!text && !wantButtons && (!asReply || !orderEndsWithText && !!configuredOrder);
 
     let mediaResult: { mediaSent: boolean | null; textSentInline: boolean } =
       { mediaSent: false, textSentInline: false };
@@ -1620,6 +1626,27 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       await new Promise((r) => setTimeout(r, textDelay));
     }
     if (asReply) {
+      // Se o passo tem botões configurados, envia inline via sendButtons em vez
+      // de devolver texto puro — assim o WhatsApp (e o simulador) renderizam
+      // os botões clicáveis exatamente como configurado no /admin/fluxos.
+      if (wantButtons) {
+        try {
+          await ctx.sender.sendButtons(ctx.remoteJid, text, stepButtons);
+          if (ctx.customer?.id) {
+            await ctx.supabase.from("conversations").insert({
+              customer_id: ctx.customer.id,
+              message_direction: "outbound",
+              message_text: text,
+              message_type: "buttons",
+              conversation_step: st.step_key,
+            });
+          }
+          return { replyText: "", inlineSent: true };
+        } catch (e) {
+          console.error(`[conversational] sendButtons falhou step=${st.step_key} — fallback texto:`, (e as Error)?.message || e);
+          return { replyText: text, inlineSent: inlineMedia };
+        }
+      }
       return { replyText: text, inlineSent: inlineMedia };
     }
     try {
