@@ -2,7 +2,7 @@
 -- AI Learning Improvements
 -- 1. ai_knowledge_sections: suporte a consultant_id (base por consultor)
 -- 2. ai_decisions: índice para feedback não-nulo (acelera ai-learn-feedback)
--- 3. ad_playbooks: upsert por scope+source_metric (evita acúmulo infinito)
+-- 3. ad_playbo         oks: upsert por scope+source_metric (evita acúmulo infinito)
 -- 4. v_ai_learning_health: view de saúde do aprendizado para o painel
 -- 5. v_flow_step_funnel: funil de abandono por step (FluxoCamila)
 -- 6. ai_decisions: coluna intent_detected + step_before índice composto
