@@ -1,54 +1,29 @@
-## Objetivo
-Fazer o simulador rodar o **motor real de produção** sem cross-function imports e sem refactor do engine — usando a infraestrutura `testMode` já existente em `whapi-webhook`.
+Plano para deixar o simulador 100% igual ao fluxo real:
 
-## Insight-chave
-`whapi-webhook/index.ts` já tem suporte completo a teste end-to-end:
-- `isTestPhone()` ativa modo teste para telefones `5500000xxxxxxxx`.
-- Headers `x-bot-test-run-id` / `x-bot-test-turn` injetam um run id.
-- `sender` é trocado por um wrapper que grava em `bot_test_outbound` em vez de enviar pelo Whapi.
-- `botRequestStore` (AsyncLocalStorage) propaga o store, `logTestOutbound` registra cada saída do bot.
+1. Corrigir a criação do customer sandbox
+- Hoje o insert deixa o trigger do banco trocar `capture_mode` para `manual`.
+- Isso faz o webhook parar em `[manual-capture-stop] texto salvo sem avanço`, exatamente o que apareceu nos logs.
+- Ajustar `flow-simulate-run` para criar/atualizar o sandbox com `capture_mode: "auto"`, `conversation_step: "welcome"` no início e sem flags de pausa/handoff.
+- Para teste, manter `is_sandbox=true` e `customer_origin="whatsapp_lead"`, mas sem entrar no modo manual de captação.
 
-Ou seja: o motor real já roda em "modo simulação" se a chamada chegar pelo webhook com o telefone certo + headers. **Não precisa duplicar engine, mover para `_shared/`, nem refatorar nada.**
+2. Usar o mesmo consultor que o webhook real usa
+- O `whapi-webhook` sempre roteia o bot pelo `settings.superadmin_consultant_id`.
+- O simulador deve garantir que o sandbox pertence a esse consultor real do Whapi, não a outro consultor quando a tela estiver aberta por admin/consultor diferente.
+- Isso evita carregar fluxo/variante errada e mantém o comportamento igual ao WhatsApp real.
 
-## Mudanças
+3. Corrigir clique de botões
+- O simulador hoje recria ids artificiais como `btn_0`, `btn_1` ao ler `bot_test_outbound`.
+- No WhatsApp real, o webhook recebe o `id` original do botão enviado pelo fluxo.
+- Ajustar o log do modo teste para gravar os botões como JSON com `{id,title}` e atualizar o mapper do simulador para devolver esses ids reais para a UI.
+- Manter fallback compatível com o formato antigo para runs antigas.
 
-### 1. `flow-simulate-run/index.ts` — reescrever
-- Validar auth (admin / dono do consultor) — igual ao código atual.
-- Telefone determinístico: `5500000` + 8 dígitos derivados de `consultantId` → garante range `isTestPhone`.
-- Garantir `customer` (`is_sandbox=true`, `flow_variant=variant`, `consultant_id`) — `is_sandbox` faz os triggers existentes ignorarem CRM/alertas/etc.
-- Criar linha em `bot_test_runs` (status `running`, escopo da chamada) e calcular `turn = COUNT(bot_test_outbound where run_id=...)`.
-- Montar payload sintético no formato Whapi (`{ messages: [{ id, from_me:false, type:'text|image|...', chat_id:'<phone>@s.whatsapp.net', from:'<phone>', timestamp, text:{body}, image:{link}|document:{link}|... }] }`) para texto, botão (`type:'action', action:{type:'reply', reply:{id}}`) e anexo.
-- `fetch` para `${SUPABASE_URL}/functions/v1/whapi-webhook` com:
-  - `Authorization: Bearer ${ANON}` (whapi-webhook não exige user JWT).
-  - `apikey: ${ANON}`.
-  - `x-bot-test-run-id: <run_id>` e `x-bot-test-turn: <turn>`.
-- Após resposta, ler `bot_test_outbound where run_id=<run_id> and turn=<turn> order by created_at asc`.
-- Mapear `kind`:
-  - `text` → `{kind:'text', text:content}`.
-  - `buttons` → parse `content` `"prompt\n[t1 | t2 | t3]"` para `{kind:'buttons', text, buttons}`.
-  - `media:audio|image|video|document` → split `content` em `url | caption`.
-- Reler `customers` para `customer_state` (mesma chave atual).
-- Marcar `bot_test_runs.status='done'` no fim.
+4. Preservar sequência real de mensagens/mídias
+- O simulador continuará chamando `whapi-webhook`, `runConversationalFlow` e `runBotFlow` reais.
+- Não vou duplicar engine nem criar resposta fake.
+- Apenas vou remover os atalhos que fazem o teste divergir: customer em modo manual e ids falsos de botão.
 
-### 2. `flow-simulate-reset/index.ts` — pequeno ajuste
-- Trocar query de deleção: deletar customers com `consultant_id=X AND phone_whatsapp like '5500000%'` (em vez de `is_sandbox=true`), pra garantir limpeza mesmo se algum lead antigo não tiver flag.
-- Manter cascade manual em `customer_flow_state`, `customer_memory`, `customer_processing_lock`, `whatsapp_message_buffer`.
-- Deletar também `bot_test_runs` + `bot_test_outbound` órfãos desse phone (housekeeping).
-
-### 3. UI `FlowSimulator.tsx` — nenhuma mudança
-Continua aceitando o mesmo formato de resposta (`events`, `customer_state`). Mensagem de "manutenção" some sozinha.
-
-## O que NÃO muda
-- Zero alteração em `whapi-webhook`, `bot-flow`, `conversational/`, `evolution-webhook`, crons.
-- Zero migração nova.
-- Zero risco no fluxo real dos consultores.
-
-## Limitação consciente
-`whapi-webhook` roteia para o `superadmin_consultant_id`. Como hoje só o super admin tem bot ativo (memory: "Active webhook = whapi-webhook"), isso não bloqueia ninguém. Quando outros consultores entrarem em produção via `evolution-webhook`, replicar o mesmo `testMode` hook lá em ~30 linhas (fora deste escopo).
-
-## Verificação
-1. Deploy `flow-simulate-run` + `flow-simulate-reset`.
-2. `curl_edge_functions` POST `/flow-simulate-run` com payload de teste → 200 + `events.length > 0`.
-3. Abrir `/admin/fluxos` → simulador → mandar "oi" → resposta real do bot aparece.
-4. Conferir logs `whapi-webhook`: deve aparecer `[test-mode] ATIVO phone=5500000…`.
-5. Conferir que `crm_deals` / `bot_handoff_alerts` NÃO ganharam linha (triggers de sandbox ativos).
+5. Validar no backend real
+- Reimplantar `flow-simulate-run` e `whapi-webhook`.
+- Testar `flow-simulate-reset` + `flow-simulate-run` com "oi".
+- Conferir logs do `whapi-webhook`: não pode aparecer `[manual-capture-stop]` para sandbox.
+- Conferir retorno: `events.length > 0`, `customer_state.conversation_step` avançando, e botões com ids reais.

@@ -84,8 +84,8 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
     } catch (_) { /* noop */ }
     setBusy(false);
     if (initial) {
-      // Dispara o motor com mensagem vazia → ele envia boas-vindas
-      await callRun({ user_message: "oi" });
+      // Dispara o motor com "oi" + fresh=true → reseta sandbox e roda welcome
+      await callRun({ user_message: "oi", fresh: true });
       setEvents((prev) => [{ kind: "system", text: "▶ Conversa zerada — começando do início", key: k() }, ...prev]);
     }
   }
