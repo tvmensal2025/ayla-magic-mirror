@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, Clock, ArrowLeft, MessageCircle, RefreshCw, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import BotHealthIntel from "@/components/admin/saude/BotHealthIntel";
+import AIBrainPanel from "@/components/admin/saude/AIBrainPanel";
 
 type Alert = {
   id: string;
