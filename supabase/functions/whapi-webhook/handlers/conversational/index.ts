@@ -1559,16 +1559,14 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       && configuredOrder.length > 0
       && configuredOrder.indexOf("text") >= 0
       && configuredOrder.every((k, i) => k !== "text" ? configuredOrder.indexOf("text") < i : true);
-    // Quando vamos enviar botões no fim, o texto NÃO deve sair inline com a mídia —
-    // ele precisa virar o caption do sendButtons.
-    const sendTextInline = !!text && !wantButtons && (!asReply || !orderEndsWithText && !!configuredOrder);
 
     // Texto entra inline (na posição certa) em qualquer caso, EXCETO quando:
     // - é o reply final E não há ordem configurada (mantém comportamento legado: texto vira reply)
     // - é o reply final E a ordem termina em "text" (texto fica por último → vira reply)
+    // - vamos enviar botões inline no fim (texto vira caption do sendButtons)
     const orderEndsWithText = Array.isArray(configuredOrder) && configuredOrder.length > 0
       && configuredOrder[configuredOrder.length - 1] === "text";
-    const sendTextInline = !!text && (!asReply || !orderEndsWithText && !!configuredOrder);
+    const sendTextInline = !!text && !wantButtons && (!asReply || !orderEndsWithText && !!configuredOrder);
 
     let mediaResult: { mediaSent: boolean | null; textSentInline: boolean } =
       { mediaSent: false, textSentInline: false };
