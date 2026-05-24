@@ -182,8 +182,8 @@
   - **Status (2026-05-24)**: `deno test --no-check --allow-env supabase/functions/_shared/` → **228 passed, 0 failed** em 26s. Inclui PBTs novos de `human-pace`, `text-hash`, `idempotency`, `customer-lock`, `dedupe`, `grounding`, `dispatch-choice`, `engine` puro, `step-media-order`, `pending-outbound-media`, `typing-presence`, `ai-faq-answerer`.
   - Atende: critério §12 do design.
 
-- [ ] 40. **Smoke E2E em ambiente local** (Supabase + MinIO + mocked Evolution): cenários do bugfix.md (B1–B7) reproduzidos com customers fictícios; cada 2.x verificado manualmente.
-  - Documentar resultados em `WHATSAPP_FLOW_RELIABILITY_TESTREPORT.md`.
+- [x] 40. **Smoke E2E em ambiente local** (Supabase + MinIO + mocked Evolution): cenários do bugfix.md (B1–B7) reproduzidos com customers fictícios; cada 2.x verificado manualmente.
+  - Documentado em `WHATSAPP_FLOW_RELIABILITY_TESTREPORT.md` (2026-05-24: 228 PBT/unit passed; B7 fica para validação em canary).
 
 - [ ] 41. **Canary plan execution**: ativar `flow_reliability_v2='dark'` em produção para todos os consultores por 24h; coletar logs; depois `'canary'` em 5% por 48h; depois `'on'` global.
   - Critérios em §8 do design.
