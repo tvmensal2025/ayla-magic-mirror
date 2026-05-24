@@ -247,13 +247,15 @@ Deno.serve(async (req) => {
     }
 
     // ── 5) Polling de bot_test_outbound ──
+    // Janela curta: encerra assim que o turno estabiliza. Botão final fecha
+    // mais rápido ainda (já é a última coisa que o passo manda).
     const events: UiEvent[] = [];
-    const deadline = Date.now() + 15_000;
+    const deadline = Date.now() + 10_000;
     const seen = new Set<string>();
     let stableSince = 0;
     let sawButtons = false;
     while (Date.now() < deadline) {
-      await sleep(350);
+      await sleep(300);
       const { data: rows } = await svc
         .from("bot_test_outbound")
         .select("id, kind, content, created_at")
@@ -264,8 +266,7 @@ Deno.serve(async (req) => {
       if (incoming.length === 0) {
         if (events.length > 0) {
           if (!stableSince) stableSince = Date.now();
-          // Botão é sempre o evento final do passo → fecha rápido.
-          const stableWindow = sawButtons ? 400 : 1200;
+          const stableWindow = sawButtons ? 250 : 800;
           if (Date.now() - stableSince > stableWindow) break;
         }
         continue;
@@ -295,7 +296,23 @@ Deno.serve(async (req) => {
       events.push({ kind: "text", text: `⚠️ Webhook falhou: ${webhookErr || "desconhecido"}` });
     }
 
-    return json({ events, customer_state: cnow || null, run_id: runId });
+    // Diagnóstico para o painel: confirma que o turno avançou de step.
+    const stepBefore = String((customer as any).conversation_step || "");
+    const stepAfter = String((cnow as any)?.conversation_step || "");
+    const advanced = stepBefore !== stepAfter;
+
+    return json({
+      events,
+      customer_state: cnow || null,
+      run_id: runId,
+      diagnostic: {
+        step_before: stepBefore,
+        step_after: stepAfter,
+        advanced,
+        webhook_ok: webhookOk,
+        webhook_err: webhookErr,
+      },
+    });
   } catch (e) {
     return json({ error: "internal", detail: String((e as Error)?.message || e) }, 500);
   }

@@ -525,7 +525,10 @@ Deno.serve(async (req) => {
     // que o welcome do fluxo ativo rode de novo. Isso evita o cenário do
     // lead travado num passo `capture_*` por dias mandando "oi" e o bot
     // gravando "texto salvo sem avanço" silenciosamente.
-    if (messageText && !isFile && customer && (customer as any).conversation_step) {
+    // 🧪 No simulador (sandbox/testMode) o "Zerar" já esvazia conversations,
+    // o que faria essa regra disparar a cada clique de botão (hoursSinceBot=∞)
+    // e zerar o step → welcome eterno. Simulator controla reset via fresh:true.
+    if (messageText && !isFile && customer && (customer as any).conversation_step && !testMode && !(customer as any).is_sandbox) {
       try {
         const { data: lastOut } = await supabase
           .from("conversations")
