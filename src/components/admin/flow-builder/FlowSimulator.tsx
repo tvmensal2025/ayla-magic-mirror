@@ -32,7 +32,7 @@ const VARIANTS: Array<"A" | "B" | "C" | "D"> = ["A", "B", "C", "D"];
 // Renderiza formatação WhatsApp (*negrito*, _itálico_, ~strike~, `mono`)
 // preservando emojis, espaços e quebras de linha (o container já usa
 // whitespace-pre-wrap). Escapa HTML antes para evitar XSS no sandbox.
-function renderWhatsApp(text: string): React.ReactNode {
+function renderWhatsApp(text: string): JSX.Element | null {
   if (!text) return null;
   const escape = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
