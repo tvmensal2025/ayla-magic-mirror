@@ -4712,9 +4712,13 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       updates.conversation_step = "portal_submitting";
 
       if (isTestMode()) {
-        reply = "✅ *Teste concluído:* todos os dados foram coletados e o lead chegou ao ponto de envio para o portal.";
+        // 🧪 Stub: simula portal aceito + OTP enviado, avança direto para aguardando_otp
+        updates.status = "awaiting_otp";
+        updates.conversation_step = "aguardando_otp";
+        reply = "✅ *Todos os dados coletados!*\n\n📲 *Cadastro enviado ao portal (modo teste)*\n\nTe enviamos um *código de verificação* via WhatsApp. Digite o código aqui (qualquer 4-6 dígitos):";
         return { reply, updates };
       }
+
 
       // ✅ Regenerar igreen_link a partir do cadastro_url do consultor dono
       // (impede o bug em que o lead é submetido com o link de outro consultor)
