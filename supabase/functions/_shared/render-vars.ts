@@ -115,9 +115,18 @@ export function renderTemplateVars(text: string | null | undefined, vars: Render
 
   // Substitui {{ chave }} e { chave } (1-2 chaves, espaços tolerados, qualquer caixa).
   // Só substitui chaves conhecidas — chaves desconhecidas ficam intactas para debug.
-  return text.replace(/\{\{?\s*([a-zA-ZÀ-ÿ_][\w\sÀ-ÿ-]{0,40})\s*\}?\}/g, (match, rawKey: string) => {
+  const replaced = text.replace(/\{\{?\s*([a-zA-ZÀ-ÿ_][\w\sÀ-ÿ-]{0,40})\s*\}?\}/g, (match, rawKey: string) => {
     const v = lookup(rawKey);
     if (v == null) return match; // chave desconhecida → mantém literal
     return v;
   });
+
+  // Limpa formatação WhatsApp órfã (negrito/itálico/strike) que ficou vazia
+  // porque a variável veio "" — evita aparecer "* *", "__", "~~" no cliente.
+  return replaced
+    .replace(/\*\s*\*/g, "")
+    .replace(/_\s*_/g, "")
+    .replace(/~\s*~/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\s+([,.!?;:])/g, "$1");
 }
