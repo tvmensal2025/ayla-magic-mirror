@@ -211,6 +211,25 @@ Deno.serve(async (req) => {
 
     // Sender real OU mock que registra em bot_test_outbound
     const realSender = createWhapiSender(whapiToken);
+
+    // Phase A — Task 8 (whatsapp-flow-architecture-v3): smoke wiring do adapter
+    // unificado. NÃO troca `realSender` — apenas confirma que `getAdapter`
+    // funciona para o canal Whapi. Wiring real chega nas próximas phases.
+    try {
+      const { getAdapter } = await import("../_shared/channels/index.ts");
+      const adapter = getAdapter({
+        kind: "whapi",
+        input: { apiToken: whapiToken },
+      });
+      jsonLog("debug", "channel_adapter_ready", {
+        channel: adapter.capabilities.channel,
+        supports_buttons: adapter.capabilities.supportsButtons,
+        max_buttons: adapter.capabilities.maxButtons,
+        supports_list: adapter.capabilities.supportsList,
+      });
+    } catch (e: any) {
+      console.warn("[channel-adapter] smoke wiring falhou (não bloqueante):", e?.message);
+    }
     const sender = testMode
       ? {
           sendText: async (_jid: string, text: string) => {
