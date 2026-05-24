@@ -328,6 +328,20 @@ function mapOutbound(kind: string, content: string): UiEvent {
   return { kind: "text", text: `[${kind}] ${content}` };
 }
 
+async function resolveNumberedButtonId(svc: any, consultantId: string, rawStep: string, variant: string, message: string): Promise<string | null> {
+  const idx = Number(message.trim()) - 1;
+  if (!Number.isInteger(idx) || idx < 0) return null;
+  const step = rawStep.replace(/^flow:/, "") || "welcome";
+  const { data: flow } = await svc.from("bot_flows").select("id").eq("consultant_id", consultantId).eq("is_active", true).eq("variant", variant || "A").order("created_at", { ascending: true }).limit(1).maybeSingle();
+  if (!flow?.id) return null;
+  const q = svc.from("bot_flow_steps").select("captures").eq("flow_id", flow.id).limit(1);
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(step)) q.eq("id", step); else q.eq("step_key", step);
+  const { data: row } = await q.maybeSingle();
+  const captures = Array.isArray(row?.captures) ? row.captures : [];
+  const buttons = captures.find((c: any) => c?.field === "_buttons" && c?.enabled !== false && Array.isArray(c?.value))?.value || [];
+  return buttons[idx]?.id ? String(buttons[idx].id) : null;
+}
+
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
