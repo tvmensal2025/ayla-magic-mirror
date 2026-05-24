@@ -1,60 +1,91 @@
-# Simulador de Fluxo "100% Real"
+# Simulador 100% fiel à produção
 
-Substituir o simulador atual (mock client-side) por um que executa o **mesmo motor** do `whapi-webhook` em modo dry-run e renderiza tudo no painel: áudio tocável, vídeo tocável, imagem visível, e IA respondendo de verdade. Botão "Zerar" reseta a conversa.
+Hoje o simulador usa um **motor client-side** (`simulateStep` em `src/lib/flow-simulator/engine.ts`) para decidir transições/fallbacks. Isso **não é** o mesmo motor da produção (`runBotFlow` em `whapi-webhook/handlers/bot-flow.ts`, ~4.8 mil linhas). Resultado: transições, intent IA, A/B/C, OCR, retomada após silêncio, captura de campos — tudo pode divergir do real.
 
-## O que muda
+Para ser **100% igual**, o simulador precisa executar o **mesmo `runBotFlow**` da produção, trocando apenas o canal de saída.
 
-### 1. Nova edge function `flow-simulate` (dry-run)
-Reaproveita os helpers do `whapi-webhook/handlers/bot-flow.ts`:
-- Resolve `bot_flow_steps` (texto, slot, transitions, captures, fallback, AI).
-- Resolve `ai_media_library` por `(consultant_id, slot_key)` para áudio/imagem/vídeo reais (URLs do MinIO).
-- Quando o passo dispara IA livre (FAQ, dúvida), chama `ai-faq-answerer` / `ai-gateway` de verdade — IA responde com o mesmo prompt e custo real.
-- **Nunca** chama Whapi/Evolution. Em vez de mandar, devolve um array de eventos:
-  ```json
-  [
-    { "kind": "text",  "body": "..." },
-    { "kind": "audio", "url": "https://...mp3", "duration": 7 },
-    { "kind": "image", "url": "https://...jpg", "caption": "..." },
-    { "kind": "video", "url": "https://...mp4" },
-    { "kind": "ai_thinking" },
-    { "kind": "ai_reply", "body": "..." },
-    { "kind": "transition", "to_step": "como_funciona", "via": "botão sim" },
-    { "kind": "capture", "field": "valor_conta", "value": "450" }
-  ]
-  ```
-- Estado da sessão fica em memória (sem persistir): cada chamada recebe `session_id`, `consultant_id`, `flow_id`, `variant`, `current_step_id`, `lead_input` (texto ou botão) e devolve eventos + novo `current_step_id`.
+## Arquitetura
 
-### 2. Reescrita do `FlowSimulator.tsx`
-- Chat-style igual WhatsApp (já é o look). Envia mensagem → loading → renderiza eventos na ordem com delays naturais (humanPace 2,2s + 55ms/char) como no real.
-- **Áudio**: `<audio controls>` apontando direto para o MinIO.
-- **Imagem**: `<img>` com lightbox onClick.
-- **Vídeo**: `<video controls playsInline>`.
-- **IA "digitando…"**: bubble animada antes da resposta IA aparecer.
-- Botões inline aparecem como no WhatsApp Business.
-- Inputs do lead: texto livre + presets + botão "📷 Enviar foto fake" (envia URL de conta-luz exemplo p/ testar OCR).
-- **Botão "Zerar"** descarta a sessão e começa de novo no primeiro passo do flow ativo.
+O webhook já isola o canal num `ChannelAdapter` (`supabase/functions/_shared/channels/types.ts`). Vamos criar um `**SimulatorAdapter**` que implementa o mesmo contrato (`sendText`, `sendChoice`, `sendMedia`, `sendPresence`), mas em vez de chamar Whapi/Evolution, **empurra cada saída num buffer**. Esse buffer é devolvido na resposta da edge.
 
-### 3. Variante / Consultor / Lead fake
-- Dropdown no topo do modal: **Variante** (A/B/C/D — já existe round-robin) — assim você testa cada uma.
-- Lead fake configurável (nome, valor_conta) — já tem defaults.
-- Toggle **"IA real (consome créditos)"** — default ligado; se desligar, IA volta a ser mock.
+### Como fica o ciclo
 
-### 4. Limitações honestas (que vão estar visíveis no modal)
-- Não envia pelo WhatsApp (nem para você nem para ninguém) — toca a mídia no navegador.
-- Não dispara cron de reaquecimento/follow-up (são jobs de tempo, não fazem sentido em teste interativo).
-- OCR de conta usa imagem fake que você anexar (ou um preset).
+```text
+UI clica "Enviar" → edge flow-simulate-run
+                    ├── garante customer sandbox (is_sandbox=true)
+                    ├── monta ParsedMessage fake (texto / button_id)
+                    ├── runBotFlow(ctx, adapter=SimulatorAdapter)
+                    │     ├── mesma resolução de step
+                    │     ├── mesma IA livre (Gemini real)
+                    │     ├── mesma busca em ai_media_library
+                    │     ├── mesmas transições/fallback/repeat
+                    │     └── adapter.sendText/sendMedia → push no buffer
+                    └── devolve [{kind:text|audio|image|video|presence, ...}]
+UI renderiza eventos com áudio/vídeo tocáveis e IA "digitando" como hoje
+```
+
+## Mudanças
+
+### Backend
+
+1. **Migração**: `customers.is_sandbox boolean default false` + índice parcial. `bot_flow_logs.is_sandbox` (se a tabela existir) para isolar dos KPIs.
+2. **Guardas em hot-paths de produção** — toda função que dispara efeito externo precisa ignorar quando `customer.is_sandbox`:
+  - `notifyNewLead` / `notifyHandoff` (não manda WhatsApp pro Rafael)
+  - `pending_outbound_media` writes
+  - `deals` auto-create (CRM)
+  - `conversation_logs`/`message_metrics`/`flow-engine-health` (não polui métricas)
+  - `pg_cron` follow-ups (`ai-followup-cron`, `send-scheduled-messages`, `bot-stuck-recovery`, `bot-loop-watchdog`)
+  - `customer-takeover` / notificações por handoff
+  - Todo INSERT em `flow_engine_*` (parity/shadow) já filtra por flag.
+   Implementação: helper `isSandbox(customer)` em `_shared/sandbox-guard.ts`, chamado nos pontos de entrada. Cada guarda volta cedo com log `event:"sandbox_skip"`.
+3. **Novo adapter** `supabase/functions/_shared/channels/simulator.ts`:
+  - Implementa `ChannelAdapter`. Buffer em memória do request (Map por jid).
+  - `sendPresence` vira evento `{kind:"presence", state:"composing"|"recording", durationMs}` (UI mostra "digitando…"/"gravando áudio…").
+  - `sendMedia` devolve `url` direto (já vem da `ai_media_library`).
+  - `sendText` e `sendChoice` viram `text` + `buttons`.
+  - `parseInbound` / `downloadMedia` não são usados na simulação (apenas saída).
+4. **Refator mínimo em `whapi-webhook/index.ts**`: extrair "como escolher o adapter" para uma função `selectAdapter(provider)`. Hoje deve estar inline.
+5. **Duas novas edges**:
+  - `flow-simulate-run` (POST): `{consultant_id, variant?, user_message?, button_id?, attach_image_url?, reset?}` → `{events:[...], current_step, customer_state}`. Cria/reusa o sandbox customer (jid `simulator-<uid>@s.whatsapp.net`), monta `ParsedMessage` e chama `runBotFlow`.
+  - `flow-simulate-reset` (POST): apaga sandbox customer do consultor + mensagens.
+  - Authz: usa o JWT do usuário; só dono do consultor ou admin/super_admin pode rodar.
+6. `**flow-simulate` atual vira deprecated** — UI passa a usar `flow-simulate-run` puro. Removo o handler `action:"ai"` (a IA passa a rodar dentro do `runBotFlow`).
+
+### Frontend
+
+7. Reescrever `FlowSimulator.tsx`:
+  - Remove import do `simulateStep` (engine client-side morre).
+  - Cada interação chama `flow-simulate-run` com `user_message` ou `button_id`.
+  - Renderiza eventos vindos da edge **na ordem que vieram** (texto, áudio playable, imagem, vídeo, "digitando…" com `durationMs`).
+  - Botão **Zerar conversa** chama `flow-simulate-reset` antes de mandar 1ª mensagem (vazia → engine produz boas-vindas).
+  - Seletor de **Variante (A/B/C/D)** no topo (passa pra edge).
+  - Botão **"📷 Enviar foto fake da conta"** anexa `attach_image_url` (preset MinIO de conta-luz de exemplo) → engine roda OCR de verdade.
+  - Banner: "Conversa sandbox — não afeta CRM, métricas nem cliente real."
+8. Remover `src/lib/flow-simulator/engine.ts` (mock) e referências.
+
+## Riscos e mitigação
+
+- **Vazamento**: se algum hot-path esquecer o `isSandbox()`, o Rafael recebe alerta fake, métrica suja, etc. Mitigação: gera lista exaustiva por `rg "notifyNewLead|notifyHandoff|pending_outbound_media|insert.*flow_engine_|insert.*conversation_logs"` e cobre cada chamada. Adicionar **trigger de defesa** em `customers`: se `is_sandbox=true`, bloquear INSERT em tabelas `deals`, `bot_loop_alerts`, etc. via policy.
+- `**runBotFlow` lê/escreve DB** — sandbox customer escreve em `customers` mesmo (necessário pro motor funcionar com estado real). Limpamos a cada reset.
+- **Custo IA**: cada run gasta créditos Gemini (já era assim). Toggle "IA real" sai (sempre real).
+- **Refator grande**: vou mexer em `whapi-webhook/index.ts` e adicionar guardas em ~10–15 pontos. Testes Deno existentes (`runBotFlow` test, `whapi_test.ts`) garantem que o caminho normal não muda. Adiciono um `simulator_test.ts` com end-to-end usando `SimulatorAdapter`.
 
 ## Detalhes técnicos
 
-- Edge function nova: `supabase/functions/flow-simulate/index.ts` (verify_jwt=false; auth via Bearer do usuário pra checar role consultor/super_admin).
-- Refatoração mínima em `whapi-webhook/handlers/bot-flow.ts`: extrair a parte "resolve passo → produz mensagens" para `_shared/flow-runner.ts` exportando `runStep({ consultantId, flowId, variant, stepId, leadInput, dryRun: true })`. O `whapi-webhook` passa a chamar essa função (sem mudança de comportamento, dryRun=false). O simulador passa `dryRun=true`.
-- UI: arquivo `FlowSimulator.tsx` reescrito (modal já abre via "Testar fluxo"). Engine client-side antiga (`src/lib/flow-simulator/engine.ts`) é removida.
+- Sandbox jid determinístico: `sim-<consultantId>@s.whatsapp.net` — um por consultor.
+- `instance_name` sandbox: `igreen-sim-<slug>` (não tenta conectar Whapi de verdade).
+- `runBotFlow` recebe `adapter` via parâmetro do ctx (hoje provavelmente é resolvido internamente — vou injetar).
+- Foto fake da conta: upload de uma URL pública estática no MinIO de "conta exemplo" — engine baixa, faz OCR de verdade, captura `valor_conta`, `nome_titular`.
 
-## Riscos
+## O que NÃO entra
 
-- Refator do `bot-flow.ts` é o ponto sensível — toda a regressão precisa de cobertura. Já existem `bot-flow_test.ts`; vou adicionar testes específicos para `runStep({ dryRun: true })`.
-- IA livre real consome créditos do Gemini a cada teste. Toggle resolve.
+- Reaquecimento via cron (são jobs de tempo — `is_sandbox` os ignora). Se quiser testar follow-up, criamos um botão "Simular passagem de 24h" depois.
+- Envio real pelo WhatsApp do consultor (o ponto é justamente não enviar).
 
 ## Cronograma
 
-1 entrega — assim que aprovar, eu implemento tudo e te aviso.
+Uma entrega. Posso começar assim que aprovar.  
+  
+ACRESCENTE PARA EU ENVIAR ARQUIVO NO TESTE DE FLUXO DE MIDIA UM EXEMPLO A FOTO DA ENERGIA OU PDF OU FOTO DO DOCUMENTO, PARA FICAR 100% IGUAL
+
+&nbsp;
