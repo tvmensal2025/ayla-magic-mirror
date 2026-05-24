@@ -64,6 +64,8 @@ Deno.serve(async (req) => {
       await safeDelete("customer_memory", "customer_id");
       await safeDelete("customer_processing_lock", "customer_id");
       await safeDelete("whatsapp_message_buffer", "customer_id");
+      await safeDelete("conversations", "customer_id");
+      await safeDelete("ai_slot_dispatch_log", "customer_id");
       // bot_test_runs / bot_test_outbound do customer
       const { data: oldRuns } = await svc
         .from("bot_test_runs")
