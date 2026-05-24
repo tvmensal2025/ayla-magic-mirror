@@ -104,7 +104,8 @@
 - [x] 20. **`buttonId` como input primário** em handlers (`flow-router.matchTransition`, `runConversationalFlow`): ordem (a) `buttonId` em `transition.trigger_phrases`, (b) `buttonId === goto_special`, (c) `messageText`.
   - Atende: 2.15.
 
-- [ ] 21. **`image_capture` configurável** em `evolution-webhook/handlers/conversational/index.ts`: antes de redirect para `aguardando_conta`, busca step com `step_type='image_capture'` no flow do consultor; se existir, executa.
+- [x] 21. **`image_capture` configurável** em `evolution-webhook/handlers/conversational/index.ts` e `whapi-webhook/handlers/conversational/index.ts`: antes de redirect para `aguardando_conta`, `resolveImageCaptureStep(supabase, consultantId)` busca `bot_flow_steps.step_key` com `step_type='image_capture'` no flow ativo do consultor; se existir, executa.
+  - Helper em `_shared/image-capture-step.ts` com cache 60s por consultor.
   - Fallback hardcoded preservado (3.13/3.23).
   - Atende: 2.13, 2.20.
 
