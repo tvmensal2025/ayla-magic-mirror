@@ -172,6 +172,9 @@ export default function SaudeBot() {
         {/* IA — Análise Gemini 7d */}
         {userId && <BotHealthIntel consultantId={userId} />}
 
+        {/* Cérebro IA — decisões + custos */}
+        {userId && <AIBrainPanel consultantId={userId} />}
+
         {/* Resumo */}
         <div className="grid grid-cols-3 gap-3">
           <Card className="p-3 sm:p-4">
