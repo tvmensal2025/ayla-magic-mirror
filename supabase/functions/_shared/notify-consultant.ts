@@ -199,8 +199,12 @@ async function shouldSendPersisted(
 
 export async function notifyNewLead(
   consultantId: string,
-  lead: { id?: string; name?: string | null; phone_whatsapp?: string | null },
+  lead: { id?: string; name?: string | null; phone_whatsapp?: string | null; is_sandbox?: boolean | null },
 ): Promise<boolean> {
+  if (lead?.is_sandbox) {
+    console.log(`[notify-new-lead] sandbox_skip lead=${lead.id}`);
+    return false;
+  }
   // Cache rápido em memória (evita dupla chamada no mesmo isolate)
   const memKey = `newlead:${consultantId}:${lead.id || lead.phone_whatsapp || ""}`;
   if (!shouldSend(memKey, 60_000)) return false;
