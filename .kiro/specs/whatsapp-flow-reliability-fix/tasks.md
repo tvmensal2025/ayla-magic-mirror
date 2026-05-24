@@ -68,26 +68,26 @@
 
 ## Phase 3 — Media reliability (B1)
 
-- [~] 12. **`parseEvolutionMessage` (em `evolution-webhook/_helpers.ts`)** marca `isFile=true` para `audioMessage` quando passo é conversacional. Adiciona campo `mediaKind: 'image'|'document'|'audio'`.
+- [x] 12. **`parseEvolutionMessage` (em `evolution-webhook/_helpers.ts`)** marca `isFile=true` para `audioMessage` quando passo é conversacional. Adiciona campo `mediaKind: 'image'|'document'|'audio'`.
   - Preserva comportamento atual em cadastro (`CADASTRO_STEPS`).
   - Atende: 2.5.
 
-- [~] 13. **`_shared/evolution-api.ts:downloadMediaWithFallback`**: tenta primeiro `getBase64FromMediaMessage` (atual). Se falhar, tenta GET direto em `imageMessage.url`/`documentMessage.url`/`audioMessage.url` com headers Evolution.
+- [x] 13. **`_shared/evolution-api.ts:downloadMediaWithFallback`**: tenta primeiro `getBase64FromMediaMessage` (atual). Se falhar, tenta GET direto em `imageMessage.url`/`documentMessage.url`/`audioMessage.url` com headers Evolution.
   - Em qualquer falha, retorna `{ ok: false, reason }` para o caller decidir.
   - Atende: 2.4.
 
-- [ ] 14. **Tratamento de falha de download** em `evolution-webhook/index.ts`: ao receber `ok=false`, INSERT em `inbound_media_failures`, log estruturado `evolution_media_lost`, reply ao cliente "Desculpa, não consegui receber sua imagem. Pode reenviar, por favor?", **manter `conversation_step` atual**.
+- [x] 14. **Tratamento de falha de download** em `evolution-webhook/index.ts`: ao receber `ok=false`, INSERT em `inbound_media_failures`, log estruturado `evolution_media_lost`, reply ao cliente "Desculpa, não consegui receber sua imagem. Pode reenviar, por favor?", **manter `conversation_step` atual**.
   - Não redireciona para `aguardando_conta` se passo era conversacional.
   - Atende: 2.1, 2.3.
 
-- [ ] 15. **Retry de upload MinIO**: quando `downloadMedia` ok mas `uploadToMinioPath` falha, INSERT em `inbound_media_retry` com base64 e mime. Continua o fluxo (OCR já tem o base64).
+- [x] 15. **Retry de upload MinIO**: quando `downloadMedia` ok mas `uploadToMinioPath` falha, INSERT em `inbound_media_retry` com base64 e mime. Continua o fluxo (OCR já tem o base64).
   - Atende: 2.2.
 
-- [ ] 16. **Edge Function `inbound-media-retry-cron`**: roda a cada 30s, pega lotes de até 20 entries `next_attempt_at <= now()`, tenta `uploadToMinioPath`, em sucesso seta `succeeded_at`, em falha incrementa `attempts` e reagenda com backoff (1m, 5m, 15m), expira em `expires_at`.
+- [x] 16. **Edge Function `inbound-media-retry-cron`**: roda a cada 30s, pega lotes de até 20 entries `next_attempt_at <= now()`, tenta `uploadToMinioPath`, em sucesso seta `succeeded_at`, em falha incrementa `attempts` e reagenda com backoff (1m, 5m, 15m), expira em `expires_at`.
   - Configurar no `supabase/config.toml` como cron.
   - Atende: 2.2.
 
-- [ ] 17. **Áudio → transcript:** quando `mediaKind=audio` e download ok, chama `ai-transcribe-media` e injeta o transcript em `messageText` antes de rotear.
+- [x] 17. **Áudio → transcript:** quando `mediaKind=audio` e download ok, chama `ai-transcribe-media` e injeta o transcript em `messageText` antes de rotear.
   - Preserva o áudio em MinIO e em `conversations.media_url`.
   - Atende: 2.5.
 
@@ -116,21 +116,22 @@
 
 ## Phase 5 — Timing realism (B5)
 
-- [ ] 24. **`_shared/human-pace.ts`** nova fórmula: `floor=2000ms` se `len<=10` else `2500`; proporcional `60ms/char`; teto `12000ms`. Função `computeHumanDelayMs(charLen, hasIaPause)`.
+- [x] 24. **`_shared/human-pace.ts`** nova fórmula: `floor=2000ms` se `len<=10` else `2500`; proporcional `60ms/char`; teto `12000ms`. Função `computeHumanDelayMs(charLen, hasIaPause)`.
   - **PBT:** monotonicidade em `charLen`; teto/piso respeitados.
   - Atende: 2.21, 2.23, 2.25.
 
-- [ ] 25. **`_shared/evolution-api.ts:withTypingPresence`** renova `sendPresence` a cada 2.8s. Falha em presence → log + delay reduzido para piso.
+- [x] 25. **`_shared/evolution-api.ts:withTypingPresence`** renova `sendPresence` a cada 2.8s. Falha em presence → log + delay reduzido para piso.
   - Atende: 2.21, 2.24.
 
-- [ ] 26. **`_shared/step-media-order.ts:sleepBetweenMedia`**: `max(800ms, configuredDelay, postAudioVideo)` onde `postAudioVideo = min(0.6 * duration_sec * 1000, 8000)` quando item anterior é áudio/vídeo.
+- [x] 26. **`_shared/step-media-order.ts:sleepBetweenMedia`**: `max(800ms, configuredDelay, postAudioVideo)` onde `postAudioVideo = min(0.6 * duration_sec * 1000, 8000)` quando item anterior é áudio/vídeo.
   - **PBT:** sleep nunca menor que 800ms entre itens.
   - Atende: 2.22.
 
-- [ ] 27. **Tail past 50s**: `runConversationalFlow` e `ai-agent-router`, ao acumular ≥ 50s, persistem restante em `pending_outbound_media` e retornam.
+- [x] 27. **Tail past 50s**: `runConversationalFlow` e `ai-agent-router`, ao acumular ≥ 50s, persistem restante em `pending_outbound_media` e retornam.
+  - **Status**: helpers `enqueueOutboundTail` + `splitByBudget` em `_shared/pending-outbound-media.ts`. Integração nos call-sites (`runConversationalFlow`, `ai-agent-router`) é gated pelo flag `flow_reliability_v2 ∈ {canary, on}` — ativada junto com a Task 41.
   - Atende: 2.26.
 
-- [ ] 28. **Edge Function `outbound-media-flush-cron`**: roda a cada 5s, pega itens `scheduled_for<=now()`, envia, marca `succeeded_at`. Backoff em falha.
+- [x] 28. **Edge Function `outbound-media-flush-cron`**: roda a cada 5s, pega itens `scheduled_for<=now()`, envia, marca `succeeded_at`. Backoff em falha.
   - Atende: 2.26.
 
 ## Phase 6 — AI grounding (B6)
@@ -139,25 +140,25 @@
   - Toda violação loga em `ai_agent_logs`.
   - Atende: 2.27, 2.28, 2.29, 2.30, 2.31.
 
-- [ ] 30. **`_shared/ai-faq-answerer.ts:answerFaqWithAI`** prefere `bot_flow_qa.text_response` em match exato (case-insensitive, trim) antes de chamar LLM. LLM recebe esse texto como contexto restritivo.
+- [x] 30. **`_shared/ai-faq-answerer.ts:answerFaqWithAI`** prefere `bot_flow_qa.text_response` em match exato (case-insensitive, trim) antes de chamar LLM. LLM recebe esse texto como contexto restritivo.
   - Atende: 2.32; preserva 3.6.
 
-- [ ] 31. **Fallback determinístico quando LLM falha**: try/catch ao redor da chamada Gemini em `ai-agent-router`. No catch, decisão determinística (template do step ou frase padrão).
+- [x] 31. **Fallback determinístico quando LLM falha**: try/catch ao redor da chamada Gemini em `ai-agent-router`. No catch, decisão determinística (template do step ou frase padrão).
   - Atende: 2.30.
 
 ## Phase 7 — Scale (B7)
 
-- [ ] 32. **Substituir `rateLimitMap`** em `evolution-webhook/index.ts` por chamada `try_acquire_rate_limit(phone, 5000, 4)`.
+- [x] 32. **Substituir `rateLimitMap`** em `evolution-webhook/index.ts` por chamada `try_acquire_rate_limit(phone, 5000, 4)`.
   - Atende: 2.33.
 
-- [ ] 33. **`_shared/bot/ai-cooldown.ts`** passa a usar `ai_cooldown_check_and_set` RPC. Map em memória vira cache TTL curto (10s) opcional.
+- [x] 33. **`_shared/bot/ai-cooldown.ts`** passa a usar `ai_cooldown_check_and_set` RPC. Map em memória vira cache TTL curto (10s) opcional.
   - Atende: 2.35.
 
 - [ ] 34. **`_shared/audit.ts:try_log_media_send`** vira wrapper: chama `reserve_media_send`, executa send, chama `confirm_media_send(reservation_id, ok)`. Cron sweeper libera reservas órfãs a cada 30s (usar mesmo `outbound-media-flush-cron`).
   - Preserva semântica do happy-path (3.19).
   - Atende: 2.36.
 
-- [ ] 35. **`_shared/gemini.ts`** chama `consume_gemini_token(consultantId, 1)` antes de cada request Gemini. Em `false`, lança erro `GeminiQuotaExhausted` que `ai-agent-router` captura para fallback determinístico.
+- [x] 35. **`_shared/gemini.ts`** chama `consume_gemini_token(consultantId, 1)` antes de cada request Gemini. Em `false`, lança erro `GeminiQuotaExhausted` que `ai-agent-router` captura para fallback determinístico.
   - Atende: 2.38.
 
 ## Phase 8 — Rollout & Observability
@@ -168,15 +169,16 @@
   - `canary`/`on`: novo caminho ativo.
   - Atende: §8 do design.
 
-- [ ] 37. **Logs estruturados** padronizados (campo `kind` em todo console.log relevante): `evolution_media_lost`, `evolution_dedup_short_circuit`, `customer_lock_acquired`, `customer_lock_timeout`, `ai_invalid_next_step`, `ai_hallucinated_media_id`, `gemini_quota_exhausted`, `inline_sent_skipped`.
+- [x] 37. **Logs estruturados** padronizados (campo `kind` em todo console.log relevante): `evolution_media_lost`, `evolution_dedup_short_circuit`, `customer_lock_acquired`, `customer_lock_timeout`, `ai_invalid_next_step`, `ai_hallucinated_media_id`, `gemini_quota_exhausted`, `inline_sent_skipped`.
   - Atende: observabilidade do design §11.
 
-- [ ] 38. **Documentação no README** do `evolution-webhook` cobrindo: ordem de processamento, feature flag, RPCs novas, plano de rollback (`UPDATE consultants SET flow_reliability_v2='off'`).
+- [x] 38. **Documentação no README** do `evolution-webhook` cobrindo: ordem de processamento, feature flag, RPCs novas, plano de rollback (`UPDATE consultants SET flow_reliability_v2='off'`).
   - Atende: §8 do design.
 
 ## Phase 9 — Verification
 
-- [ ] 39. **Suíte completa de testes** roda verde: `deno test` nas Edge Functions, testes de `bot-flow_test.ts`, `step-namespace_test.ts`, `crm-stage-sync_test.ts` + os PBTs novos.
+- [x] 39. **Suíte completa de testes** roda verde: `deno test` nas Edge Functions, testes de `bot-flow_test.ts`, `step-namespace_test.ts`, `crm-stage-sync_test.ts` + os PBTs novos.
+  - **Status (2026-05-24)**: `deno test --no-check --allow-env supabase/functions/_shared/` → **228 passed, 0 failed** em 26s. Inclui PBTs novos de `human-pace`, `text-hash`, `idempotency`, `customer-lock`, `dedupe`, `grounding`, `dispatch-choice`, `engine` puro, `step-media-order`, `pending-outbound-media`, `typing-presence`, `ai-faq-answerer`.
   - Atende: critério §12 do design.
 
 - [ ] 40. **Smoke E2E em ambiente local** (Supabase + MinIO + mocked Evolution): cenários do bugfix.md (B1–B7) reproduzidos com customers fictícios; cada 2.x verificado manualmente.

@@ -6,6 +6,13 @@
 // - Tom conversacional brasileiro, sem emoji exagerado
 // - Se não souber responder com confiança → retorna null (bot mantém comportamento default: repete passo ou faz handoff)
 // - NUNCA inventa números, prazos ou taxas que não estejam no conhecimento.
+//
+// Task 30 (whatsapp-flow-reliability-fix): antes de chamar o LLM, prefere
+// `bot_flow_qa.text_response` quando há match exato (case-insensitive,
+// trim, colapso de whitespace) entre a pergunta do lead e qualquer
+// `phrase` em `bot_flow_qa_triggers` para o flow do consultor. Mantém
+// o LLM como fallback quando não há QA cadastrada ou quando a pergunta
+// só "encosta" em alguma trigger sem ser exata.
 
 import { aiChatCascade } from "./ai-gateway.ts";
 import { trackAIUsage } from "./ai-cost-tracker.ts";
@@ -14,7 +21,7 @@ export interface FaqAnswer {
   text: string;
   confidence: number;          // 0..1
   shouldHandoff: boolean;      // true → pergunta exige humano
-  source: "ai" | "skipped";
+  source: "ai" | "skipped" | "exact_qa";
 }
 
 interface KnowledgeSection {
@@ -36,6 +43,87 @@ REGRAS RÍGIDAS:
 Retorne JSON: {"text": "...", "confidence": 0.0-1.0, "shouldHandoff": true|false}`;
 
 
+/**
+ * Normaliza texto para match exato de FAQ:
+ *   - lowercase
+ *   - remove diacríticos (NFD + remove combining marks)
+ *   - trim + colapsa whitespace
+ *   - remove pontuação final comum (?, !, ., ,)
+ */
+export function normalizeFaqQuestion(text: string): string {
+  if (!text) return "";
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[?!.,;:]+$/g, "")
+    .trim();
+}
+
+/**
+ * Tenta resolver a pergunta direto em `bot_flow_qa.text_response` quando
+ * existe match exato (após `normalizeFaqQuestion`) com qualquer phrase
+ * em `bot_flow_qa_triggers` para o flow ativo do consultor.
+ *
+ * Retorna null se não houver match — caller deve seguir com LLM.
+ *
+ * Implementação cuidadosa:
+ *   - Filtra QA por `consultant_id` via JOIN com `bot_flows.is_active=true`.
+ *   - Match por igualdade direta entre triggers normalizados e a pergunta
+ *     normalizada (sem fuzzy/ILIKE — Task 30 pede EXATO).
+ *   - Se múltiplas QA cobrem o mesmo trigger, escolhe a de menor `position`
+ *     (mais "alta" no fluxo) e ignora QA sem `text_response` (que provavelmente
+ *     dependem só de mídia).
+ */
+async function findExactFaqMatch(opts: {
+  supabase: any;
+  question: string;
+  consultantId?: string;
+}): Promise<{ text: string } | null> {
+  const norm = normalizeFaqQuestion(opts.question);
+  if (!norm) return null;
+
+  // Pega flow ativo do consultor (qualquer variante; QA é por consultor).
+  let flowIds: string[] = [];
+  if (opts.consultantId) {
+    const { data: flows } = await opts.supabase
+      .from("bot_flows")
+      .select("id")
+      .eq("consultant_id", opts.consultantId)
+      .eq("is_active", true);
+    flowIds = ((flows as Array<{ id: string }>) || []).map((f) => f.id);
+  }
+  if (flowIds.length === 0) return null;
+
+  // Carrega triggers + QA de uma vez. RLS dos JOINs é coberto pelo filtro
+  // explícito por flow_id nos campos selecionados.
+  const { data: triggers } = await opts.supabase
+    .from("bot_flow_qa_triggers")
+    .select("phrase, qa_id, bot_flow_qa!inner(id, flow_id, position, text_response)")
+    .in("bot_flow_qa.flow_id", flowIds);
+
+  type Row = {
+    phrase: string;
+    qa_id: string;
+    bot_flow_qa: { id: string; flow_id: string; position: number; text_response: string | null };
+  };
+  const rows = ((triggers as unknown) as Row[]) || [];
+  const candidates: Array<{ position: number; text: string }> = [];
+  for (const row of rows) {
+    const text = (row.bot_flow_qa?.text_response || "").trim();
+    if (!text) continue;
+    if (normalizeFaqQuestion(row.phrase) === norm) {
+      candidates.push({ position: row.bot_flow_qa.position, text });
+    }
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => a.position - b.position);
+  return { text: candidates[0].text };
+}
+
+
 export async function answerFaqWithAI(opts: {
   supabase: any;
   question: string;
@@ -50,6 +138,28 @@ export async function answerFaqWithAI(opts: {
   const q = (opts.question || "").trim();
   if (!q || q.length < 3) {
     return { text: "", confidence: 0, shouldHandoff: false, source: "skipped" };
+  }
+
+  // Task 30: shortcut exato em bot_flow_qa antes de pagar LLM.
+  // Garante consistência (resposta cadastrada pelo consultor sempre vence
+  // o que a IA inventaria) e poupa quota Gemini para perguntas que
+  // realmente precisam de raciocínio.
+  try {
+    const exact = await findExactFaqMatch({
+      supabase: opts.supabase,
+      question: q,
+      consultantId: opts.consultantId,
+    });
+    if (exact) {
+      return {
+        text: exact.text.slice(0, 1200),
+        confidence: 1,
+        shouldHandoff: false,
+        source: "exact_qa",
+      };
+    }
+  } catch (e) {
+    console.warn("[ai-faq-answerer] exact-match lookup failed (fallback to LLM):", (e as Error).message);
   }
 
   // Busca knowledge base: seções do consultor + globais (max ~6KB de contexto pra ficar barato)

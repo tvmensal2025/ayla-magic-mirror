@@ -112,6 +112,53 @@ export async function tagLeadSource(
       }
     }
 
+    // 2.5) Match por busca textual (tsvector + ts_rank), Task 13 da spec
+    //      `captacao-fluxo-d-conversao` (Requirement 8.4).
+    //
+    // Quando o match exato falha mas a primeira mensagem do lead é longa o
+    // suficiente, executamos uma busca full-text sobre `initial_message`
+    // das campanhas do consultor. Aceitamos o resultado se o `ts_rank`
+    // normalizado for ≥ 0.7. Empate → campanha mais recente vence.
+    //
+    // Implementação: pedimos as top-5 campanhas por rank e filtramos
+    // por threshold no JS — assim aproveitamos o índice GIN
+    // `facebook_campaigns_initial_message_tsv_idx` sem precisar de RPC.
+    let similarityScore: number | null = null;
+    if (!sourceCampaignId && input.messageText && input.messageText.trim().length >= 10) {
+      try {
+        const queryText = input.messageText.trim().slice(0, 500);
+        const { data: tsRows, error: tsErr } = await supabase.rpc(
+          "match_campaigns_by_initial_message",
+          {
+            p_consultant: input.customer.consultant_id,
+            p_query: queryText,
+            p_limit: 5,
+          },
+        );
+        if (tsErr) {
+          // RPC ausente → degrada silenciosamente. Backend é fail-open.
+          if (!String(tsErr.message || "").includes("not exist")) {
+            console.warn("[lead-source] tsvector RPC falhou:", tsErr.message);
+          }
+        } else if (Array.isArray(tsRows) && tsRows.length > 0) {
+          // Cada row: { campaign_id, score, created_at }. Sort defensivo.
+          const sorted = [...(tsRows as Array<{ campaign_id: string; score: number; created_at: string }>)]
+            .sort((a, b) => {
+              if (b.score !== a.score) return b.score - a.score;
+              return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+            });
+          const top = sorted[0];
+          if (top && top.score >= 0.7) {
+            sourceCampaignId = top.campaign_id;
+            similarityScore = top.score;
+            matchMethod = "tsvector";
+          }
+        }
+      } catch (e: any) {
+        console.warn("[lead-source] tsvector match exception:", e?.message);
+      }
+    }
+
     // 3) Regex fallback de frases típicas de anúncio
     const textMatch = !input.isFile && input.messageText && ADS_REGEX.test(input.messageText);
 
@@ -147,6 +194,7 @@ export async function tagLeadSource(
         customer_id: input.customer.id,
         campaign_id: sourceCampaignId,
         method: matchMethod,
+        similarity_score: similarityScore,
         message_sample: input.messageText ? String(input.messageText).slice(0, 200) : null,
       });
     } catch (e: any) {

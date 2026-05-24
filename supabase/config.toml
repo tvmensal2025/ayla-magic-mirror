@@ -90,3 +90,9 @@ verify_jwt = false
 
 [functions.outbound-media-flush-cron]
 verify_jwt = false
+
+[functions.flow-d-stuck-watchdog]
+verify_jwt = false
+
+[functions.reactivation-cron]
+verify_jwt = false

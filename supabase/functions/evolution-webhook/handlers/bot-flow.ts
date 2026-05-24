@@ -44,6 +44,7 @@ import { uploadMediaToMinio, OCR_CONFIDENCE_THRESHOLD } from "../_helpers.ts";
 import { jsonLog } from "../../_shared/audit.ts";
 import { isTestMode } from "../../_shared/test-mode.ts";
 import { notifyHandoff } from "../../_shared/notify-consultant.ts";
+import { recordFlowDAlert } from "../../_shared/captation/flow-d-alerts.ts";
 import type { BotContext, BotResult } from "./types.ts";
 
 // Trigrama similarity para anti-loop (0..1)
@@ -2750,6 +2751,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
         } else {
           console.error("❌ OCR conta falhou:", ocrData.erro);
+          // Task 6 (captacao-fluxo-d-conversao): registra alerta para
+          // que o consultor veja no NotificationCenter quando lead em
+          // Fluxo D não consegue passar do OCR. Para A/B/C/E o helper
+          // pula sozinho (variant != 'D').
+          void recordFlowDAlert({
+            supabase,
+            customerId: customer.id,
+            consultantId: customer.consultant_id,
+            conversationStep: "aguardando_conta",
+            alertType: "flow_d_ocr_failed_bill",
+            reason: String(ocrData?.erro || "ocr_failed"),
+            flowVariant: (customer as any)?.flow_variant,
+          });
           const tries = (customer.ocr_conta_attempts || 0) + 1;
           updates.ocr_conta_attempts = tries;
           if (tries < 2) {
@@ -2763,6 +2777,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         }
       } catch (e) {
         console.error("❌ Erro OCR conta:", e);
+        // Task 6: alerta também em exception (timeout, rede, etc).
+        void recordFlowDAlert({
+          supabase,
+          customerId: customer.id,
+          consultantId: customer.consultant_id,
+          conversationStep: "aguardando_conta",
+          alertType: "flow_d_ocr_failed_bill",
+          reason: (e as Error)?.message ?? String(e),
+          flowVariant: (customer as any)?.flow_variant,
+        });
         const tries = (customer.ocr_conta_attempts || 0) + 1;
         updates.ocr_conta_attempts = tries;
         if (tries < 2) {
@@ -3321,6 +3345,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
         } else {
           console.error("❌ OCR doc falhou:", ocrData.erro);
+          // Task 6 (captacao-fluxo-d-conversao): alerta para Fluxo D.
+          void recordFlowDAlert({
+            supabase,
+            customerId: customer.id,
+            consultantId: customer.consultant_id,
+            conversationStep: customer.conversation_step ?? "aguardando_doc_verso",
+            alertType: "flow_d_ocr_failed_doc",
+            reason: String(ocrData?.erro || "ocr_failed"),
+            flowVariant: (customer as any)?.flow_variant,
+          });
           const tries = (customer.ocr_doc_attempts || 0) + 1;
           updates.ocr_doc_attempts = tries;
           if (tries < 2) {
@@ -3334,6 +3368,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         }
       } catch (e) {
         console.error("❌ Erro OCR doc:", e);
+        // Task 6: alerta também em exception (timeout, rede, etc).
+        void recordFlowDAlert({
+          supabase,
+          customerId: customer.id,
+          consultantId: customer.consultant_id,
+          conversationStep: customer.conversation_step ?? "aguardando_doc_verso",
+          alertType: "flow_d_ocr_failed_doc",
+          reason: (e as Error)?.message ?? String(e),
+          flowVariant: (customer as any)?.flow_variant,
+        });
         const tries = (customer.ocr_doc_attempts || 0) + 1;
         updates.ocr_doc_attempts = tries;
         if (tries < 2) {
