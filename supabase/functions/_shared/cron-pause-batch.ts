@@ -17,7 +17,10 @@
 //
 // Nunca lança — em erro, retorna a lista original (fail-open: cron segue).
 
-import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+// Aceita qualquer versão do SupabaseClient (callers usam @2.45.0 e @2).
+// deno-lint-ignore no-explicit-any
+type AnySupabase = any;
+
 import { jsonLog } from "./audit.ts";
 
 const FORBIDDEN_STATUSES = new Set([
@@ -28,7 +31,7 @@ const FORBIDDEN_STATUSES = new Set([
 ]);
 
 export async function filterSendableCustomers(
-  supabase: SupabaseClient,
+  supabase: AnySupabase,
   customerIds: string[],
   options?: { cronName?: string },
 ): Promise<string[]> {

@@ -19,13 +19,17 @@
 // FAIL-OPEN: qualquer throw → log `engine_v3_fallback_to_legacy` + retorna
 // { handled: false }. O caminho legado nunca é bloqueado por bug do v3.
 
-import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getFlowEngineV3, isV2Enabled, type FlowEngineV3Flag } from "../feature-flag.ts";
+import { loadFlowState } from "../customer-flow-state.ts";
 import { loadFlowState } from "../customer-flow-state.ts";
 import { jsonLog } from "../audit.ts";
 
+// Aceita qualquer versão do SupabaseClient (webhooks usam @2.x diferentes).
+// deno-lint-ignore no-explicit-any
+type AnySupabase = any;
+
 export interface RunEngineV3Input {
-  supabase: SupabaseClient;
+  supabase: AnySupabase;
   customerId: string;
   consultantId: string;
   /** Útil em logs para auditoria de paridade dark vs legado. */
