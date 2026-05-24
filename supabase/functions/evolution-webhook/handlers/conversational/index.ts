@@ -1197,7 +1197,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   }
 
   // Sprint 1.5: honra threshold de handoff (conf < 0.5) — pausa bot, consultor assume.
-  if (cls.action === "handoff" && cls.intent !== "tem_duvida") {
+  if (cls.action === "handoff" && cls.intent !== "tem_duvida" && !ctx.buttonId) {
     console.log(`[conversational/evo] 🤝 handoff por baixa confiança (conf=${cls.confidence})`);
     return _finalize(stepKey, {
       reply: "",
