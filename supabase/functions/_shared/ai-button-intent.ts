@@ -30,14 +30,6 @@ export async function matchButtonIntent(
     return { match: null, refused: false, confused: !msg, confidence: 0, reason: "empty" };
   }
 
-  // Regex rápidos
-  if (CONFUSION_RX.test(msg) || msg.length <= 2) {
-    return { match: null, refused: false, confused: true, confidence: 0.95, reason: "regex_confused" };
-  }
-  if (REFUSAL_RX.test(msg)) {
-    return { match: null, refused: true, confused: false, confidence: 0.9, reason: "regex_refused" };
-  }
-
   // Match direto por número
   const numMatch = msg.match(/^([1-9])\b/);
   if (numMatch) {
@@ -45,6 +37,14 @@ export async function matchButtonIntent(
     if (idx >= 0 && idx < buttons.length) {
       return { match: buttons[idx].id, refused: false, confused: false, confidence: 0.95, reason: "number" };
     }
+  }
+
+  // Regex rápidos — depois do número, senão "1", "2", "3" viram confused.
+  if (CONFUSION_RX.test(msg) || msg.length <= 2) {
+    return { match: null, refused: false, confused: true, confidence: 0.95, reason: "regex_confused" };
+  }
+  if (REFUSAL_RX.test(msg)) {
+    return { match: null, refused: true, confused: false, confidence: 0.9, reason: "regex_refused" };
   }
 
   // Match por title aproximado (substring case-insensitive sem acento)
