@@ -155,7 +155,7 @@
 - [x] 33. **`_shared/bot/ai-cooldown.ts`** passa a usar `ai_cooldown_check_and_set` RPC. Map em memória vira cache TTL curto (10s) opcional.
   - Atende: 2.35.
 
-- [ ] 34. **`_shared/audit.ts:try_log_media_send`** vira wrapper: chama `reserve_media_send`, executa send, chama `confirm_media_send(reservation_id, ok)`. Cron sweeper libera reservas órfãs a cada 30s (usar mesmo `outbound-media-flush-cron`).
+- [x] 34. **`_shared/media-dedupe.ts`** vira wrapper: `reserveMediaSlot` / `confirmMediaSlot` usando `reserve_media_send` + `confirm_media_send`. `canSendMediaOnce` (API legada boolean) preserva semântica chamando reserve → confirm(true) inline. Sweeper SQL `sweep_orphan_media_reservations(30s)` chamado pelo `outbound-media-flush-cron` a cada 5s.
   - Preserva semântica do happy-path (3.19).
   - Atende: 2.36.
 
