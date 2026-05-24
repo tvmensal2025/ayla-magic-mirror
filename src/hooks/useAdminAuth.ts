@@ -88,7 +88,16 @@ export function useAdminAuth() {
       if (isStale()) return; if (createError) throw createError;
       applyConsultantData(createdData);
     } catch { if (isStale()) return; resetConsultantState(); }
-    finally { if (isStale()) return; setLoading(false); loadingUidRef.current = null; }
+    finally {
+      // `return` em finally é unsafe (no-unsafe-finally) — substituiria
+      // qualquer return/throw do try/catch silenciosamente. Aqui só queremos
+      // pular `setLoading(false)` quando stale. Forma segura: condicionar
+      // a chamada dentro do bloco em vez de retornar do finally.
+      if (!isStale()) {
+        setLoading(false);
+        loadingUidRef.current = null;
+      }
+    }
   };
 
   const handleFormChange = (updates: Record<string, string>) => {

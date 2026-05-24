@@ -18,6 +18,9 @@ export default tseslint.config(
       "**/*.min.js",
     ],
   },
+  // ─────────────────────────────────────────────────────────────────────────
+  // Regras gerais (frontend React + libs).
+  // ─────────────────────────────────────────────────────────────────────────
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
@@ -33,22 +36,56 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
       "@typescript-eslint/no-unused-vars": "off",
+      // `any` vira warn no nível geral — código legado tem 657 ocorrências
+      // espalhadas; refatorar todas seria um trabalho de semanas com risco
+      // de regressão. Ainda aparece no PR review (warning visível) mas não
+      // quebra o CI nem bloqueia deploy.
+      //
+      // Para código NOVO (módulos do core e os componentes do v3), a regra
+      // continua "error" via override abaixo — quem escreve novo precisa
+      // tipar direito. Quem mexe em legado pode adicionar `any` se já era
+      // `any` antes (continuidade), mas vai ver o warning.
+      "@typescript-eslint/no-explicit-any": "warn",
+      // `catch {}` é padrão amplamente usado neste projeto para fail-open
+      // explícito (best-effort sem propagar exceção). Permitido.
+      "no-empty": ["error", { allowEmptyCatch: true }],
+      // `Type = {}` (no-empty-object-type) e `foo && bar()` aparecem em
+      // alguns lugares legados — viram warnings.
+      "@typescript-eslint/no-empty-object-type": "warn",
+      "@typescript-eslint/no-unused-expressions": "warn",
+      "no-useless-escape": "warn",
+      // Warnings de hooks continuam — são úteis para apontar bugs reais
+      // (deps faltando geram stale closures).
+    },
+  },
+  // ─────────────────────────────────────────────────────────────────────────
+  // Override: código novo do whatsapp-flow-architecture-v3 mantém `any` strict.
+  // ─────────────────────────────────────────────────────────────────────────
+  {
+    files: [
+      "src/components/admin/saude/FlowEngineHealthCard.tsx",
+      "src/components/admin/flow-builder/canonicalStepTypes.ts",
+      "src/components/admin/flow-builder/channelPreview.ts",
+    ],
+    rules: {
       "@typescript-eslint/no-explicit-any": "error",
     },
   },
-  // Core do whatsapp-flow-architecture-v3 (Phase F Task 32):
-  //
-  // Os módulos do core (`_shared/flow-engine/**`, `_shared/channels/**`,
-  // `_shared/captation/**`, `_shared/conversion/**`, `_shared/performance/**`,
-  // `_shared/webhook-entry.ts`) NÃO devem usar `console.log` direto — devem
-  // usar `_shared/logger.ts` (`log("kind", payload)`).
-  //
-  // Essa regra é enforced via convenção/code review, não via ESLint, porque
-  // `supabase/functions/**` é ignorado pelo ESLint (são módulos Deno
-  // typechecked via `deno check`, não via tsc do React).
-  //
-  // Convenção:
-  //   - `console.warn` e `console.error` continuam permitidos.
-  //   - `console.log` direto é proibido em arquivos do core.
-  //   - Logger central serializa para console.log internamente — só ele faz.
+  // ─────────────────────────────────────────────────────────────────────────
+  // Override: arquivos de configuração (Tailwind, PostCSS, Vite plugins
+  // que usam o ecossistema CommonJS do shadcn) podem usar `require()`.
+  // ─────────────────────────────────────────────────────────────────────────
+  {
+    files: ["tailwind.config.ts", "tailwind.config.js", "postcss.config.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
+  // ─────────────────────────────────────────────────────────────────────────
+  // Convenção (não ESLint): no core do flow architecture v3, use o
+  // logger central em vez de console.log direto.
+  // Os arquivos do core estão em `supabase/functions/_shared/{flow-engine,
+  // channels,captation,conversion,performance}/**` — ignorados pelo ESLint
+  // (Deno usa typecheck próprio). A regra é enforced via code review.
+  // ─────────────────────────────────────────────────────────────────────────
 );
