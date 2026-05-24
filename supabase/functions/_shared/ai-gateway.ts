@@ -71,6 +71,49 @@ export async function aiChat(opts: AIChatOptions): Promise<AIChatResult> {
   return { text: typeof text === "string" ? text : "", json, usage: data?.usage, raw: data };
 }
 
+// ─── Cascade helpers ────────────────────────────────────────────────────
+// Same family, ordered by quality desc. Used by aiChatCascade when a model
+// fails with 429/402/timeout.
+const FALLBACK_CHAIN: Record<string, string[]> = {
+  "openai/gpt-5.5":              ["openai/gpt-5.5", "openai/gpt-5.4", "openai/gpt-5-mini"],
+  "openai/gpt-5.4":              ["openai/gpt-5.4", "openai/gpt-5", "openai/gpt-5-mini"],
+  "openai/gpt-5":                ["openai/gpt-5", "openai/gpt-5-mini"],
+  "google/gemini-3.1-pro-preview":["google/gemini-3.1-pro-preview", "google/gemini-2.5-pro", "google/gemini-2.5-flash"],
+  "google/gemini-2.5-pro":       ["google/gemini-2.5-pro", "google/gemini-2.5-flash"],
+  "google/gemini-3-flash-preview":["google/gemini-3-flash-preview", "google/gemini-2.5-flash", "google/gemini-2.5-flash-lite"],
+  "google/gemini-2.5-flash":     ["google/gemini-2.5-flash", "google/gemini-2.5-flash-lite"],
+};
+
+function isTransient(msg: string): boolean {
+  return /(\b429\b|\b402\b|\b5\d\d\b|timeout|aborted|fetch failed|ECONN|ENETDOWN)/i.test(msg);
+}
+
+export interface CascadeResult extends AIChatResult { modelUsed: string; attempts: number; }
+
+/**
+ * Same as aiChat, but auto-falls-back through FALLBACK_CHAIN on transient
+ * errors (429/402/5xx/timeout). Returns the model that actually succeeded.
+ */
+export async function aiChatCascade(opts: AIChatOptions): Promise<CascadeResult> {
+  const start = opts.model || "google/gemini-3-flash-preview";
+  const chain = FALLBACK_CHAIN[start] || [start];
+  let lastErr: Error | null = null;
+  let attempts = 0;
+  for (const model of chain) {
+    attempts++;
+    try {
+      const r = await aiChat({ ...opts, model });
+      return { ...r, modelUsed: model, attempts };
+    } catch (e) {
+      lastErr = e as Error;
+      if (!isTransient(lastErr.message)) break; // non-transient → stop
+      console.warn(`[ai-gateway] cascade fallback: ${model} failed (${lastErr.message.slice(0, 100)})`);
+    }
+  }
+  throw lastErr || new Error("aiChatCascade exhausted with no error");
+}
+
+
 // Multimodal helper for transcription / vision via inline base64.
 export async function aiMultimodal(opts: {
   model?: string;
