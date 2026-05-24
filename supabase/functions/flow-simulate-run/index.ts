@@ -79,7 +79,7 @@ Deno.serve(async (req) => {
     const consultantId = realSuperAdminId;
 
     const userMessage = String(body?.user_message || "").trim();
-    const buttonId = body?.button_id ? String(body.button_id) : null;
+    let buttonId = body?.button_id ? String(body.button_id) : null;
     const attach: { url?: string; kind?: "image" | "document" | "audio" | "video" } = body?.attach || {};
     const variant = String(body?.variant || "").toUpperCase();
     const fresh = body?.fresh === true; // sinaliza "Zerar" → resetar step
@@ -145,6 +145,10 @@ Deno.serve(async (req) => {
     }
     await svc.from("customers").update(patch).eq("id", customer.id);
     Object.assign(customer as any, patch);
+
+    if (!buttonId && /^\s*[1-9]\s*$/.test(userMessage)) {
+      buttonId = await resolveNumberedButtonId(svc, consultantId, String((customer as any).conversation_step || ""), variant || String((customer as any).flow_variant || "A"), userMessage);
+    }
 
     // ── 2) Cria bot_test_run em curso ──
     const { data: runRow, error: runErr } = await svc
