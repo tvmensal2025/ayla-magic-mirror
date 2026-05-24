@@ -251,8 +251,9 @@ Deno.serve(async (req) => {
     const deadline = Date.now() + 15_000;
     const seen = new Set<string>();
     let stableSince = 0;
+    let sawButtons = false;
     while (Date.now() < deadline) {
-      await sleep(400);
+      await sleep(350);
       const { data: rows } = await svc
         .from("bot_test_outbound")
         .select("id, kind, content, created_at")
@@ -263,14 +264,18 @@ Deno.serve(async (req) => {
       if (incoming.length === 0) {
         if (events.length > 0) {
           if (!stableSince) stableSince = Date.now();
-          else if (Date.now() - stableSince > 1500) break;
+          // Botão é sempre o evento final do passo → fecha rápido.
+          const stableWindow = sawButtons ? 400 : 1200;
+          if (Date.now() - stableSince > stableWindow) break;
         }
         continue;
       }
       stableSince = 0;
       for (const r of incoming as any[]) {
         seen.add(r.id);
-        events.push(mapOutbound(String(r.kind || ""), String(r.content || "")));
+        const ev = mapOutbound(String(r.kind || ""), String(r.content || ""));
+        if (ev.kind === "buttons") sawButtons = true;
+        events.push(ev);
       }
     }
 
