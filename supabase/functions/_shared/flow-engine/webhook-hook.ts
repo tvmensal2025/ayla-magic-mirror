@@ -21,7 +21,6 @@
 
 import { getFlowEngineV3, isV2Enabled, type FlowEngineV3Flag } from "../feature-flag.ts";
 import { loadFlowState } from "../customer-flow-state.ts";
-import { loadFlowState } from "../customer-flow-state.ts";
 import { jsonLog } from "../audit.ts";
 
 // Aceita qualquer versão do SupabaseClient (webhooks usam @2.x diferentes).
