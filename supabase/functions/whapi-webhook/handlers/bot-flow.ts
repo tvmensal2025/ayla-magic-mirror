@@ -1830,6 +1830,24 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             isButton: false,
             hasMedia: false,
           });
+          // Memória: atualiza resumo da conversa em background (a cada ~6 turnos)
+          try {
+            const { count: inboundCount } = await supabase
+              .from("conversation_messages")
+              .select("id", { count: "exact", head: true })
+              .eq("customer_id", customer.id)
+              .eq("message_direction", "inbound");
+            const { maybeUpdateSummary } = await import("../../_shared/ai-summary.ts");
+            void maybeUpdateSummary({
+              supabase,
+              customerId: customer.id,
+              consultantId: customer.consultant_id,
+              history: recentHistory,
+              customer,
+              inboundTurnCount: inboundCount || 0,
+              previousSummary: (customer as any).conversation_summary || null,
+            });
+          } catch (_) { /* best-effort */ }
           // Backward-compat: trata como o antigo "ai" object
           const ai = { text: orch.reply, confidence: orch.confidence, shouldHandoff: orch.shouldHandoff };
 
