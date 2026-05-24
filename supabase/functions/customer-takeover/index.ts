@@ -77,6 +77,51 @@ Deno.serve(async (req) => {
       return json({ error: "update_failed", message: error.message, code: error.code, details: error.details }, 500);
     }
 
+    // Phase B Task 14 (whatsapp-flow-architecture-v3): também escreve em
+    // `customer_flow_state` para que o engine v3 (quando ativo) leia o
+    // status correto. Trigger sync_customer_flow_state_to_customers cobre
+    // a direção v3→legacy; aqui fazemos legacy→v3 explícito porque o
+    // takeover é a única operação onde o humano dirige o estado.
+    // Best-effort: se a linha em `customer_flow_state` não existe (lead
+    // que ainda não viu o engine v3), ignoramos — o webhook cria quando
+    // o cliente responder.
+    try {
+      const { persistFlowState } = await import("../_shared/customer-flow-state.ts");
+      if (body.paused) {
+        // Só sobrescreve se a linha já existir — não criamos por conta própria
+        // porque não temos `flow_id` a mão aqui.
+        const { data: existing } = await supabase
+          .from("customer_flow_state")
+          .select("customer_id")
+          .eq("customer_id", body.customerId)
+          .maybeSingle();
+        if (existing) {
+          await persistFlowState(supabase, {
+            customerId: body.customerId,
+            status: "paused_manual",
+            pauseReason: (body.reason as any) || "humano_assumiu",
+            assignedHumanId: userId,
+          });
+        }
+      } else {
+        const { data: existing } = await supabase
+          .from("customer_flow_state")
+          .select("customer_id, status")
+          .eq("customer_id", body.customerId)
+          .maybeSingle();
+        if (existing) {
+          await persistFlowState(supabase, {
+            customerId: body.customerId,
+            status: "running",
+            pauseReason: null,
+            assignedHumanId: null,
+          });
+        }
+      }
+    } catch (e: any) {
+      console.warn("[customer-takeover] sync customer_flow_state falhou:", e?.message);
+    }
+
     return json({ ok: true, paused: body.paused });
   } catch (e: any) {
     console.error("[customer-takeover] crash:", e?.message);
