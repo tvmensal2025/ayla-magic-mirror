@@ -36,6 +36,7 @@ const AdTemplatesPanel = lazy(() => import("@/components/superadmin/AdTemplatesP
 const AILearningHealthPanel = lazy(() => import("@/components/admin/super/AILearningHealthPanel").then(m => ({ default: m.AILearningHealthPanel })));
 const CaptacaoTab = lazy(() => import("@/components/superadmin/CaptacaoTab").then(m => ({ default: m.CaptacaoTab })));
 const AdManagersTab = lazy(() => import("@/components/superadmin/AdManagersTab").then(m => ({ default: m.AdManagersTab })));
+const RolloutPanel = lazy(() => import("@/components/superadmin/RolloutPanel").then(m => ({ default: m.RolloutPanel })));
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { logAdminAction } from "@/hooks/useAdminAudit";
 
