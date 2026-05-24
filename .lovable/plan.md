@@ -1,32 +1,64 @@
-## Diagnóstico
+Plano de correção
 
-- O simulador está chamando `flow-simulate-run`, que por sua vez chama o motor real `whapi-webhook` em modo teste.
-- Para a variante D, o primeiro passo (`d_welcome`) tem botões configurados, mas está com `wait_for: none` e `media_order: [audio, image, video, text]`.
-- No caminho de restart (`conversation_step = welcome`), o código envia texto via `sendStepMedia` ou `sendText`, mas não usa `sendButtons`; por isso o banco registra `kind: text`, e o simulador não tem botões para renderizar.
-- O fluxo fica processando cerca de 8–9s porque `flow-simulate-run` sempre espera polling até estabilizar por 1,5s após o webhook, mesmo quando já recebeu um evento final.
-- A repetição ainda acontece porque o reset inicial apaga o customer, mas não limpa `conversations`/`ai_slot_dispatch_log`; e o caminho de restart não compartilha o mesmo anti-repetição/botões do `emitStep`, criando divergência entre “começo do fluxo” e “próximos passos”.
+1. Corrigir a causa da repetição
 
-## Plano de implementação
+- Ajustar o roteador do `whapi-webhook` para não limpar `conversation_step` quando o lead já está em um passo válido do fluxo configurado.
+- Hoje ele força `conversation_step = null` em situações onde deveria continuar no step atual; isso explica o welcome repetindo após clicar em botões.
 
-1. **Unificar o envio do passo inicial com o envio real de passos**
-   - Em `supabase/functions/whapi-webhook/handlers/conversational/index.ts`, ajustar o bloco `unknown step -> restart` para usar o mesmo helper de emissão que já trata mídia, texto, botões e ordem configurada.
-   - Quando o passo tiver `captures._buttons`, enviar `ctx.sender.sendButtons(...)` com os IDs reais, inclusive no primeiro welcome.
-   - Preservar a ordem configurada: áudio/imagem/vídeo/texto, mas se o texto final tem botões, o texto deve sair como mensagem interativa com botões e não como texto simples.
+2. Fazer botões seguirem a configuração real
 
-2. **Evitar repetição no simulador sem mudar dados reais**
-   - Garantir que `flow-simulate-reset` limpe também os rastros do sandbox em `conversations` e `ai_slot_dispatch_log`, além dos `bot_test_runs`.
-   - No `fresh: true` de `flow-simulate-run`, aplicar a mesma limpeza leve do sandbox antes de rodar o fluxo, para não sobrar anti-dup/dedupe antigo causando pulo ou repetição.
+- Garantir que o clique do botão Whapi use o `buttonId` real salvo em `captures._buttons`.
+- Ajustar o matching para casar tanto por `buttonId` quanto pelo título/frases configuradas.
+- Para Rafael/Whapi, o simulador deve renderizar botões clicáveis; para Evolution, deve aceitar `1`, `2`, `3` como fallback numérico.
 
-3. **Reduzir o “processando...” do simulador**
-   - Em `flow-simulate-run`, encerrar o polling mais cedo quando já houver evento de texto/botões final ou quando o webhook terminou e não há novos eventos por um intervalo curto.
-   - Manter margem suficiente para capturar áudio + texto + botões na ordem correta.
+3. Respeitar 100% a sequência do fluxo
 
-4. **Renderizar botões exatamente como enviados pelo Whapi**
-   - Confirmar que o `bot_test_outbound` registre `kind: buttons` com JSON `{ text, buttons: [{ id, title }] }`.
-   - O `FlowSimulator.tsx` já renderiza `kind: buttons`; se necessário, ajustar apenas para preservar espaçamento/formatação WhatsApp sem inventar texto.
+- No motor conversacional, seguir exatamente:
+  - step atual;
+  - transição do botão/regra;
+  - `goto_step_id` configurado;
+  - `fallback.goto_step_id`;
+  - ordem de mídia/texto configurada.
+- Não inventar resposta, não pular step, não repetir step já emitido no mesmo turno.
+- Se o step pede conta de luz, ele precisa parar esperando arquivo/imagem/documento antes de mostrar resultado/cadastro.
 
-5. **Validação final**
-   - Testar `flow-simulate-run` com variante D e `fresh: true`.
-   - Verificar que o retorno contém áudio quando configurado e depois `kind: buttons` com os 3 botões reais.
-   - Verificar que responder clicando no botão do simulador envia `button_id` real e avança para o passo configurado, sem repetir o welcome.
-   - Verificar logs do `whapi-webhook` para confirmar que o caminho Whapi real continua usando botões, enquanto Evolution segue aceitando `1`, `2`, `3`.
+4. Corrigir o caso “Cadastrar”
+
+- Quando clicar “Cadastrar agora”/“Cadastrar”, o fluxo deve ir para o passo que pede a conta de luz ou documento conforme configurado.
+- Depois do envio da conta, o pipeline real deve processar OCR/valor e só então mostrar a mensagem de resultado/economia e perguntar se deseja cadastrar.
+- Se faltar arquivo/valor necessário, o simulador deve pedir o dado correto em vez de avançar artificialmente.
+
+5. Reduzir o tempo de “processando”
+
+- No `flow-simulate-run`, encerrar o polling assim que o turno tiver terminado de verdade:
+  - recebeu botões finais;
+  - recebeu prompt de captura final;
+  - não há novos eventos após janela curta;
+  - webhook retornou sem eventos.
+- Manter uma janela maior só para casos com mídia pesada, sem travar todos os cliques.
+
+6. Melhorar validação do teste
+
+- Adicionar retorno de diagnóstico no simulador com `run_id`, step anterior, step final e eventos emitidos.
+- Usar isso para confirmar que cada clique avançou para o step esperado e não reiniciou no welcome.
+
+Validação
+
+- Testar variante D com Whapi:
+  1. Zerar conversa.
+  2. Ver welcome com áudio/texto/botões.
+  3. Clicar “Quero simular” e confirmar que vai para pedir conta, sem repetir welcome.
+  4. Clicar “Como funciona” e confirmar mídia/texto na ordem configurada e botões finais.
+  5. Clicar “Cadastrar” e confirmar que pede a conta/documento correto antes de resultado.
+  6. Verificar que `conversation_step` final bate com o step configurado.
+
+Arquivos envolvidos
+
+- `supabase/functions/whapi-webhook/index.ts`
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
+- `supabase/functions/_shared/flow-router.ts`
+- `supabase/functions/_shared/ai-button-intent.ts`
+- `supabase/functions/flow-simulate-run/index.ts`
+- `src/components/admin/flow-builder/FlowSimulator.tsx`  
+  
+`JA LIGAR O FLUXO NOS PASSOS CERTOS FICANDO 100% CERTO`  
