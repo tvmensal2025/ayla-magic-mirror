@@ -250,12 +250,12 @@ Deno.serve(async (req) => {
     // Janela curta: encerra assim que o turno estabiliza. Botão final fecha
     // mais rápido ainda (já é a última coisa que o passo manda).
     const events: UiEvent[] = [];
-    const deadline = Date.now() + 10_000;
+    const deadline = Date.now() + 8_000;
     const seen = new Set<string>();
     let stableSince = 0;
     let sawButtons = false;
     while (Date.now() < deadline) {
-      await sleep(300);
+      await sleep(250);
       const { data: rows } = await svc
         .from("bot_test_outbound")
         .select("id, kind, content, created_at")
@@ -266,7 +266,7 @@ Deno.serve(async (req) => {
       if (incoming.length === 0) {
         if (events.length > 0) {
           if (!stableSince) stableSince = Date.now();
-          const stableWindow = sawButtons ? 250 : 800;
+          const stableWindow = sawButtons ? 200 : 600;
           if (Date.now() - stableSince > stableWindow) break;
         }
         continue;
