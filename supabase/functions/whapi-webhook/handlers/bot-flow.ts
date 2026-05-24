@@ -4439,6 +4439,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             console.warn("[aguardando_otp] submit-otp dispatch erro:", (e as Error).message);
           }
         }
+      } else {
+        reply = "📱 Por favor, digite o *código numérico* que você recebeu no WhatsApp.\n\n(Geralmente são 4 a 6 dígitos)";
+      }
+      break;
+    }
+
+    case "processando_ocr_conta": {
+      // Sprint A1: evita cair no default que reseta para aguardando_conta
+      reply = "⏳ Ainda estou analisando sua conta, só mais um instante...";
+      break;
+    }
+
+
 
 
     case "validando_otp": {
