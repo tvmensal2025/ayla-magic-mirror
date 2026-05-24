@@ -1,189 +1,153 @@
-# Evolution Webhook
+# evolution-webhook
 
-Edge Function que recebe mensagens da Evolution API e processa o bot WhatsApp.
+Webhook que recebe eventos da Evolution API. Este README documenta a ordem de processamento atualizada após o whatsapp-flow-architecture-v3.
 
-## 🎯 Diferenças do Whapi Webhook
-
-### **Whapi (antigo)**
-- 1 instância centralizada
-- 1 webhook para todos
-- Token único
-
-### **Evolution (novo)**
-- N instâncias (1 por consultor)
-- 1 webhook por instância
-- Token por instância
-
-## 📋 Estrutura
+## Ordem de processamento (do início ao fim do turno)
 
 ```
-evolution-webhook/
-├── index.ts          ← Webhook principal
-└── README.md         ← Este arquivo
+1. CORS / parse JSON
+2. Identificar instance + consultor (whatsapp_instances + consultants)
+3. Resolver feature flags:
+   - flow_reliability_v2  ('off' | 'dark' | 'canary' | 'on')
+   - flow_engine_v3       ('off' | 'dark' | 'canary' | 'on')
+4. Gate global "IA desligada" → silent return.
+5. parseEvolutionMessage → extrai remoteJid, messageText, buttonId, mediaKind.
+6. Dedupe por (message_id, instance_name) em webhook_message_dedup.
+7. Rate limit:
+   - legacy: in-memory Map (4 msg / 5s por phone)
+   - v2: try_acquire_rate_limit RPC quando flow_reliability_v2 ∈ {dark,canary,on}
+8. Customer lock (v2): try_acquire_customer_lock RPC com TTL 8s.
+9. OTP intercept (handlers/otp-intercept.ts).
+10. Find or create customer.
+11. Auto-tag lead source (Meta Ads CTWA / initial_message / regex).
+    Hoje inline; será movido para _shared/captation/lead-source.ts (Phase E).
+12. Log inbound em conversations.
+13. Captação manual: confirmação de dados (capture_mode='manual').
+14. Bot paused gate.
+15. Download de mídia (Task 14: registro de falha + reply de cortesia).
+    Áudio → transcript automático via ai-transcribe-media (Task 17).
+    Falha de upload MinIO → enqueue em inbound_media_retry (Task 15).
+16. AI Agent gate (Camila — ai-agent-router).
+17. Engine v3 dark (Phase C Task 21):
+    - Carrega EngineCustomerState quando flow_engine_v3 ∈ {dark,canary,on}.
+    - Em dark: log diff vs legado.
+    - Em canary/on: dispatcher v3 emite (a partir de Task 40+).
+18. Bot flow legado: runBotFlow ou runConversationalFlow.
+19. Persistir updates + logs.
+20. Anti-dup textual:
+    - legacy: comparação exata.
+    - v2: hash em conversations.message_text_hash.
+21. Send reply (sendText / sendMedia / sendButtons).
+22. Log outbound.
+23. Release customer lock.
 ```
 
-## 🔧 Configuração
+## Feature flags
 
-### **1. Criar Instância no Banco**
+### `flow_reliability_v2` (whatsapp-flow-reliability-fix)
+
+| Valor  | Comportamento |
+|---|---|
+| `off`  | Caminho legado puro (default seguro). |
+| `dark` | v2 calcula em paralelo, log apenas. Legado emite. |
+| `canary` | v2 emite em pequenos consultores. Legado fallback. |
+| `on`   | v2 é a fonte de verdade. |
+
+**Rollback**: `UPDATE consultants SET flow_reliability_v2='off';`
+
+### `flow_engine_v3` (whatsapp-flow-architecture-v3)
+
+| Valor  | Comportamento |
+|---|---|
+| `off`  | Engine v3 não roda. Caminho legado puro. |
+| `dark` | Engine v3 calcula EngineResult em paralelo. Loga `engine_dark_decision`. Legado emite. |
+| `canary` | Dispatcher v3 emite em pequenos consultores. `delegate_legacy_runBotFlow` cobre cadastro. |
+| `on`   | Dispatcher v3 padrão. |
+
+**Rollback**: `UPDATE consultants SET flow_engine_v3='off';`
+
+### Interação entre as duas flags
+
+Os dois flags são independentes. Recomendação:
+- v2 deve estar `'on'` antes de mover v3 para `'canary'` (v3 depende da fundação de v2).
+- v2 e v3 podem rodar `'on'` simultaneamente — são camadas distintas.
+
+## RPCs novas
+
+| RPC | Origem | Função |
+|---|---|---|
+| `try_acquire_rate_limit(phone, window_ms, max)` | v2 | Rate limit persistente. |
+| `try_acquire_customer_lock(customer_id, ttl_ms)` | v2 | Lock por customer. |
+| `release_customer_lock(customer_id, token)` | v2 | Libera lock. |
+| `ai_cooldown_check_and_set(key, ttl_ms, reason)` | v2 | Cooldown shared. |
+| `consume_gemini_token(consultant_id, n)` | v2 | Quota Gemini por consultor. |
+| `reserve_media_send / confirm_media_send` | v2 | Idempotência de mídia. |
+
+## Tabelas novas
+
+| Tabela | Spec | Função |
+|---|---|---|
+| `inbound_media_failures` | v2 | Log persistente de mídia perdida. |
+| `inbound_media_retry` | v2 | Fila de retry de upload MinIO. |
+| `outbound_message_log` | v2 | Idempotency keys. |
+| `webhook_rate_limit` | v2 | Rate limit por phone. |
+| `customer_processing_lock` | v2 | Soft lock por customer. |
+| `pending_outbound_media` | v2 | Tail past 50s. |
+| `customer_flow_state` | v3 | Estado canônico do lead. |
+
+## Step types canônicos (v3)
+
+`bot_flow_steps.step_type_canonical` (CHECK constraint):
+
+| Tipo | Descrição |
+|---|---|
+| `text_message` | Envia texto e avança. |
+| `media_message` | Envia mídia (img/audio/video/doc) e avança. |
+| `audio_slot` | Toca slot da Camila (boas_vindas, etc.). |
+| `ask_text` | Pergunta + captura texto livre. |
+| `ask_choice` | Pergunta + botão real OU lista numerada (channel-aware). |
+| `ask_media` | Pede mídia do lead. |
+| `branch` | Decisão por condição (avança para then/else). |
+| `system_capture` | OCR/cadastro/OTP — delega para runBotFlow legado. |
+
+## Lista canônica de `customer_pause_reason`
+
+(20 valores em uso. Adicionar novo motivo exige `ALTER TYPE`.)
+
+| Valor | Significado |
+|---|---|
+| `opt_out` | Lead pediu para não receber mais. **Terminal**. |
+| `humano_assumiu` | Consultor clicou em "Assumir". |
+| `lead_pediu_humano` | Lead pediu humano explicitamente. |
+| `low_bill_value` | Conta abaixo do mínimo viável. |
+| `low_confidence_handoff` | IA com baixa confidence redirecionou. |
+| `lead_refused_softpause` | Lead recusou continuar. |
+| `lead_nao_pronto` | Lead pediu tempo (auto-resume disponível). |
+| `lead_quer_pensar` | Lead quer pensar (auto-resume disponível). |
+| `lead_nao_responde` | Sem resposta após followups. |
+| `confused_after_retries` | 3+ tentativas sem entender. |
+| `muitas_duvidas` | 5+ desvios consecutivos. |
+| `muitas_duvidas_ia` | 3+ perguntas seguidas para IA. |
+| `ai_handoff_duvidas` | IA decidiu handoff. |
+| `ai_limit_atingido` | Limite de mensagens da IA. |
+| `anti_loop` | Resposta muito similar à anterior. |
+| `silent_handoff_empty_reply` | Bot tentou silenciar (reply vazio). |
+| `gemini_quota_exhausted` | Quota Gemini esgotada. |
+| `dados_incompletos_pos_loop` | Cadastro incompleto após retries. |
+| `custom_step_no_match_retries_exhausted` | Step custom sem match. |
+| `ia_decidiu` | IA pediu pausa por outro motivo. |
+| `engine_error` | Erro inesperado no engine v3. |
+
+## Plano de rollback
+
+Em qualquer suspeita de incidente:
 
 ```sql
-INSERT INTO whatsapp_instances (
-  consultant_id,
-  instance_name,
-  api_url,
-  api_key,
-  webhook_url,
-  status
-) VALUES (
-  'uuid-do-consultor',
-  'consultor-ana-giulia',
-  'https://evolution-api.com',
-  'sua-api-key',
-  'https://seu-projeto.supabase.co/functions/v1/evolution-webhook',
-  'disconnected'
-);
+-- Reverte engine v3 imediato (efeito em até 30s, cache).
+UPDATE consultants SET flow_engine_v3 = 'off';
+
+-- Reverte v2 (mais drástico, só se necessário):
+UPDATE consultants SET flow_reliability_v2 = 'off';
 ```
 
-### **2. Configurar Webhook na Evolution API**
-
-```bash
-curl -X POST https://evolution-api.com/webhook/set/consultor-ana-giulia \
-  -H "apikey: sua-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://seu-projeto.supabase.co/functions/v1/evolution-webhook",
-    "webhook_by_events": false,
-    "webhook_base64": false,
-    "events": [
-      "MESSAGES_UPSERT",
-      "MESSAGES_UPDATE",
-      "CONNECTION_UPDATE"
-    ]
-  }'
-```
-
-## 📨 Payload Recebido
-
-```json
-{
-  "instance": "consultor-ana-giulia",
-  "data": {
-    "key": {
-      "remoteJid": "5511999998888@s.whatsapp.net",
-      "fromMe": false,
-      "id": "msg-id"
-    },
-    "message": {
-      "conversation": "Olá",
-      "imageMessage": {
-        "url": "https://...",
-        "mimetype": "image/jpeg"
-      },
-      "buttonsResponseMessage": {
-        "selectedButtonId": "sim_conta"
-      }
-    }
-  }
-}
-```
-
-## 🔄 Fluxo
-
-```
-1. Evolution API envia webhook
-   ↓
-2. Identifica instância (body.instance)
-   ↓
-3. Busca instância no banco (whatsapp_instances)
-   ↓
-4. Parse mensagem (parseEvolutionMessage)
-   ↓
-5. Busca/cria cliente (customers)
-   ↓
-6. Processa máquina de estados (switch step)
-   ↓
-7. Salva updates no banco
-   ↓
-8. Envia resposta via Evolution API
-   ↓
-9. Log em conversations
-```
-
-## 🎨 Máquina de Estados
-
-**Igual ao whapi-webhook:**
-
-```
-welcome → aguardando_conta → processando_ocr_conta → 
-confirmando_dados_conta → ask_tipo_documento → 
-aguardando_doc_frente → aguardando_doc_verso → 
-confirmando_dados_doc → ask_name → ask_cpf → 
-ask_rg → ask_birth_date → ask_phone_confirm → 
-ask_phone → ask_email → ask_cep → ask_number → 
-ask_complement → ask_installation_number → 
-ask_bill_value → ask_finalizar → finalizando → 
-portal_submitting → aguardando_otp → 
-validando_otp → aguardando_assinatura → complete
-```
-
-## 🔑 Variáveis de Ambiente
-
-```bash
-SUPABASE_URL=https://seu-projeto.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=sua-service-role-key
-GEMINI_API_KEY=sua-gemini-api-key
-```
-
-## 🧪 Testar
-
-```bash
-# 1. Deploy
-supabase functions deploy evolution-webhook
-
-# 2. Enviar mensagem de teste
-curl -X POST https://seu-projeto.supabase.co/functions/v1/evolution-webhook \
-  -H "Content-Type: application/json" \
-  -d '{
-    "instance": "consultor-ana-giulia",
-    "data": {
-      "key": {
-        "remoteJid": "5511999998888@s.whatsapp.net",
-        "fromMe": false
-      },
-      "message": {
-        "conversation": "Olá"
-      }
-    }
-  }'
-```
-
-## 📊 Logs
-
-```bash
-# Ver logs em tempo real
-supabase functions logs evolution-webhook --follow
-
-# Ver últimos 100 logs
-supabase functions logs evolution-webhook --limit 100
-```
-
-## ⚠️ Troubleshooting
-
-### **Erro: Instance not found**
-- Verificar se instância existe no banco
-- Verificar se `instance_name` está correto
-
-### **Erro: Failed to send message**
-- Verificar se `api_url` e `api_key` estão corretos
-- Verificar se instância está conectada (status = 'connected')
-
-### **Mensagem não processada**
-- Verificar logs: `supabase functions logs evolution-webhook`
-- Verificar se webhook está configurado na Evolution API
-- Verificar se payload está no formato correto
-
-## 🔗 Links Úteis
-
-- [Evolution API Docs](https://doc.evolution-api.com)
-- [Supabase Edge Functions](https://supabase.com/docs/guides/functions)
-- [Documentação Completa](../../../MIGRACAO_WHAPI_PARA_EVOLUTION.md)
+Estado em `customer_flow_state` permanece coerente após rollback graças ao trigger `sync_customer_flow_state_to_customers`.
