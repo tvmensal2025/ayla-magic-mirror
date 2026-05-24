@@ -1626,6 +1626,27 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       await new Promise((r) => setTimeout(r, textDelay));
     }
     if (asReply) {
+      // Se o passo tem botões configurados, envia inline via sendButtons em vez
+      // de devolver texto puro — assim o WhatsApp (e o simulador) renderizam
+      // os botões clicáveis exatamente como configurado no /admin/fluxos.
+      if (wantButtons) {
+        try {
+          await ctx.sender.sendButtons(ctx.remoteJid, text, stepButtons);
+          if (ctx.customer?.id) {
+            await ctx.supabase.from("conversations").insert({
+              customer_id: ctx.customer.id,
+              message_direction: "outbound",
+              message_text: text,
+              message_type: "buttons",
+              conversation_step: st.step_key,
+            });
+          }
+          return { replyText: "", inlineSent: true };
+        } catch (e) {
+          console.error(`[conversational] sendButtons falhou step=${st.step_key} — fallback texto:`, (e as Error)?.message || e);
+          return { replyText: text, inlineSent: inlineMedia };
+        }
+      }
       return { replyText: text, inlineSent: inlineMedia };
     }
     try {
