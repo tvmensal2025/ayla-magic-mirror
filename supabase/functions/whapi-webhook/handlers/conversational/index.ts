@@ -1036,7 +1036,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
               customer_id: ctx.customer.id,
               message_direction: "outbound",
               message_text: renderedText,
-              message_type: "buttons",
+              message_type: "text",
               conversation_step: cursor.step_key,
             });
           }
@@ -1692,7 +1692,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
               customer_id: ctx.customer.id,
               message_direction: "outbound",
               message_text: text,
-              message_type: "buttons",
+              message_type: "text",
               conversation_step: st.step_key,
             });
           }

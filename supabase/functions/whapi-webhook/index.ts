@@ -581,7 +581,11 @@ Deno.serve(async (req) => {
     // 🧪 No simulador (sandbox/testMode) o "Zerar" já esvazia conversations,
     // o que faria essa regra disparar a cada clique de botão (hoursSinceBot=∞)
     // e zerar o step → welcome eterno. Simulator controla reset via fresh:true.
-    if (messageText && !isFile && customer && (customer as any).conversation_step && !testMode && !(customer as any).is_sandbox) {
+    // 🚫 Clique de botão NUNCA dispara re-welcome — o lead já está engajado
+    // no fluxo respondendo a uma pergunta interativa. Sem esse guard, qualquer
+    // clique curto ("Quero simular") em chat antigo zerava conversation_step e
+    // o webhook respondia de novo o passo welcome em loop.
+    if (messageText && !isFile && !isButton && !buttonId && customer && (customer as any).conversation_step && !testMode && !(customer as any).is_sandbox) {
       try {
         const { data: lastOut } = await supabase
           .from("conversations")
