@@ -1561,11 +1561,17 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         .order("created_at", { ascending: false })
         .limit(5);
       const rows: any[] = (recent as any[]) || [];
+      // Inclui também o step_key legado mapeado (aguardando_conta, ask_finalizar
+      // etc) — sem isso o anti-rep não detecta duplicidade quando o passo emite
+      // texto E depois o handler legado registra a mesma outbound com o step
+      // cadastro correspondente.
+      const _legacyMapped = stepTypeToCadastro(st.step_type);
       const stepIds = new Set<string>([
         st.id,
         st.step_key,
         `flow:${st.id}`,
         `flow:${st.step_key}`,
+        ...(_legacyMapped ? [_legacyMapped, `flow:${_legacyMapped}`] : []),
       ]);
       const hit = rows.find((r) => stepIds.has(String(r.conversation_step || "")));
       if (hit) {
