@@ -1741,6 +1741,19 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       cursor = nextStep;
     }
 
+    // 🔄 Reset de contadores de retry quando o lead avança para outro step.
+    // Se o customer estava em retry-mode num step diferente do atual, zera
+    // contadores antes de persistir (Property 5 / Requirements 1.5, 4.3).
+    const customerRetriesStep = String((ctx.customer as any).custom_step_retries_step || "");
+    if (customerRetriesStep && customerRetriesStep !== s.id) {
+      console.log(`[conversational] retry-counters-reset step=${s.step_key}`);
+      extra = {
+        ...extra,
+        custom_step_retries: 0,
+        custom_step_retries_step: null,
+      };
+    }
+
     return {
       reply: replyText,
       updates: { conversation_step: nextConversationStep, __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, __inline_sent: inlineSent || undefined, ...extra },
@@ -2019,6 +2032,91 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     return _finalize(stepKey, {
       reply: "",
       updates: { conversation_step: currentStep.id, __inline_sent: true, ...captureUpdates, ...restoreDetourUpdates },
+    });
+  }
+
+  // 🆕 fb.mode === "retry" — implementação validada via PBT (Property 1-5)
+  // Honra a configuração do FluxoBuilder: envia retry_text, conta tentativas e
+  // escala via fb.then ("humano" | "next" | "repeat") quando excede max_retries.
+  if (fb.mode === "retry") {
+    const maxRetries = Math.max(1, Number(fb.max_retries ?? 2));
+    const sameStep = String((ctx.customer as any).custom_step_retries_step || "") === currentStep.id;
+    const prevCount = sameStep ? Number((ctx.customer as any).custom_step_retries || 0) : 0;
+    const newCount = prevCount + 1;
+
+    console.log(
+      `[conversational] retry-mode step=${currentStep.step_key} ` +
+      `attempt=${newCount}/${maxRetries} prev=${prevCount} sameStep=${sameStep}`,
+    );
+
+    // Esgotou retries
+    if (newCount > maxRetries) {
+      const then = String(fb.then || "humano");
+
+      if (then === "humano") {
+        const handoffText = await getTemplate(
+          ctx.supabase, "aguardando_humano", "avisado",
+          { nome: ctx.customer.name, representante: ctx.nomeRepresentante },
+        );
+        try {
+          await ctx.supabase.from("bot_handoff_alerts").insert({
+            customer_id: ctx.customer.id,
+            consultant_id: ctx.customer.consultant_id,
+            reason: `${currentStep.step_key}_retry_exhausted`,
+            metadata: {
+              step: currentStep.step_key,
+              retries: newCount,
+              max: maxRetries,
+              fallback: fb,
+            },
+          });
+        } catch (_) { /* best-effort */ }
+        return _finalize(stepKey, {
+          reply: handoffText,
+          updates: {
+            conversation_step: "aguardando_humano",
+            bot_paused: true,
+            bot_paused_reason: `${currentStep.step_key}_retry_exhausted`,
+            bot_paused_at: new Date().toISOString(),
+            custom_step_retries: 0,
+            custom_step_retries_step: null,
+            ...captureUpdates,
+            ...restoreDetourUpdates,
+          },
+        });
+      }
+
+      if (then === "next") {
+        const nextByPos = dbSteps.find((s) => s.is_active && s.position > currentStep.position);
+        if (nextByPos) {
+          return _finalize(stepKey, await goToStep(nextByPos, {
+            ...restoreDetourUpdates,
+            custom_step_retries: 0,
+            custom_step_retries_step: null,
+          }));
+        }
+        // Sem próximo → cai pra repeat (envia retry_text uma última vez)
+      }
+      // then === "repeat" → continua para enviar retry_text abaixo
+    }
+
+    // Envia retry_text e incrementa contador
+    const retryText = String(
+      fb.retry_text ||
+      renderStepText(currentStep) ||
+      "Pode me responder, por favor? 🙂",
+    );
+    return _finalize(stepKey, {
+      reply: retryText,
+      updates: {
+        conversation_step: currentStep.id,
+        custom_step_retries: newCount,
+        custom_step_retries_step: currentStep.id,
+        __intent: cls.intent,
+        __confidence: cls.confidence,
+        ...captureUpdates,
+        ...restoreDetourUpdates,
+      },
     });
   }
 
