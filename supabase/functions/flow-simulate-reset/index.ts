@@ -51,11 +51,11 @@ Deno.serve(async (req) => {
     const rawRealPhone = String(body?.real_phone || "").replace(/\D/g, "");
     const phone = realMode && rawRealPhone ? rawRealPhone : testPhoneFor(consultantId);
 
-    // Acha customers pelo phone determinístico (cobre runs antigas mesmo sem is_sandbox)
-    const { data: list } = await svc
-      .from("customers")
-      .select("id")
-      .eq("phone_whatsapp", phone);
+    // Acha customers pelo phone. Em real mode, exige is_test_lead=true
+    // pra NUNCA apagar um cliente real por engano.
+    let q = svc.from("customers").select("id, is_test_lead, is_sandbox").eq("phone_whatsapp", phone);
+    if (realMode) q = q.eq("is_test_lead", true);
+    const { data: list } = await q;
     const ids = (list || []).map((r: any) => r.id);
 
     if (ids.length > 0) {
