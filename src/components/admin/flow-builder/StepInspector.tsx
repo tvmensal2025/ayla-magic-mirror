@@ -38,6 +38,18 @@ export default function StepInspector({
   step, steps, consultantId, variant, flowId, maxPosition, onClose, onPatch, onReload,
 }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.rpc("is_super_admin", { _user_id: user.id });
+      if (!cancelled) setIsSuperAdmin(Boolean(data));
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   if (!step) return null;
   const buttons = getButtons(step);
