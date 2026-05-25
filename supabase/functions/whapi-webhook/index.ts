@@ -201,6 +201,7 @@ Deno.serve(async (req) => {
     const headerRunId = req.headers.get("x-bot-test-run-id");
     const headerRealServices = req.headers.get("x-bot-real-services") === "1";
     const headerBypassQuiet = req.headers.get("x-bot-bypass-quiet-hours") === "1";
+    const headerFastClock = req.headers.get("x-bot-fast-clock") === "1";
     const realMode = headerRealServices && !!headerRunId; // phone pode ser real
     const testMode = sandboxPhone || realMode;
     let testRunId: string | null = null;
