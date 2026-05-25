@@ -3,9 +3,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Flame, Users } from "lucide-react";
 import { SalesFunnelBoard } from "./SalesFunnelBoard";
 
-const KanbanBoard = lazy(() =>
-  import("./KanbanBoard").then((m) => ({ default: m.KanbanBoard })),
-);
+const PosVendaKanban = lazy(() => import("./PosVendaKanban"));
 
 interface CrmTabsProps {
   consultantId: string;
