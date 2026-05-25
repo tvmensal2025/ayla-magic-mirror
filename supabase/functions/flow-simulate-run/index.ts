@@ -293,6 +293,7 @@ Deno.serve(async (req) => {
           "apikey": ANON,
           "x-bot-test-run-id": runId,
           "x-bot-test-turn": String(turn),
+          "x-bot-bypass-quiet-hours": "1",
           ...(realMode ? { "x-bot-real-services": "1" } : {}),
         },
         body: JSON.stringify(whapiBody),
