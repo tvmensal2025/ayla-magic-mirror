@@ -37,6 +37,7 @@ interface PosVendaCustomer {
 }
 
 const STAGES: { key: Stage; label: string; color: string }[] = [
+  { key: "em_analise", label: "Em análise", color: "bg-slate-500/10 text-slate-300 border-slate-500/20" },
   { key: "aprovado",  label: "Aprovado",  color: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" },
   { key: "reprovado", label: "Reprovado", color: "bg-red-500/10 text-red-500 border-red-500/20" },
   { key: "d30",       label: "30 dias",   color: "bg-sky-500/10 text-sky-500 border-sky-500/20" },
@@ -54,7 +55,7 @@ function computeStage(c: PosVendaCustomer): Stage {
   if (c.pos_venda_stage) return c.pos_venda_stage;
   if (/reprov|cancel/i.test(c.andamento_igreen || "") || ["rejected","cancelled","canceled"].includes(c.status)) return "reprovado";
   const d = daysSince(c.portal_submitted_at);
-  if (d == null) return "aprovado";
+  if (d == null) return "em_analise";
   if (d >= 120) return "d120";
   if (d >= 90)  return "d90";
   if (d >= 60)  return "d60";
