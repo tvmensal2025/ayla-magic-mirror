@@ -3539,40 +3539,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       let detectConfidence = 0;
       let detectSource: string = "fallback";
 
-      // 🧪 testMode: pula detecção de tipo e OCR real, usa mock direto
-      if (isCustomerSandbox(customer)) {
-        const { mockDocOcr } = await import("../../_shared/test-mode.ts");
-        const ocrData = mockDocOcr();
-        console.log("🧪 [test-mode] OCR doc mock:", JSON.stringify(ocrData).substring(0, 200));
-        const d = ocrData.dados;
-        if (fileBase64) {
-          updates.document_front_url = `data:${mime};base64,${fileBase64}`;
-          updates.document_front_base64 = fileBase64;
-          updates.media_storage = "inline";
-        } else if (fileUrl) {
-          updates.document_front_url = fileUrl.startsWith("http") ? fileUrl : "evolution-media:pending";
-        }
-        updates.document_back_url = "nao_aplicavel"; // mock usa CNH
-        updates.document_type = "cnh";
-        const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome);
-        if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; }
-        if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
-        if (d.rg) updates.rg = d.rg;
-        if (d.dataNascimento) updates.data_nascimento = d.dataNascimento;
-        if (d.nomePai) updates.nome_pai = d.nomePai;
-        if (d.nomeMae) updates.nome_mae = d.nomeMae;
-        updates.doc_holder_name = d.nome || "";
-        // Avança para o próximo passo de coleta (email ou CEP)
-        const _cpfOcr = String(updates.cpf || customer.cpf || "").replace(/\D/g, "");
-        if (_cpfOcr.length !== 11) {
-          updates.conversation_step = "ask_cpf";
-          reply = `✅ *Documento analisado!*\n\n👤 Nome: *${d.nome}*\n📄 RG: *${d.rg}*\n\nSó preciso do seu *CPF* (apenas números):`;
-        } else {
-          updates.conversation_step = "ask_email";
-          reply = `✅ *Documento analisado com sucesso!* 🎉\n\n👤 Nome: *${d.nome}*\n🪪 CPF: *${_cpfOcr}*\n📅 Nascimento: *${d.dataNascimento}*\n\nAgora me passa seu *e-mail* para finalizar o cadastro:`;
-        }
-        break;
-      }
+      // 🚫 Mock OCR doc removido (2026-05-25): simulador roda detect-doc-type +
+      // ocrDocumentoFrenteVerso REAIS (Gemini), igual ao fluxo de produção.
 
       try {
         const det = await (await import("../../_shared/detect-doc-type.ts")).detectDocumentTypeDetailed({
