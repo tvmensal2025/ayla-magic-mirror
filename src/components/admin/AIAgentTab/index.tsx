@@ -109,7 +109,7 @@ export function AIAgentTab({ userId }: { userId: string }) {
           )
           .eq("consultant_id", userId)
           .eq("bot_paused", true)
-          .eq("bot_paused_reason", "manual_global_pause");
+          .in("bot_paused_reason", ["manual_global_pause", "humano_assumiu_backfill"]);
         if (rErr) throw rErr;
         toast({ title: "🤖 IA reativada", description: `${count ?? 0} lead(s) religados.` });
       }
