@@ -13,6 +13,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { DISTRIBUIDORAS_PRESETS } from "@/data/distribuidoraPresets";
 import { AdImagePreview } from "./AdImagePreview";
+import { TemplateInfoCard } from "@/components/admin/ads/TemplateInfoCard";
 
 const empty: Partial<AdTemplate> = {
   title: "",
