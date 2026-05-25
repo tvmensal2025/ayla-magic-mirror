@@ -38,6 +38,13 @@ export interface TestStore {
    * 100% reais — apenas a cadência humana fica curta.
    */
   fastClock?: boolean;
+  /**
+   * Quando true → força OCR (conta + documento) a retornar erro determinístico,
+   * sem chamar o Gemini. Usado APENAS pelos cenários do bot-e2e-runner que
+   * validam o caminho de fallback `mode=retry`. Não tem efeito em produção
+   * porque depende do `testMode` estar ativo (sandbox phone OU header explícito).
+   */
+  forceOcrFail?: boolean;
 }
 
 /** True se a run atual pediu para ignorar quiet hours (simulador). */
@@ -48,6 +55,16 @@ export function shouldBypassQuietHours(): boolean {
 /** True se a run atual quer cadência acelerada (simulador). */
 export function shouldUseFastClock(): boolean {
   return botRequestStore.getStore()?.fastClock === true;
+}
+
+/**
+ * True quando o cenário do simulador pediu para forçar OCR a falhar.
+ * Lido pelos helpers em `_shared/ocr.ts` (gated atrás de `isTestMode()`)
+ * antes de chamar o Gemini. Produção nunca passa por este branch porque
+ * `testMode` só está ativo em runs do simulador (sandbox phone ou header).
+ */
+export function shouldForceOcrFail(): boolean {
+  return botRequestStore.getStore()?.forceOcrFail === true;
 }
 
 export const botRequestStore = new AsyncLocalStorage<TestStore>();

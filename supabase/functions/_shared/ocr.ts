@@ -1,7 +1,7 @@
 import { fetchWithTimeout, withRetry, TIMEOUT_FETCH_IMAGE, TIMEOUT_GEMINI } from "./utils.ts";
 import { normalizarRG, validarDataNascimento, validarNomeOCR, validarCPFDigitos } from "./conversation-helpers.ts";
 import { captureError } from "./sentry.ts";
-import { isMockMode, mockBillOcr, mockDocOcr } from "./test-mode.ts";
+import { isMockMode, mockBillOcr, mockDocOcr, shouldForceOcrFail, isTestMode } from "./test-mode.ts";
 
 // ─── Baixar imagem (Evolution API ou URL direta) ────────────────────
 export async function baixarImagem(
@@ -98,6 +98,12 @@ export async function ocrContaEnergia(
   mediaMessage?: any
 ): Promise<{ sucesso: boolean; dados?: any; erro?: string }> {
   try {
+    // 🧪 Cenário do bot-e2e-runner: força fail para validar caminho de retry.
+    // Gated por `isTestMode()` — produção nunca passa por aqui.
+    if (isTestMode() && shouldForceOcrFail()) {
+      console.log("🧪 [ocrContaEnergia] forceOcrFail=true → simulando falha");
+      return { sucesso: false, erro: "test_force_ocr_fail" };
+    }
     // OCR roda SEMPRE de verdade (Gemini), inclusive no simulador — usuário pediu
     // paridade total com o fluxo original. Mock OCR removido em 2026-05-25.
     if (!geminiApiKey) return { sucesso: false, erro: "GEMINI_API_KEY não configurada" };
@@ -306,6 +312,11 @@ Retorne APENAS este JSON, sem markdown e sem texto antes ou depois:
 
 export async function ocrDocumento(imagemUrl: string | null, geminiApiKey: string, tipo: string = "RG", whapiToken?: string, mediaId?: string, isVerso = false): Promise<{ sucesso: boolean; dados?: any; erro?: string }> {
   try {
+    // 🧪 Cenário bot-e2e-runner: força fail (gated em testMode).
+    if (isTestMode() && shouldForceOcrFail()) {
+      console.log("🧪 [ocrDocumento] forceOcrFail=true → simulando falha");
+      return { sucesso: false, erro: "test_force_ocr_fail" };
+    }
     if (!geminiApiKey) return { sucesso: false, erro: "GEMINI_API_KEY não configurada" };
 
     const img = await baixarImagem(imagemUrl, whapiToken, mediaId);
@@ -623,6 +634,11 @@ export async function ocrDocumentoFrenteVerso(
   frenteUrl: string | null, versoUrl: string | null, tipo: string,
   geminiApiKey: string, frenteBase64?: string, frenteMediaMsg?: any, versoBase64?: string
 ): Promise<{ sucesso: boolean; dados?: any; erro?: string }> {
+  // 🧪 Cenário bot-e2e-runner: força fail (gated em testMode).
+  if (isTestMode() && shouldForceOcrFail()) {
+    console.log("🧪 [ocrDocumentoFrenteVerso] forceOcrFail=true → simulando falha");
+    return { sucesso: false, erro: "test_force_ocr_fail" };
+  }
   // OCR sempre real (Gemini) — simulador agora roda igual fluxo original.
   console.log(`🔍 ocrDocumentoFrenteVerso: frenteB64=${!!frenteBase64}, versoB64=${!!versoBase64}, frenteUrl=${frenteUrl?.substring(0,60)}, versoUrl=${versoUrl?.substring(0,60)}`);
 
