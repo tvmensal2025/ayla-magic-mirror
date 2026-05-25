@@ -1,0 +1,1 @@
+ALTER FUNCTION public.compute_pos_venda_stage(timestamptz, text, text) SET search_path = public;
