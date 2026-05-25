@@ -256,6 +256,21 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
     return () => window.removeEventListener("keydown", onKey);
   }, [open, canSubmit, submitting]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Sinaliza no <body> quando a barra minimizada está visível, para que o
+  // layout do WhatsApp possa reservar espaço no rodapé e o composer não
+  // fique coberto pela barra fixa de Captação.
+  useEffect(() => {
+    const showingBar = open && minimized;
+    if (showingBar) {
+      document.body.dataset.captacaoBarOpen = "1";
+    } else {
+      delete document.body.dataset.captacaoBarOpen;
+    }
+    return () => {
+      delete document.body.dataset.captacaoBarOpen;
+    };
+  }, [open, minimized]);
+
   // Barra fina minimizada — h-11, tap em qualquer lugar abre meia-tela.
   if (open && minimized) {
     return (
