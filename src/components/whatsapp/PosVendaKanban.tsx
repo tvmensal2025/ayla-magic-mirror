@@ -201,16 +201,16 @@ export default function PosVendaKanban({ consultantId }: { consultantId: string 
           className="max-w-sm rounded-xl"
         />
         <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-          <SelectTrigger className="w-[240px] rounded-xl">
-            <SelectValue placeholder="Filtrar por consultor" />
+          <SelectTrigger className="w-[280px] rounded-xl">
+            <SelectValue placeholder="Filtrar por quem cadastrou" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="mine">Meus clientes (cadastro principal)</SelectItem>
+            <SelectItem value="mine">Apenas cadastrados por mim {myIgreenId ? `(iGreen ${myIgreenId})` : ""}</SelectItem>
             <SelectItem value="assigned">Atribuídos a mim</SelectItem>
-            <SelectItem value="all">Todos (meus + atribuídos)</SelectItem>
-            {consultants.filter(c => c.id !== consultantId).map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                Consultor: {c.full_name || c.slug || c.id.slice(0,8)}
+            <SelectItem value="all">Todos da minha rede</SelectItem>
+            {registrants.filter(r => r.id !== myIgreenId).map((r) => (
+              <SelectItem key={r.id} value={r.id}>
+                Cadastrado por: {r.name}
               </SelectItem>
             ))}
           </SelectContent>
