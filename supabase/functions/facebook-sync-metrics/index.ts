@@ -9,6 +9,29 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Meta retorna conversas CTWA em vários action_types dependendo da versão da campanha
+// (legado vs nova messaging objective). Somamos todos os candidatos relevantes.
+const CONV_ACTIONS = [
+  "onsite_conversion.messaging_conversation_started_7d",
+  "onsite_conversion.messaging_first_reply",
+  "onsite_conversion.total_messaging_connection",
+  "messaging_conversation_started_7d",
+  "messaging_first_reply",
+  "total_messaging_connection",
+];
+const LEAD_ACTIONS = ["lead", "onsite_conversion.lead_grouped"];
+
+function sumActions(actions: any[] | undefined, types: string[]): number {
+  if (!Array.isArray(actions)) return 0;
+  let total = 0;
+  for (const a of actions) {
+    if (types.includes(a?.action_type)) total += Number(a?.value || 0);
+  }
+  return total;
+}
+
+
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
