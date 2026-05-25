@@ -16,9 +16,18 @@ export function useCustomerDeals(consultantId: string, customers: Customer[]) {
       if (data) {
         const map: Record<string, { stage: string; deal_origin?: string | null }> = {};
 
+        // Conjunto de IDs de clientes da carteira iGreen — esses NUNCA recebem
+        // stage do funil de leads, mesmo que exista deal antigo batendo por telefone.
+        const igreenIds = new Set(
+          customers.filter((c: any) => c.customer_origin === "igreen_sync").map((c) => c.id),
+        );
+
         for (const deal of data) {
-          if (deal.customer_id && !map[deal.customer_id]) {
-            map[deal.customer_id] = { stage: deal.stage, deal_origin: deal.deal_origin };
+          if (deal.customer_id) {
+            if (igreenIds.has(deal.customer_id)) continue;
+            if (!map[deal.customer_id]) {
+              map[deal.customer_id] = { stage: deal.stage, deal_origin: deal.deal_origin };
+            }
             continue;
           }
 
@@ -26,6 +35,7 @@ export function useCustomerDeals(consultantId: string, customers: Customer[]) {
           if (!dealPhone) continue;
 
           for (const customer of customers) {
+            if (igreenIds.has(customer.id)) continue;
             const customerPhone = normalizeCustomerPhone(customer.phone_whatsapp);
             if (!customerPhone || map[customer.id]) continue;
             if (customerPhone === dealPhone || customerPhone.endsWith(dealPhone) || dealPhone.endsWith(customerPhone)) {

@@ -117,6 +117,9 @@ export function CustomerImportExport({ customers, filtered, consultantId, onCust
         name: item.name,
         status: item.status,
         consultant_id: consultantId,
+        // Importação por planilha = carteira/pós-venda. NUNCA vira lead do WhatsApp
+        // nem entra no funil do CRM. Para isso, marcamos a origem como igreen_sync.
+        customer_origin: "igreen_sync",
         ...item.data,
       })) as TablesInsert<"customers">[];
 
@@ -128,27 +131,7 @@ export function CustomerImportExport({ customers, filtered, consultantId, onCust
         if (error) throw error;
 
         if (upserted && upserted.length > 0) {
-          const jids = upserted.map((u) => `${u.phone_whatsapp}@s.whatsapp.net`);
-          const { data: existingDeals } = await supabase
-            .from("crm_deals")
-            .select("remote_jid")
-            .in("remote_jid", jids)
-            .eq("consultant_id", consultantId);
-          const existingJids = new Set((existingDeals || []).map((d) => d.remote_jid));
-
-          const newDeals = upserted
-            .filter((u) => !existingJids.has(`${u.phone_whatsapp}@s.whatsapp.net`))
-            .filter((u: any) => (u.tipo_produto || "energia") !== "telefonia")
-            .map((u) => ({
-              consultant_id: consultantId,
-              customer_id: u.id,
-              remote_jid: `${u.phone_whatsapp}@s.whatsapp.net`,
-              stage: "novo_lead",
-            }));
-          if (newDeals.length > 0) {
-            await supabase.from("crm_deals").insert(newDeals);
-          }
-
+          // NÃO criamos crm_deals aqui — Excel é carteira, não lead.
           const newPhones = new Set(batch.filter((b) => b.isNew).map((b) => b.phone));
           for (const u of upserted) {
             if (newPhones.has(u.phone_whatsapp)) progress.newCount++;
