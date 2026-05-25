@@ -11,7 +11,7 @@ export type Transition = {
   trigger_intent: string;
   trigger_phrases: string[];
   goto_step_id: string | null;
-  goto_special: "cadastro" | "humano" | "repeat" | null;
+  goto_special: "cadastro" | "humano" | "repeat" | "ai" | null;
 };
 
 export type CaptureField =
