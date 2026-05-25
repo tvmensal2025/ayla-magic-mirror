@@ -44,7 +44,7 @@ import { normalizeDocumentType, isCNH, friendlyLabel } from "../../_shared/docum
 import { detectDocumentType } from "../../_shared/detect-doc-type.ts";
 import { uploadMediaToMinio, OCR_CONFIDENCE_THRESHOLD } from "../_helpers.ts";
 import { jsonLog } from "../../_shared/audit.ts";
-import { isMockMode } from "../../_shared/test-mode.ts";
+import { isMockMode, shouldBypassQuietHours } from "../../_shared/test-mode.ts";
 import { notifyHandoff } from "../../_shared/notify-consultant.ts";
 import type { BotContext, BotResult } from "./types.ts";
 
@@ -486,7 +486,7 @@ function buildConfirmacaoDoc(merged: any): string {
 }
 
 export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
-  if (isQuietHourBRT()) {
+  if (isQuietHourBRT() && !shouldBypassQuietHours()) {
     logQuietSkip("bot-flow", { customer_id: ctx.customer?.id, phone: ctx.phone });
     return { reply: null, updates: {} } as BotResult;
   }

@@ -200,6 +200,7 @@ Deno.serve(async (req) => {
     const sandboxPhone = isTestPhone(phone);
     const headerRunId = req.headers.get("x-bot-test-run-id");
     const headerRealServices = req.headers.get("x-bot-real-services") === "1";
+    const headerBypassQuiet = req.headers.get("x-bot-bypass-quiet-hours") === "1";
     const realMode = headerRealServices && !!headerRunId; // phone pode ser real
     const testMode = sandboxPhone || realMode;
     let testRunId: string | null = null;
@@ -1210,7 +1211,7 @@ Deno.serve(async (req) => {
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
           });
       const result = testMode && testRunId
-        ? await botRequestStore.run({ testMode: true, runId: testRunId, supabase, turn: testTurn, realServices }, runEngine)
+        ? await botRequestStore.run({ testMode: true, runId: testRunId, supabase, turn: testTurn, realServices, bypassQuietHours: testMode && headerBypassQuiet }, runEngine)
         : await runEngine();
       reply = result.reply;
       updates = result.updates;

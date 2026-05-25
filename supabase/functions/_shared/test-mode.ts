@@ -26,6 +26,17 @@ export interface TestStore {
    * Quando false/undefined → sandbox tradicional (mocks ligados, delays zerados).
    */
   realServices?: boolean;
+  /**
+   * Quando true → simulador pediu para ignorar a janela de silêncio
+   * (21:30→08:00 BRT). Aplica-se apenas a esta run; produção real continua
+   * respeitando quiet hours normalmente.
+   */
+  bypassQuietHours?: boolean;
+}
+
+/** True se a run atual pediu para ignorar quiet hours (simulador). */
+export function shouldBypassQuietHours(): boolean {
+  return botRequestStore.getStore()?.bypassQuietHours === true;
 }
 
 export const botRequestStore = new AsyncLocalStorage<TestStore>();
