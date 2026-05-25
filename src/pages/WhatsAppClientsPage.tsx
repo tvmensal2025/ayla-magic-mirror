@@ -536,6 +536,8 @@ export default function WhatsAppClientsPage() {
           })
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }
