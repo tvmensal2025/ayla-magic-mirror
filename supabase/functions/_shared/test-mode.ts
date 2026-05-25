@@ -17,12 +17,33 @@ export interface TestStore {
   runId: string;
   supabase: any;
   turn: number;
+  /**
+   * Quando true → "Modo Real":
+   *  - delays NÃO são pulados (paridade total com produção)
+   *  - OCR/portal/OTP/facial usam serviços REAIS (sem mock)
+   *  - outbound vai para Whapi REAL **e** é espelhado em bot_test_outbound
+   *    pra UI do simulador conseguir mostrar.
+   * Quando false/undefined → sandbox tradicional (mocks ligados, delays zerados).
+   */
+  realServices?: boolean;
 }
 
 export const botRequestStore = new AsyncLocalStorage<TestStore>();
 
+/** True quando estamos numa run do simulador (mock OU real). */
 export function isTestMode(): boolean {
   return botRequestStore.getStore()?.testMode === true;
+}
+
+/** True apenas no sandbox tradicional (com mocks ligados). */
+export function isMockMode(): boolean {
+  const s = botRequestStore.getStore();
+  return s?.testMode === true && s?.realServices !== true;
+}
+
+/** True se estamos espelhando outbound pra UI do simulador (Modo Real). */
+export function isMirroringOutbound(): boolean {
+  return botRequestStore.getStore()?.realServices === true;
 }
 
 export function getTestStore(): TestStore | undefined {
