@@ -182,10 +182,8 @@ Deno.serve(async (req) => {
       patch.numero_instalacao = null;
       patch.electricity_bill_value = null;
       patch.electricity_bill_photo_url = null;
-      patch.bill_image_url = null;
       patch.bill_base64 = null;
       patch.bill_holder_name = null;
-      patch.bill_data_raw = null;
       patch.document_front_url = null;
       patch.document_back_url = null;
       patch.document_type = null;
@@ -202,7 +200,11 @@ Deno.serve(async (req) => {
       patch.bot_paused_reason = null;
       patch.bot_paused_at = null;
     }
-    await svc.from("customers").update(patch).eq("id", customer.id);
+    const { error: patchErr } = await svc.from("customers").update(patch).eq("id", customer.id);
+    if (patchErr) {
+      console.error("[flow-simulate-run] patch_failed", patchErr.message, "keys=", Object.keys(patch).join(","));
+      return json({ error: "patch_failed", detail: patchErr.message }, 500);
+    }
     Object.assign(customer as any, patch);
 
     if (fresh) {
