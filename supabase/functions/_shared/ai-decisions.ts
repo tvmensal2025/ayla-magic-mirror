@@ -53,7 +53,7 @@ export function logAiDecision(entry: AiDecisionEntry): void {
       step_before: trunc(entry.stepBefore ?? null, 200),
       step_after: trunc(entry.stepAfter ?? null, 200),
       reply_sent: trunc(entry.replySent ?? null, 1000),
-      suppressed: entry.suppressed ?? null,
+      suppressed: entry.suppressed ?? false,
       source: trunc(entry.source ?? null, 50),
       latency_ms: entry.latencyMs ?? null,
       reasoning: trunc(entry.reasoning ?? null, 1000),
