@@ -470,6 +470,8 @@ Credenciais → edge function → autentica API iGreen → pagina clientes → b
 
 O motor `supabase/functions/whapi-webhook/handlers/bot-flow.ts` é orientado por dados na tabela `bot_flow_steps`. Quem chegar depois deve respeitar este contrato pra evitar regressões.
 
+> **Paridade Evolution ↔ Whapi:** todas as regras descritas aqui valem para os dois canais. Os handlers conversational (`evolution-webhook/handlers/conversational/index.ts` e `whapi-webhook/handlers/conversational/index.ts`) implementam o mesmo contrato — só muda o canal de envio. O handler `evolution-webhook/handlers/bot-flow.ts` (engine `sys`, OCR/portal) também replica o helper `resolveOcrFallback` do Whapi para honrar `retry_text` configurado em `capture_conta` / `capture_documento` quando o OCR falha em variant D.
+
 ### Tipos de step (`step_type`)
 
 | Tipo | Quando usar | Precisa `captures`? | Precisa `transitions`? |
@@ -512,23 +514,63 @@ Toda regra que não casa cai no `default` ou no `fallback`.
 
 ```json
 {
-  "mode": "retry|advance|goto|repeat|handoff|ai",
+  "mode": "retry|advance|goto|repeat|handoff|ai|ai_answer",
   "max_retries": 2,
+  "retry_text": "Pode mandar de novo? 🙏",
+  "then": "humano|next|repeat",
   "on_fail": "handoff|next|repeat",
   "goto_step_id": null,
   "handoff_reason": "step_misconfigured_or_lead_off_topic"
 }
 ```
 
-### Anti-loop (engine)
+#### `mode: "retry"` — comportamento canônico
 
-Quando um lead manda resposta inválida em um passo com `transitions` (sem `default`):
+Implementado nos handlers conversational de **ambos** os webhooks (`evolution-webhook/handlers/conversational/index.ts` e `whapi-webhook/handlers/conversational/index.ts`). Antes do fix `flow-d-retry-rules-fix`, esse modo caía silenciosamente em `_smartRepeat`; hoje é honrado por turno.
+
+Campos relevantes:
+
+| Campo | Tipo | Default | Descrição |
+|---|---|---|---|
+| `mode` | string | — | Deve ser `"retry"` para ativar o branch. |
+| `max_retries` | int | `2` | Número de tentativas antes de escalar. Mínimo `1`. |
+| `retry_text` | string | texto do step | Mensagem amigável reenviada a cada tentativa. Se vazio, usa `renderStepText(currentStep)`; se ainda vazio, usa `"Pode me responder, por favor? 🙂"`. |
+| `then` | `"humano" \| "next" \| "repeat"` | `"humano"` | Ação após exceder `max_retries`. |
+
+Fluxo por turno (lead manda algo que não casa com nenhuma `transition`):
+
+1. **Tentativas `1..max_retries`:** envia `retry_text`, incrementa `customers.custom_step_retries` e fixa `customers.custom_step_retries_step = currentStep.id`.
+2. **Exceder `max_retries` + `then = "humano"`:** pausa o bot (`bot_paused=true`, `bot_paused_reason='<step_key>_retry_exhausted'`), avança `conversation_step='aguardando_humano'`, zera contadores, envia template `aguardando_humano/avisado` e cria registro em `bot_handoff_alerts` com `reason='<step_key>_retry_exhausted'`.
+3. **Exceder + `then = "next"`:** avança para o próximo step ativo por `position` e zera contadores. Sem próximo → degrada para `repeat`.
+4. **Exceder + `then = "repeat"`:** mantém o step e envia `retry_text` mais uma vez (não escala).
+5. **Lead avança de step (transition casa):** contadores são zerados em `goToStep`. Log: `[conversational] retry-counters-reset step=<step_key>`.
+
+Telemetria por turno: `[conversational] retry-mode step=<step_key> attempt=<n>/<max> prev=<prev> sameStep=<bool>`.
+
+Contadores em `customers`:
+
+- `custom_step_retries` (int, default `0`)
+- `custom_step_retries_step` (text, nullable) — id do step a que o contador se refere; permite resetar ao mudar de step.
+
+#### `mode: "retry"` no engine `sys` (OCR fail variante D)
+
+Quando o OCR falha em `aguardando_conta` / `aguardando_doc_*` no `evolution-webhook/handlers/bot-flow.ts`, o helper `resolveOcrFallback` (espelhado do Whapi) busca o step `capture_conta` ou `capture_documento` ativo do fluxo do consultor e:
+
+- Usa `fallback.retry_text` no reply (em vez do texto hardcoded) quando configurado.
+- Escala para humano com `bot_paused_reason='ocr_conta_retry_exhausted'` (ou `ocr_doc_retry_exhausted`) quando `attempts >= max_retries` e `then = "humano"`.
+- Para variantes `A/B/C/E` ou steps sem `mode: "retry"`, mantém o texto hardcoded original (sem regressão).
+
+Observação: o campo `on_fail` ainda é aceito por compatibilidade com `repair_bot_flow` e fluxos antigos. Para `mode: "retry"` o handler lê `then` (novo, prioritário); a propriedade `on_fail` permanece como sinônimo legado nos seeds.
+
+### Anti-loop (engine — fallback genérico para steps SEM `mode: "retry"`)
+
+Para steps que **não** declaram `fallback.mode = "retry"` (caminho legado `_smartRepeat`), quando um lead manda resposta inválida em um passo com `transitions` (sem `default`):
 
 1. **1ª tentativa**: repete a pergunta com texto suave (`"Desculpa, não entendi 🙈"`)
 2. **2ª tentativa**: versão ainda mais curta (`"Pra eu te ajudar, só sim ou não 😊"`)
 3. **3ª+**: pausa o bot (`bot_paused=true`, `bot_paused_reason='custom_step_no_match_retries_exhausted'`), cria `bot_handoff_alerts` e notifica o consultor via `notifyHandoff`.
 
-Contadores: `customers.custom_step_retries` (int) + `customers.custom_step_retries_step` (texto). Resetam quando o lead avança de passo.
+Contadores: `customers.custom_step_retries` (int) + `customers.custom_step_retries_step` (texto). Resetam quando o lead avança de passo. Os mesmos contadores são reaproveitados pelo branch `mode: "retry"` descrito acima — quem chega primeiro no turno (retry explícito ou anti-loop genérico) ganha.
 
 ### Auto-reparo (`repair_bot_flow` RPC)
 
