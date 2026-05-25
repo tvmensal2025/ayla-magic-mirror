@@ -69,6 +69,12 @@ function trigramSim(a: string, b: string): number {
 // ── Sleep based on media duration (lets audio finish before sending video) ──
 async function sleepForMedia(kind: string, durationSec?: number | null): Promise<void> {
   if (isMockMode()) return; // 🧪 modo teste: zero espera entre mídias
+  // Simulador real → cadência curta (serviços reais continuam reais, só corta espera artificial)
+  if (shouldUseFastClock()) {
+    const ms = (kind === "audio" || kind === "video") ? 1200 : 600;
+    await new Promise((r) => setTimeout(r, ms));
+    return;
+  }
   if (kind === "audio") {
     const ms = Math.min(((durationSec && durationSec > 0) ? durationSec : 90) * 1000, 120_000);
     await new Promise((r) => setTimeout(r, ms));
