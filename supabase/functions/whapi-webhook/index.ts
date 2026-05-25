@@ -838,7 +838,7 @@ Deno.serve(async (req) => {
     // ─── Modo Captação manual: salvar resposta na ficha e PARAR ─────────
     // O consultor controla o próximo tile. Texto livre do lead não deve rodar
     // o motor conversacional nem avançar automaticamente para o próximo passo.
-    if (!realMode && (customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
+    if ((customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
       try {
         const multi = extractMultiField(messageText);
         const patch = buildMultiFieldPatch(customer as any, multi);
