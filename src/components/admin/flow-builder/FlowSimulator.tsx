@@ -59,17 +59,17 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
   const [state, setState] = useState<any>(null);
   const [diagnostic, setDiagnostic] = useState<any>(null);
   const [showData, setShowData] = useState(false);
-  const [realMode, setRealMode] = useState(false);
-  const [realPhone, setRealPhone] = useState(() => {
-    try { return localStorage.getItem("flowSim:realPhone") || ""; } catch { return ""; }
+  const [otpRealPhone, setOtpRealPhone] = useState(() => {
+    try { return localStorage.getItem("flowSim:otpRealPhone") || ""; } catch { return ""; }
   });
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Persistir telefone real pra não digitar toda vez
+  // Persistir telefone OTP pra não digitar toda vez
   useEffect(() => {
-    try { localStorage.setItem("flowSim:realPhone", realPhone); } catch { /* noop */ }
-  }, [realPhone]);
+    try { localStorage.setItem("flowSim:otpRealPhone", otpRealPhone); } catch { /* noop */ }
+  }, [otpRealPhone]);
+
 
   useEffect(() => {
     if (open) handleReset(true);
