@@ -349,46 +349,50 @@ export default function StepInspector({
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={() => setAdvancedOpen((v) => !v)}
-              className="flex w-full items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 text-sm font-medium hover:bg-muted/60"
-            >
-              <span>Avançado</span>
-              {advancedOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </button>
+            {isSuperAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setAdvancedOpen((v) => !v)}
+                  className="flex w-full items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 text-sm font-medium hover:bg-muted/60"
+                >
+                  <span>Avançado <Badge variant="outline" className="ml-2 text-[10px]">SuperAdmin</Badge></span>
+                  {advancedOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </button>
 
-            {advancedOpen && (
-              <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="key">Chave técnica (step_key)</Label>
-                  <Input
-                    id="key"
-                    value={step.step_key ?? ""}
-                    onChange={(e) => onPatch({ step_key: e.target.value || null })}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Usado pra identificar este passo nos relatórios. Mude com cuidado.
-                  </p>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Slot de mídia (slot_key)</Label>
-                  <Input
-                    value={step.slot_key ?? ""}
-                    onChange={(e) => onPatch({ slot_key: e.target.value || null })}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Delay antes do texto (ms)</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={20000}
-                    value={step.text_delay_ms ?? 0}
-                    onChange={(e) => onPatch({ text_delay_ms: Number(e.target.value) || 0 })}
-                  />
-                </div>
-              </div>
+                {advancedOpen && (
+                  <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="key">Chave técnica (step_key)</Label>
+                      <Input
+                        id="key"
+                        value={step.step_key ?? ""}
+                        onChange={(e) => onPatch({ step_key: e.target.value || null })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Usado pra identificar este passo nos relatórios. Mude com cuidado.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Slot de mídia (slot_key)</Label>
+                      <Input
+                        value={step.slot_key ?? ""}
+                        onChange={(e) => onPatch({ slot_key: e.target.value || null })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Delay antes do texto (ms)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={20000}
+                        value={step.text_delay_ms ?? 0}
+                        onChange={(e) => onPatch({ text_delay_ms: Number(e.target.value) || 0 })}
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
 
