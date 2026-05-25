@@ -5082,6 +5082,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      recompute_pos_venda_stages: { Args: never; Returns: number }
       refund_consultant_wallet: {
         Args: {
           _amount_cents: number
