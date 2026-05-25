@@ -46,7 +46,10 @@ Deno.serve(async (req) => {
       if (!isAdmin) return json({ error: "forbidden" }, 403);
     }
 
-    const phone = testPhoneFor(consultantId);
+    // Real mode → reseta pelo telefone real informado. Sandbox → phone determinístico.
+    const realMode = body?.real_mode === true;
+    const rawRealPhone = String(body?.real_phone || "").replace(/\D/g, "");
+    const phone = realMode && rawRealPhone ? rawRealPhone : testPhoneFor(consultantId);
 
     // Acha customers pelo phone determinístico (cobre runs antigas mesmo sem is_sandbox)
     const { data: list } = await svc
