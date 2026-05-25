@@ -85,28 +85,28 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
     setEvents((prev) => [...prev, ...incoming.map((e) => ({ ...e, key: k() }))]);
   }
 
-  function realPhoneDigits(): string {
-    return realPhone.replace(/\D/g, "");
+  function otpPhoneDigits(): string {
+    return otpRealPhone.replace(/\D/g, "");
   }
 
-  function realPhoneValid(): boolean {
-    const d = realPhoneDigits();
-    return d.length === 12 || d.length === 13;
+  function otpPhoneValid(): boolean {
+    const d = otpPhoneDigits();
+    return d.length === 0 || d.length === 12 || d.length === 13;
   }
 
   async function callRun(payload: any) {
-    if (realMode && !realPhoneValid()) {
-      toast.error("Modo Real: informe um telefone válido (55 + DDD + número)");
+    if (!otpPhoneValid()) {
+      toast.error("Telefone OTP inválido — use 55 + DDD + número, ou deixe em branco");
       return;
     }
     setBusy(true);
     try {
+      const otpPhone = otpPhoneDigits();
       const { data, error } = await supabase.functions.invoke("flow-simulate-run", {
         body: {
           consultant_id: consultantId,
           variant,
-          real_mode: realMode,
-          real_phone: realMode ? realPhoneDigits() : undefined,
+          otp_real_phone: otpPhone || undefined,
           ...payload,
         },
       });
@@ -119,7 +119,7 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
           ...prev,
           {
             kind: "system",
-            text: `⚠ Motor não avançou (${out.diagnostic.step_before || "—"} → ${out.diagnostic.step_after || "—"}). ${out.diagnostic.webhook_err || "Verifique o modo real/logs."}`,
+            text: `⚠ Motor não avançou (${out.diagnostic.step_before || "—"} → ${out.diagnostic.step_after || "—"}). ${out.diagnostic.webhook_err || "Verifique os logs."}`,
             key: k(),
           },
         ]);
@@ -133,6 +133,7 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
       setBusy(false);
     }
   }
+
 
 
   async function handleReset(initial = false) {
