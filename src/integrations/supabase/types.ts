@@ -1659,6 +1659,7 @@ export type Database = {
           id: string
           intent: string | null
           phone: string | null
+          reason: string | null
           to_step: string
         }
         Insert: {
@@ -1671,6 +1672,7 @@ export type Database = {
           id?: string
           intent?: string | null
           phone?: string | null
+          reason?: string | null
           to_step: string
         }
         Update: {
@@ -1683,6 +1685,7 @@ export type Database = {
           id?: string
           intent?: string | null
           phone?: string | null
+          reason?: string | null
           to_step?: string
         }
         Relationships: []
@@ -2064,6 +2067,8 @@ export type Database = {
           ab_test_enabled: boolean
           active_variants: string[]
           ai_persona: string | null
+          ai_profile: string
+          ai_provider_pref: string
           approved: boolean | null
           cadastro_url: string
           conversational_flow_enabled: boolean
@@ -2091,6 +2096,8 @@ export type Database = {
           ab_test_enabled?: boolean
           active_variants?: string[]
           ai_persona?: string | null
+          ai_profile?: string
+          ai_provider_pref?: string
           approved?: boolean | null
           cadastro_url: string
           conversational_flow_enabled?: boolean
@@ -2118,6 +2125,8 @@ export type Database = {
           ab_test_enabled?: boolean
           active_variants?: string[]
           ai_persona?: string | null
+          ai_profile?: string
+          ai_provider_pref?: string
           approved?: boolean | null
           cadastro_url?: string
           conversational_flow_enabled?: boolean
