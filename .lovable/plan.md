@@ -1,78 +1,51 @@
-## Diagnóstico
+## Objetivo
+Executar uma simulação ponta-a-ponta no `flow-simulate-run` contra o consultor superadmin (mesmo motor do WhatsApp real) usando imagens reais do MinIO, validar OCR e reportar onde o fluxo trava (se travar).
 
-O sintoma é: usuário anexa foto da conta no `/admin/fluxos` → simulador, e o painel "Conta de luz (OCR)" nunca preenche distribuidora/valor/instalação.
+## Inputs reais encontrados
+- **Conta de luz (MinIO, HTTP):** `https://igreen-minio.d9v63q.easypanel.host/igreen/documentos/124170_rafael/warmup_warmup_20260525/conta.png` ✅
+- **CNH frente/verso:** não há URL HTTP no DB (só base64 inline em `document_front_url`). Vou usar uma das duas opções abaixo conforme você preferir — pergunto após plano se necessário, mas por padrão sigo com **(A)**:
+  - **(A)** Reaproveitar a própria conta como "documento" só para destravar o passo `aguardando_doc_auto` (Gemini vai rodar OCR real, provavelmente retorna sem CPF/RG → fluxo deve cair em retry/handoff — isso já é um sinal útil).
+  - **(B)** Você cola URL pública de uma CNH na próxima mensagem e eu repito o passo.
 
-### Evidências coletadas
+## Execução (sequencial via curl no edge `flow-simulate-run`)
 
-1. Customer sandbox mais recente (`2d0188db…`):
-  - `error_message = "aguard_conta: isFile=true hasImage=true fileBase64Len=160 sandbox=true"` (diagnóstico de `bot-flow.ts:3010`)
-  - `conversation_step = "aguardando_conta"` (deveria estar em `aguardando_doc_auto` se o mock tivesse rodado)
-  - `electricity_bill_photo_url` setado (data URL), mas `distribuidora/numero_instalacao/electricity_bill_value` todos NULL
-  - `bot_test_outbound` registra apenas o `"✅ Conta recebida! ⏳ Analisando…"` (turn 1) — nenhum follow-up
-2. Bucket `simulator-uploads` é **público** ✅, então download HTTP funciona.
-3. `fileBase64Len=160` (≈120 bytes) revela duas coisas:
-  - A imagem REAL não chegou — provavelmente o download da URL de storage retornou algo minúsculo (ou o usuário enviou um PNG de teste 1x1).
-  - Mesmo assim, em sandbox a validação de tamanho é puladae (`bot-flow.ts:3092`), então o mock DEVERIA rodar.
+Cada chamada usa o token de sessão do preview (você está logado como superadmin) e a flag `fresh:true` apenas no primeiro turno.
 
-### Causa raiz #1 — mock OCR travando silenciosamente
-
-`bot-flow.ts:3112-3313` envolve TODO o caminho de OCR (mock + real) num `try/catch`. Dentro do `try`:
-
-```ts
-if (isCustomerSandbox(customer)) {
-  await supabase.update({ error_message: "mock_path: entered…" }).eq(...);   // ← nunca chega aqui
-  const { mockBillOcr } = await import("../../_shared/test-mode.ts");
-  …
-}
+```text
+T0  fresh=true,  user_message="oi"                          → welcome / pergunta nome
+T1  user_message="Rafael Teste E2E"                         → confirma nome / pede conta
+T2  attach={url: bill_url, kind:"image"}, msg="conta"       → OCR conta (Gemini real) → card revisão
+T3  button_id da revisão "Confirmar"                        → avança para aguardando_doc_auto
+T4  attach={url: doc_url, kind:"image"}, msg="cnh frente"   → OCR documento (Gemini real)
+T5  button_id "Confirmar" do doc                            → avança para portal/OTP
+T6  user_message="123456" (OTP mock)                        → portal_submitting → finalizando
 ```
 
-Como `error_message` continua igual a `"aguard_conta: …"` (escrito ANTES do `try`), comprovamos que algo entre `sendText("Conta recebida")` (3077) e a primeira linha do branch mock (3117) lança exceção. O `catch` (3300) então:
+Entre turnos eu leio:
+- `events[]` retornado (textos/botões/mídia que o bot mandou)
+- `customer_state` (conversation_step, distribuidora, valor, instalação, cpf, rg, etc.)
+- `diagnostic.advanced` (true/false) + `webhook_err`
+- Se travar: `bot_test_outbound` + `ai_slot_dispatch_log` + `conversations` do run para diagnóstico
 
-- incrementa `ocr_conta_attempts`,
-- **reverte `conversation_step = "aguardando_conta"**` ← bate com o estado observado,
-- monta `retryText` como reply.
+## Entregável (chat)
+Tabela por turno com:
+- step antes → depois
+- tempo de resposta
+- eventos enviados pelo bot (resumidos)
+- campos preenchidos no customer (ex.: `distribuidora=ENEL`, `electricity_bill_value=237.45`)
+- ⚠️ erros (OCR vazio, capture_mode flip, handoff, etc.)
 
-A reply de retry também não aparece em `bot_test_outbound`, sugerindo que a exceção propaga mais acima (provavelmente um timeout/falha no `await import()` dinâmico ou no `await sendText` mockado em condição de borda do AsyncLocalStorage).
+E no final um **veredito**: "✅ E2E completo até X" ou "❌ Travou em Y porque Z" + sugestão de correção.
 
-### Causa raiz #2 — duplicidade de mock
+## Observações técnicas
+- Sandbox phone determinístico (`5500000xxxxxxx`) → não afeta lead real.
+- `is_sandbox=true` faz portal/OTP/facial continuarem mock (sem disparar Worker real).
+- OCR conta + OCR doc são **reais** (mocks já foram removidos no commit anterior).
+- Vou rodar tudo no sandbox do consultor `0c2711ad-4836-41e6-afba-edd94f698ae3` (superadmin oficial).
+- Nada de schema/code muda neste turno — só execução + leitura.
 
-O `_shared/ocr.ts:101` já tem o curto-circuito `if (isMockMode()) return mockBillOcr()`. O branch redundante no `bot-flow.ts:3114-3148` foi adicionado para garantir o mock mesmo quando `botRequestStore` (AsyncLocalStorage) perde contexto — mas ele agora é frágil (dynamic import, side-effects), e quando quebra leva o usuário ao loop "Analisando… [silêncio]".
+## O que precisa do build mode
+- `supabase--curl_edge_functions` (7 chamadas)
+- `supabase--read_query` entre cada turno
 
-### Causa raiz #3 (provável intenção do usuário)
-
-"Teste realista não está lendo OCR" também pode significar: **o usuário envia uma conta de verdade e espera ver os dados extraídos**, mas recebe sempre "Joao Silva Teste" (do mock fixo). Hoje o simulador é sandbox 100% → mock OCR fixo, sem opção de rodar Gemini real.
-
----
-
-## Plano de correção
-
-### A) Estabilizar o caminho mock atual (rápido, garante que o painel preenche)
-
-1. Trocar o `await import("../../_shared/test-mode.ts")` por **import estático** no topo de `bot-flow.ts` (já existe `import { ... } from "../../_shared/test-mode.ts"` — só adicionar `mockBillOcr, mockDocOcr` à lista). Mesmo nos dois pontos (`aguardando_conta` e doc handler ~3577).
-2. Mover o branch mock para **fora do `try/catch**` de OCR — assim qualquer erro inesperado não reverte step nem some com a reply.
-3. No `catch` de fallback OCR, logar `e?.message` em `customers.error_message` (sobrescrevendo `aguard_conta:`) para dar visibilidade futura.
-4. Limpar `error_message` quando o passo avança com sucesso (evita "lixo" de runs antigas confundindo debug).
-
-### B) Adicionar toggle "OCR real (Gemini)" no simulador (opcional, atende à intenção do usuário)
-
-1. `FlowSimulator.tsx`: novo checkbox **"Rodar OCR de verdade nesta conta"** ao lado do campo de Telefone OTP, persistido em `localStorage`.
-2. `flow-simulate-run/index.ts`: aceita `real_ocr: boolean` no body. Se `true`, grava `customers.ocr_test_mode = "real"` antes do turno.
-3. `bot-flow.ts` (caso `aguardando_conta` e handlers de doc): quando `customer.ocr_test_mode === "real"` E há `fileBase64` válido → pula o mock e chama `ocrContaEnergia` normal (Gemini). Caso contrário mantém o mock rápido.
-4. Migration adiciona coluna `customers.ocr_test_mode text` (`'mock' | 'real'`, default `'mock'`).
-
-### C) Validação pós-deploy
-
-1. Simulador → "Zerar" → anexar PNG 1px → painel direito deve mostrar dados mockados ("Joao Silva Teste", R$ 350,50, ENEL SP) em <3s e step ir para `aguardando_doc_auto`.
-2. Ativar toggle "OCR real" → anexar foto de conta de verdade → painel mostra os dados reais extraídos pelo Gemini.
-3. `SELECT error_message FROM customers WHERE is_sandbox` deve estar `NULL` ou conter mensagem de erro real, não o diagnóstico residual.
-
-### Arquivos afetados
-
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (refactor mock OCR conta + doc)
-- `supabase/functions/flow-simulate-run/index.ts` (aceitar `real_ocr`)
-- `src/components/admin/flow-builder/FlowSimulator.tsx` (toggle OCR real)
-- `supabase/migrations/*_add_ocr_test_mode.sql` (apenas se aprovar parte B)
-
-### Pergunta para o usuário antes de implementar
-
-iremos implantar apenas real igual o fluxo roiginal
+Aprovar pra eu rodar.
