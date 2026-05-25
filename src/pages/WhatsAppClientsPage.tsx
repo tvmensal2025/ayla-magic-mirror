@@ -286,6 +286,22 @@ export default function WhatsAppClientsPage() {
         </TabsList>
       </Tabs>
 
+      {/* Kanban Pós-Venda (Clientes iGreen) */}
+      {!isLeadsTab && consultantId && (
+        <div className="premium-card !p-4">
+          <div className="mb-3">
+            <h2 className="text-lg font-bold font-heading text-foreground">CRM Pós-Venda</h2>
+            <p className="text-xs text-muted-foreground">
+              Aprovado · Reprovado · 30 · 60 · 90 · 120 dias — recalcula sozinho todo dia. Arrastar fixa manual.
+            </p>
+          </div>
+          <PosVendaKanban consultantId={consultantId} />
+        </div>
+      )}
+
+      {/* Stats (Leads WhatsApp) */}
+      {isLeadsTab && (
+      <>
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {stats.map((s) => (
