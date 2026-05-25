@@ -141,10 +141,9 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
     setState(null);
     setDiagnostic(null);
     if (!consultantId) return;
-    if (realMode && !realPhoneValid()) {
+    if (!otpPhoneValid()) {
       if (initial) {
-        // Não dispara welcome até o usuário digitar um telefone real válido
-        setEvents([{ kind: "system", text: "⚠ Modo Real ligado — informe seu telefone (55 + DDD + número) para começar.", key: k() }]);
+        setEvents([{ kind: "system", text: "⚠ Telefone OTP inválido — use 55 + DDD + número (12 ou 13 dígitos) ou deixe em branco.", key: k() }]);
       }
       return;
     }
@@ -153,8 +152,6 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
       await supabase.functions.invoke("flow-simulate-reset", {
         body: {
           consultant_id: consultantId,
-          real_mode: realMode,
-          real_phone: realMode ? realPhoneDigits() : undefined,
         },
       });
     } catch (_) { /* noop */ }
@@ -162,9 +159,10 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
     if (initial) {
       // Dispara o motor com "oi" + fresh=true → reseta sandbox e roda welcome
       await callRun({ user_message: "oi", fresh: true });
-      setEvents((prev) => [{ kind: "system", text: realMode ? "▶ Modo Real ativo — fluxo 100% real (OCR + Portal + OTP no seu WhatsApp)" : "▶ Conversa zerada — começando do início", key: k() }, ...prev]);
+      setEvents((prev) => [{ kind: "system", text: "▶ Conversa zerada — simulador rápido (OCR/Portal mockados; OTP real só se telefone preenchido)", key: k() }, ...prev]);
     }
   }
+
 
 
   async function handleSend(text: string, button_id?: string) {
