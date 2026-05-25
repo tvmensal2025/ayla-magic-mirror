@@ -486,43 +486,26 @@ export function AdTemplatesPanel() {
           Nenhum template ainda. Clique em "Novo template" para criar o primeiro.
         </Card>
       ) : (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
           {items.map((t) => (
-            <Card key={t.id} className="overflow-hidden">
-              <div className="aspect-video bg-muted grid grid-cols-3 gap-0.5">
-                {t.photos.slice(0, 3).map((p, i) => (
-                  <img key={i} src={p.url} alt="" className="w-full h-full object-cover" />
-                ))}
-                {Array.from({ length: Math.max(0, 3 - t.photos.length) }).map((_, i) => (
-                  <div key={i} className="bg-muted/50" />
-                ))}
-              </div>
-              <div className="p-3 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <h4 className="font-bold text-sm leading-tight">{t.title}</h4>
-                  <Badge variant={t.status === "published" ? "default" : "secondary"} className="text-[10px]">
-                    {t.status === "published" ? "Publicado" : t.status === "draft" ? "Rascunho" : "Arquivado"}
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground line-clamp-2">{t.headline}</p>
-                <div className="text-[11px] text-muted-foreground flex items-center gap-3">
-                  <span>{t.usage_count} uso(s)</span>
-                  <span>R$ {(t.suggested_daily_budget_cents / 100).toFixed(0)}/dia</span>
-                  {t.avg_cpl_cents != null && <span>CPL ~R$ {(t.avg_cpl_cents / 100).toFixed(2)}</span>}
-                </div>
-                <div className="flex gap-1.5 pt-1">
-                  <Button size="sm" variant="outline" className="flex-1 h-8 text-xs gap-1" onClick={() => setEditing(t)}>
-                    <Pencil className="w-3 h-3" /> Editar
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-8 px-2" onClick={() => togglePublish(t)} title={t.status === "published" ? "Despublicar" : "Publicar"}>
-                    {t.status === "published" ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-8 px-2 text-destructive" onClick={() => handleDelete(t.id)}>
-                    <Trash2 className="w-3 h-3" />
-                  </Button>
-                </div>
-              </div>
-            </Card>
+            <TemplateInfoCard
+              key={t.id}
+              template={t}
+              mode="manage"
+              onEdit={() => setEditing(t)}
+              onTogglePublish={() => togglePublish(t)}
+              onDelete={() => handleDelete(t.id)}
+              onDuplicate={async () => {
+                try {
+                  const { duplicateAdTemplate } = await import("@/services/adTemplates");
+                  await duplicateAdTemplate(t);
+                  toast({ title: "Template duplicado como rascunho" });
+                  await reload();
+                } catch (e: any) {
+                  toast({ title: "Erro ao duplicar", description: e.message, variant: "destructive" });
+                }
+              }}
+            />
           ))}
         </div>
       )}
