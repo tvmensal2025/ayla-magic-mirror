@@ -191,17 +191,26 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ─── Modo teste end-to-end (telefone reservado 5500000xxx) ─────────
-    const testMode = isTestPhone(phone);
+    // ─── Modo teste end-to-end ────────────────────────────────────────────
+    // Dois modos:
+    //   1) Sandbox tradicional → phone começa com 5500000 (mocks ligados, delays zerados)
+    //   2) Modo Real → header x-bot-real-services + x-bot-test-run-id, phone REAL,
+    //      OCR/portal/OTP/facial usam serviços reais; outbound é REAL + espelhado
+    //      em bot_test_outbound pra UI mostrar.
+    const sandboxPhone = isTestPhone(phone);
+    const headerRunId = req.headers.get("x-bot-test-run-id");
+    const headerRealServices = req.headers.get("x-bot-real-services") === "1";
+    const realMode = headerRealServices && !!headerRunId; // phone pode ser real
+    const testMode = sandboxPhone || realMode;
     let testRunId: string | null = null;
     let testTurn = 0;
+    let realServices = false;
     if (testMode) {
-      const headerRunId = req.headers.get("x-bot-test-run-id");
       const headerTurn = Number(req.headers.get("x-bot-test-turn") || "0");
       if (headerRunId) {
         testRunId = headerRunId;
         testTurn = Number.isFinite(headerTurn) ? headerTurn : 0;
-      } else {
+      } else if (sandboxPhone) {
         const { data: runRow } = await supabase
           .from("bot_test_runs")
           .select("id")
@@ -211,7 +220,8 @@ Deno.serve(async (req) => {
           .maybeSingle();
         testRunId = runRow?.id || null;
       }
-      console.log(`🧪 [test-mode] ATIVO phone=${phone} runId=${testRunId} turn=${testTurn}`);
+      realServices = realMode;
+      console.log(`🧪 [test-mode] ATIVO phone=${phone} runId=${testRunId} turn=${testTurn} realServices=${realServices}`);
     }
 
     // Sender real OU mock que registra em bot_test_outbound
@@ -235,32 +245,64 @@ Deno.serve(async (req) => {
     } catch (e: any) {
       console.warn("[channel-adapter] smoke wiring falhou (não bloqueante):", e?.message);
     }
-    const sender = testMode
-      ? {
-          sendText: async (_jid: string, text: string) => {
-            await logTestOutbound("text", text); return true;
-          },
-          sendButtons: async (_jid: string, message: string, buttons: any[]) => {
-            // JSON com ids reais — simulador precisa do id original para reenviar
-            // exatamente o que o WhatsApp real mandaria de volta no buttons_reply.
-            const payload = JSON.stringify({
-              text: message,
-              buttons: (buttons || []).map((b: any) => ({
-                id: String(b?.id ?? ""),
-                title: String(b?.title ?? b?.id ?? ""),
-              })),
-            });
-            await logTestOutbound("buttons", payload);
-            return true;
-          },
-          sendMedia: async (_jid: string, mediaUrl: string, caption: string, mediatype: string) => {
-            await logTestOutbound(`media:${mediatype}`, `${mediaUrl} | ${caption || ""}`);
-            return true;
-          },
-          sendPresence: async () => true,
-          downloadMedia: async () => null,
-        }
-      : realSender;
+
+    // Sandbox tradicional → sender 100% mock (não toca Whapi)
+    const mockSender = {
+      sendText: async (_jid: string, text: string) => {
+        await logTestOutbound("text", text); return true;
+      },
+      sendButtons: async (_jid: string, message: string, buttons: any[]) => {
+        const payload = JSON.stringify({
+          text: message,
+          buttons: (buttons || []).map((b: any) => ({
+            id: String(b?.id ?? ""),
+            title: String(b?.title ?? b?.id ?? ""),
+          })),
+        });
+        await logTestOutbound("buttons", payload);
+        return true;
+      },
+      sendMedia: async (_jid: string, mediaUrl: string, caption: string, mediatype: string) => {
+        await logTestOutbound(`media:${mediatype}`, `${mediaUrl} | ${caption || ""}`);
+        return true;
+      },
+      sendPresence: async () => true,
+      downloadMedia: async () => null,
+    };
+
+    // Modo Real → wrap realSender pra espelhar cada outbound em bot_test_outbound.
+    // O envio real (Whapi) sempre ocorre; a falha do mirror NUNCA bloqueia o envio.
+    const mirrorSender = {
+      sendText: async (jid: string, text: string) => {
+        const ok = await realSender.sendText(jid, text);
+        try { await logTestOutbound("text", text); } catch (_) {}
+        return ok;
+      },
+      sendButtons: async (jid: string, message: string, buttons: any[]) => {
+        const ok = await realSender.sendButtons(jid, message, buttons);
+        try {
+          const payload = JSON.stringify({
+            text: message,
+            buttons: (buttons || []).map((b: any) => ({
+              id: String(b?.id ?? ""),
+              title: String(b?.title ?? b?.id ?? ""),
+            })),
+          });
+          await logTestOutbound("buttons", payload);
+        } catch (_) {}
+        return ok;
+      },
+      sendMedia: async (jid: string, mediaUrl: string, caption: string, mediatype: string) => {
+        const ok = await realSender.sendMedia(jid, mediaUrl, caption, mediatype);
+        try { await logTestOutbound(`media:${mediatype}`, `${mediaUrl} | ${caption || ""}`); } catch (_) {}
+        return ok;
+      },
+      sendPresence: realSender.sendPresence?.bind(realSender) ?? (async () => true),
+      downloadMedia: realSender.downloadMedia?.bind(realSender) ?? (async () => null),
+    };
+
+    const sender = realServices ? mirrorSender : (sandboxPhone ? mockSender : realSender);
+
 
     // ─── Identificar consultor super admin (id já validado no topo) ────
     const { data: consultantData } = await supabase
@@ -1162,7 +1204,7 @@ Deno.serve(async (req) => {
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
           });
       const result = testMode && testRunId
-        ? await botRequestStore.run({ testMode: true, runId: testRunId, supabase, turn: testTurn }, runEngine)
+        ? await botRequestStore.run({ testMode: true, runId: testRunId, supabase, turn: testTurn, realServices }, runEngine)
         : await runEngine();
       reply = result.reply;
       updates = result.updates;

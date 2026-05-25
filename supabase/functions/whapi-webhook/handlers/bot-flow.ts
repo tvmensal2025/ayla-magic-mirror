@@ -44,7 +44,7 @@ import { normalizeDocumentType, isCNH, friendlyLabel } from "../../_shared/docum
 import { detectDocumentType } from "../../_shared/detect-doc-type.ts";
 import { uploadMediaToMinio, OCR_CONFIDENCE_THRESHOLD } from "../_helpers.ts";
 import { jsonLog } from "../../_shared/audit.ts";
-import { isTestMode } from "../../_shared/test-mode.ts";
+import { isMockMode } from "../../_shared/test-mode.ts";
 import { notifyHandoff } from "../../_shared/notify-consultant.ts";
 import type { BotContext, BotResult } from "./types.ts";
 
@@ -68,7 +68,7 @@ function trigramSim(a: string, b: string): number {
 
 // ── Sleep based on media duration (lets audio finish before sending video) ──
 async function sleepForMedia(kind: string, durationSec?: number | null): Promise<void> {
-  if (isTestMode()) return; // 🧪 modo teste: zero espera entre mídias
+  if (isMockMode()) return; // 🧪 modo teste: zero espera entre mídias
   if (kind === "audio") {
     const ms = Math.min(((durationSec && durationSec > 0) ? durationSec : 90) * 1000, 120_000);
     await new Promise((r) => setTimeout(r, ms));
@@ -2276,7 +2276,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (!canSend) continue;
               try {
                 await sendMedia(remoteJid, m.url, cap, k, Number((m as any).duration_sec || 0) || undefined);
-                if (i < ordered.length - 1 && !isTestMode()) await new Promise((r) => setTimeout(r, 1500));
+                if (i < ordered.length - 1 && !isMockMode()) await new Promise((r) => setTimeout(r, 1500));
               } catch (e) {
                 console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);
               }
@@ -3082,7 +3082,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
       try {
         // 🧪 testMode: usa mock de OCR para não depender do Gemini nem de URL pública
-        if (isTestMode()) {
+        if (isMockMode()) {
           const { mockBillOcr } = await import("../../_shared/test-mode.ts");
           const ocrData = mockBillOcr();
           console.log("🧪 [test-mode] OCR conta mock:", JSON.stringify(ocrData).substring(0, 200));
@@ -3225,7 +3225,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           updates.conversation_step = "confirmando_dados_conta";
 
           // 🧪 testMode: pula a fila de revisão do consultor e envia a confirmação direto
-          if (isTestMode()) {
+          if (isMockMode()) {
             const merged = { ...customer, ...updates };
             await sendOptions(remoteJid, buildConfirmacaoConta(merged), [
               { id: "sim_conta", title: "✅ SIM" },
@@ -3538,7 +3538,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       let detectSource: string = "fallback";
 
       // 🧪 testMode: pula detecção de tipo e OCR real, usa mock direto
-      if (isTestMode()) {
+      if (isMockMode()) {
         const { mockDocOcr } = await import("../../_shared/test-mode.ts");
         const ocrData = mockDocOcr();
         console.log("🧪 [test-mode] OCR doc mock:", JSON.stringify(ocrData).substring(0, 200));
@@ -3868,7 +3868,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           updates.conversation_step = "confirmando_dados_doc";
 
           // 🧪 testMode: pula a fila de revisão do consultor e envia a confirmação direto
-          if (isTestMode()) {
+          if (isMockMode()) {
             const merged = { ...customer, ...updates };
             await sendOptions(remoteJid, buildConfirmacaoDoc(merged), [
               { id: "sim_doc", title: "✅ SIM" },
@@ -4253,7 +4253,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "ask_phone_confirm": {
       // 🧪 testMode: número sandbox (5500000xxx) tem 15 dígitos — inválido para o portal.
       // Auto-confirma com um número fixo válido para não travar o fluxo.
-      if (isTestMode()) {
+      if (isMockMode()) {
         updates.phone_landline = "(11) 99999-8888";
         updates.phone_contact_confirmed = true;
         const merged = { ...customer, ...updates };
@@ -4423,7 +4423,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const cepClean = messageText.replace(/\D/g, "");
       if (cepClean.length !== 8) { reply = "❌ CEP inválido. Informe os *8 números*:"; break; }
       // 🧪 testMode: pula ViaCEP e usa os dados do OCR mock já salvos no customer
-      if (isTestMode()) {
+      if (isMockMode()) {
         updates.cep = cepClean;
         // Preserva endereço já preenchido pelo OCR mock; se não tiver, usa fallback
         updates.address_street = customer.address_street || "Rua das Flores";
@@ -4586,7 +4586,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     case "portal_submitting": {
-      if (isTestMode()) {
+      if (isMockMode()) {
         // 🧪 Stub: simula portal aceito + OTP enviado ao WhatsApp
         updates.conversation_step = "aguardando_otp";
         updates.status = "awaiting_otp";
@@ -4604,7 +4604,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         updates.otp_code = otpCode;
         updates.otp_received_at = new Date().toISOString();
         reply = `✅ Código *${otpCode}* recebido! ⏳ Validando no portal...\n\nEm instantes vou te enviar o link da *validação facial* (última etapa).`;
-        if (isTestMode()) {
+        if (isMockMode()) {
           // 🧪 Stub: aceita qualquer código e avança direto para facial com link fake
           updates.link_facial = "https://sandbox.igreen.cloud/facial/teste";
           updates.conversation_step = "aguardando_facial";
@@ -4676,7 +4676,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "aguardando_facial":
     case "aguardando_assinatura": {
       // 🧪 Em modo teste, se ainda não tem link, injeta o sandbox
-      if (isTestMode() && !customer.link_facial && !customer.link_assinatura) {
+      if (isMockMode() && !customer.link_facial && !customer.link_assinatura) {
         updates.link_facial = "https://sandbox.igreen.cloud/facial/teste";
       }
       const link = updates.link_facial || customer.link_facial || customer.link_assinatura;
@@ -4898,7 +4898,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       updates.status = "portal_submitting";
       updates.conversation_step = "portal_submitting";
 
-      if (isTestMode()) {
+      if (isMockMode()) {
         // 🧪 Stub: simula portal aceito + OTP enviado, avança direto para aguardando_otp
         updates.status = "awaiting_otp";
         updates.conversation_step = "aguardando_otp";

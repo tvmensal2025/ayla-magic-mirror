@@ -59,8 +59,17 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
   const [state, setState] = useState<any>(null);
   const [diagnostic, setDiagnostic] = useState<any>(null);
   const [showData, setShowData] = useState(false);
+  const [realMode, setRealMode] = useState(false);
+  const [realPhone, setRealPhone] = useState(() => {
+    try { return localStorage.getItem("flowSim:realPhone") || ""; } catch { return ""; }
+  });
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Persistir telefone real pra não digitar toda vez
+  useEffect(() => {
+    try { localStorage.setItem("flowSim:realPhone", realPhone); } catch { /* noop */ }
+  }, [realPhone]);
 
   useEffect(() => {
     if (open) handleReset(true);
@@ -76,11 +85,30 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
     setEvents((prev) => [...prev, ...incoming.map((e) => ({ ...e, key: k() }))]);
   }
 
+  function realPhoneDigits(): string {
+    return realPhone.replace(/\D/g, "");
+  }
+
+  function realPhoneValid(): boolean {
+    const d = realPhoneDigits();
+    return d.length === 12 || d.length === 13;
+  }
+
   async function callRun(payload: any) {
+    if (realMode && !realPhoneValid()) {
+      toast.error("Modo Real: informe um telefone válido (55 + DDD + número)");
+      return;
+    }
     setBusy(true);
     try {
       const { data, error } = await supabase.functions.invoke("flow-simulate-run", {
-        body: { consultant_id: consultantId, variant, ...payload },
+        body: {
+          consultant_id: consultantId,
+          variant,
+          real_mode: realMode,
+          real_phone: realMode ? realPhoneDigits() : undefined,
+          ...payload,
+        },
       });
       if (error) throw error;
       const out = data as { events?: any[]; customer_state?: any; diagnostic?: any };
@@ -95,24 +123,37 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
     }
   }
 
+
   async function handleReset(initial = false) {
     setEvents([]);
     setState(null);
     setDiagnostic(null);
     if (!consultantId) return;
+    if (realMode && !realPhoneValid()) {
+      if (initial) {
+        // Não dispara welcome até o usuário digitar um telefone real válido
+        setEvents([{ kind: "system", text: "⚠ Modo Real ligado — informe seu telefone (55 + DDD + número) para começar.", key: k() }]);
+      }
+      return;
+    }
     setBusy(true);
     try {
       await supabase.functions.invoke("flow-simulate-reset", {
-        body: { consultant_id: consultantId },
+        body: {
+          consultant_id: consultantId,
+          real_mode: realMode,
+          real_phone: realMode ? realPhoneDigits() : undefined,
+        },
       });
     } catch (_) { /* noop */ }
     setBusy(false);
     if (initial) {
       // Dispara o motor com "oi" + fresh=true → reseta sandbox e roda welcome
       await callRun({ user_message: "oi", fresh: true });
-      setEvents((prev) => [{ kind: "system", text: "▶ Conversa zerada — começando do início", key: k() }, ...prev]);
+      setEvents((prev) => [{ kind: "system", text: realMode ? "▶ Modo Real ativo — fluxo 100% real (OCR + Portal + OTP no seu WhatsApp)" : "▶ Conversa zerada — começando do início", key: k() }, ...prev]);
     }
   }
+
 
   async function handleSend(text: string, button_id?: string) {
     const trimmed = text.trim();
@@ -153,10 +194,46 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
         <DialogHeader>
           <DialogTitle>🎬 Simulador de Fluxo — motor real de produção</DialogTitle>
           <DialogDescription>
-            Roda o mesmo runBotFlow/runConversationalFlow da produção num customer sandbox.
-            Nada toca o CRM, métricas, alertas ou WhatsApp real.
+            {realMode
+              ? "MODO REAL ligado: OCR, Portal Worker, OTP e link facial usam serviços REAIS. WhatsApp envia mensagens reais para o telefone abaixo."
+              : "Sandbox: roda o mesmo runBotFlow/runConversationalFlow da produção, com OCR/Portal mockados. Nada toca o CRM ou WhatsApp real."}
           </DialogDescription>
         </DialogHeader>
+
+        {/* ── Toggle Modo Real ── */}
+        <div className={`rounded-md border p-2 text-xs ${realMode ? "border-red-500/40 bg-red-500/5" : "border-border bg-muted/20"}`}>
+          <div className="flex items-center justify-between gap-2">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={realMode}
+                onChange={(e) => setRealMode(e.target.checked)}
+                disabled={busy}
+                className="h-3.5 w-3.5"
+              />
+              <span className="font-semibold">
+                {realMode ? "🔴 Modo Real ATIVO" : "⚪ Ligar Modo Real (100% serviços reais)"}
+              </span>
+            </label>
+            {realMode && (
+              <Input
+                value={realPhone}
+                onChange={(e) => setRealPhone(e.target.value)}
+                placeholder="55 11 99999-9999"
+                disabled={busy}
+                className="h-7 max-w-[200px] text-[11px]"
+              />
+            )}
+          </div>
+          {realMode && (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              ⚠ Envia WhatsApp REAL ao número acima. OCR (Gemini), Portal Worker (Playwright na VPS), OTP e link de assinatura serão reais.
+              {!realPhoneValid() && <span className="text-red-500"> Telefone inválido — use 55 + DDD + número (12 ou 13 dígitos).</span>}
+            </p>
+          )}
+        </div>
+
+
 
         <div className="flex items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2 flex-wrap">
@@ -408,7 +485,9 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
 
         <p className="flex items-start gap-1 text-[10px] text-muted-foreground">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-          Conversa sandbox — não polui CRM, métricas nem envia WhatsApp real. Use o anexo (📎) para simular envio de foto da conta de luz ou documento. O OCR roda em modo mock (dados fictícios pré-definidos). Clique em <strong>👁 Dados</strong> para ver o que foi coletado.
+          {realMode
+            ? <>🔴 <strong>Modo Real:</strong> WhatsApp, OCR (Gemini), Portal Worker, OTP e link facial são reais. O OTP chega no WhatsApp do número acima — digite-o aqui ou diretamente no WhatsApp. Lead marcado como <code>is_test_lead=true</code>, fora das métricas.</>
+            : <>Conversa sandbox — não polui CRM, métricas nem envia WhatsApp real. Use o anexo (📎) para simular envio de foto da conta de luz ou documento. O OCR roda em modo mock (dados fictícios pré-definidos). Clique em <strong>👁 Dados</strong> para ver o que foi coletado.</>}
         </p>
       </DialogContent>
     </Dialog>
