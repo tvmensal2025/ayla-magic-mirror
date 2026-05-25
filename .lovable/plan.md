@@ -1,76 +1,79 @@
-## Diagnóstico
+# Plano — Simulador 100% Real até o Portal
 
-Os logs do `whapi-webhook` durante o teste mostram que o simulador travou por **dois bugs de schema do banco**, não por lógica de fluxo:
+## Objetivo
 
-### Bug 1 — Coluna `document_uploaded` inexistente
-```
-[customer-flow-state] loadFlowState erro: 
-column customers_1.document_uploaded does not exist
-```
-Acontece em **toda** mensagem. O loader de estado quebra silenciosamente e o motor segue sem saber o que o lead já fez → repete passos, escolhe rota errada.
+Quando você clicar "Simular" no `/admin/fluxos`, o sistema vai rodar **exatamente igual a um lead real**: OCR de verdade no Gemini, envio real ao Portal Worker, OTP real chegando no WhatsApp, link facial real do iGreen. Sem mock, sem atalho.
 
-### Bug 2 — `ai_decisions.suppressed` NOT NULL sem default
-```
-[ai-decisions] insert failed: null value in column "suppressed" 
-of relation "ai_decisions" violates not-null constraint
-```
-Toda decisão da IA falha ao gravar → perda de telemetria + possível retry em loop.
+## O que muda
 
-### Sintoma observado
-Depois de clicar "📸 Quero simular", o bot disparou `d_como_funciona` em vez de `d_pedir_conta`. Isso confirma que o estado do lead foi carregado errado por causa do Bug 1.
+### 1. Remover `testMode` dos 3 pontos que ainda fingem
 
----
+Hoje o simulador tem 3 atalhos que pulam serviços reais:
 
-## Plano
 
-### 1. Migration: corrigir schema
+| Etapa         | Hoje (mock)                        | Vai virar (real)                                  |
+| ------------- | ---------------------------------- | ------------------------------------------------- |
+| OCR conta     | Retorna R$350 + distribuidora fake | Chama Gemini com a foto real que você mandou      |
+| Portal submit | Marca `portal_submitting` e para   | Dispara `dispatchPortalWorker` → Playwright real  |
+| OTP           | Aceita qualquer código             | Espera o código real chegar do WhatsApp do iGreen |
+| Link facial   | Link fake                          | Link real que o portal devolve                    |
 
-- Adicionar coluna `customers.document_uploaded boolean default false` (ou ajustar o código de `customer-flow-state` para deixar de ler essa coluna — vou checar qual é mais seguro antes de escrever a SQL).
-- Alterar `ai_decisions.suppressed` para ter `default false` (e backfill dos nulls existentes se houver).
 
-### 2. Validar no simulador
+### 2. Toggle no FluxoBuilder
 
-Após a migration:
-- Zerar o sandbox.
-- Mandar "oi" → conferir que entra em `d_welcome`.
-- Clicar "Quero simular" → conferir que vai para `d_pedir_conta` (e não `d_como_funciona`).
-- Mandar a foto da conta → conferir OCR + avanço para `d_resultado`.
-- Conferir nos logs que **não aparecem mais** os dois erros acima.
+Botão **"Modo Real"** ao lado de "Simular":
 
-### 3. E2E automático (Deno test do `whapi-webhook`)
+- **OFF (padrão)**: roda mock rápido (10s, sem custo)
+- **ON**: roda 100% real (60-90s, consome créditos Gemini + ocupa worker)
 
-Criar `supabase/functions/whapi-webhook/e2e_test.ts` cobrindo a variante D:
+Quando ON, o simulador cria um `customer` real com seu telefone, marca `is_test_lead=true` pra não poluir métricas, e segue o fluxo normal.
 
-1. Reset do sandbox
-2. "oi" → espera welcome + botões
-3. Botão `simular` → espera `d_pedir_conta`
-4. Foto da conta → espera `d_resultado` com valor
-5. Botão "cadastrar" → espera `d_pedir_documento`
-6. Foto do documento → espera `d_finalizar`
-7. Validação de campos obrigatórios
-8. OTP mock → validação
-9. Facial mock → finalização
-10. Lead em `cadastro_em_analise`
+### 3. Pré-requisitos validados antes de ligar Modo Real
 
-Cada passo falha o teste se: repetir mensagem, pular etapa, ou se logs mostrarem erro de schema/null.
+Antes do botão habilitar, checa:
 
-Executável via `supabase--test_edge_functions` para regressão futura.
+- ✅ `GEMINI_API_KEY` setado
+- ✅ `PORTAL_WORKER_URL` + `WORKER_SECRET` setados e `/health` respondendo
+- ✅ Instância WhatsApp do consultor conectada (pra OTP voltar)
+- ✅ Seu telefone cadastrado no consultor (pra receber as mensagens)
 
----
+Se faltar algo, mostra checklist vermelho explicando o que configurar.
+
+### 4. Limpeza pós-teste
+
+Botão **"Zerar teste real"** que:
+
+- Deleta o customer de teste
+- Remove arquivos do MinIO daquele teste
+- Limpa `ai_decisions`, `customer_events` do teste
+
+## Arquivos envolvidos (técnico)
+
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` — remover branches `if (testMode)` em OCR/portal/OTP
+- `supabase/functions/_shared/ocr.ts` — sempre chamar Gemini
+- `supabase/functions/_shared/portal-worker.ts` — já está real, só não ser bypassed
+- `src/pages/FluxoBuilder.tsx` — adicionar toggle "Modo Real" + checklist
+- `src/lib/flow-simulator/engine.ts` — passar `realMode: true` quando ligado
+- Migration: `customers.is_test_lead boolean default false` + índice
 
 ## Critério de sucesso
 
-- Sem nenhuma ocorrência de `document_uploaded does not exist` nos logs.
-- Sem nenhuma ocorrência de `ai_decisions ... suppressed`.
-- Fluxo D no simulador vai de "oi" até `cadastro_em_analise` sem repetir nenhum passo.
-- Teste E2E passando.
+Ligar Modo Real → mandar "oi" → "Quero simular" → enviar foto real da conta → Gemini extrai valor real → bot manda áudio → manda CNH real → portal abre no Worker → OTP chega no seu WhatsApp → você digita → link facial real chega → ✅.
 
----
+## Riscos
 
-## Detalhe técnico (para referência)
+- **Custo Gemini**: ~$0.01 por teste real
+- **Worker ocupado**: trava fila de leads reais por 90s. Sugiro rodar fora do horário comercial OU criar fila separada `test_queue` no worker.
+- **CPF/instalação duplicada**: se usar seus dados reais 2x, portal recusa. Solução: usar CPF/instalação diferentes a cada teste OU resetar no portal manualmente. Ireiusar nomes e pessoasdiferentes a cada teste
 
-Arquivos envolvidos:
-- `supabase/functions/whapi-webhook/handlers/customer-flow-state.ts` (origem do erro 1)
-- `supabase/functions/whapi-webhook/handlers/ai-decisions.ts` (origem do erro 2)
-- Migration nova em `supabase/migrations/`
-- Teste novo em `supabase/functions/whapi-webhook/e2e_test.ts`
+## Pergunta antes de implementar
+
+Você quer que o teste real use:
+
+- **(A)** Seus dados reais (seu CPF, sua conta) — mais fiel, mas portal vai recusar duplicata depois
+- **(B)** Dados de um "lead de teste fixo" cadastrado no consultor — reutilizável, mas precisa configurar 1x
+- **(C)** Dados aleatórios gerados (CPF válido fake) — portal vai recusar na validação Receita
+
+APENAS TESTES REAIS   
+  
+ENTAO A   
