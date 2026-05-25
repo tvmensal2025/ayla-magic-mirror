@@ -1,82 +1,107 @@
-# Simulador 100% fiel ao fluxo (boas-vindas → OCR conta → cadastro → OTP → facial)
+## Diagnóstico
 
-## Situação atual
+O sistema melhorou, mas ainda não está 100% garantido de ponta a ponta.
 
-Hoje o simulador só consegue chegar até "Quero simular / Como funciona" e parar no resultado mock do OCR. Os passos seguintes (`aguardando_doc_auto`, `cadastro_portal`, `aguardando_otp`, `aguardando_facial`, `finalizar_cadastro`) dependem de serviços externos reais:
+### O que melhorou
 
-- **OCR conta de luz** → chama worker de OCR (Gemini Vision) com a imagem real
-- **OCR documento** → mesma pipeline, exige PDF/foto real do RG/CNH
-- `**cadastro_portal**` → edge function `submit-cadastro` que faz scraping no portal iGreen
-- `**aguardando_otp**` → edge function `submit-otp` valida no portal
-- `**aguardando_facial**` → edge function `start-facial` gera link real de biometria
-- `**finalizar_cadastro**` → marca status no portal
+- A variante D está ativa e organizada em 8 passos principais: boas-vindas, pedir conta, explicação, resultado, pedir documento, dúvidas, handoff e finalizar cadastro.
+- O `whapi-webhook` já tem proteções importantes:
+  - não reseta mais o lead para o início em vários estados críticos;
+  - aceita resposta numérica nos botões;
+  - tem mocks no `testMode` para OCR, documento, portal, OTP e facial;
+  - força o simulador a usar `capture_mode='auto'`, despausa bot e limpa dados no “Zerar”.
+- O fluxo real tem tratamento de erro de OCR com tentativa, retry e possibilidade de pausar/chamar humano.
+- O envio ao portal real continua protegido: fora do `testMode`, ele chama worker/portal, `submit-otp` e validações reais.
 
-No modo simulador (`testMode` / `is_sandbox`) nada disso pode bater nos serviços reais — caso contrário polui o portal de produção e o WhatsApp.
+### O que ainda impede dizer “100%”
 
-## Objetivo
+- O simulador ainda não é igual ao real: ele usa OCR mock, documento mock, OTP aceito automaticamente e link facial fake em `testMode`.
+- O último `bot_test_run` encontrado do simulador teve só 1 evento, então não existe evidência gravada de um teste completo até OTP/facial/finalização.
+- Os logs recentes não mostraram chamadas do `whapi-webhook`; só apareceram crons/rotinas, então não dá para confirmar produção real pelas últimas entradas disponíveis.
+- Os fallbacks configurados no DB da variante D estão como `mode: goto`, mas o código de OCR só usa configuração customizada se o fallback for `mode: retry`. Na prática, o retry personalizado da variante D pode não estar sendo usado.
+- `d_pedir_conta` aponta fallback para `d_resultado` e `d_pedir_documento` aponta fallback para `d_finalizar`; isso é perigoso se o motor V3 aplicar fallback por timer, porque pode avançar sem OCR/documento válido.
+- O helper `resolveOcrFallback` busca o primeiro fluxo ativo do consultor sem filtrar `variant = D`, então pode pegar fallback de outra variante.
+- O fluxo visual da variante D tem 8 passos, mas o cadastro real injeta etapas legadas obrigatórias quando faltam dados: CPF, e-mail, telefone, CEP/endereço, confirmação etc. Isso pode fazer o simulador parecer diferente do fluxo “desenhado”.
 
-Permitir rodar **o fluxo inteiro** dentro do simulador, com stubs determinísticos para cada passo externo, mantendo a mesma ordem de mensagens/botões que o cliente real veria.
+## Plano de correção
 
-## Plano
+### 1. Corrigir fallbacks da variante D
 
-### 1. Stubs sandbox no webhook
+Atualizar os passos de captura:
 
-Em `whapi-webhook/handlers/bot-flow.ts` (cases `aguardando_otp`, `validando_otp`, `otp_falhou`, `aguardando_doc_auto`, `cadastro_portal`, `aguardando_facial`, `finalizar_cadastro`) e nos pontos de OCR (`conversational/index.ts` linhas ~754 e ~1115), envolver as chamadas `fetch` para `submit-otp`, `submit-cadastro`, `start-facial` e worker OCR em um guard:
+- `d_pedir_conta`:
+  - trocar fallback de `goto d_resultado` para `retry`;
+  - usar `retry_text` claro para pedir nova foto da fatura;
+  - após 2 tentativas, enviar para humano sem avançar para resultado falso.
 
-```ts
-if (testMode || customer.is_sandbox) {
-  // stub determinístico
-} else {
-  // fluxo real
-}
-```
+- `d_pedir_documento`:
+  - trocar fallback de `goto d_finalizar` para `retry`;
+  - usar `retry_text` claro para pedir RG/CNH nítido;
+  - após 2 tentativas, enviar para humano sem submeter cadastro incompleto.
 
-Stubs por passo:
+### 2. Fazer OCR fallback respeitar a variante correta
 
-- **OCR conta**: usa valor fake (`R$ 350,00`, economia 20%) e nome “Cliente Teste” já presentes no mock atual
-- **OCR documento**: aceita qualquer anexo e devolve CPF/nome fake (`123.456.789-00`, mesmo nome)
-- **submit-cadastro**: marca `conversation_step = aguardando_otp` em ~1s e emite a mensagem “📲 Te enviei um código…”
-- **submit-otp**: aceita qualquer código 4-8 dígitos, avança para `aguardando_facial`
-- **start-facial**: devolve link fake (`https://sandbox.igreen.cloud/facial/teste`) e avança para `finalizar_cadastro`
-- **finalizar_cadastro**: emite mensagem final “🎉 Cadastro concluído (modo teste)”
+Ajustar `resolveOcrFallback` para buscar o fluxo ativo filtrando também por `customer.flow_variant`, principalmente `D`.
 
-### 2. Anti-loops e timing
+Resultado esperado: a variante D usa seus próprios textos/regras, sem herdar fallback da A/B/C.
 
-- Stubs respondem síncronos no mesmo turno (sem fire-and-forget) para o polling do simulador detectar o avanço dentro do `deadlineMs` atual (8s).
-- Não chamam `whapi/send` real — apenas gravam `conversations` (que o simulador lê).
+### 3. Separar dois modos de teste
 
-### 3. Auto-anexos no simulador
+Criar distinção clara:
 
-`flow-simulate-run/index.ts`: quando o passo atual exigir mídia (`aguardando_conta`, `aguardando_doc_auto`) e o usuário clicar em um botão equivalente (“Enviar conta”, “Enviar documento”), o front (`FlowSimulator.tsx`) já oferece upload, mas precisamos garantir que o backend gere uma `image`/`document` mockada se o usuário digitar `mock` ou clicar em “Usar conta de teste”. Adicionar botão visível “🧪 Usar conta/doc de teste” no simulador para anexar URL pública fake.
+- `simulator_mock`: seguro, rápido, sem bater portal real;
+- `simulator_real`: usa OCR real, portal real, OTP real e facial real, marcado como teste real.
 
-### 4. Regressão automatizada
+Isso evita confusão entre “simulador visual” e “teste real completo”.
 
-Criar `flow-simulate-run/regression_test.ts` que roda end-to-end:
+### 4. Garantir paridade do fluxo desenhado com o fluxo real
 
-1. Zerar
-2. “oi” → captura nome
-3. “Quero simular” → conta mock → resultado
-4. “Cadastrar agora” → doc mock → `aguardando_otp`
-5. “123456” → `aguardando_facial`
-6. Clique no link facial → `finalizar_cadastro`
+Quando a variante D chegar em `d_finalizar`, o backend deve:
 
-Verifica em cada turno: `step_before → step_after`, presença de texto/botões esperados, nenhuma repetição.
+- validar campos obrigatórios;
+- se faltar algo, pedir o campo necessário;
+- quando tudo estiver completo, submeter ao portal;
+- aguardar OTP real;
+- validar OTP;
+- gerar/esperar facial;
+- finalizar em `cadastro_em_analise`.
 
-### 5. Validação
+### 5. Criar regressão end-to-end
 
-- Rodar regression test
-- Abrir simulador da variante A e D, percorrer manualmente o fluxo completo, confirmar mensagem final “Cadastro concluído (modo teste)”
-- Conferir logs do `whapi-webhook` para garantir que nenhuma chamada real a `submit-otp`/`submit-cadastro`/`start-facial` foi feita em modo sandbox
+Adicionar teste automático cobrindo:
 
-## Arquivos afetados
+1. Zerar lead sandbox;
+2. “oi”;
+3. botão “Quero simular”;
+4. enviar conta;
+5. conferir resultado;
+6. cadastrar;
+7. enviar documento;
+8. preencher dados faltantes;
+9. submeter portal;
+10. OTP;
+11. facial;
+12. finalizar em análise.
 
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (guards sandbox nos cases de OTP/cadastro/facial)
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts` (guards no pipeline de OCR)
-- `supabase/functions/flow-simulate-run/index.ts` (mock de anexos sob demanda)
-- `supabase/functions/flow-simulate-run/regression_test.ts` (novo)
-- `src/components/admin/fluxos/FlowSimulator.tsx` (botão “Usar conta/doc de teste”)
+O teste deve falhar se repetir mensagem, travar em OCR, pular documento, ou avançar sem dados obrigatórios.
 
-## Perguntas antes de implementar
+### 6. Validar com dados reais
 
-1. Confirmar: em modo sandbox **E IR PARA R**eais (portal iGreen, OCR Gemini, biometria TEM QUE FAZERO FLUXO REAL DO INICOAO FINAL
-2. OK usar valores REAIS DE ACORDO COM A FATURA, TODOS OS TESTES SERAO REAIS E TRATADOSCOMO SE FOSSE REAL
+Depois dos ajustes:
+
+- rodar simulador mock para fluidez;
+- rodar teste real controlado com fatura/documento reais;
+- verificar logs do `whapi-webhook`, `submit-cadastro`, `submit-otp`, `start-facial` e worker portal;
+- confirmar no DB que o lead terminou em `cadastro_em_analise` ou estado final esperado.
+
+## Critério de sucesso
+
+O sistema só pode ser considerado 100% quando:
+
+- o fluxo D não avança sem conta válida;
+- não avança sem documento válido;
+- não chama portal com cadastro incompleto;
+- OTP e facial funcionam no teste real;
+- simulador mock e teste real seguem a mesma ordem de mensagens;
+- existe teste automático completo passando;
+- logs não mostram erro, loop, silêncio ou reset indevido.

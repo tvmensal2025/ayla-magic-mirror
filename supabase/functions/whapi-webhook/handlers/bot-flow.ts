@@ -116,13 +116,27 @@ async function resolveOcrFallback(
   stepType: "capture_conta" | "capture_documento",
   attempts: number,
   defaultRetryText: string,
+  flowVariant?: string | null,
 ): Promise<OcrFallbackResult> {
   try {
     if (!consultantId) return { retryText: defaultRetryText, escalate: false };
-    const { data: flow } = await supabase
+    const variant = String(flowVariant || "A").toUpperCase();
+    // Busca o fluxo ativo DA variante correta (A/B/C/D) — sem isso herdaria
+    // fallback de outra variante e estouraria com multiple rows.
+    let flowQ = supabase
       .from("bot_flows").select("id")
       .eq("consultant_id", consultantId).eq("is_active", true)
-      .order("created_at", { ascending: true }).limit(1).maybeSingle();
+      .eq("variant", variant)
+      .order("created_at", { ascending: true }).limit(1);
+    let { data: flow } = await flowQ.maybeSingle();
+    if (!flow?.id) {
+      // Fallback: primeiro fluxo ativo do consultor (legado, sem variante)
+      const { data: anyFlow } = await supabase
+        .from("bot_flows").select("id")
+        .eq("consultant_id", consultantId).eq("is_active", true)
+        .order("created_at", { ascending: true }).limit(1).maybeSingle();
+      flow = anyFlow;
+    }
     if (!flow?.id) return { retryText: defaultRetryText, escalate: false };
     const { data: stepRow } = await supabase
       .from("bot_flow_steps").select("fallback")
@@ -3122,7 +3136,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             const tries = (customer.ocr_conta_attempts || 0) + 1;
             updates.ocr_conta_attempts = tries;
             const { retryText, escalate } = await resolveOcrFallback(supabase, customer.id, customer.consultant_id, "capture_conta", tries,
-              `⚠️ Não consegui ler a conta com clareza suficiente (qualidade: ${confianca}%).\n\n📸 Por favor, envie uma *foto mais nítida e bem iluminada* da conta de energia.\n\nDicas:\n• Use boa iluminação\n• Evite reflexos\n• Foco nos dados principais\n• Tire em ambiente claro`);
+              `⚠️ Não consegui ler a conta com clareza suficiente (qualidade: ${confianca}%).\n\n📸 Por favor, envie uma *foto mais nítida e bem iluminada* da conta de energia.\n\nDicas:\n• Use boa iluminação\n• Evite reflexos\n• Foco nos dados principais\n• Tire em ambiente claro`, (customer as any)?.flow_variant);
             if (escalate) {
               updates.bot_paused = true; updates.bot_paused_reason = "ocr_conta_max_retries"; updates.bot_paused_at = new Date().toISOString();
               reply = `${retryText}\n\nVou chamar ${nomeRepresentante} pra te ajudar pessoalmente 🙌`;
@@ -3141,7 +3155,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             const tries = (customer.ocr_conta_attempts || 0) + 1;
             updates.ocr_conta_attempts = tries;
             const { retryText, escalate } = await resolveOcrFallback(supabase, customer.id, customer.consultant_id, "capture_conta", tries,
-              "⚠️ Recebi a conta mas não consegui extrair os dados principais.\n\n📸 Envie uma *foto mais nítida* mostrando claramente:\n• Seu nome\n• Endereço\n• Distribuidora\n• Valor da conta");
+              "⚠️ Recebi a conta mas não consegui extrair os dados principais.\n\n📸 Envie uma *foto mais nítida* mostrando claramente:\n• Seu nome\n• Endereço\n• Distribuidora\n• Valor da conta", (customer as any)?.flow_variant);
             if (escalate) {
               updates.bot_paused = true; updates.bot_paused_reason = "ocr_conta_max_retries"; updates.bot_paused_at = new Date().toISOString();
               reply = `${retryText}\n\nVou chamar ${nomeRepresentante} pra te ajudar pessoalmente 🙌`;
@@ -3239,7 +3253,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           const tries = (customer.ocr_conta_attempts || 0) + 1;
           updates.ocr_conta_attempts = tries;
           const { retryText, escalate } = await resolveOcrFallback(supabase, customer.id, customer.consultant_id, "capture_conta", tries,
-            "⚠️ Não consegui ler a conta. Por favor, envie uma *foto mais nítida e bem iluminada* (sem reflexos).");
+            "⚠️ Não consegui ler a conta. Por favor, envie uma *foto mais nítida e bem iluminada* (sem reflexos).", (customer as any)?.flow_variant);
           if (escalate) {
             updates.bot_paused = true; updates.bot_paused_reason = "ocr_conta_max_retries"; updates.bot_paused_at = new Date().toISOString();
             reply = `${retryText}\n\nVou chamar ${nomeRepresentante} pra te ajudar pessoalmente 🙌`;
@@ -3253,7 +3267,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         const tries = (customer.ocr_conta_attempts || 0) + 1;
         updates.ocr_conta_attempts = tries;
         const { retryText, escalate } = await resolveOcrFallback(supabase, customer.id, customer.consultant_id, "capture_conta", tries,
-          "⚠️ Erro ao processar a conta. Tente enviar novamente.");
+          "⚠️ Erro ao processar a conta. Tente enviar novamente.", (customer as any)?.flow_variant);
         if (escalate) {
           updates.bot_paused = true; updates.bot_paused_reason = "ocr_conta_max_retries"; updates.bot_paused_at = new Date().toISOString();
           reply = `${retryText}\n\nVou chamar ${nomeRepresentante} pra te ajudar pessoalmente 🙌`;
@@ -3881,7 +3895,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           const tries = (customer.ocr_doc_attempts || 0) + 1;
           updates.ocr_doc_attempts = tries;
           const { retryText, escalate } = await resolveOcrFallback(supabase, customer.id, customer.consultant_id, "capture_documento", tries,
-            "⚠️ Não consegui ler o documento. Envie uma foto mais nítida do *VERSO*.");
+            "⚠️ Não consegui ler o documento. Envie uma foto mais nítida do *VERSO*.", (customer as any)?.flow_variant);
           if (escalate) {
             updates.bot_paused = true; updates.bot_paused_reason = "ocr_doc_max_retries"; updates.bot_paused_at = new Date().toISOString();
             reply = `${retryText}\n\nVou chamar ${nomeRepresentante} pra te ajudar pessoalmente 🙌`;
@@ -3895,7 +3909,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         const tries = (customer.ocr_doc_attempts || 0) + 1;
         updates.ocr_doc_attempts = tries;
         const { retryText, escalate } = await resolveOcrFallback(supabase, customer.id, customer.consultant_id, "capture_documento", tries,
-          "⚠️ Erro ao processar o documento. Tente enviar novamente.");
+          "⚠️ Erro ao processar o documento. Tente enviar novamente.", (customer as any)?.flow_variant);
         if (escalate) {
           updates.bot_paused = true; updates.bot_paused_reason = "ocr_doc_max_retries"; updates.bot_paused_at = new Date().toISOString();
           reply = `${retryText}\n\nVou chamar ${nomeRepresentante} pra te ajudar pessoalmente 🙌`;
