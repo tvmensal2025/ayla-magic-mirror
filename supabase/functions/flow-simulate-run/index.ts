@@ -84,10 +84,16 @@ Deno.serve(async (req) => {
     const variant = String(body?.variant || "").toUpperCase();
     const fresh = body?.fresh === true; // sinaliza "Zerar" → resetar step
 
-    const phone = testPhoneFor(consultantId);
+    // ─── Modo Real: usa telefone REAL do usuário, serviços reais (OCR/Portal/OTP/facial) ──
+    const realMode = body?.real_mode === true;
+    const rawRealPhone = String(body?.real_phone || "").replace(/\D/g, "");
+    if (realMode && (rawRealPhone.length < 12 || rawRealPhone.length > 13)) {
+      return json({ error: "real_phone_invalid", detail: "Telefone real precisa ter 12 ou 13 dígitos (55 + DDD + número)" }, 400);
+    }
+    const phone = realMode ? rawRealPhone : testPhoneFor(consultantId);
     const chatId = `${phone}@s.whatsapp.net`;
 
-    // ── 1) Garante customer sandbox ──
+    // ── 1) Garante customer (sandbox OU real-test) ──
     let { data: customer } = await svc
       .from("customers")
       .select("*")
@@ -100,8 +106,9 @@ Deno.serve(async (req) => {
         .insert({
           consultant_id: consultantId,
           phone_whatsapp: phone,
-          name: "Simulador Sandbox",
-          is_sandbox: true,
+          name: realMode ? "Lead Teste Real" : "Simulador Sandbox",
+          is_sandbox: !realMode,
+          is_test_lead: realMode,
           customer_origin: "whatsapp_lead",
           flow_variant: variant || "A",
           status: "pending",
@@ -112,6 +119,7 @@ Deno.serve(async (req) => {
       if (createErr) return json({ error: "create_customer_failed", detail: createErr.message }, 500);
       customer = created;
     }
+
 
     // 🛡️ Force-fix do customer ANTES de chamar o webhook:
     //  • capture_mode='auto' (bypassa trigger trg_customers_default_capture_mode
