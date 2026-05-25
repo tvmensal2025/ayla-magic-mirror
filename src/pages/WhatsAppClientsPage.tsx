@@ -9,6 +9,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import PosVendaKanban from "@/components/whatsapp/PosVendaKanban";
 
 const COMMISSION_RATES = [10, 20, 40, 50, 60, 70, 80, 100] as const;
 type CommissionRate = typeof COMMISSION_RATES[number];
@@ -91,6 +92,7 @@ export default function WhatsAppClientsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [originTab, setOriginTab] = useState<OriginTab>("whatsapp_lead");
   const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [consultantId, setConsultantId] = useState<string | null>(null);
 
   useEffect(() => { loadCustomers(); }, []);
 
@@ -101,6 +103,7 @@ export default function WhatsAppClientsPage() {
       if (!user) { toast.error("Usuário não autenticado"); return; }
       const { data: consultant } = await supabase.from("consultants").select("id").eq("id", user.id).single();
       if (!consultant) { toast.error("Consultor não encontrado"); return; }
+      setConsultantId(consultant.id);
       const { data, error } = await supabase.from("customers").select("*").eq("consultant_id", consultant.id).order("created_at", { ascending: false });
       if (error) throw error;
       setCustomers((data as any) || []);
@@ -283,6 +286,22 @@ export default function WhatsAppClientsPage() {
         </TabsList>
       </Tabs>
 
+      {/* Kanban Pós-Venda (Clientes iGreen) */}
+      {!isLeadsTab && consultantId && (
+        <div className="premium-card !p-4">
+          <div className="mb-3">
+            <h2 className="text-lg font-bold font-heading text-foreground">CRM Pós-Venda</h2>
+            <p className="text-xs text-muted-foreground">
+              Aprovado · Reprovado · 30 · 60 · 90 · 120 dias — recalcula sozinho todo dia. Arrastar fixa manual.
+            </p>
+          </div>
+          <PosVendaKanban consultantId={consultantId} />
+        </div>
+      )}
+
+      {/* Stats (Leads WhatsApp) */}
+      {isLeadsTab && (
+      <>
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {stats.map((s) => (
@@ -517,6 +536,8 @@ export default function WhatsAppClientsPage() {
           })
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

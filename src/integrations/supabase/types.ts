@@ -2509,6 +2509,7 @@ export type Database = {
           ai_last_rescue_at: string | null
           ai_rescue_count: number
           andamento_igreen: string | null
+          assigned_consultant_id: string | null
           assigned_human_id: string | null
           assinatura_cliente: string | null
           assinatura_igreen: string | null
@@ -2630,6 +2631,9 @@ export type Database = {
           phone_landline: string | null
           phone_whatsapp: string
           portal_submitted_at: string | null
+          pos_venda_manual: boolean
+          pos_venda_reason: string | null
+          pos_venda_stage: string | null
           possui_procurador: boolean | null
           previous_conversation_step: string | null
           qualification_score: number | null
@@ -2656,6 +2660,7 @@ export type Database = {
           ai_last_rescue_at?: string | null
           ai_rescue_count?: number
           andamento_igreen?: string | null
+          assigned_consultant_id?: string | null
           assigned_human_id?: string | null
           assinatura_cliente?: string | null
           assinatura_igreen?: string | null
@@ -2777,6 +2782,9 @@ export type Database = {
           phone_landline?: string | null
           phone_whatsapp: string
           portal_submitted_at?: string | null
+          pos_venda_manual?: boolean
+          pos_venda_reason?: string | null
+          pos_venda_stage?: string | null
           possui_procurador?: boolean | null
           previous_conversation_step?: string | null
           qualification_score?: number | null
@@ -2803,6 +2811,7 @@ export type Database = {
           ai_last_rescue_at?: string | null
           ai_rescue_count?: number
           andamento_igreen?: string | null
+          assigned_consultant_id?: string | null
           assigned_human_id?: string | null
           assinatura_cliente?: string | null
           assinatura_igreen?: string | null
@@ -2924,6 +2933,9 @@ export type Database = {
           phone_landline?: string | null
           phone_whatsapp?: string
           portal_submitted_at?: string | null
+          pos_venda_manual?: boolean
+          pos_venda_reason?: string | null
+          pos_venda_stage?: string | null
           possui_procurador?: boolean | null
           previous_conversation_step?: string | null
           qualification_score?: number | null
@@ -2940,6 +2952,27 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "customers_assigned_consultant_id_fkey"
+            columns: ["assigned_consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customers_assigned_consultant_id_fkey"
+            columns: ["assigned_consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customers_assigned_consultant_id_fkey"
+            columns: ["assigned_consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
           {
             foreignKeyName: "customers_consultant_id_fkey"
             columns: ["consultant_id"]
@@ -4896,6 +4929,10 @@ export type Database = {
       }
       clone_bot_flow_as_b: { Args: { _consultant_id: string }; Returns: string }
       clone_bot_flow_as_c: { Args: { _consultant_id: string }; Returns: string }
+      compute_pos_venda_stage: {
+        Args: { _andamento: string; _status: string; _submitted_at: string }
+        Returns: string
+      }
       confirm_media_send: {
         Args: { p_ok: boolean; p_res_id: string }
         Returns: undefined
@@ -5045,6 +5082,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      recompute_pos_venda_stages: { Args: never; Returns: number }
       refund_consultant_wallet: {
         Args: {
           _amount_cents: number
