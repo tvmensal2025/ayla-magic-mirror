@@ -1561,11 +1561,17 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
         .order("created_at", { ascending: false })
         .limit(5);
       const rows: any[] = (recent as any[]) || [];
+      // Inclui também o step_key legado mapeado (aguardando_conta, ask_finalizar
+      // etc) — sem isso o anti-rep não detecta duplicidade quando o passo emite
+      // texto E depois o handler legado registra a mesma outbound com o step
+      // cadastro correspondente.
+      const _legacyMapped = stepTypeToCadastro(st.step_type);
       const stepIds = new Set<string>([
         st.id,
         st.step_key,
         `flow:${st.id}`,
         `flow:${st.step_key}`,
+        ...(_legacyMapped ? [_legacyMapped, `flow:${_legacyMapped}`] : []),
       ]);
       const hit = rows.find((r) => stepIds.has(String(r.conversation_step || "")));
       if (hit) {
@@ -2128,13 +2134,18 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Só cai pra próximo por posição como último recurso.
   if (hasCapture) {
     let nextByConfig: DbStep | undefined;
+    // PRIORIDADE: fallback.success_goto_step_id (override pós-captura-sucesso configurado pelo admin)
+    // → fallback.goto_step_id (modo goto tradicional)
+    // → próximo por position (último recurso).
+    const successId = (currentStep.fallback as any)?.success_goto_step_id || null;
     const fbId = currentStep.fallback?.mode === "goto" ? currentStep.fallback.goto_step_id : null;
-    if (fbId) nextByConfig = dbSteps.find((s) => s.is_active && s.id === fbId);
+    const preferredId = successId || fbId;
+    if (preferredId) nextByConfig = dbSteps.find((s) => s.is_active && s.id === preferredId);
     if (!nextByConfig) {
       nextByConfig = dbSteps.find((s) => s.is_active && s.position > currentStep.position);
     }
     if (nextByConfig) {
-      console.log(`[conversational] auto-advance por captura ${currentStep.step_key} → ${nextByConfig.step_key} (intents=${captureIntents.join(",")}, source=${fbId ? "fallback.goto" : "position"})`);
+      console.log(`[conversational] auto-advance por captura ${currentStep.step_key} → ${nextByConfig.step_key} (intents=${captureIntents.join(",")}, source=${successId ? "fallback.success_goto" : fbId ? "fallback.goto" : "position"})`);
       if (nextByConfig.step_key === "cadastro" || CADASTRO_STEPS.has(nextByConfig.step_key)) {
         const docStep = findActiveByType("capture_documento");
         if (docStep) return _finalize(stepKey, await goToStep(docStep, restoreDetourUpdates));

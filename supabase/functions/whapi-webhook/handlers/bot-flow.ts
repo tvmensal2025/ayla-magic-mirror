@@ -3333,9 +3333,38 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           console.warn(`[post-confirm-conta] falha ao localizar capture_conta: ${(e as any)?.message || e}`);
         }
         console.log(`[post-confirm-conta] capture_conta_pos=${_captureContaPos || "not_found"}`);
-        let nextCustom = _captureContaPos > 0
-          ? await findNextActiveFlowStep(supabase, customer.consultant_id, { afterPosition: _captureContaPos })
-          : null;
+        // 🔑 success_goto_step_id (configurado no fallback do capture_conta) tem
+        // prioridade absoluta — força avanço para o passo `message` configurado
+        // (ex: d_resultado) antes de cair na busca por position.
+        let nextCustom: any = null;
+        try {
+          const { data: _flowRowSuccess } = await supabase
+            .from("bot_flows").select("id")
+            .eq("consultant_id", customer.consultant_id).eq("is_active", true)
+            .eq("variant", (customer as any)?.flow_variant || "A").maybeSingle();
+          if (_flowRowSuccess?.id) {
+            const { data: _captureStep } = await supabase
+              .from("bot_flow_steps").select("fallback")
+              .eq("flow_id", (_flowRowSuccess as any).id).eq("is_active", true)
+              .eq("step_type", "capture_conta")
+              .order("position", { ascending: true }).limit(1).maybeSingle();
+            const _successId = (_captureStep as any)?.fallback?.success_goto_step_id;
+            if (_successId) {
+              const { data: _target } = await supabase
+                .from("bot_flow_steps").select("*")
+                .eq("id", _successId).eq("is_active", true).maybeSingle();
+              if (_target) {
+                nextCustom = _target;
+                console.log(`[post-confirm-conta] success_goto_step_id=${_successId} → ${(_target as any).step_key}`);
+              }
+            }
+          }
+        } catch (_e) { /* best-effort */ }
+        if (!nextCustom) {
+          nextCustom = _captureContaPos > 0
+            ? await findNextActiveFlowStep(supabase, customer.consultant_id, { afterPosition: _captureContaPos })
+            : null;
+        }
         if (nextCustom && Number(nextCustom.position || 0) <= _captureContaPos) {
           console.warn(`[post-confirm-conta] ignorando regressão next=${nextCustom.step_key} pos=${nextCustom.position} capture_pos=${_captureContaPos}`);
           nextCustom = null;
