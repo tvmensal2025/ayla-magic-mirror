@@ -227,7 +227,7 @@ export function FlowQuickBar({ consultantId, customerId, customerName, disabled 
             variant="ghost" size="icon"
             className="h-8 w-8 shrink-0 text-muted-foreground hover:text-primary relative"
             disabled={disabled || !!seq || !customerId}
-            title={!customerId ? "Carregando cliente…" : "Enviar passo do fluxo"}
+            title={!customerId ? "Carregando lead…" : "Enviar passo do fluxo"}
           >
             {seq ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <Zap className="h-4 w-4" />}
             {seq && (

@@ -163,14 +163,26 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   // whatsapp_lead row so flow shortcuts (⚡) always have a customerId.
   useEffect(() => {
     if (!chat) { setIsCustomer(false); setCustomerId(null); return; }
-    const phone = chat.remoteJid.split("@")[0];
+    const rawPhone = chat.remoteJid.split("@")[0].replace(/\D/g, "");
+    // BR phone pode estar gravado com ou sem DDI 55 — gera candidatos
+    // pra garantir que o lookup ache o cliente existente e o botão ⚡
+    // não fique cinza por falta de match.
+    const candidates = new Set<string>();
+    candidates.add(rawPhone);
+    if (rawPhone.startsWith("55") && rawPhone.length >= 12) {
+      candidates.add(rawPhone.slice(2));
+    } else if (!rawPhone.startsWith("55")) {
+      candidates.add(`55${rawPhone}`);
+    }
+    const candidatesArr = Array.from(candidates);
+    const insertPhone = rawPhone.startsWith("55") ? rawPhone : `55${rawPhone}`;
     let cancelled = false;
     (async () => {
       const { data: existing } = await supabase
         .from("customers")
         .select("id")
         .eq("consultant_id", consultantId)
-        .eq("phone_whatsapp", phone)
+        .in("phone_whatsapp", candidatesArr)
         .maybeSingle();
       if (cancelled) return;
       if (existing?.id) {
@@ -178,12 +190,30 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         setCustomerId(existing.id);
         return;
       }
-      const fallbackName = (chat as { pushName?: string | null }).pushName || (chat as { name?: string | null }).name || phone;
+      // Fallback fuzzy: últimos 9 dígitos (DDD + número), evita duplicar
+      // quando o phone foi salvo com formatação esquisita.
+      const tail = rawPhone.slice(-9);
+      if (tail.length === 9) {
+        const { data: fuzzy } = await supabase
+          .from("customers")
+          .select("id, phone_whatsapp")
+          .eq("consultant_id", consultantId)
+          .like("phone_whatsapp", `%${tail}`)
+          .limit(1);
+        if (cancelled) return;
+        const found = (fuzzy as Array<{ id: string }> | null)?.[0];
+        if (found?.id) {
+          setIsCustomer(true);
+          setCustomerId(found.id);
+          return;
+        }
+      }
+      const fallbackName = (chat as { pushName?: string | null }).pushName || (chat as { name?: string | null }).name || insertPhone;
       const { data: created, error } = await supabase
         .from("customers")
         .insert({
           consultant_id: consultantId,
-          phone_whatsapp: phone,
+          phone_whatsapp: insertPhone,
           name: fallbackName,
           customer_origin: "whatsapp_lead",
           conversation_step: "novo_lead",
@@ -290,7 +320,10 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const phoneNumber = chat.remoteJid.split("@")[0];
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
+    <div className="flex-1 flex flex-col min-h-0 [body[data-captacao-bar-open]_&]:pb-11">
+      {/* O `pb-11` acima reserva espaço quando a barra minimizada da
+          Captação (h-11 fixed bottom-0) está visível, pra ela nunca
+          cobrir o composer / botão de enviar. */}
       {/* Chat header */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-card">
         <Avatar className="h-9 w-9">

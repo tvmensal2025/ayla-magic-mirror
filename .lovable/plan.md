@@ -1,106 +1,44 @@
-## O que vou fazer
+## Problemas identificados
 
-Duas frentes em paralelo: **(A)** card de template muito mais informativo, **(B)** corrigir a causa raiz de "0 conversas" e métricas zeradas.
+**1. Barra minimizada da Captação tampa o composer do WhatsApp**
 
----
-
-## A) Cards de Template — SuperAdmin + Galeria do Consultor
-
-Hoje o card mostra só: 3 miniaturas, título, headline truncada (2 linhas), R$/dia, usos. Você quer mais.
-
-### Novo card (mesmo componente, 2 modos: compacto / expandido)
-
-**Topo visual**
-- Carrossel das fotos no formato real (1:1, 4:5, 9:16) com pílula do formato em cada uma, em vez de 3 thumbs cortadas no mesmo aspect-video.
-- Selo de status: `Publicado` / `Rascunho` / `Arquivado` + selo de aprovação Meta (quando houver `meta_review_status`).
-
-**Bloco "Copy completa"** (expansível, default fechado)
-- Headline completa.
-- Texto principal inteiro (sem line-clamp).
-- Descrição.
-- Lista de variantes A/B: `N headlines × M textos principais` com botão "Ver variantes" abrindo accordion.
-
-**Bloco "Segmentação"** (sempre visível, denso)
-- Chips de distribuidoras alvo (ou "Todas").
-- Cidades alvo (ou "Todas as cidades das distribuidoras").
-- Faixa etária `age_min–age_max` + gênero.
-- Idiomas / país se houver.
-
-**Bloco "Performance real" (últimos 30d)** — novo
-- Agrega `facebook_metrics_daily` de TODAS as `facebook_campaigns` cujo `template_id = t.id`.
-- Mostra: Gasto, Impressões, Cliques, CTR, **Conversas WhatsApp**, Leads, CPL médio, Clientes fechados (`customers_acquired`), Frequência média.
-- Se `usage_count = 0` → estado vazio claro: "Nenhum consultor publicou esse modelo ainda" (em vez de "0" mudo).
-- Se `usage_count > 0` mas métricas = 0 → "Aguardando primeiros dados da Meta (até 24h após publicar)".
-- Sparkline 30d de gasto + conversas (opcional, leve, com `recharts` já no projeto).
-
-**Bloco "Score de qualidade IA"**
-- Lê `ad_image_validator` cacheado por foto: pior caso (erro / atenção / aprovada) com tooltip.
-- Score médio de qualidade da copy (se já existir em `ad_creative_qa`).
-
-**Rodapé de ações (já existe + 1 novo)**
-- Editar, Publicar/Despublicar, Apagar.
-- **Novo**: "Duplicar" (cria cópia como rascunho — útil pra A/B no nível do template).
-- **Novo**: "Ver campanhas" — abre modal listando todas as campanhas reais ativas criadas a partir desse template, com performance individual.
-
-### Galeria do consultor (`AdTemplatesGallery`)
-Mesmo card, mas sem ações de SuperAdmin e com performance filtrada **apenas pelas campanhas dele**.
-
----
-
-## B) Diagnóstico "0 conversas" e dados zerados
-
-Encontrei a causa provável lendo `supabase/functions/facebook-sync-metrics/index.ts`:
-
-### Bug 1 — action_type único e desatualizado
-A sync só lê:
-```ts
-a.action_type === "onsite_conversion.messaging_conversation_started_7d"
+`src/components/captacao/CaptureSheet.tsx` (linha 265) renderiza:
 ```
-A Meta retorna conversas CTWA em **vários** action_types dependendo da campanha:
-- `onsite_conversion.messaging_conversation_started_7d` (legado)
-- `onsite_conversion.messaging_first_reply`
-- `onsite_conversion.total_messaging_connection`
-- `messaging_conversation_started_7d` (sem prefixo, em alguns formatos)
+fixed bottom-0 left-0 right-0 z-50 h-11 ...
+```
+Quando o modo Captação está ativo e minimizado, essa barra de 44 px fica fixa no rodapé da janela inteira, por cima do `MessageComposer` do `ChatView`. Resultado: você não enxerga o textarea nem o botão de enviar.
 
-Se sua campanha for CTWA moderna, a Meta provavelmente devolve `messaging_first_reply` ou `total_messaging_connection` e o sync ignora → **0 conversas**.
+**2. Botão ⚡ (FlowQuickBar) fica cinza em alguns leads (ex.: 11971254913)**
 
-**Fix**: helper `sumActions(actions, types[])` que soma TODOS os action_types relevantes, e o mesmo helper aplicado ao breakdown por placement.
+Em `src/components/whatsapp/FlowQuickBar.tsx:229` o botão é desabilitado por `!customerId`. O `customerId` vem de `ChatView.tsx:164-204`, que busca em `customers` por `phone_whatsapp = chat.remoteJid.split("@")[0]`. Como esse phone pode estar gravado com/sem DDI 55 (ex.: `5511971254913` vs `11971254913`), o lookup falha, a criação automática às vezes também falha (RLS/duplicidade), e o botão fica cinza.
 
-### Bug 2 — `leads` só conta `action_type === "lead"`
-Para campanhas CTWA (objetivo MESSAGES) não existe action `lead` — o equivalente é a própria conversa iniciada. Por isso `leads = 0` e `CPL = 0` mesmo com gasto rodando.
+## O que vou fazer (apenas frontend, sem mexer em backend/CRM)
 
-**Fix**: quando a campanha for CTWA (`destination_type = WHATSAPP` ou `objective = OUTCOME_ENGAGEMENT/MESSAGES`), usar `messaging_conversations_started` como denominador do CPL.
+### A) Composer nunca mais é coberto pela Captação
 
-### Bug 3 — `customers_acquired` reconciliação
-A função reconcilia `customers_acquired` lendo `deals` aprovados nos últimos 7d filtrados por consultor — vou verificar se ela está fazendo o `match` por `attribution_source = 'meta_ads'` corretamente; se não, todos zerados.
+- No `ChatView` (e/ou no contêiner do WhatsApp em `Admin.tsx`) aplicar `paddingBottom` dinâmico igual à altura da barra de Captação quando ela estiver visível e minimizada (`h-11` + safe-area).
+  - Sinal: ler o mesmo flag que já controla `open && minimized` (expor via contexto leve de Captação ou via um data-attribute no `<body>` que o `CaptureSheet` já pode setar). Implementação simples: o `CaptureSheet`, ao montar a barra minimizada, marca `document.body.dataset.captacaoBarOpen = "1"`; o layout do WhatsApp aplica `pb-12` quando esse atributo existe.
+- Alternativa para mobile: reduzir `z-index` da barra para abaixo do composer **ou** mover a barra para `bottom: var(--composer-height)` quando o WhatsApp estiver aberto. Vou seguir com a abordagem do padding (mais previsível).
 
-### Bug 4 — Estado vazio enganoso
-Vários painéis mostram "0" quando deveriam mostrar "Sem dados ainda" ou "Aguardando Meta". Vou trocar por estados claros com instrução (CTA "Forçar sync agora" reaproveitando `SyncMetricsButton`).
+### B) Botão ⚡ sempre aceso para qualquer lead
 
-### Diagnóstico rápido antes do fix (1 query)
-Vou rodar um `SELECT` em `facebook_metrics_daily` dos últimos 3 dias para confirmar se `spend_cents > 0` mas `messaging_conversations_started = 0` — confirma o bug do action_type. E vou logar o `actions[]` cru da Meta numa execução manual da edge function pra ver quais action_types ela está devolvendo no seu caso real.
+Em `ChatView.tsx` ajustar a resolução de `customerId`:
 
----
+1. Criar helper `normalizeBrPhone(jidOrPhone)` que retorna lista de candidatos: `["5511971254913", "11971254913"]` (com e sem 55).
+2. Trocar `.eq("phone_whatsapp", phone)` por `.in("phone_whatsapp", candidates)` no lookup inicial.
+3. Se ainda não achar, antes de inserir, fazer um `select` final por `like '%últimos9dígitos%'` (mesma lógica usada em outros pontos), para evitar duplicar contato.
+4. Padronizar o `phone_whatsapp` no insert para o formato com DDI 55 (já existente em outros pontos).
+5. No `FlowQuickBar`, manter `!customerId` apenas como gate técnico real (não muda nada visual extra), mas ajustar o `title` para "Carregando lead…" quando o `ChatView` ainda está resolvendo, deixando claro que é transitório (e não "desligado").
 
-## Detalhes técnicos
+### Arquivos afetados
 
-**Arquivos a editar**
-- `src/components/superadmin/AdTemplatesPanel.tsx` — novo card expansível, blocos descritos.
-- `src/components/admin/ads/AdTemplatesGallery.tsx` — mesmo card, modo consultor.
-- `src/services/adTemplates.ts` — novo método `getTemplateAggregatedMetrics(templateId, scope)` que agrega `facebook_metrics_daily` por template.
-- `supabase/functions/facebook-sync-metrics/index.ts` — helper `sumActions`, suportar 4 action_types, CPL inteligente por objetivo, log dos action_types crus para diagnóstico.
+- `src/components/captacao/CaptureSheet.tsx` — marcar/remover `data-captacao-bar` no body.
+- `src/components/whatsapp/ChatView.tsx` — padding dinâmico do container do chat + lookup robusto de customerId.
+- `src/components/whatsapp/FlowQuickBar.tsx` — pequeno ajuste de `title` (opcional, só pra UX).
+- (sem migrações, sem mudanças de backend).
 
-**Novo (se necessário)**
-- Componente `TemplatePerformanceBlock.tsx` reutilizado nos dois cards.
-- Migração leve: índice em `facebook_campaigns(template_id)` se ainda não existir, pra agregar rápido.
+## Validação
 
-**Sem mudança de schema** salvo o índice acima.
-
----
-
-## Ordem de execução
-1. Diagnóstico via SQL + log de action_types da Meta (5 min).
-2. Fix do `facebook-sync-metrics` (action_types + CPL CTWA) e re-sync.
-3. Novo card de template no SuperAdmin.
-4. Galeria do consultor reutilizando o card.
-5. Validar com você: abrir um template real e conferir números batendo com o Ads Manager.
+- Abrir WhatsApp com Captação minimizada e confirmar que o composer fica visível e clicável em desktop e mobile.
+- Abrir conversa do `11971254913` e confirmar que o ⚡ acende em poucos segundos, com `customerId` resolvido sem duplicar registro em `customers`.
+- Repetir com 2-3 leads novos (sem cadastro) para garantir que o auto-create ainda funciona.
