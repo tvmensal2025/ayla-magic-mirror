@@ -3110,42 +3110,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       };
 
       try {
-        // 🧪 testMode: usa mock de OCR para não depender do Gemini nem de URL pública
-        if (isCustomerSandbox(customer)) {
-          // 🔍 DEBUG2: confirma que entrou no caminho mock
-          try {
-            await supabase.from("customers").update({
-              error_message: `mock_path: entered isCustomerSandbox=true at ${new Date().toISOString()}`,
-            }).eq("id", customer.id);
-          } catch (_) { /* noop */ }
-          const { mockBillOcr } = await import("../../_shared/test-mode.ts");
-          const ocrData = mockBillOcr();
-          console.log("🧪 [test-mode] OCR conta mock:", JSON.stringify(ocrData).substring(0, 200));
-          const d = ocrData.dados;
-          const safe = safeAssignName(customer.name, (customer as any).name_source, d.nome);
-          if (safe) { updates.name = safe; updates.name_source = "ocr_conta"; }
-          if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
-          updates.electricity_bill_value = Number(d.valorConta) || 350;
-          updates.cep = (d.cep || "").replace(/\D/g, "");
-          updates.address_street = d.endereco || "";
-          updates.address_number = d.numero || "";
-          updates.address_neighborhood = d.bairro || "";
-          updates.address_city = d.cidade || "";
-          updates.address_state = d.estado || "";
-          updates.distribuidora = d.distribuidora || "";
-          updates.numero_instalacao = d.numeroInstalacao || "";
-          updates.bill_holder_name = d.nome || "";
-          updates.bill_data_raw = JSON.stringify(d);
-          updates.ocr_conta_confianca = 95;
-          updates.conversation_step = "aguardando_doc_auto";
-          reply = `✅ *Conta analisada com sucesso!* 📊\n\n` +
-            `👤 *Titular:* ${d.nome}\n` +
-            `🏠 *Endereço:* ${d.endereco}, ${d.numero} — ${d.bairro}, ${d.cidade}/${d.estado}\n` +
-            `💡 *Distribuidora:* ${d.distribuidora}\n` +
-            `💰 *Valor:* R$ ${Number(d.valorConta).toFixed(2)}\n\n` +
-            `Agora me manda a *frente do seu documento* (RG ou CNH) 📸`;
-          break;
-        }
+        // 🚫 Mock OCR removido (2026-05-25): simulador agora roda OCR REAL via
+        // ocrContaEnergia (Gemini), igual ao fluxo de produção. Isso garante que
+        // o painel "Conta de luz (OCR)" mostre os dados reais da imagem enviada.
         console.log("📡 Chamando OCR Gemini para conta:", fileUrl?.substring(0, 100));
         // Garante bytes: se não temos base64 mas temos URL HTTP, baixa on-demand
         let ocrBase64 = fileBase64 || undefined;
