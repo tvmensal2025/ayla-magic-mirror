@@ -129,19 +129,31 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
     setState(null);
     setDiagnostic(null);
     if (!consultantId) return;
+    if (realMode && !realPhoneValid()) {
+      if (initial) {
+        // Não dispara welcome até o usuário digitar um telefone real válido
+        setEvents([{ kind: "system", text: "⚠ Modo Real ligado — informe seu telefone (55 + DDD + número) para começar.", key: k() }]);
+      }
+      return;
+    }
     setBusy(true);
     try {
       await supabase.functions.invoke("flow-simulate-reset", {
-        body: { consultant_id: consultantId },
+        body: {
+          consultant_id: consultantId,
+          real_mode: realMode,
+          real_phone: realMode ? realPhoneDigits() : undefined,
+        },
       });
     } catch (_) { /* noop */ }
     setBusy(false);
     if (initial) {
       // Dispara o motor com "oi" + fresh=true → reseta sandbox e roda welcome
       await callRun({ user_message: "oi", fresh: true });
-      setEvents((prev) => [{ kind: "system", text: "▶ Conversa zerada — começando do início", key: k() }, ...prev]);
+      setEvents((prev) => [{ kind: "system", text: realMode ? "▶ Modo Real ativo — fluxo 100% real (OCR + Portal + OTP no seu WhatsApp)" : "▶ Conversa zerada — começando do início", key: k() }, ...prev]);
     }
   }
+
 
   async function handleSend(text: string, button_id?: string) {
     const trimmed = text.trim();
