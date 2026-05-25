@@ -3,9 +3,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Flame, Users } from "lucide-react";
 import { SalesFunnelBoard } from "./SalesFunnelBoard";
 
-const KanbanBoard = lazy(() =>
-  import("./KanbanBoard").then((m) => ({ default: m.KanbanBoard })),
-);
+const PosVendaKanban = lazy(() => import("./PosVendaKanban"));
 
 interface CrmTabsProps {
   consultantId: string;
@@ -36,7 +34,7 @@ export function CrmTabs({ consultantId, instanceName, onOpenChat }: CrmTabsProps
         </TabsContent>
         <TabsContent value="posvenda" className="flex-1 min-h-0 mt-2 overflow-auto data-[state=inactive]:hidden">
           <Suspense fallback={<div className="flex justify-center py-12"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>}>
-            <KanbanBoard consultantId={consultantId} instanceName={instanceName} />
+            <PosVendaKanban consultantId={consultantId} />
           </Suspense>
         </TabsContent>
       </Tabs>
