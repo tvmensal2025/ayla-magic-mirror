@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useUserRole } from "@/hooks/useUserRole";
 import { UseTemplateDialog } from "./UseTemplateDialog";
 import { SmartPublishButton } from "./SmartPublishButton";
+import { TemplateInfoCard } from "./TemplateInfoCard";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
