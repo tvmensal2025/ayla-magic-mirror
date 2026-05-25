@@ -47,7 +47,12 @@ export function renderTemplate(tpl: string, vars: TemplateVars): string {
   out = replaceVar(out, "cpf", cpf);
   // Limpa artefatos quando uma variável ficou vazia (sem nome conhecido etc):
   // "Oi , tudo bem" -> "Oi, tudo bem" ; "Olá !" -> "Olá!" ; "  " -> " "
+  // Também remove pares de formatação WhatsApp órfãos ("* *", "_ _", "~ ~")
+  // — caso o template tenha "do *{{representante}}*" e o nome venha vazio.
   out = out
+    .replace(/\*\s*\*/g, "")                        // negrito vazio
+    .replace(/_\s*_/g, "")                          // itálico vazio
+    .replace(/~\s*~/g, "")                          // strike vazio
     .replace(/([,;:])\s*([,;:!?.])/g, "$2")        // ", !" -> "!"
     .replace(/\s+([,.!?;:])/g, "$1")                // " ," -> ","
     .replace(/([(\[])\s+/g, "$1")
