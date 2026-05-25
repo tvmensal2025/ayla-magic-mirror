@@ -35,6 +35,7 @@ import {
   detectQuestionIntent,
 } from "../../_shared/conversation-helpers.ts";
 import { matchQA } from "./conversational/index.ts";
+import { getTemplate } from "./conversational/templates.ts";
 import { extractMultiField, buildMultiFieldPatch } from "../../_shared/multi-field-extractor.ts";
 import { detectFlowSwitch } from "../../_shared/flow-router.ts";
 import { ocrContaEnergia, ocrDocumentoFrenteVerso } from "../../_shared/ocr.ts";
@@ -97,6 +98,75 @@ async function fetchUrlToBase64(url: string, timeoutMs = 15_000): Promise<{ base
   } catch (e) {
     console.warn("[fetchUrlToBase64] falhou:", (e as any)?.message);
     return null;
+  }
+}
+
+/**
+ * Resolve fallback de OCR a partir do step configurado no Flow Builder.
+ *
+ * **Fonte canônica:** este helper é espelhado byte-for-byte de
+ * `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (linhas ~110-163).
+ * Ambos os webhooks DEVEM manter implementação idêntica — qualquer alteração
+ * aqui precisa ser replicada no Whapi (e vice-versa) para preservar
+ * comportamento entre canais (ver Requirement 2.5 do spec
+ * `flow-d-retry-rules-fix`).
+ *
+ * Lê o campo `fallback` do bot_flow_step atual (`capture_conta` /
+ * `capture_documento`) e retorna o `retry_text` configurado pelo consultor,
+ * ou o `defaultRetryText` se não houver. Quando `then === "humano"` e as
+ * tentativas esgotaram, sinaliza `escalate = true` para o caller pausar o
+ * bot e disparar handoff.
+ */
+// ── Resolve fallback de OCR a partir do step configurado no Flow Builder ──
+// Lê o campo `fallback` do bot_flow_step atual (capture_conta / capture_documento)
+// e retorna o retry_text configurado pelo consultor, ou null se não houver.
+// Quando `then === "humano"` e as tentativas esgotaram, pausa o bot.
+interface OcrFallbackResult {
+  retryText: string;
+  escalate: boolean; // true = pausa bot + notifica consultor
+}
+async function resolveOcrFallback(
+  supabase: any,
+  customerId: string,
+  consultantId: string | null | undefined,
+  stepType: "capture_conta" | "capture_documento",
+  attempts: number,
+  defaultRetryText: string,
+  flowVariant?: string | null,
+): Promise<OcrFallbackResult> {
+  try {
+    if (!consultantId) return { retryText: defaultRetryText, escalate: false };
+    const variant = String(flowVariant || "A").toUpperCase();
+    // Busca o fluxo ativo DA variante correta (A/B/C/D) — sem isso herdaria
+    // fallback de outra variante e estouraria com multiple rows.
+    let flowQ = supabase
+      .from("bot_flows").select("id")
+      .eq("consultant_id", consultantId).eq("is_active", true)
+      .eq("variant", variant)
+      .order("created_at", { ascending: true }).limit(1);
+    let { data: flow } = await flowQ.maybeSingle();
+    if (!flow?.id) {
+      // Fallback: primeiro fluxo ativo do consultor (legado, sem variante)
+      const { data: anyFlow } = await supabase
+        .from("bot_flows").select("id")
+        .eq("consultant_id", consultantId).eq("is_active", true)
+        .order("created_at", { ascending: true }).limit(1).maybeSingle();
+      flow = anyFlow;
+    }
+    if (!flow?.id) return { retryText: defaultRetryText, escalate: false };
+    const { data: stepRow } = await supabase
+      .from("bot_flow_steps").select("fallback")
+      .eq("flow_id", flow.id).eq("step_type", stepType).eq("is_active", true)
+      .order("position", { ascending: true }).limit(1).maybeSingle();
+    const fb = (stepRow as any)?.fallback;
+    if (!fb || fb.mode !== "retry") return { retryText: defaultRetryText, escalate: false };
+    const maxRetries = Math.max(1, Number(fb.max_retries ?? 2));
+    const retryText = String(fb.retry_text || defaultRetryText);
+    const escalate = attempts >= maxRetries && String(fb.then || "") === "humano";
+    return { retryText, escalate };
+  } catch (e) {
+    console.warn("[resolveOcrFallback] erro:", (e as any)?.message);
+    return { retryText: defaultRetryText, escalate: false };
   }
 }
 
@@ -2791,13 +2861,27 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           });
           const tries = (customer.ocr_conta_attempts || 0) + 1;
           updates.ocr_conta_attempts = tries;
-          if (tries < 2) {
-            updates.conversation_step = "aguardando_conta";
-            reply = "⚠️ Não consegui ler a conta. Por favor, envie uma *foto mais nítida e bem iluminada* (sem reflexos).";
+          const ocrFb = await resolveOcrFallback(
+            supabase,
+            customer.id,
+            customer.consultant_id,
+            "capture_conta",
+            tries,
+            "⚠️ Não consegui ler a conta. Por favor, envie uma *foto mais nítida e bem iluminada* (sem reflexos).",
+            (customer as any).flow_variant,
+          );
+          if (ocrFb.escalate) {
+            updates.bot_paused = true;
+            updates.bot_paused_reason = "ocr_conta_retry_exhausted";
+            updates.bot_paused_at = new Date().toISOString();
+            updates.conversation_step = "aguardando_humano";
+            reply = await getTemplate(supabase, "aguardando_humano", "avisado", {
+              nome: customer.name,
+              representante: nomeRepresentante,
+            });
           } else {
-            console.warn(`⏭️ OCR conta falhou ${tries}x — pulando para coleta manual`);
-            updates.conversation_step = "ask_name";
-            reply = "⚠️ Não consegui ler sua conta de luz, mas tudo bem! Vou te perguntar os dados manualmente.\n\nQual é o seu *nome completo*?";
+            updates.conversation_step = "aguardando_conta";
+            reply = ocrFb.retryText;
           }
         }
       } catch (e) {
@@ -2814,12 +2898,27 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         });
         const tries = (customer.ocr_conta_attempts || 0) + 1;
         updates.ocr_conta_attempts = tries;
-        if (tries < 2) {
-          updates.conversation_step = "aguardando_conta";
-          reply = "⚠️ Erro ao processar a conta. Tente enviar novamente.";
+        const ocrFb = await resolveOcrFallback(
+          supabase,
+          customer.id,
+          customer.consultant_id,
+          "capture_conta",
+          tries,
+          "⚠️ Erro ao processar a conta. Tente enviar novamente.",
+          (customer as any).flow_variant,
+        );
+        if (ocrFb.escalate) {
+          updates.bot_paused = true;
+          updates.bot_paused_reason = "ocr_conta_retry_exhausted";
+          updates.bot_paused_at = new Date().toISOString();
+          updates.conversation_step = "aguardando_humano";
+          reply = await getTemplate(supabase, "aguardando_humano", "avisado", {
+            nome: customer.name,
+            representante: nomeRepresentante,
+          });
         } else {
-          updates.conversation_step = "ask_name";
-          reply = "⚠️ Tive um problema ao ler sua conta. Vou continuar perguntando os dados.\n\nQual é o seu *nome completo*?";
+          updates.conversation_step = "aguardando_conta";
+          reply = ocrFb.retryText;
         }
       }
       break;
@@ -3382,13 +3481,27 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           });
           const tries = (customer.ocr_doc_attempts || 0) + 1;
           updates.ocr_doc_attempts = tries;
-          if (tries < 2) {
-            updates.conversation_step = "aguardando_doc_verso";
-            reply = "⚠️ Não consegui ler o documento. Envie uma foto mais nítida do *VERSO*.";
+          const ocrFb = await resolveOcrFallback(
+            supabase,
+            customer.id,
+            customer.consultant_id,
+            "capture_documento",
+            tries,
+            "⚠️ Não consegui ler o documento. Envie uma foto mais nítida do *VERSO*.",
+            (customer as any).flow_variant,
+          );
+          if (ocrFb.escalate) {
+            updates.bot_paused = true;
+            updates.bot_paused_reason = "ocr_documento_retry_exhausted";
+            updates.bot_paused_at = new Date().toISOString();
+            updates.conversation_step = "aguardando_humano";
+            reply = await getTemplate(supabase, "aguardando_humano", "avisado", {
+              nome: customer.name,
+              representante: nomeRepresentante,
+            });
           } else {
-            console.warn(`⏭️ OCR doc falhou ${tries}x — pulando para coleta manual de RG/CPF/data nasc`);
-            updates.conversation_step = "ask_cpf";
-            reply = "⚠️ Não consegui extrair os dados do documento, mas vamos continuar.\n\nQual o seu *CPF*? (apenas números)";
+            updates.conversation_step = "aguardando_doc_verso";
+            reply = ocrFb.retryText;
           }
         }
       } catch (e) {
@@ -3405,12 +3518,27 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         });
         const tries = (customer.ocr_doc_attempts || 0) + 1;
         updates.ocr_doc_attempts = tries;
-        if (tries < 2) {
-          updates.conversation_step = "aguardando_doc_verso";
-          reply = "⚠️ Erro ao processar o documento. Tente enviar novamente.";
+        const ocrFb = await resolveOcrFallback(
+          supabase,
+          customer.id,
+          customer.consultant_id,
+          "capture_documento",
+          tries,
+          "⚠️ Erro ao processar o documento. Tente enviar novamente.",
+          (customer as any).flow_variant,
+        );
+        if (ocrFb.escalate) {
+          updates.bot_paused = true;
+          updates.bot_paused_reason = "ocr_documento_retry_exhausted";
+          updates.bot_paused_at = new Date().toISOString();
+          updates.conversation_step = "aguardando_humano";
+          reply = await getTemplate(supabase, "aguardando_humano", "avisado", {
+            nome: customer.name,
+            representante: nomeRepresentante,
+          });
         } else {
-          updates.conversation_step = "ask_cpf";
-          reply = "⚠️ Tive problemas para ler seu documento. Vamos seguir manualmente.\n\nQual o seu *CPF*? (apenas números)";
+          updates.conversation_step = "aguardando_doc_verso";
+          reply = ocrFb.retryText;
         }
       }
       break;
@@ -4463,5 +4591,5 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 }
 
 // ── Test-only re-exports (não alteram comportamento) ──
-export const __test = { sleepForMedia, fetchUrlToBase64, trigramSim };
+export const __test = { sleepForMedia, fetchUrlToBase64, trigramSim, resolveOcrFallback };
 
