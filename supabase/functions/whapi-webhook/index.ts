@@ -463,9 +463,7 @@ Deno.serve(async (req) => {
           consultant_id: superAdminConsultantId,
           status: "pending",
           conversation_step: "welcome",
-          is_test_lead: realMode,
-          is_sandbox: false,
-          capture_mode: "auto",
+          ...(realMode ? { is_test_lead: true, is_sandbox: false, capture_mode: "auto" } : {}),
           ...(pushedName ? { name: pushedName, name_source: "whatsapp_profile" } : {}),
         })
         .select().single();
