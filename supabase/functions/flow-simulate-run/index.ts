@@ -84,29 +84,26 @@ Deno.serve(async (req) => {
     const variant = String(body?.variant || "").toUpperCase();
     const fresh = body?.fresh === true; // sinaliza "Zerar" → resetar step
 
-    // ─── Modo Real: usa telefone REAL do usuário, serviços reais (OCR/Portal/OTP/facial) ──
-    const realMode = body?.real_mode === true;
-    const rawRealPhone = String(body?.real_phone || "").replace(/\D/g, "");
-    if (realMode && (rawRealPhone.length < 12 || rawRealPhone.length > 13)) {
-      return json({ error: "real_phone_invalid", detail: "Telefone real precisa ter 12 ou 13 dígitos (55 + DDD + número)" }, 400);
+    // ─── OTP real opcional: simulador sempre roda em sandbox (rápido/mock),
+    // mas se o usuário informar um telefone real, o passo portal_submitting
+    // chama o Worker de verdade e o SMS chega nesse número.
+    const rawOtpRealPhone = String(body?.otp_real_phone || "").replace(/\D/g, "");
+    if (rawOtpRealPhone && (rawOtpRealPhone.length < 12 || rawOtpRealPhone.length > 13)) {
+      return json({ error: "otp_real_phone_invalid", detail: "Telefone OTP precisa ter 12 ou 13 dígitos (55 + DDD + número)" }, 400);
     }
-    const phone = realMode ? rawRealPhone : testPhoneFor(consultantId);
+    const otpRealPhone = rawOtpRealPhone || null;
+    const phone = testPhoneFor(consultantId);
     const chatId = `${phone}@s.whatsapp.net`;
 
-    // ── 1) Garante customer (sandbox OU real-test) ──
-    // Modo Real NUNCA pode reaproveitar um cliente real antigo do mesmo telefone:
-    // ele precisa usar/criar somente registros marcados como is_test_lead=true.
-    let customerQuery = svc
+    // ── 1) Garante customer sandbox ──
+    const { data: customerRows } = await svc
       .from("customers")
       .select("*")
       .eq("phone_whatsapp", phone)
       .eq("consultant_id", consultantId)
+      .eq("is_sandbox", true)
       .order("created_at", { ascending: false })
       .limit(1);
-    customerQuery = realMode
-      ? customerQuery.eq("is_test_lead", true)
-      : customerQuery.eq("is_sandbox", true);
-    const { data: customerRows } = await customerQuery;
     let customer = customerRows?.[0] || null;
 
     if (!customer) {
@@ -115,20 +112,22 @@ Deno.serve(async (req) => {
         .insert({
           consultant_id: consultantId,
           phone_whatsapp: phone,
-          name: realMode ? "Lead Teste Real" : "Simulador Sandbox",
-          is_sandbox: !realMode,
-          is_test_lead: realMode,
+          name: "Simulador Sandbox",
+          is_sandbox: true,
+          is_test_lead: false,
           capture_mode: "auto",
           customer_origin: "whatsapp_lead",
           flow_variant: variant || "A",
           status: "pending",
           conversation_step: "welcome",
+          otp_test_phone: otpRealPhone,
         })
         .select("*")
         .single();
       if (createErr) return json({ error: "create_customer_failed", detail: createErr.message }, 500);
       customer = created;
     }
+
 
 
     // 🛡️ Force-fix do customer ANTES de chamar o webhook:
