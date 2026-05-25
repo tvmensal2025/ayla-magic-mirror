@@ -3110,42 +3110,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       };
 
       try {
-        // 🧪 testMode: usa mock de OCR para não depender do Gemini nem de URL pública
-        if (isCustomerSandbox(customer)) {
-          // 🔍 DEBUG2: confirma que entrou no caminho mock
-          try {
-            await supabase.from("customers").update({
-              error_message: `mock_path: entered isCustomerSandbox=true at ${new Date().toISOString()}`,
-            }).eq("id", customer.id);
-          } catch (_) { /* noop */ }
-          const { mockBillOcr } = await import("../../_shared/test-mode.ts");
-          const ocrData = mockBillOcr();
-          console.log("🧪 [test-mode] OCR conta mock:", JSON.stringify(ocrData).substring(0, 200));
-          const d = ocrData.dados;
-          const safe = safeAssignName(customer.name, (customer as any).name_source, d.nome);
-          if (safe) { updates.name = safe; updates.name_source = "ocr_conta"; }
-          if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
-          updates.electricity_bill_value = Number(d.valorConta) || 350;
-          updates.cep = (d.cep || "").replace(/\D/g, "");
-          updates.address_street = d.endereco || "";
-          updates.address_number = d.numero || "";
-          updates.address_neighborhood = d.bairro || "";
-          updates.address_city = d.cidade || "";
-          updates.address_state = d.estado || "";
-          updates.distribuidora = d.distribuidora || "";
-          updates.numero_instalacao = d.numeroInstalacao || "";
-          updates.bill_holder_name = d.nome || "";
-          updates.bill_data_raw = JSON.stringify(d);
-          updates.ocr_conta_confianca = 95;
-          updates.conversation_step = "aguardando_doc_auto";
-          reply = `✅ *Conta analisada com sucesso!* 📊\n\n` +
-            `👤 *Titular:* ${d.nome}\n` +
-            `🏠 *Endereço:* ${d.endereco}, ${d.numero} — ${d.bairro}, ${d.cidade}/${d.estado}\n` +
-            `💡 *Distribuidora:* ${d.distribuidora}\n` +
-            `💰 *Valor:* R$ ${Number(d.valorConta).toFixed(2)}\n\n` +
-            `Agora me manda a *frente do seu documento* (RG ou CNH) 📸`;
-          break;
-        }
+        // 🚫 Mock OCR removido (2026-05-25): simulador agora roda OCR REAL via
+        // ocrContaEnergia (Gemini), igual ao fluxo de produção. Isso garante que
+        // o painel "Conta de luz (OCR)" mostre os dados reais da imagem enviada.
         console.log("📡 Chamando OCR Gemini para conta:", fileUrl?.substring(0, 100));
         // Garante bytes: se não temos base64 mas temos URL HTTP, baixa on-demand
         let ocrBase64 = fileBase64 || undefined;
@@ -3572,40 +3539,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       let detectConfidence = 0;
       let detectSource: string = "fallback";
 
-      // 🧪 testMode: pula detecção de tipo e OCR real, usa mock direto
-      if (isCustomerSandbox(customer)) {
-        const { mockDocOcr } = await import("../../_shared/test-mode.ts");
-        const ocrData = mockDocOcr();
-        console.log("🧪 [test-mode] OCR doc mock:", JSON.stringify(ocrData).substring(0, 200));
-        const d = ocrData.dados;
-        if (fileBase64) {
-          updates.document_front_url = `data:${mime};base64,${fileBase64}`;
-          updates.document_front_base64 = fileBase64;
-          updates.media_storage = "inline";
-        } else if (fileUrl) {
-          updates.document_front_url = fileUrl.startsWith("http") ? fileUrl : "evolution-media:pending";
-        }
-        updates.document_back_url = "nao_aplicavel"; // mock usa CNH
-        updates.document_type = "cnh";
-        const _safe = safeAssignName(customer.name, (customer as any).name_source, d.nome);
-        if (_safe) { updates.name = _safe; updates.name_source = "ocr_doc"; }
-        if (d.cpf) updates.cpf = d.cpf.replace(/\D/g, "");
-        if (d.rg) updates.rg = d.rg;
-        if (d.dataNascimento) updates.data_nascimento = d.dataNascimento;
-        if (d.nomePai) updates.nome_pai = d.nomePai;
-        if (d.nomeMae) updates.nome_mae = d.nomeMae;
-        updates.doc_holder_name = d.nome || "";
-        // Avança para o próximo passo de coleta (email ou CEP)
-        const _cpfOcr = String(updates.cpf || customer.cpf || "").replace(/\D/g, "");
-        if (_cpfOcr.length !== 11) {
-          updates.conversation_step = "ask_cpf";
-          reply = `✅ *Documento analisado!*\n\n👤 Nome: *${d.nome}*\n📄 RG: *${d.rg}*\n\nSó preciso do seu *CPF* (apenas números):`;
-        } else {
-          updates.conversation_step = "ask_email";
-          reply = `✅ *Documento analisado com sucesso!* 🎉\n\n👤 Nome: *${d.nome}*\n🪪 CPF: *${_cpfOcr}*\n📅 Nascimento: *${d.dataNascimento}*\n\nAgora me passa seu *e-mail* para finalizar o cadastro:`;
-        }
-        break;
-      }
+      // 🚫 Mock OCR doc removido (2026-05-25): simulador roda detect-doc-type +
+      // ocrDocumentoFrenteVerso REAIS (Gemini), igual ao fluxo de produção.
 
       try {
         const det = await (await import("../../_shared/detect-doc-type.ts")).detectDocumentTypeDetailed({

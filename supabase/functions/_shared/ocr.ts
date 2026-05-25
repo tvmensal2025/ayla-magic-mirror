@@ -98,7 +98,8 @@ export async function ocrContaEnergia(
   mediaMessage?: any
 ): Promise<{ sucesso: boolean; dados?: any; erro?: string }> {
   try {
-    if (isMockMode()) { console.log("🧪 [test-mode] ocrContaEnergia mocked"); return mockBillOcr(); }
+    // OCR roda SEMPRE de verdade (Gemini), inclusive no simulador — usuário pediu
+    // paridade total com o fluxo original. Mock OCR removido em 2026-05-25.
     if (!geminiApiKey) return { sucesso: false, erro: "GEMINI_API_KEY não configurada" };
 
     const img = await baixarImagem(imagemUrl, base64FromEvolution, mediaMessage);
@@ -622,7 +623,7 @@ export async function ocrDocumentoFrenteVerso(
   frenteUrl: string | null, versoUrl: string | null, tipo: string,
   geminiApiKey: string, frenteBase64?: string, frenteMediaMsg?: any, versoBase64?: string
 ): Promise<{ sucesso: boolean; dados?: any; erro?: string }> {
-  if (isMockMode()) { console.log("🧪 [test-mode] ocrDocumentoFrenteVerso mocked"); return mockDocOcr(); }
+  // OCR sempre real (Gemini) — simulador agora roda igual fluxo original.
   console.log(`🔍 ocrDocumentoFrenteVerso: frenteB64=${!!frenteBase64}, versoB64=${!!versoBase64}, frenteUrl=${frenteUrl?.substring(0,60)}, versoUrl=${versoUrl?.substring(0,60)}`);
 
   // OCR da frente — passa frenteBase64 e frenteMediaMsg
