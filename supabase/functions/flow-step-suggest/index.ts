@@ -136,7 +136,20 @@ Foque em mover o lead pra frente (fechamento, captação de dados, ou objeção)
 
     let parsed: { suggestions?: Suggestion[] } = {};
     try { parsed = JSON.parse(raw); } catch {
-      return json({ error: "parse_error", raw: raw.slice(0, 200) }, 500);
+      // Tenta reparar JSON truncado: corta no último item completo e fecha braces/brackets
+      try {
+        let s = raw;
+        const lastObjEnd = s.lastIndexOf("}");
+        if (lastObjEnd > 0) s = s.slice(0, lastObjEnd + 1);
+        const opensArr = (s.match(/\[/g) || []).length;
+        const closesArr = (s.match(/\]/g) || []).length;
+        const opensObj = (s.match(/\{/g) || []).length;
+        const closesObj = (s.match(/\}/g) || []).length;
+        s = s + "]".repeat(Math.max(0, opensArr - closesArr)) + "}".repeat(Math.max(0, opensObj - closesObj));
+        parsed = JSON.parse(s);
+      } catch {
+        return json({ error: "parse_error", raw: raw.slice(0, 200) }, 500);
+      }
     }
     const suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 3) : [];
     return json({ ok: true, suggestions });
