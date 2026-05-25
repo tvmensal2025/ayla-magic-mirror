@@ -293,10 +293,11 @@ Deno.serve(async (req) => {
         const daily = (json.data || []).slice().sort((a: any, b: any) => (a.date_start > b.date_start ? -1 : 1));
         let zeroStreak = 0;
         for (const row of daily) {
-          const l = Number((row.actions || []).find((a: any) => a.action_type === "lead")?.value || 0);
-          const c2 = Number((row.actions || []).find((a: any) => a.action_type === "onsite_conversion.messaging_conversation_started_7d")?.value || 0);
+          const l = sumActions(row.actions, LEAD_ACTIONS);
+          const c2 = sumActions(row.actions, CONV_ACTIONS);
           if (l + c2 === 0) zeroStreak++; else break;
         }
+
         // Auto-pause também por saldo da wallet abaixo do limite
         const wallet = await getWallet(c.consultant_id);
         const lowBalance = wallet && wallet.balance <= wallet.auto_pause_at;
