@@ -98,7 +98,8 @@ export async function ocrContaEnergia(
   mediaMessage?: any
 ): Promise<{ sucesso: boolean; dados?: any; erro?: string }> {
   try {
-    if (isMockMode()) { console.log("🧪 [test-mode] ocrContaEnergia mocked"); return mockBillOcr(); }
+    // OCR roda SEMPRE de verdade (Gemini), inclusive no simulador — usuário pediu
+    // paridade total com o fluxo original. Mock OCR removido em 2026-05-25.
     if (!geminiApiKey) return { sucesso: false, erro: "GEMINI_API_KEY não configurada" };
 
     const img = await baixarImagem(imagemUrl, base64FromEvolution, mediaMessage);
