@@ -2134,13 +2134,18 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
   // Só cai pra próximo por posição como último recurso.
   if (hasCapture) {
     let nextByConfig: DbStep | undefined;
+    // PRIORIDADE: fallback.success_goto_step_id (override pós-captura-sucesso configurado pelo admin)
+    // → fallback.goto_step_id (modo goto tradicional)
+    // → próximo por position (último recurso).
+    const successId = (currentStep.fallback as any)?.success_goto_step_id || null;
     const fbId = currentStep.fallback?.mode === "goto" ? currentStep.fallback.goto_step_id : null;
-    if (fbId) nextByConfig = dbSteps.find((s) => s.is_active && s.id === fbId);
+    const preferredId = successId || fbId;
+    if (preferredId) nextByConfig = dbSteps.find((s) => s.is_active && s.id === preferredId);
     if (!nextByConfig) {
       nextByConfig = dbSteps.find((s) => s.is_active && s.position > currentStep.position);
     }
     if (nextByConfig) {
-      console.log(`[conversational] auto-advance por captura ${currentStep.step_key} → ${nextByConfig.step_key} (intents=${captureIntents.join(",")}, source=${fbId ? "fallback.goto" : "position"})`);
+      console.log(`[conversational] auto-advance por captura ${currentStep.step_key} → ${nextByConfig.step_key} (intents=${captureIntents.join(",")}, source=${successId ? "fallback.success_goto" : fbId ? "fallback.goto" : "position"})`);
       if (nextByConfig.step_key === "cadastro" || CADASTRO_STEPS.has(nextByConfig.step_key)) {
         const docStep = findActiveByType("capture_documento");
         if (docStep) return _finalize(stepKey, await goToStep(docStep, restoreDetourUpdates));
