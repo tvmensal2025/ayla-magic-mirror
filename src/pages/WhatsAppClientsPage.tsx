@@ -92,6 +92,7 @@ export default function WhatsAppClientsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [originTab, setOriginTab] = useState<OriginTab>("whatsapp_lead");
   const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [consultantId, setConsultantId] = useState<string | null>(null);
 
   useEffect(() => { loadCustomers(); }, []);
 
