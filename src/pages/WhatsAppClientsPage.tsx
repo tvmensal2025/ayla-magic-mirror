@@ -103,6 +103,7 @@ export default function WhatsAppClientsPage() {
       if (!user) { toast.error("Usuário não autenticado"); return; }
       const { data: consultant } = await supabase.from("consultants").select("id").eq("id", user.id).single();
       if (!consultant) { toast.error("Consultor não encontrado"); return; }
+      setConsultantId(consultant.id);
       const { data, error } = await supabase.from("customers").select("*").eq("consultant_id", consultant.id).order("created_at", { ascending: false });
       if (error) throw error;
       setCustomers((data as any) || []);
