@@ -3112,6 +3112,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       try {
         // 🧪 testMode: usa mock de OCR para não depender do Gemini nem de URL pública
         if (isCustomerSandbox(customer)) {
+          // 🔍 DEBUG2: confirma que entrou no caminho mock
+          try {
+            await supabase.from("customers").update({
+              error_message: `mock_path: entered isCustomerSandbox=true at ${new Date().toISOString()}`,
+            }).eq("id", customer.id);
+          } catch (_) { /* noop */ }
           const { mockBillOcr } = await import("../../_shared/test-mode.ts");
           const ocrData = mockBillOcr();
           console.log("🧪 [test-mode] OCR conta mock:", JSON.stringify(ocrData).substring(0, 200));
