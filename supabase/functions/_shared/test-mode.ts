@@ -32,11 +32,22 @@ export interface TestStore {
    * respeitando quiet hours normalmente.
    */
   bypassQuietHours?: boolean;
+  /**
+   * Quando true → simulador pediu pra encurtar as pausas artificiais entre
+   * mensagens/mídias (sleepForMedia etc). Mantém OCR/Gemini/Portal/Whapi
+   * 100% reais — apenas a cadência humana fica curta.
+   */
+  fastClock?: boolean;
 }
 
 /** True se a run atual pediu para ignorar quiet hours (simulador). */
 export function shouldBypassQuietHours(): boolean {
   return botRequestStore.getStore()?.bypassQuietHours === true;
+}
+
+/** True se a run atual quer cadência acelerada (simulador). */
+export function shouldUseFastClock(): boolean {
+  return botRequestStore.getStore()?.fastClock === true;
 }
 
 export const botRequestStore = new AsyncLocalStorage<TestStore>();
