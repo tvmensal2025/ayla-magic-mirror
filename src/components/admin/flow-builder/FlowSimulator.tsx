@@ -503,9 +503,8 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
 
         <p className="flex items-start gap-1 text-[10px] text-muted-foreground">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-          {otpPhoneDigits()
-            ? <>📲 <strong>OTP real ativo:</strong> ao chegar em <code>portal_submitting</code>, o Worker é chamado de verdade e o SMS chega em {otpRealPhone}. Resto do fluxo continua mockado/rápido.</>
-            : <>Conversa sandbox — não polui CRM, métricas nem envia WhatsApp real. Use o anexo (📎) para simular envio de foto da conta de luz ou documento. O OCR roda em modo mock (dados fictícios pré-definidos). Clique em <strong>👁 Dados</strong> para ver o que foi coletado.</>}
+          Conversa sandbox — não polui CRM, métricas nem envia WhatsApp real. OCR e Portal rodam em modo mock (dados fictícios pré-definidos), então cada turno volta em ~1-2s. Use o anexo (📎) para simular foto da conta de luz ou documento. Clique em <strong>👁 Dados</strong> para ver o que foi coletado.
+
 
         </p>
       </DialogContent>
