@@ -290,7 +290,10 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const phoneNumber = chat.remoteJid.split("@")[0];
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
+    <div className="flex-1 flex flex-col min-h-0 [body[data-captacao-bar-open]_&]:pb-11">
+      {/* O `pb-11` acima reserva espaço quando a barra minimizada da
+          Captação (h-11 fixed bottom-0) está visível, pra ela nunca
+          cobrir o composer / botão de enviar. */}
       {/* Chat header */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-card">
         <Avatar className="h-9 w-9">
