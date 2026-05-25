@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import StepSuggestions from "./StepSuggestions";
 import {
   Step, Transition, Capture, BUTTON_PRESETS, STEP_TYPE_OPTIONS, getButtons, isOcrStep, isAiAnswerStep,
 } from "./flowTypes";
+import { supabase } from "@/integrations/supabase/client";
 
 
 
