@@ -30,7 +30,13 @@ serve(async (req) => {
     // Convert PDF to base64
     const arrayBuffer = await file.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
-    const base64 = btoa(String.fromCharCode(...bytes));
+    // Chunked base64 encoding — evita "Maximum call stack size exceeded" em PDFs grandes
+    let binary = "";
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK) as unknown as number[]);
+    }
+    const base64 = btoa(binary);
 
     // Use Gemini (multimodal) to extract ALL text from the PDF
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
