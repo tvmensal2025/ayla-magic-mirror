@@ -94,11 +94,20 @@ Deno.serve(async (req) => {
     const chatId = `${phone}@s.whatsapp.net`;
 
     // ── 1) Garante customer (sandbox OU real-test) ──
-    let { data: customer } = await svc
+    // Modo Real NUNCA pode reaproveitar um cliente real antigo do mesmo telefone:
+    // ele precisa usar/criar somente registros marcados como is_test_lead=true.
+    let customerQuery = svc
       .from("customers")
       .select("*")
       .eq("phone_whatsapp", phone)
-      .maybeSingle();
+      .eq("consultant_id", consultantId)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    customerQuery = realMode
+      ? customerQuery.eq("is_test_lead", true)
+      : customerQuery.eq("is_sandbox", true);
+    const { data: customerRows } = await customerQuery;
+    let customer = customerRows?.[0] || null;
 
     if (!customer) {
       const { data: created, error: createErr } = await svc
@@ -109,6 +118,7 @@ Deno.serve(async (req) => {
           name: realMode ? "Lead Teste Real" : "Simulador Sandbox",
           is_sandbox: !realMode,
           is_test_lead: realMode,
+          capture_mode: "auto",
           customer_origin: "whatsapp_lead",
           flow_variant: variant || "A",
           status: "pending",
@@ -153,7 +163,7 @@ Deno.serve(async (req) => {
       patch.chat_cleared_at = new Date().toISOString();
       patch.status = "pending";
       // Limpa todos os dados coletados do lead para simular um lead novo
-      patch.name = "Simulador Sandbox";
+      patch.name = realMode ? "Lead Teste Real" : "Simulador Sandbox";
       patch.name_source = null;
       patch.cpf = null;
       patch.rg = null;

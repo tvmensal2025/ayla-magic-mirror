@@ -403,13 +403,17 @@ Deno.serve(async (req) => {
     // "invisíveis" e o código cria um customer NOVO com step=welcome,
     // disparando o áudio inicial de novo. Sempre buscar o registro mais
     // recente do telefone e decidir o que fazer baseado no status.
-    let { data: activeRecords } = await supabase
+    let activeQuery = supabase
       .from("customers")
       .select("*")
       .eq("phone_whatsapp", phone)
       .eq("consultant_id", superAdminConsultantId)
       .order("created_at", { ascending: false })
       .limit(1);
+    // Modo Real do simulador deve isolar o lead de teste e nunca reaproveitar
+    // um customer real antigo do mesmo telefone (ex.: capture_mode=manual).
+    if (realMode) activeQuery = activeQuery.eq("is_test_lead", true);
+    let { data: activeRecords } = await activeQuery;
 
     let customer = activeRecords?.[0] || null;
 
@@ -459,18 +463,20 @@ Deno.serve(async (req) => {
           consultant_id: superAdminConsultantId,
           status: "pending",
           conversation_step: "welcome",
+          ...(realMode ? { is_test_lead: true, is_sandbox: false, capture_mode: "auto" } : {}),
           ...(pushedName ? { name: pushedName, name_source: "whatsapp_profile" } : {}),
         })
         .select().single();
       if (error) {
-        const { data: fallback } = await supabase
+        let fallbackQuery = supabase
           .from("customers")
           .select("*")
           .eq("phone_whatsapp", phone)
           .eq("consultant_id", superAdminConsultantId)
           .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(1);
+        if (realMode) fallbackQuery = fallbackQuery.eq("is_test_lead", true);
+        const { data: fallback } = await fallbackQuery.maybeSingle();
         if (fallback) {
           // Mesma regra do bloco principal: NÃO resetar leads pós-cadastro para welcome.
           customer = fallback;
@@ -813,7 +819,7 @@ Deno.serve(async (req) => {
 
     // ─── Modo Captação (manual): dispara IA p/ sugerir campos em background ──
     try {
-      if ((customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
+      if (!realMode && (customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
         const fnUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/capture-extract`;
         // fire-and-forget
         fetch(fnUrl, {
@@ -832,7 +838,7 @@ Deno.serve(async (req) => {
     // ─── Modo Captação manual: salvar resposta na ficha e PARAR ─────────
     // O consultor controla o próximo tile. Texto livre do lead não deve rodar
     // o motor conversacional nem avançar automaticamente para o próximo passo.
-    if ((customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
+    if (!realMode && (customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
       try {
         const multi = extractMultiField(messageText);
         const patch = buildMultiFieldPatch(customer as any, multi);
@@ -1019,7 +1025,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    if ((customer as any).capture_mode === "manual" && hasAudio && messageText && !isFile) {
+    if (!realMode && (customer as any).capture_mode === "manual" && hasAudio && messageText && !isFile) {
       try {
         const multi = extractMultiField(messageText);
         const patch = buildMultiFieldPatch(customer as any, multi);

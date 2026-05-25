@@ -112,7 +112,18 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
       });
       if (error) throw error;
       const out = data as { events?: any[]; customer_state?: any; diagnostic?: any };
-      appendEvents(out.events || []);
+      const nextEvents = out.events || [];
+      appendEvents(nextEvents);
+      if (nextEvents.length === 0 && out.diagnostic && !out.diagnostic.advanced) {
+        setEvents((prev) => [
+          ...prev,
+          {
+            kind: "system",
+            text: `⚠ Motor não avançou (${out.diagnostic.step_before || "—"} → ${out.diagnostic.step_after || "—"}). ${out.diagnostic.webhook_err || "Verifique o modo real/logs."}`,
+            key: k(),
+          },
+        ]);
+      }
       if (out.customer_state) setState(out.customer_state);
       if (out.diagnostic) setDiagnostic(out.diagnostic);
     } catch (e) {
