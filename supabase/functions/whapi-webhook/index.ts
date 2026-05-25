@@ -819,7 +819,7 @@ Deno.serve(async (req) => {
 
     // ─── Modo Captação (manual): dispara IA p/ sugerir campos em background ──
     try {
-      if (!realMode && (customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
+      if ((customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
         const fnUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/capture-extract`;
         // fire-and-forget
         fetch(fnUrl, {
