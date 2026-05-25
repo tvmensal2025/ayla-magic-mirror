@@ -178,11 +178,27 @@ export default function PosVendaKanban({ consultantId }: { consultantId: string 
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-sm rounded-xl"
         />
+        <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+          <SelectTrigger className="w-[240px] rounded-xl">
+            <SelectValue placeholder="Filtrar por consultor" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="mine">Meus clientes (cadastro principal)</SelectItem>
+            <SelectItem value="assigned">Atribuídos a mim</SelectItem>
+            <SelectItem value="all">Todos (meus + atribuídos)</SelectItem>
+            {consultants.filter(c => c.id !== consultantId).map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                Consultor: {c.full_name || c.slug || c.id.slice(0,8)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button variant="outline" size="sm" onClick={runRecompute} disabled={recomputing} className="gap-2 rounded-xl">
           <RefreshCw className={`w-4 h-4 ${recomputing ? "animate-spin" : ""}`} />
           Recalcular colunas (auto)
         </Button>
       </div>
+
 
       {loading ? (
         <div className="text-center py-12 text-sm text-muted-foreground">Carregando…</div>
