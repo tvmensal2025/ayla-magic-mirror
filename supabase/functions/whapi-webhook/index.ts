@@ -1204,7 +1204,7 @@ Deno.serve(async (req) => {
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
           });
       const result = testMode && testRunId
-        ? await botRequestStore.run({ testMode: true, runId: testRunId, supabase, turn: testTurn }, runEngine)
+        ? await botRequestStore.run({ testMode: true, runId: testRunId, supabase, turn: testTurn, realServices }, runEngine)
         : await runEngine();
       reply = result.reply;
       updates = result.updates;
