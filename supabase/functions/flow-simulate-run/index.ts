@@ -164,7 +164,7 @@ Deno.serve(async (req) => {
       patch.chat_cleared_at = new Date().toISOString();
       patch.status = "pending";
       // Limpa todos os dados coletados do lead para simular um lead novo
-      patch.name = realMode ? "Lead Teste Real" : "Simulador Sandbox";
+      patch.name = "Simulador Sandbox";
       patch.name_source = null;
       patch.cpf = null;
       patch.rg = null;
