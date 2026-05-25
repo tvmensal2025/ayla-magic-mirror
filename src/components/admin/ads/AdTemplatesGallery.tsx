@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useUserRole } from "@/hooks/useUserRole";
 import { UseTemplateDialog } from "./UseTemplateDialog";
 import { SmartPublishButton } from "./SmartPublishButton";
+import { TemplateInfoCard } from "./TemplateInfoCard";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -83,68 +84,33 @@ export function AdTemplatesGallery({ consultantId, onPublished }: Props) {
 
   return (
     <>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {items.map((t) => (
-          <Card key={t.id} className={`overflow-hidden flex flex-col ${t.status !== "published" ? "opacity-70" : ""}`}>
-            <div className="aspect-square bg-muted grid grid-cols-3 grid-rows-1 gap-0.5 relative">
-              {t.photos.slice(0, 3).map((p, i) => (
-                <img key={i} src={p.url} alt="" className="w-full h-full object-cover" />
-              ))}
-              {Array.from({ length: Math.max(0, 3 - t.photos.length) }).map((_, i) => (
-                <div key={i} className="bg-muted/50" />
-              ))}
-              {t.status !== "published" && (
-                <div className="absolute top-1 left-1 bg-amber-500/90 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
-                  {t.status === "archived" ? "PAUSADO" : "RASCUNHO"}
-                </div>
-              )}
-              {isSuperAdmin && (
-                <div className="absolute top-1 right-1 flex gap-1">
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    className="h-7 w-7 bg-background/90 backdrop-blur"
-                    onClick={() => handleToggle(t)}
-                    disabled={toggling === t.id}
-                    title={t.status === "published" ? "Pausar modelo" : "Ativar modelo"}
-                  >
-                    {toggling === t.id
-                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      : t.status === "published" ? <Pause className="w-3.5 h-3.5 text-amber-500" /> : <Play className="w-3.5 h-3.5 text-emerald-500" />}
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    className="h-7 w-7 bg-background/90 backdrop-blur text-destructive hover:bg-destructive/10"
-                    onClick={() => setConfirmDelete(t)}
-                    disabled={deleting === t.id}
-                    title="Apagar modelo (SuperAdmin)"
-                  >
-                    {deleting === t.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                  </Button>
-                </div>
-              )}
-            </div>
-            <div className="p-3 space-y-2 flex-1 flex flex-col">
-              <h4 className="font-bold leading-tight">{t.title}</h4>
-              <p className="text-xs text-muted-foreground line-clamp-2 flex-1">{t.headline}</p>
-              <div className="text-[11px] text-muted-foreground flex items-center justify-between">
-                <span>R$ {(t.suggested_daily_budget_cents / 100).toFixed(0)}/dia</span>
-                {t.usage_count > 0 && <span>{t.usage_count} consultor(es) usando</span>}
+          <TemplateInfoCard
+            key={t.id}
+            template={t}
+            mode="use"
+            consultantId={consultantId}
+            onTogglePublish={isSuperAdmin ? () => handleToggle(t) : undefined}
+            onDelete={isSuperAdmin ? () => setConfirmDelete(t) : undefined}
+            busy={toggling === t.id || deleting === t.id}
+            footer={
+              <div className="space-y-1.5">
+                <SmartPublishButton
+                  template={t}
+                  consultantId={consultantId}
+                  onPublished={onPublished}
+                  onFallback={(tpl) => setPicked(tpl)}
+                />
+                <Button size="sm" variant="outline" className="w-full gap-1.5" onClick={() => setPicked(t)}>
+                  <Settings2 className="w-3.5 h-3.5" /> Personalizar antes de publicar
+                </Button>
               </div>
-              <SmartPublishButton
-                template={t}
-                consultantId={consultantId}
-                onPublished={onPublished}
-                onFallback={(tpl) => setPicked(tpl)}
-              />
-              <Button size="sm" variant="outline" className="w-full gap-1.5" onClick={() => setPicked(t)}>
-                <Settings2 className="w-3.5 h-3.5" /> Personalizar
-              </Button>
-            </div>
-          </Card>
+            }
+          />
         ))}
       </div>
+
 
       <UseTemplateDialog
         open={!!picked}

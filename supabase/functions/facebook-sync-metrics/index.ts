@@ -9,6 +9,29 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Meta retorna conversas CTWA em vários action_types dependendo da versão da campanha
+// (legado vs nova messaging objective). Somamos todos os candidatos relevantes.
+const CONV_ACTIONS = [
+  "onsite_conversion.messaging_conversation_started_7d",
+  "onsite_conversion.messaging_first_reply",
+  "onsite_conversion.total_messaging_connection",
+  "messaging_conversation_started_7d",
+  "messaging_first_reply",
+  "total_messaging_connection",
+];
+const LEAD_ACTIONS = ["lead", "onsite_conversion.lead_grouped"];
+
+function sumActions(actions: any[] | undefined, types: string[]): number {
+  if (!Array.isArray(actions)) return 0;
+  let total = 0;
+  for (const a of actions) {
+    if (types.includes(a?.action_type)) total += Number(a?.value || 0);
+  }
+  return total;
+}
+
+
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -127,27 +150,37 @@ Deno.serve(async (req) => {
           for (const row of bp?.data || []) {
             const key = `${row.publisher_platform || "?"}:${row.platform_position || "?"}`;
             const spend = Math.round(parseFloat(row.spend || "0") * 100);
-            const leads = Number((row.actions || []).find((a: any) =>
-              a.action_type === "lead" ||
-              a.action_type === "onsite_conversion.messaging_conversation_started_7d"
-            )?.value || 0);
+            const leadsDirect = sumActions(row.actions, LEAD_ACTIONS);
+            const convs = sumActions(row.actions, CONV_ACTIONS);
+            const leads = leadsDirect > 0 ? leadsDirect : convs;
             const cpl = leads > 0 ? Math.round(spend / leads) : 0;
             cplByPlacement[key] = { spend, leads, cpl };
+
           }
         } catch (be) {
           console.warn("[fb-sync] breakdown placement falhou", c.fb_campaign_id, (be as Error).message);
         }
 
         let totalSpend = 0; let totalLeads = 0; let totalConv = 0; let maxFreq = 0;
+        // Log dos action_types crus na primeira linha para diagnóstico (1ª iteração apenas).
+        let loggedActions = false;
         for (const row of json.data || []) {
           const date = row.date_start;
-          const leads = (row.actions || []).find((a: any) => a.action_type === "lead")?.value || 0;
-          const conv = (row.actions || []).find((a: any) => a.action_type === "onsite_conversion.messaging_conversation_started_7d")?.value || 0;
+          if (!loggedActions && Array.isArray(row.actions) && row.actions.length) {
+            console.info(`[fb-sync] ${c.fb_campaign_id} actions raw types:`,
+              Array.from(new Set(row.actions.map((a: any) => a.action_type))).join(","));
+            loggedActions = true;
+          }
+          const leads = sumActions(row.actions, LEAD_ACTIONS);
+          const conv = sumActions(row.actions, CONV_ACTIONS);
           const regs = (row.actions || []).find((a: any) => a.action_type === "complete_registration")?.value || 0;
           const spend = Math.round(parseFloat(row.spend || "0") * 100);
-          const cpl = leads > 0 ? Math.round(spend / Number(leads)) : 0;
+          // Para CTWA: se não há lead direto, conversa iniciada vira o denominador do CPL.
+          const cplBase = leads > 0 ? leads : conv;
+          const cpl = cplBase > 0 ? Math.round(spend / cplBase) : 0;
           totalSpend += spend; totalLeads += Number(leads); totalConv += Number(conv);
           maxFreq = Math.max(maxFreq, parseFloat(row.frequency || "0"));
+
           // Lê linha existente pra calcular delta de gasto + atividade incremental no período
           const { data: prev } = await admin
             .from("facebook_metrics_daily")
@@ -260,10 +293,11 @@ Deno.serve(async (req) => {
         const daily = (json.data || []).slice().sort((a: any, b: any) => (a.date_start > b.date_start ? -1 : 1));
         let zeroStreak = 0;
         for (const row of daily) {
-          const l = Number((row.actions || []).find((a: any) => a.action_type === "lead")?.value || 0);
-          const c2 = Number((row.actions || []).find((a: any) => a.action_type === "onsite_conversion.messaging_conversation_started_7d")?.value || 0);
+          const l = sumActions(row.actions, LEAD_ACTIONS);
+          const c2 = sumActions(row.actions, CONV_ACTIONS);
           if (l + c2 === 0) zeroStreak++; else break;
         }
+
         // Auto-pause também por saldo da wallet abaixo do limite
         const wallet = await getWallet(c.consultant_id);
         const lowBalance = wallet && wallet.balance <= wallet.auto_pause_at;
