@@ -403,13 +403,17 @@ Deno.serve(async (req) => {
     // "invisíveis" e o código cria um customer NOVO com step=welcome,
     // disparando o áudio inicial de novo. Sempre buscar o registro mais
     // recente do telefone e decidir o que fazer baseado no status.
-    let { data: activeRecords } = await supabase
+    let activeQuery = supabase
       .from("customers")
       .select("*")
       .eq("phone_whatsapp", phone)
       .eq("consultant_id", superAdminConsultantId)
       .order("created_at", { ascending: false })
       .limit(1);
+    // Modo Real do simulador deve isolar o lead de teste e nunca reaproveitar
+    // um customer real antigo do mesmo telefone (ex.: capture_mode=manual).
+    if (realMode) activeQuery = activeQuery.eq("is_test_lead", true);
+    let { data: activeRecords } = await activeQuery;
 
     let customer = activeRecords?.[0] || null;
 
