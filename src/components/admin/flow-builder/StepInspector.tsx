@@ -595,6 +595,7 @@ export default function StepInspector({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">⚠ Sem destino</SelectItem>
+                            <SelectItem value="special:ai">🤖 Responder com IA (Gemini)</SelectItem>
                             <SelectItem value="special:humano">👤 Falar com humano</SelectItem>
                             <SelectItem value="special:cadastro">📝 Pular para cadastro</SelectItem>
                             {steps
