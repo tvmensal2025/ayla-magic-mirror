@@ -2657,6 +2657,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (sp === "humano") {
                 return { reply: `Tranquilo! Vou chamar ${nomeRepresentante || "um consultor"} pra te ajudar por aqui 🙌`, updates: { conversation_step: "aguardando_humano", bot_paused: true, bot_paused_reason: "flow_button_humano", bot_paused_at: new Date().toISOString(), __inline_sent: emittedCurrent || undefined } as any };
               }
+              if (sp === "ai") {
+                // 🤖 Regra "Responder com IA": Gemini responde a dúvida e
+                // reconduz ao passo atual. NÃO faz handoff humano.
+                console.log(`[custom-step-resolver] special:ai step=${stepRow.step_key} → respondAndReentry`);
+                return await respondAndReentry({
+                  reason: "custom_step_no_match",
+                  questionText: messageText,
+                  reentryFull: String(stepRow.message_text || ""),
+                });
+              }
               if (sp === "cadastro") {
                 return { reply: "", updates: { conversation_step: "aguardando_conta", sales_phase: "fechamento", __inline_sent: emittedCurrent || undefined } as any };
               }
