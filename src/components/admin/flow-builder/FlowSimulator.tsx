@@ -208,10 +208,10 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
           </DialogDescription>
         </DialogHeader>
 
-        {/* ── Telefone OTP real (opcional) ── */}
+        {/* ── Telefone OTP real (opcional, registrado no customer) ── */}
         <div className="rounded-md border border-border bg-muted/20 p-2 text-xs">
           <div className="flex items-center justify-between gap-2">
-            <span className="font-semibold">📲 Telefone para OTP real (opcional)</span>
+            <span className="font-semibold">📲 Telefone p/ OTP (opcional)</span>
             <Input
               value={otpRealPhone}
               onChange={(e) => setOtpRealPhone(e.target.value)}
@@ -221,10 +221,11 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
             />
           </div>
           <p className="mt-1 text-[10px] text-muted-foreground">
-            Vazio = OTP mockado (digite qualquer 4-6 dígitos). Preenchido = quando o fluxo chegar em <code>portal_submitting</code>, o Worker é chamado de verdade e o SMS da distribuidora chega no celular acima. As mensagens do bot continuam apenas no simulador.
+            Simulador roda 100% mock (rápido). O telefone fica salvo em <code>customers.otp_test_phone</code> e poderá ser usado pelo Portal Worker quando o passo de OTP for ligado ao mundo real.
             {!otpPhoneValid() && <span className="text-red-500"> Telefone inválido — use 55 + DDD + número (12 ou 13 dígitos).</span>}
           </p>
         </div>
+
 
 
 
