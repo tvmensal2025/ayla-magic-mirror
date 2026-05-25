@@ -702,19 +702,48 @@ Deno.serve(async (req) => {
     // ─── 🔇 BOT PAUSADO (handoff humano ativo) ────────────────────────
     // Respeita bot_paused, assigned_human_id E bot_paused_until via helper único.
     if (isCustomerPausedByHuman(customer as any)) {
-      await supabase.from("conversations").insert({
-        customer_id: customer.id,
-        message_direction: "inbound",
-        message_text: messageText || (hasAudio ? "[áudio]" : "[arquivo]"),
-        message_type: hasAudio ? "audio" : (isFile ? "image" : "text"),
-        conversation_step: customer.conversation_step,
-      });
-      const _pausedUntil = (customer as any).bot_paused_until && new Date((customer as any).bot_paused_until) > new Date();
-      const _reason = (customer as any).bot_paused_reason || ((customer as any).assigned_human_id ? "humano_assumiu" : (_pausedUntil ? "paused_until" : "manual"));
-      console.log(`🔇 Bot pausado para ${phone} (flag=${(customer as any).bot_paused === true}, human=${(customer as any).assigned_human_id || "—"}, until=${(customer as any).bot_paused_until || "—"}, reason=${_reason}) — ignorando msg`);
-      return new Response(JSON.stringify({ ok: true, msg: "bot_paused", reason: _reason, paused_until: (customer as any).bot_paused_until || null }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      // Auto-unpause em falso positivo do bot-stuck-recovery: se a pausa veio
+      // do cron automático ("lead_travado_recovery_*") e o lead acabou de
+      // mandar mensagem (ou apertar botão), ele claramente NÃO está travado.
+      // Despausamos e seguimos o fluxo normalmente — senão flow D/quick replies
+      // ficam mudos.
+      const _autoReason = String((customer as any).bot_paused_reason || "").toLowerCase();
+      const _isAutoStuckPause = _autoReason.startsWith("lead_travado_recovery")
+        && !(customer as any).assigned_human_id;
+      if (_isAutoStuckPause) {
+        const { error: unpErr } = await supabase
+          .from("customers")
+          .update({
+            bot_paused: false,
+            bot_paused_reason: null,
+            bot_paused_until: null,
+            bot_paused_at: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", customer.id);
+        if (unpErr) {
+          console.error("⚠️ falha ao despausar lead_travado_recovery:", unpErr);
+        } else {
+          console.log(`▶️ Auto-despausado ${phone} (reason=lead_travado_recovery, lead respondeu) — bot volta`);
+          (customer as any).bot_paused = false;
+          (customer as any).bot_paused_reason = null;
+          (customer as any).bot_paused_until = null;
+        }
+      } else {
+        await supabase.from("conversations").insert({
+          customer_id: customer.id,
+          message_direction: "inbound",
+          message_text: messageText || (hasAudio ? "[áudio]" : "[arquivo]"),
+          message_type: hasAudio ? "audio" : (isFile ? "image" : "text"),
+          conversation_step: customer.conversation_step,
+        });
+        const _pausedUntil = (customer as any).bot_paused_until && new Date((customer as any).bot_paused_until) > new Date();
+        const _reason = (customer as any).bot_paused_reason || ((customer as any).assigned_human_id ? "humano_assumiu" : (_pausedUntil ? "paused_until" : "manual"));
+        console.log(`🔇 Bot pausado para ${phone} (flag=${(customer as any).bot_paused === true}, human=${(customer as any).assigned_human_id || "—"}, until=${(customer as any).bot_paused_until || "—"}, reason=${_reason}) — ignorando msg`);
+        return new Response(JSON.stringify({ ok: true, msg: "bot_paused", reason: _reason, paused_until: (customer as any).bot_paused_until || null }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // ─── ✅ Captação manual: cliente respondendo confirmação de dados ────
