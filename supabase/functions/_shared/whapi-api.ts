@@ -8,6 +8,7 @@
 
 import { fetchWithTimeout, logStructured, TIMEOUT_WHAPI } from "./utils.ts";
 import { captureError } from "./sentry.ts";
+import { shouldUseFastClock } from "./test-mode.ts";
 
 export interface WhapiButton {
   id: string;
@@ -53,6 +54,7 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
   // Whapi mantém o status até `typing_time` segundos antes de entregar a mensagem.
   // Limite seguro: 1s mínimo, 15s máximo.
   function typingTimeFor(text: string): number {
+    if (shouldUseFastClock()) return 1; // simulador real → typing mínimo
     const len = (text || "").length;
     const ms = 1500 + len * 35; // ~mesma curva do humanPace
     return Math.max(1, Math.min(15, Math.round(ms / 1000)));
