@@ -194,10 +194,46 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
         <DialogHeader>
           <DialogTitle>🎬 Simulador de Fluxo — motor real de produção</DialogTitle>
           <DialogDescription>
-            Roda o mesmo runBotFlow/runConversationalFlow da produção num customer sandbox.
-            Nada toca o CRM, métricas, alertas ou WhatsApp real.
+            {realMode
+              ? "MODO REAL ligado: OCR, Portal Worker, OTP e link facial usam serviços REAIS. WhatsApp envia mensagens reais para o telefone abaixo."
+              : "Sandbox: roda o mesmo runBotFlow/runConversationalFlow da produção, com OCR/Portal mockados. Nada toca o CRM ou WhatsApp real."}
           </DialogDescription>
         </DialogHeader>
+
+        {/* ── Toggle Modo Real ── */}
+        <div className={`rounded-md border p-2 text-xs ${realMode ? "border-red-500/40 bg-red-500/5" : "border-border bg-muted/20"}`}>
+          <div className="flex items-center justify-between gap-2">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={realMode}
+                onChange={(e) => setRealMode(e.target.checked)}
+                disabled={busy}
+                className="h-3.5 w-3.5"
+              />
+              <span className="font-semibold">
+                {realMode ? "🔴 Modo Real ATIVO" : "⚪ Ligar Modo Real (100% serviços reais)"}
+              </span>
+            </label>
+            {realMode && (
+              <Input
+                value={realPhone}
+                onChange={(e) => setRealPhone(e.target.value)}
+                placeholder="55 11 99999-9999"
+                disabled={busy}
+                className="h-7 max-w-[200px] text-[11px]"
+              />
+            )}
+          </div>
+          {realMode && (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              ⚠ Envia WhatsApp REAL ao número acima. OCR (Gemini), Portal Worker (Playwright na VPS), OTP e link de assinatura serão reais.
+              {!realPhoneValid() && <span className="text-red-500"> Telefone inválido — use 55 + DDD + número (12 ou 13 dígitos).</span>}
+            </p>
+          )}
+        </div>
+
+
 
         <div className="flex items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2 flex-wrap">
