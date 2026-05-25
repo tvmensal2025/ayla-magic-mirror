@@ -195,7 +195,7 @@ export async function matchQA(
 }
 
 async function sleepForMedia(kind: string, _durationSec?: number | null, delayBeforeMs?: number | null): Promise<void> {
-  if (isTestMode()) return; // 🧪 modo teste: zero espera
+  if (isMockMode()) return; // 🧪 modo teste: zero espera
   // ⚠️ ANTES esperávamos a duração inteira do áudio/vídeo antes da próxima mídia.
   // Isso fazia a Edge Function estourar 60-120s, dar timeout no Whapi e o passo
   // nunca avançava. Agora usamos pausa curta: o Whapi já entrega na ordem.
@@ -464,7 +464,7 @@ async function sendStepMedia(
       // Teto duro de 12s para não estourar o limite de 60s da Edge Function
       // quando uma sequência tem 4+ itens. Consultor que precisa de pausa
       // maior deve quebrar em dois passos.
-      if (!isTestMode()) {
+      if (!isMockMode()) {
         const wait = Math.max(0, Math.min(item.delayMs, 12_000));
         if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       }
@@ -535,7 +535,7 @@ async function sendStepMedia(
     // O teto duro de 12s evita estourar o limite de 60s da Edge Function
     // mesmo com 5+ mídias na sequência.
     const configuredDelay = Number(m.delay_before_ms || 0);
-    if (!isTestMode()) {
+    if (!isMockMode()) {
       if (configuredDelay > 0) {
         const wait = Math.min(configuredDelay, 12_000);
         await new Promise((r) => setTimeout(r, wait));
@@ -826,7 +826,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     !ctx.customer.conversation_step ||
     ctx.customer.conversation_step === "welcome" ||
     ctx.customer.conversation_step === "menu_inicial";
-  if (isFirstMessage && !isTestMode()) {
+  if (isFirstMessage && !isMockMode()) {
     try {
       const { data: flowRow } = await ctx.supabase
         .from("bot_flows")
@@ -1663,7 +1663,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
 
     // Texto ainda não enviado: aplica text_delay e devolve como reply (asReply)
     // ou envia inline como cascade (último recurso, sem ordem configurada).
-    if (textDelay > 0 && !isTestMode()) {
+    if (textDelay > 0 && !isMockMode()) {
       await new Promise((r) => setTimeout(r, textDelay));
     }
     if (asReply) {
