@@ -144,8 +144,10 @@ Deno.serve(async (req) => {
       bot_paused_reason: null,
       assigned_human_id: null,
       do_not_contact: false,
-      is_sandbox: !realMode,
-      is_test_lead: realMode,
+      is_sandbox: true,
+      is_test_lead: false,
+      otp_test_phone: otpRealPhone,
+
       consultant_id: consultantId,
       status: customer.status === "complete" || customer.status === "active" ? "pending" : (customer.status || "pending"),
       updated_at: new Date().toISOString(),
