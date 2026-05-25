@@ -413,12 +413,22 @@ Deno.serve(async (req) => {
       sender = createEvolutionSender(evolutionUrl, evolutionKey, instanceName);
     }
 
-    // Build variables for text rendering
+    // Build variables for text rendering. Carrega nome do representante
+    // (primeiro nome) — sem isso {{representante}} vira "" e o cleanup
+    // remove o `* *` à volta, sumindo "do Rafael" no welcome do fluxo.
+    let _repName = "";
+    try {
+      const { data: _consultant } = await supabase
+        .from("consultants").select("name").eq("id", body.consultantId).maybeSingle();
+      const _full = String((_consultant as any)?.name || "").trim();
+      _repName = _full.split(/\s+/)[0] || _full;
+    } catch (_) { /* best-effort */ }
     const renderedText = (step as any).message_text
       ? renderTemplateVars(String((step as any).message_text), {
           name: (customer as any).name || "",
           phone: (customer as any).phone_whatsapp || "",
           cpf: (customer as any).cpf || "",
+          representante: _repName,
           valor_conta: (customer as any).electricity_bill_value,
         })
       : "";
