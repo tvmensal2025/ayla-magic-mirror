@@ -19,6 +19,8 @@ import StepCard from "@/components/admin/flow-builder/StepCard";
 import StepInspector from "@/components/admin/flow-builder/StepInspector";
 import WhatsAppPreview from "@/components/admin/flow-builder/WhatsAppPreview";
 import FlowTemplatesDialog from "@/components/admin/flow-builder/FlowTemplatesDialog";
+import CreateFlowFromTemplateDialog from "@/components/admin/flow-builder/CreateFlowFromTemplateDialog";
+import AiPreferencesCard from "@/components/admin/flow-builder/AiPreferencesCard";
 import VariantDistributionBar from "@/components/admin/flow-builder/VariantDistributionBar";
 import FlowSimulator from "@/components/admin/flow-builder/FlowSimulator";
 import { useFlowValidation } from "@/components/admin/flow-builder/useFlowValidation";
@@ -52,6 +54,7 @@ export default function FluxoBuilder() {
   const [mediaCounts, setMediaCounts] = useState<Record<string, { audio: number; image: number; video: number }>>({});
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
+  const [createFromTemplateOpen, setCreateFromTemplateOpen] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -311,6 +314,16 @@ export default function FluxoBuilder() {
               <Sparkles className="mr-1 h-3 w-3" />
               Templates
             </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => setCreateFromTemplateOpen(true)}
+              disabled={!userId}
+              title="Criar um fluxo novo do zero usando blocos prontos (OCR de conta, documento, IA de dúvidas)"
+            >
+              <Plus className="mr-1 h-3 w-3" />
+              Novo fluxo
+            </Button>
           </div>
         </div>
 
@@ -378,9 +391,10 @@ export default function FluxoBuilder() {
           </Button>
         </section>
 
-        {/* Coluna direita — preview WhatsApp */}
-        <aside className="hidden lg:block">
+        {/* Coluna direita — preview WhatsApp + preferências de IA */}
+        <aside className="hidden space-y-3 lg:block">
           <WhatsAppPreview step={selected} steps={steps} consultantName={consultantName} />
+          {userId && <AiPreferencesCard consultantId={userId} />}
         </aside>
       </main>
 
@@ -407,6 +421,17 @@ export default function FluxoBuilder() {
           flowId={flowId}
           currentMaxPosition={maxPosition}
           onApplied={() => reload(userId, editingVariant)}
+        />
+      )}
+
+      {/* Criar fluxo do zero a partir de blocos prontos */}
+      {userId && (
+        <CreateFlowFromTemplateDialog
+          open={createFromTemplateOpen}
+          onOpenChange={setCreateFromTemplateOpen}
+          consultantId={userId}
+          defaultVariant={editingVariant}
+          onCreated={() => reload(userId, editingVariant)}
         />
       )}
 

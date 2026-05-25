@@ -1164,6 +1164,65 @@ Deno.serve(async (req) => {
         (customer as any).conversation_step = routed.step;
       }
 
+      // 🩹 AUTO-CURA DE STEP ÓRFÃO ENTRE VARIANTES (2026-05-25)
+      // Bug recorrente: consultor publica nova variante depois que leads já
+      // estavam em outra. Os leads ficam com `flow_variant='X'` mas
+      // `conversation_step` apontando para UUID de outro fluxo. Como o motor
+      // carrega só o fluxo da variant atual, o UUID nunca é resolvido e o lead
+      // trava em silêncio. Solução: resetar para welcome (firstActive).
+      const _stepRaw = stripPrefix((customer as any).conversation_step || "");
+      const _looksLikeFlowStep = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(_stepRaw)
+        || _stepRaw.startsWith("passo_");
+      const _isCadastroStepGuard = CADASTRO_STEPS.has(_stepRaw);
+      if (_looksLikeFlowStep && !_isCadastroStepGuard) {
+        try {
+          const variant = String((customer as any)?.flow_variant || "A").toUpperCase();
+          const { data: stepLookup } = await supabase
+            .from("bot_flow_steps")
+            .select("id, flow_id, is_active, bot_flows!inner(variant, is_active, consultant_id)")
+            .or(`id.eq.${_stepRaw},step_key.eq.${_stepRaw}`)
+            .eq("is_active", true)
+            .eq("bot_flows.is_active", true)
+            .eq("bot_flows.consultant_id", instanceData.consultant_id)
+            .eq("bot_flows.variant", variant)
+            .limit(1);
+          const found = Array.isArray(stepLookup) && stepLookup.length > 0;
+          if (!found) {
+            console.warn(
+              `🩹 [step-mismatch-cure] customer=${customer.id} step="${_stepRaw}" ` +
+              `variant=${variant} → step não pertence ao fluxo desta variant. ` +
+              `Resetando para welcome.`
+            );
+            try {
+              await supabase.from("customers")
+                .update({
+                  conversation_step: "welcome",
+                  previous_conversation_step: customer.conversation_step,
+                  custom_step_retries: 0,
+                  custom_step_retries_step: null,
+                  last_custom_prompt_at: null,
+                })
+                .eq("id", customer.id);
+              try {
+                await supabase.from("bot_step_transitions").insert({
+                  customer_id: customer.id,
+                  consultant_id: instanceData.consultant_id,
+                  from_step: _stepRaw,
+                  to_step: "welcome",
+                  reason: `step_variant_mismatch:${variant}`,
+                  intent: "auto_cure",
+                });
+              } catch (_) { /* coluna reason pode não existir ainda */ }
+              (customer as any).conversation_step = "welcome";
+            } catch (e) {
+              console.warn("[step-mismatch-cure] persist falhou:", (e as Error).message);
+            }
+          }
+        } catch (e) {
+          console.warn("[step-mismatch-cure] lookup falhou:", (e as Error).message);
+        }
+      }
+
       // 🚀 FONTE ÚNICA DE VERDADE: Fluxo da Camila (DB) controla TODO step
       // que não pertence ao pipeline de cadastro. Se houver fluxo ativo + steps,
       // força engine=flow mesmo que o step legacy esteja setado.

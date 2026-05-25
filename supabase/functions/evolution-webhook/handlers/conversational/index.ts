@@ -38,9 +38,15 @@ interface DbCapture {
 }
 
 interface DbFallback {
-  mode?: "repeat" | "goto" | "ai";
+  mode?: "repeat" | "goto" | "ai" | "ai_answer" | "retry" | "handoff";
   goto_step_id?: string | null;
   ai_prompt?: string | null;
+  after_ai?: "stay" | "advance";
+  max_retries?: number;
+  retry_text?: string | null;
+  on_fail?: string | null;
+  handoff_reason?: string | null;
+  then?: string | null;
 }
 
 interface DbStep {
@@ -247,6 +253,8 @@ async function aiDecideFallback(
   supabase?: any,
 ): Promise<string | null> {
   if (!geminiApiKey || !prompt) return null;
+  // 🧪 modo teste/sandbox: pula LLM (gasta 4-7s por turno).
+  if (isTestMode()) return null;
   // Verifica cooldown: persistente (banco, multi-container) se supabase disponível,
   // senão usa apenas o cache local.
   const inCooldown = supabase
@@ -1879,7 +1887,37 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     }
     if (t.goto_special === "repeat" || (!t.goto_step_id && !t.goto_special)) return repeatCurrent();
     const nextStep = dbSteps.find((s) => s.id === t.goto_step_id);
-    if (!nextStep || !nextStep.is_active) return repeatCurrent();
+    if (!nextStep || !nextStep.is_active) {
+      // 🩹 AUTO-CURA: quando o consultor configurou goto_step_id órfão (step
+      // deletado/duplicado/movido entre variantes), em vez de fazer
+      // repeatCurrent silencioso (que prende o lead pra sempre), pula pro
+      // próximo step ativo por position e loga. Sem isso, fluxos editados
+      // travam o lead em silêncio com o bot esperando resposta inalcançável.
+      const fallbackByPos = dbSteps.find(
+        (s) => s.is_active && s.position > currentStep.position,
+      );
+      console.warn(
+        `[flow-orphan-goto] consultor=${ctx.customer.consultant_id} ` +
+        `step="${currentStep.step_key}" goto_step_id="${t.goto_step_id}" não existe/inativo. ` +
+        `${fallbackByPos ? `Auto-curando para "${fallbackByPos.step_key}" (pos ${fallbackByPos.position}).` : "Nenhum próximo step ativo. Repetindo."}`,
+      );
+      try {
+        await ctx.supabase.from("bot_step_transitions").insert({
+          customer_id: ctx.customer.id,
+          consultant_id: ctx.customer.consultant_id,
+          from_step: currentStep.step_key,
+          to_step: fallbackByPos?.step_key ?? currentStep.step_key,
+          reason: `orphan_goto:${String(t.goto_step_id).slice(0, 8)}`,
+          intent: "auto_cure",
+        } as any);
+      } catch (_) { /* best-effort */ }
+      if (!fallbackByPos) return repeatCurrent();
+      if (fallbackByPos.step_key === "cadastro" || CADASTRO_STEPS.has(fallbackByPos.step_key)) {
+        const docStep = findActiveByType("capture_documento");
+        if (docStep) return goToStep(docStep, restoreDetourUpdates);
+      }
+      return goToStep(fallbackByPos, restoreDetourUpdates);
+    }
     if (nextStep.step_key === "cadastro" || CADASTRO_STEPS.has(nextStep.step_key)) {
       const docStep = findActiveByType("capture_documento");
       if (docStep) return goToStep(docStep, restoreDetourUpdates);
@@ -1983,6 +2021,62 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       updates: { conversation_step: currentStep.id, __inline_sent: true, ...captureUpdates, ...restoreDetourUpdates },
     });
   }
+
+  // 🤖 ai_answer: IA responde a pergunta do lead INLINE e mantém o passo.
+  if (fb.mode === "ai_answer" && fb.ai_prompt && !strictMode && (ctx.messageText || "").trim()) {
+    try {
+      const { generateAiAnswer } = await import("../../../_shared/ai-answer.ts");
+      const profile = await (async () => {
+        try {
+          const { getConsultantAiProfile, getConsultantAiProvider } = await import("../../../_shared/ai-config.ts");
+          const [p, pr] = await Promise.all([
+            getConsultantAiProfile(ctx.supabase, consultantId || ""),
+            getConsultantAiProvider(ctx.supabase, consultantId || ""),
+          ]);
+          return { profile: p, provider: pr };
+        } catch (_) {
+          return { profile: "balanced" as const, provider: "google" as const };
+        }
+      })();
+      const aiText = await generateAiAnswer({
+        supabase: ctx.supabase,
+        consultantId: consultantId || "global",
+        systemPrompt: String(fb.ai_prompt),
+        userQuestion: String(ctx.messageText || ""),
+        knowledgeContext: { customer: ctx.customer },
+        profile: profile.profile,
+        provider: profile.provider,
+        timeoutMs: 8000,
+      });
+      if (aiText && aiText.trim()) {
+        try {
+          await ctx.sender.sendText(ctx.remoteJid, aiText);
+          await ctx.supabase.from("conversations").insert({
+            customer_id: ctx.customer.id,
+            message_direction: "outbound",
+            message_text: aiText,
+            message_type: "text",
+            conversation_step: currentStep.step_key,
+          });
+        } catch (e) {
+          console.warn("[ai_answer] sendText falhou:", (e as any)?.message);
+        }
+        return _finalize(stepKey, {
+          reply: "",
+          updates: {
+            conversation_step: currentStep.id,
+            __inline_sent: true,
+            ...captureUpdates,
+            ...restoreDetourUpdates,
+          },
+        });
+      }
+    } catch (e) {
+      console.warn("[ai_answer] erro, caindo no fallback genérico:", (e as Error).message);
+    }
+    return _finalize(stepKey, await repeatCurrent());
+  }
+
   if (fb.mode === "ai" && fb.ai_prompt && !strictMode) {
     const candidates = dbSteps.filter(s => s.is_active && s.id !== currentStep.id).map(s => ({ id: s.id, step_key: s.step_key }));
     const choice = await aiDecideFallback(fb.ai_prompt, ctx.messageText || "", candidates, ctx.geminiApiKey, consultantId || "global", ctx.supabase);

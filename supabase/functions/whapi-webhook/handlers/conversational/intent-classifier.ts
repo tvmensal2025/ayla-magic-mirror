@@ -162,12 +162,24 @@ export async function classifyIntent(
   } else if (!text.trim()) {
     result = { intent: "outro", confidence: 0, source: "fallback" };
   } else {
-    const hasOpenAI = !!Deno.env.get("OPENAI_API_KEY");
-    console.log(`[classifier] route step=${currentStep} hasOpenAI=${hasOpenAI} hasGemini=${!!geminiApiKey} textLen=${text.length}`);
-    let r: ClassifyResult | null = null;
-    if (hasOpenAI) r = await classifyOpenAI(text, currentStep);
-    if (!r && geminiApiKey) r = await classifyGemini(text, currentStep, geminiApiKey);
-    result = r ?? { intent: "outro", confidence: 0, source: "fallback" };
+    // 🧪 modo teste/sandbox: pula LLM (gasta 2-3s por turno) e usa regex+default.
+    // Simulator é validação de fluxo, não de classifier — IA real nunca é
+    // o caminho de teste em mock.
+    let isMock = false;
+    try {
+      const { isMockMode } = await import("../../../_shared/test-mode.ts");
+      isMock = isMockMode();
+    } catch (_) { /* noop */ }
+    if (isMock) {
+      result = { intent: "outro", confidence: 0.6, source: "fallback" };
+    } else {
+      const hasOpenAI = !!Deno.env.get("OPENAI_API_KEY");
+      console.log(`[classifier] route step=${currentStep} hasOpenAI=${hasOpenAI} hasGemini=${!!geminiApiKey} textLen=${text.length}`);
+      let r: ClassifyResult | null = null;
+      if (hasOpenAI) r = await classifyOpenAI(text, currentStep);
+      if (!r && geminiApiKey) r = await classifyGemini(text, currentStep, geminiApiKey);
+      result = r ?? { intent: "outro", confidence: 0, source: "fallback" };
+    }
   }
 
   // Sprint 1: aplicar thresholds de confiança

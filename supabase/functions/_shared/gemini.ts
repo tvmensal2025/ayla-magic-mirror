@@ -28,8 +28,13 @@ export class GeminiQuotaExhausted extends Error {
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
-// Pricing (USD per 1M tokens) — updated 2025. Conservative estimates.
+// Pricing (USD per 1M tokens) — updated May 2026 with frontier models.
 const PRICING: Record<string, { in: number; out: number }> = {
+  // Gemini 3.x family (frontier — May 2026)
+  "gemini-3.1-pro": { in: 4.00, out: 20.0 },
+  "gemini-3.5-flash": { in: 0.40, out: 3.00 },
+  "gemini-3-flash-preview": { in: 0.30, out: 2.50 },
+  // Gemini 2.5 (legacy fallback)
   "gemini-2.5-pro": { in: 1.25, out: 10.0 },
   "gemini-2.5-flash": { in: 0.30, out: 2.50 },
   "gemini-2.5-flash-lite": { in: 0.10, out: 0.40 },

@@ -309,14 +309,13 @@ Deno.serve(async (req) => {
     }
 
     // ── 5) Polling de bot_test_outbound ──
-    // Janela curta: encerra assim que o turno estabiliza. Botão final fecha
-    // mais rápido ainda (já é a última coisa que o passo manda).
+    // Polling agressivo otimizado para o painel OCR aparecer em tempo real.
     const events: UiEvent[] = [];
-    const deadline = Date.now() + 12_000; // aumentado de 8s → 12s para cold starts
+    const deadline = Date.now() + 8_000;
     const seen = new Set<string>();
     let stableSince = 0;
     while (Date.now() < deadline) {
-      await sleep(250);
+      await sleep(80); // polling 80ms — turnos chegam em ~800ms-1.5s, OCR em <2s
       const { data: rows } = await svc
         .from("bot_test_outbound")
         .select("id, kind, content, created_at")
@@ -327,8 +326,8 @@ Deno.serve(async (req) => {
       if (incoming.length === 0) {
         if (events.length > 0) {
           if (!stableSince) stableSince = Date.now();
-          // Janela maior: 600ms sempre (antes era 200ms com botões → fechava cedo demais)
-          const stableWindow = 600;
+          // Janela estável 200ms — fecha o turno rapidamente quando bot acaba
+          const stableWindow = 200;
           if (Date.now() - stableSince > stableWindow) break;
         }
         continue;
@@ -349,7 +348,7 @@ Deno.serve(async (req) => {
 
     const { data: cnow } = await svc
       .from("customers")
-      .select("conversation_step, flow_variant, name, capture_mode, status, cpf, rg, data_nascimento, email, phone_landline, phone_contact_confirmed, cep, address_street, address_number, address_neighborhood, address_city, address_state, distribuidora, numero_instalacao, electricity_bill_value, electricity_bill_photo_url, document_front_url, document_back_url, otp_code, link_facial, link_assinatura")
+      .select("conversation_step, flow_variant, name, name_source, capture_mode, status, cpf, rg, data_nascimento, email, phone_landline, phone_contact_confirmed, cep, address_street, address_number, address_neighborhood, address_city, address_state, distribuidora, numero_instalacao, electricity_bill_value, electricity_bill_photo_url, bill_holder_name, bill_data_confirmed_at, document_front_url, document_back_url, document_type, doc_holder_name, doc_data_confirmed_at, otp_code, otp_received_at, link_facial, link_assinatura, facial_confirmed_at")
       .eq("id", customer.id)
       .maybeSingle();
 

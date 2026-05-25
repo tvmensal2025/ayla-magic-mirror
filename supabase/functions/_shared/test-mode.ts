@@ -63,6 +63,29 @@ export function isMockMode(): boolean {
   return s?.testMode === true && s?.realServices !== true;
 }
 
+/**
+ * Versão robusta de `isMockMode` que NÃO depende de AsyncLocalStorage.
+ *
+ * `isMockMode()` lê do `botRequestStore` (AsyncLocalStorage). Em alguns
+ * caminhos onde o handler é chamado via dynamic `import()` ou via fronteiras
+ * de microtask que perdem o contexto async-local (Deno Edge runtime), o
+ * store retorna `undefined` mesmo quando o webhook está rodando em sandbox.
+ *
+ * Esta função decide o mesmo a partir de fatos persistentes do customer:
+ *   - `is_sandbox === true` (flag explícita do simulador)
+ *   - phone começando com `5500000` (range de teste reservado)
+ *
+ * Use esta versão em handlers de OCR, portal worker e qualquer lugar onde
+ * `isMockMode()` precise funcionar com 100% de confiabilidade dentro de
+ * runBotFlow chamado por outros handlers.
+ */
+export function isCustomerSandbox(customer: { is_sandbox?: boolean | null; phone_whatsapp?: string | null } | null | undefined): boolean {
+  if (!customer) return false;
+  if (customer.is_sandbox === true) return true;
+  if (isTestPhone(customer.phone_whatsapp ?? null)) return true;
+  return false;
+}
+
 /** True se estamos espelhando outbound pra UI do simulador (Modo Real). */
 export function isMirroringOutbound(): boolean {
   return botRequestStore.getStore()?.realServices === true;
@@ -109,8 +132,11 @@ export function mockDocOcr() {
       rg: "12.345.678-9",
       dataNascimento: "15/05/1985",
       dataNascimentoConfianca: "alta",
-      nome_pai: "Pedro Silva",
-      nome_mae: "Maria Silva",
+      // Alinhado ao OCR real (`_shared/ocr.ts` retorna camelCase: nomePai/nomeMae).
+      // Antes o mock retornava `nome_pai`/`nome_mae` em snake_case e o consumer
+      // (`bot-flow.ts:3579`) lia `d.nomePai`/`d.nomeMae`, sempre undefined no mock.
+      nomePai: "Pedro Silva",
+      nomeMae: "Maria Silva",
       tipo_documento: "RG",
       confianca: 95,
     },

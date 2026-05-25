@@ -69,6 +69,16 @@ export async function matchButtonIntent(
     return { match: null, refused: false, confused: true, confidence: 0.3, reason: "no_api_key" };
   }
 
+  // 🧪 modo teste/sandbox: pula IA pra não gastar 2-4s extra por turno.
+  // Como nenhum match deterministico pegou, deixa o motor seguir como
+  // "outro" e cair na transição default do step.
+  try {
+    const { isMockMode } = await import("./test-mode.ts");
+    if (isMockMode()) {
+      return { match: null, refused: false, confused: true, confidence: 0.4, reason: "mock_skip_ai" };
+    }
+  } catch (_) { /* noop */ }
+
   const prompt = `Cliente respondeu no WhatsApp: "${msg.slice(0, 200)}"
 
 Opções disponíveis (cliente deveria tocar em um botão):

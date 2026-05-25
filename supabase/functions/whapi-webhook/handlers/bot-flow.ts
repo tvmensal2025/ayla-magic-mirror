@@ -44,7 +44,7 @@ import { normalizeDocumentType, isCNH, friendlyLabel } from "../../_shared/docum
 import { detectDocumentType } from "../../_shared/detect-doc-type.ts";
 import { uploadMediaToMinio, OCR_CONFIDENCE_THRESHOLD } from "../_helpers.ts";
 import { jsonLog } from "../../_shared/audit.ts";
-import { isMockMode, shouldBypassQuietHours, shouldUseFastClock } from "../../_shared/test-mode.ts";
+import { isMockMode, isCustomerSandbox, shouldBypassQuietHours, shouldUseFastClock } from "../../_shared/test-mode.ts";
 import { notifyHandoff } from "../../_shared/notify-consultant.ts";
 import type { BotContext, BotResult } from "./types.ts";
 
@@ -112,7 +112,7 @@ async function fetchUrlToBase64(url: string, timeoutMs = 15_000): Promise<{ base
 // e retorna o retry_text configurado pelo consultor, ou null se não houver.
 // Quando `then === "humano"` e as tentativas esgotaram, pausa o bot.
 interface OcrFallbackResult {
-  retryText: string | null;
+  retryText: string;
   escalate: boolean; // true = pausa bot + notifica consultor
 }
 async function resolveOcrFallback(
@@ -1235,7 +1235,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               conversation_step: stepKey,
             });
             sent = true;
-            if (!isLast) await new Promise((r) => setTimeout(r, 800));
+            // 🧪 mock: zero pausa entre textos (simulador roda turnos em ~1s)
+            if (!isLast && !isMockMode()) await new Promise((r) => setTimeout(r, 800));
           } catch (e) {
             console.warn(`[dispatch:${stepKey}] envio de texto falhou:`, (e as any)?.message);
           }
@@ -1261,7 +1262,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         }
 
         const delayMs = Number(m.delay_before_ms || 0);
-        if (delayMs > 0) await new Promise((r) => setTimeout(r, Math.min(delayMs, 10_000)));
+        // 🧪 mock: pula delay configurado pelo consultor (simulador é apenas validação)
+        if (delayMs > 0 && !isMockMode()) await new Promise((r) => setTimeout(r, Math.min(delayMs, 10_000)));
 
         try {
           const ok = await sendMedia(remoteJid, m.url, "", kind, Number(m.duration_sec || 0) || undefined);
@@ -1293,7 +1295,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             title: applyVars(b.title).slice(0, 20),
           }));
           const prompt = "👇 Escolha uma opção:";
-          await new Promise((r) => setTimeout(r, 600));
+          // 🧪 mock: pula pausa antes dos botões
+          if (!isMockMode()) await new Promise((r) => setTimeout(r, 600));
           await sendButtons(remoteJid, prompt, renderedButtons);
           await supabase.from("conversations").insert({
             customer_id: customer.id,
@@ -2807,7 +2810,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 }
                 if (!nxt) break;
                 console.log(`[chain-skip] from=${current.position} to=${nxt.position}`);
-                await new Promise((r) => setTimeout(r, 1500));
+                if (!isMockMode()) await new Promise((r) => setTimeout(r, 1500));
                 current = nxt;
               }
               const ntype = String(current.step_type || "message");
@@ -3002,6 +3005,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     // ─── 2. AGUARDANDO CONTA ──────────────
     case "aguardando_conta": {
+      // 🔍 DEBUG diagnóstico (2026-05-25): persiste qual caminho o handler tomou
+      try {
+        await supabase.from("customers").update({
+          error_message: `aguard_conta: isFile=${isFile} hasImage=${hasImage} fileBase64Len=${fileBase64?.length ?? 0} sandbox=${isCustomerSandbox(customer)}`,
+        }).eq("id", customer.id);
+      } catch (_) { /* noop */ }
       if (!isFile) {
         const txt = String(messageText || "").trim();
         const first = ((customer as any).name || "").split(/\s+/)[0];
@@ -3078,17 +3087,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       console.log("  - mimetype:", imageMessage?.mimetype || documentMessage?.mimetype);
 
       if (fileBase64) {
-        if (fileBase64.length < 100) {
-          console.error("❌ Base64 muito pequeno:", fileBase64.length);
-          updates.conversation_step = "aguardando_conta";
-          reply = "⚠️ Erro ao processar imagem. Tente enviar uma foto mais nítida.";
-          break;
-        }
-        try { atob(fileBase64.substring(0, 100)); } catch {
-          console.error("❌ Base64 inválido");
-          updates.conversation_step = "aguardando_conta";
-          reply = "⚠️ Erro ao processar imagem. Tente enviar novamente.";
-          break;
+        // 🧪 mock: pula validação de tamanho/formato (PNG 1x1 do simulador
+        // tem ~45 bytes; o OCR é mockado então não importa o conteúdo).
+        if (!isCustomerSandbox(customer)) {
+          if (fileBase64.length < 100) {
+            console.error("❌ Base64 muito pequeno:", fileBase64.length);
+            updates.conversation_step = "aguardando_conta";
+            reply = "⚠️ Erro ao processar imagem. Tente enviar uma foto mais nítida.";
+            break;
+          }
+          try { atob(fileBase64.substring(0, 100)); } catch {
+            console.error("❌ Base64 inválido");
+            updates.conversation_step = "aguardando_conta";
+            reply = "⚠️ Erro ao processar imagem. Tente enviar novamente.";
+            break;
+          }
         }
       }
 
@@ -3098,7 +3111,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
       try {
         // 🧪 testMode: usa mock de OCR para não depender do Gemini nem de URL pública
-        if (isMockMode()) {
+        if (isCustomerSandbox(customer)) {
           const { mockBillOcr } = await import("../../_shared/test-mode.ts");
           const ocrData = mockBillOcr();
           console.log("🧪 [test-mode] OCR conta mock:", JSON.stringify(ocrData).substring(0, 200));
@@ -3241,7 +3254,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           updates.conversation_step = "confirmando_dados_conta";
 
           // 🧪 testMode: pula a fila de revisão do consultor e envia a confirmação direto
-          if (isMockMode()) {
+          if (isCustomerSandbox(customer)) {
             const merged = { ...customer, ...updates };
             await sendOptions(remoteJid, buildConfirmacaoConta(merged), [
               { id: "sim_conta", title: "✅ SIM" },
@@ -3390,7 +3403,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               for (const m of messagesOnly) {
                 console.log(`[post-confirm-conta] despachando msg intermediária ${m.step_key}`);
                 await dispatchStepFromFlow(m.step_key, _vars);
-                await new Promise((r) => setTimeout(r, 1800));
+                if (!isMockMode()) await new Promise((r) => setTimeout(r, 1800));
               }
               if (_stopIdx >= 0) {
                 nextCustom = stepsAfter[_stopIdx];
@@ -3554,7 +3567,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       let detectSource: string = "fallback";
 
       // 🧪 testMode: pula detecção de tipo e OCR real, usa mock direto
-      if (isMockMode()) {
+      if (isCustomerSandbox(customer)) {
         const { mockDocOcr } = await import("../../_shared/test-mode.ts");
         const ocrData = mockDocOcr();
         console.log("🧪 [test-mode] OCR doc mock:", JSON.stringify(ocrData).substring(0, 200));
@@ -3835,7 +3848,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       console.log("📥 Documento verso recebido:");
       console.log("  - fileBase64 length:", fileBase64?.length || 0);
       console.log("  - mimetype:", imageMessage?.mimetype || documentMessage?.mimetype);
-      if (fileBase64 && fileBase64.length < 100) {
+      if (fileBase64 && fileBase64.length < 100 && !isCustomerSandbox(customer)) {
         console.error("❌ Base64 muito pequeno:", fileBase64.length);
         updates.conversation_step = "aguardando_doc_verso";
         reply = "⚠️ Erro ao processar documento. Tente enviar uma foto mais nítida.";
@@ -3884,7 +3897,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           updates.conversation_step = "confirmando_dados_doc";
 
           // 🧪 testMode: pula a fila de revisão do consultor e envia a confirmação direto
-          if (isMockMode()) {
+          if (isCustomerSandbox(customer)) {
             const merged = { ...customer, ...updates };
             await sendOptions(remoteJid, buildConfirmacaoDoc(merged), [
               { id: "sim_doc", title: "✅ SIM" },
@@ -4269,7 +4282,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "ask_phone_confirm": {
       // 🧪 testMode: número sandbox (5500000xxx) tem 15 dígitos — inválido para o portal.
       // Auto-confirma com um número fixo válido para não travar o fluxo.
-      if (isMockMode()) {
+      if (isCustomerSandbox(customer)) {
         updates.phone_landline = "(11) 99999-8888";
         updates.phone_contact_confirmed = true;
         const merged = { ...customer, ...updates };
@@ -4439,7 +4452,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const cepClean = messageText.replace(/\D/g, "");
       if (cepClean.length !== 8) { reply = "❌ CEP inválido. Informe os *8 números*:"; break; }
       // 🧪 testMode: pula ViaCEP e usa os dados do OCR mock já salvos no customer
-      if (isMockMode()) {
+      if (isCustomerSandbox(customer)) {
         updates.cep = cepClean;
         // Preserva endereço já preenchido pelo OCR mock; se não tiver, usa fallback
         updates.address_street = customer.address_street || "Rua das Flores";
@@ -4602,7 +4615,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     case "portal_submitting": {
-      if (isMockMode()) {
+      if (isCustomerSandbox(customer)) {
         // 🧪 Stub: simula portal aceito + OTP enviado ao WhatsApp
         updates.conversation_step = "aguardando_otp";
         updates.status = "awaiting_otp";
@@ -4620,7 +4633,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         updates.otp_code = otpCode;
         updates.otp_received_at = new Date().toISOString();
         reply = `✅ Código *${otpCode}* recebido! ⏳ Validando no portal...\n\nEm instantes vou te enviar o link da *validação facial* (última etapa).`;
-        if (isMockMode()) {
+        if (isCustomerSandbox(customer)) {
           // 🧪 Stub: aceita qualquer código e avança direto para facial com link fake
           updates.link_facial = "https://sandbox.igreen.cloud/facial/teste";
           updates.conversation_step = "aguardando_facial";
@@ -4692,7 +4705,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     case "aguardando_facial":
     case "aguardando_assinatura": {
       // 🧪 Em modo teste, se ainda não tem link, injeta o sandbox
-      if (isMockMode() && !customer.link_facial && !customer.link_assinatura) {
+      if (isCustomerSandbox(customer) && !customer.link_facial && !customer.link_assinatura) {
         updates.link_facial = "https://sandbox.igreen.cloud/facial/teste";
       }
       const link = updates.link_facial || customer.link_facial || customer.link_assinatura;
@@ -4914,7 +4927,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       updates.status = "portal_submitting";
       updates.conversation_step = "portal_submitting";
 
-      if (isMockMode()) {
+      if (isCustomerSandbox(customer)) {
         // 🧪 Stub: simula portal aceito + OTP enviado, avança direto para aguardando_otp
         updates.status = "awaiting_otp";
         updates.conversation_step = "aguardando_otp";
