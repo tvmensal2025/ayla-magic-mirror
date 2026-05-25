@@ -1,43 +1,71 @@
-## Diagnóstico encontrado
+## Diagnóstico
 
-O simulador está chamando `flow-simulate-run` corretamente e o `whapi-webhook` retorna 200, mas o motor não envia resposta porque caiu na regra de silêncio noturno:
+O simulador já está chamando o `whapi-webhook` real e recebendo resposta 200, mas ele fica lento por dois motivos principais:
 
-- Log real: `quiet_hours_skip` em `conversational`
-- Estado ficou `welcome -> welcome`
-- `events: []`
-- Como o Modo Real usa paridade total, ele respeitou a janela 21:30 -> 08:00 e por isso parece que “não iniciou”.
+1. **Modo Real espera duração inteira de áudio/vídeo** em `bot-flow.ts`.
+  - Exemplo atual: áudio sem duração cadastrada espera até 90s; vídeo até 30s.
+  - Isso é fiel ao ritmo humano do bot, mas ruim para teste interativo e pode parecer travado.
+2. `**flow-simulate-run` só retorna depois que o webhook termina + polling de saída**.
+  - Se o passo envia mídia em sequência, OCR, Gemini ou Portal Worker, a tela fica “processando” durante toda a execução.
 
-## Correção planejada
+## Plano de correção
 
-1. **Manter a produção intacta**
-   - Não remover a regra de silêncio do bot real em produção.
-   - Não criar atalho/mock no Modo Real.
+### 1. Manter serviços reais, mas acelerar só o relógio do simulador
 
-2. **Adicionar override somente para o Simulador Real**
-   - Quando `flow-simulate-run` chamar `whapi-webhook` no Modo Real, enviar um header interno indicando que é um teste explícito do painel.
-   - Dentro do contexto de teste, permitir que `isQuietHourBRT()` seja ignorado apenas nessa execução do simulador.
-   - OCR, IA, Whapi, handoff, delays, Portal Worker, OTP e demais serviços continuam reais.
+Adicionar um flag interno de teste, por exemplo `x-bot-fast-clock: 1`, enviado apenas pelo `flow-simulate-run`.
 
-3. **Aplicar o override nos dois motores**
-   - `runBotFlow`
-   - `runConversationalFlow`
+Com isso:
 
-4. **Melhorar o diagnóstico da UI**
-   - Se o motor não avançar por silêncio, mostrar mensagem clara: “bloqueado por horário de silêncio” em vez de erro genérico.
-   - Isso evita achar que o fluxo quebrou quando a regra operacional está atuando.
+- OCR continua real.
+- Gemini continua real.
+- Portal Worker/OTP/link facial continuam reais.
+- Whapi continua real no número informado.
+- Só as pausas artificiais de cadência entre mensagens/mídias ficam curtas.
 
-5. **Validar com teste real de função**
-   - Testar `flow-simulate-run` com `real_mode=true` e telefone real.
-   - Confirmar que a resposta gera eventos/espelhamento e não fica mais `welcome -> welcome` por `quiet_hours_skip`.
+### 2. Corrigir `sleepForMedia` do fluxo principal
 
-## Arquivos que serão alterados
+Em `supabase/functions/whapi-webhook/handlers/bot-flow.ts`, alterar a espera quando estiver no simulador real com fast clock:
 
-- `supabase/functions/_shared/test-mode.ts`
-- `supabase/functions/flow-simulate-run/index.ts`
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
-- Possivelmente `src/components/admin/flow-builder/FlowSimulator.tsx` apenas para diagnóstico visual.
+- áudio/vídeo: aguardar ~800ms a 1500ms, não a duração inteira;
+- imagem/texto: manter pausa curta;
+- produção real fora do simulador continua igual.
+
+Isso espelha o que já foi feito no handler conversacional, mas limitado ao simulador.
+
+### 3. Propagar o flag no contexto de teste
+
+Em `supabase/functions/_shared/test-mode.ts`:
+
+- adicionar `fastClock?: boolean` no `TestStore`;
+- criar helper `shouldUseFastClock()`.
+
+Em `supabase/functions/whapi-webhook/index.ts`:
+
+- ler o header interno `x-bot-fast-clock`;
+- salvar no `botRequestStore` somente quando `testMode === true`.
+
+Em `supabase/functions/flow-simulate-run/index.ts`:
+
+- enviar `x-bot-fast-clock: 1` junto com `x-bot-real-services: 1`.
+
+### 4. Reduzir espera morta do polling do simulador
+
+Ajustar a janela em `flow-simulate-run`:
+
+- quando já houver evento de saída, encerrar mais rápido após estabilizar;
+- manter uma janela segura para cold start/primeira resposta;
+- retornar diagnóstico claro quando não houver evento, em vez de parecer travado.
+
+### 5. Validar no fluxo real
+
+Depois de implementar:
+
+- testar `flow-simulate-run` no modo real com a mensagem `oi`;
+- testar clique em `Quero simular`;
+- conferir que responde em poucos segundos e que o estado do customer avança corretamente;
+- revisar logs do `whapi-webhook` para confirmar que o fast clock só ativou em test mode.  
+
 
 ## Resultado esperado
 
-O Modo Real iniciará imediatamente pelo painel mesmo fora do horário comercial, usando serviços reais, sem afetar a regra de silêncio dos leads reais em produção.
+O teste continua 100% real nos serviços e decisões, mas deixa de esperar 30–90s por cadência artificial de mídia. Cada mensagem deve voltar em poucos segundos, exceto etapas naturalmente pesadas como OCR/Portal/OTP, que ainda dependem dos serviços reais.
