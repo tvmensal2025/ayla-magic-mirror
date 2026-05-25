@@ -1,64 +1,43 @@
-## Diagnóstico
+## Diagnóstico encontrado
 
-O teste não está 100% real por dois problemas principais:
+O simulador está chamando `flow-simulate-run` corretamente e o `whapi-webhook` retorna 200, mas o motor não envia resposta porque caiu na regra de silêncio noturno:
 
-1. **O Modo Real está caindo no telefone sandbox**
-   - A UI enviou `real_mode: true` e `real_phone: 5511971254913`, mas os logs do `whapi-webhook` mostram que o processamento rodou no telefone `550000021189303`.
-   - Resultado: ele continua usando o customer sandbox em vez do seu WhatsApp real.
+- Log real: `quiet_hours_skip` em `conversational`
+- Estado ficou `welcome -> welcome`
+- `events: []`
+- Como o Modo Real usa paridade total, ele respeitou a janela 21:30 -> 08:00 e por isso parece que “não iniciou”.
 
-2. **O fluxo trava no `capture_mode = manual`**
-   - Os logs mostram: `[manual-capture-stop] ... texto salvo sem avanço step="welcome"`.
-   - Isso impede o motor de sair do `welcome`, por isso a resposta da API volta com `events: []`, `step_after: welcome` e nada aparece/envia.
+## Correção planejada
 
-Também encontrei um terceiro risco: existe um customer real antigo para `5511971254913` com `is_test_lead=false` e `capture_mode=manual`. O reset do simulador não apaga esse registro por segurança, então o Modo Real pode reencontrar esse lead real antigo e não o lead de teste recém-criado.
+1. **Manter a produção intacta**
+   - Não remover a regra de silêncio do bot real em produção.
+   - Não criar atalho/mock no Modo Real.
 
-## Plano de correção
+2. **Adicionar override somente para o Simulador Real**
+   - Quando `flow-simulate-run` chamar `whapi-webhook` no Modo Real, enviar um header interno indicando que é um teste explícito do painel.
+   - Dentro do contexto de teste, permitir que `isQuietHourBRT()` seja ignorado apenas nessa execução do simulador.
+   - OCR, IA, Whapi, handoff, delays, Portal Worker, OTP e demais serviços continuam reais.
 
-1. **Garantir que o Modo Real use sempre o telefone real informado**
-   - Ajustar `flow-simulate-reset` para resolver o mesmo `superadmin_consultant_id` usado em `flow-simulate-run`.
-   - Assim reset e run apontam para o mesmo consultor e para o mesmo telefone.
+3. **Aplicar o override nos dois motores**
+   - `runBotFlow`
+   - `runConversationalFlow`
 
-2. **Isolar lead de teste real sem apagar cliente real**
-   - No Modo Real, antes de criar/reusar customer, procurar primeiro por `phone_whatsapp + consultant_id + is_test_lead=true`.
-   - Se houver customer real antigo com o mesmo telefone e `is_test_lead=false`, não reaproveitar para o teste.
-   - Criar um novo customer marcado como `is_test_lead=true`, `is_sandbox=false`, `capture_mode=auto`.
+4. **Melhorar o diagnóstico da UI**
+   - Se o motor não avançar por silêncio, mostrar mensagem clara: “bloqueado por horário de silêncio” em vez de erro genérico.
+   - Isso evita achar que o fluxo quebrou quando a regra operacional está atuando.
 
-3. **Forçar o motor a não parar no modo manual durante testes reais**
-   - No `whapi-webhook`, quando `x-bot-real-services=1`, ignorar os guards de `capture_mode=manual` que salvam e param.
-   - O Modo Real precisa simular o lead real avançando automaticamente pelo fluxo criado, não o modo captação manual do CRM.
+5. **Validar com teste real de função**
+   - Testar `flow-simulate-run` com `real_mode=true` e telefone real.
+   - Confirmar que a resposta gera eventos/espelhamento e não fica mais `welcome -> welcome` por `quiet_hours_skip`.
 
-4. **Corrigir visibilidade no simulador**
-   - Garantir que `botRequestStore` receba `realServices=true` e que o `mirrorSender` registre todos os envios reais em `bot_test_outbound`.
-   - Se nenhum evento for capturado, devolver diagnóstico explícito no painel em vez de ficar vazio.
+## Arquivos que serão alterados
 
-5. **Validar ponta a ponta**
-   - Testar `flow-simulate-run` com `real_mode=true`, `real_phone=5511971254913`, `fresh=true`.
-   - Conferir que a resposta sai de `welcome`, gera eventos e usa o telefone real.
-   - Conferir logs do `whapi-webhook` mostrando `phone=5511971254913`, `realServices=true`.
+- `supabase/functions/_shared/test-mode.ts`
+- `supabase/functions/flow-simulate-run/index.ts`
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
+- Possivelmente `src/components/admin/flow-builder/FlowSimulator.tsx` apenas para diagnóstico visual.
 
 ## Resultado esperado
 
-Depois da correção:
-
-```text
-Modo Real ON + telefone real
-        ↓
-flow-simulate-reset limpa somente lead de teste real
-        ↓
-flow-simulate-run chama whapi-webhook com telefone real
-        ↓
-whapi-webhook roda motor do fluxo ativo sem parar em manual
-        ↓
-WhatsApp real recebe mensagens
-        ↓
-simulador espelha os mesmos eventos
-        ↓
-OCR, Portal Worker, OTP e link facial seguem serviços reais
-```
-
-## Arquivos envolvidos
-
-- `supabase/functions/flow-simulate-run/index.ts`
-- `supabase/functions/flow-simulate-reset/index.ts`
-- `supabase/functions/whapi-webhook/index.ts`
-- `src/components/admin/flow-builder/FlowSimulator.tsx` somente se for necessário melhorar o diagnóstico visual.
+O Modo Real iniciará imediatamente pelo painel mesmo fora do horário comercial, usando serviços reais, sem afetar a regra de silêncio dos leads reais em produção.
