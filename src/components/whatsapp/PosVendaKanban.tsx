@@ -68,32 +68,33 @@ export default function PosVendaKanban({ consultantId }: { consultantId: string 
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [consultants, setConsultants] = useState<{ id: string; full_name: string | null; slug: string | null }[]>([]);
+  const [registrants, setRegistrants] = useState<{ id: string; name: string }[]>([]); // registered_by_igreen_id
+  const [myIgreenId, setMyIgreenId] = useState<string | null>(null);
   const [assignDialog, setAssignDialog] = useState<PosVendaCustomer | null>(null);
   const [assignTo, setAssignTo] = useState<string>("");
   const [rejectDialog, setRejectDialog] = useState<PosVendaCustomer | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [recomputing, setRecomputing] = useState(false);
-  const [ownerFilter, setOwnerFilter] = useState<string>("mine"); // "mine" | "assigned" | consultantId | "all"
+  // "mine" = registered_by_igreen_id = meu | "assigned" | "all" | <igreen_id específico>
+  const [ownerFilter, setOwnerFilter] = useState<string>("mine");
 
   async function load() {
     setLoading(true);
     let q = supabase
       .from("customers")
-      .select("id,name,phone_whatsapp,electricity_bill_value,portal_submitted_at,andamento_igreen,status,consultant_id,assigned_consultant_id,pos_venda_stage,pos_venda_manual,pos_venda_reason")
-      .eq("customer_origin", "igreen_sync");
+      .select("id,name,phone_whatsapp,electricity_bill_value,portal_submitted_at,andamento_igreen,status,consultant_id,assigned_consultant_id,pos_venda_stage,pos_venda_manual,pos_venda_reason,registered_by_igreen_id,registered_by_name")
+      .eq("customer_origin", "igreen_sync")
+      .or(`consultant_id.eq.${consultantId},assigned_consultant_id.eq.${consultantId}`);
 
     if (ownerFilter === "mine") {
-      q = q.eq("consultant_id", consultantId);
+      if (myIgreenId) q = q.eq("registered_by_igreen_id", myIgreenId);
+      else { setCustomers([]); setLoading(false); return; }
     } else if (ownerFilter === "assigned") {
       q = q.eq("assigned_consultant_id", consultantId);
-    } else if (ownerFilter === "all") {
-      q = q.or(`consultant_id.eq.${consultantId},assigned_consultant_id.eq.${consultantId}`);
-    } else {
-      // specific consultant id selected — só mostra se também atribuído a mim ou se eu sou o dono
-      q = q
-        .eq("consultant_id", ownerFilter)
-        .or(`consultant_id.eq.${consultantId},assigned_consultant_id.eq.${consultantId}`);
+    } else if (ownerFilter !== "all") {
+      // specific registered_by_igreen_id
+      q = q.eq("registered_by_igreen_id", ownerFilter);
     }
 
     const { data, error } = await q.order("portal_submitted_at", { ascending: false, nullsFirst: false });
@@ -106,12 +107,33 @@ export default function PosVendaKanban({ consultantId }: { consultantId: string 
   }
 
   async function loadConsultants() {
-    const { data } = await supabase.from("consultants").select("id,full_name,slug").order("full_name");
-    setConsultants((data as any) || []);
+    const { data } = await supabase.from("consultants").select("id,name,igreen_id").order("name");
+    setConsultants(((data as any) || []).map((c: any) => ({ id: c.id, full_name: c.name, slug: null })));
+    const me = (data as any)?.find((c: any) => c.id === consultantId);
+    if (me?.igreen_id) setMyIgreenId(String(me.igreen_id));
   }
 
-  useEffect(() => { load(); }, [consultantId, ownerFilter]);
-  useEffect(() => { loadConsultants(); }, []);
+  async function loadRegistrants() {
+    // distinct registered_by entre clientes da rede do consultor
+    const { data } = await supabase
+      .from("customers")
+      .select("registered_by_igreen_id,registered_by_name")
+      .eq("customer_origin", "igreen_sync")
+      .or(`consultant_id.eq.${consultantId},assigned_consultant_id.eq.${consultantId}`)
+      .not("registered_by_igreen_id", "is", null)
+      .limit(2000);
+    const map = new Map<string, string>();
+    for (const r of (data as any) || []) {
+      const id = String(r.registered_by_igreen_id);
+      if (!map.has(id)) map.set(id, r.registered_by_name || `iGreen ${id}`);
+    }
+    setRegistrants(Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)));
+  }
+
+  useEffect(() => { load(); }, [consultantId, ownerFilter, myIgreenId]);
+  useEffect(() => { loadConsultants(); loadRegistrants(); }, [consultantId]);
+
+
 
   const grouped = useMemo(() => {
     const filtered = customers.filter((c) => {
@@ -179,16 +201,16 @@ export default function PosVendaKanban({ consultantId }: { consultantId: string 
           className="max-w-sm rounded-xl"
         />
         <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-          <SelectTrigger className="w-[240px] rounded-xl">
-            <SelectValue placeholder="Filtrar por consultor" />
+          <SelectTrigger className="w-[280px] rounded-xl">
+            <SelectValue placeholder="Filtrar por quem cadastrou" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="mine">Meus clientes (cadastro principal)</SelectItem>
+            <SelectItem value="mine">Apenas cadastrados por mim {myIgreenId ? `(iGreen ${myIgreenId})` : ""}</SelectItem>
             <SelectItem value="assigned">Atribuídos a mim</SelectItem>
-            <SelectItem value="all">Todos (meus + atribuídos)</SelectItem>
-            {consultants.filter(c => c.id !== consultantId).map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                Consultor: {c.full_name || c.slug || c.id.slice(0,8)}
+            <SelectItem value="all">Todos da minha rede</SelectItem>
+            {registrants.filter(r => r.id !== myIgreenId).map((r) => (
+              <SelectItem key={r.id} value={r.id}>
+                Cadastrado por: {r.name}
               </SelectItem>
             ))}
           </SelectContent>
