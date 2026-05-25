@@ -162,15 +162,25 @@ Deno.serve(async (req) => {
         }
 
         let totalSpend = 0; let totalLeads = 0; let totalConv = 0; let maxFreq = 0;
+        // Log dos action_types crus na primeira linha para diagnóstico (1ª iteração apenas).
+        let loggedActions = false;
         for (const row of json.data || []) {
           const date = row.date_start;
-          const leads = (row.actions || []).find((a: any) => a.action_type === "lead")?.value || 0;
-          const conv = (row.actions || []).find((a: any) => a.action_type === "onsite_conversion.messaging_conversation_started_7d")?.value || 0;
+          if (!loggedActions && Array.isArray(row.actions) && row.actions.length) {
+            console.info(`[fb-sync] ${c.fb_campaign_id} actions raw types:`,
+              Array.from(new Set(row.actions.map((a: any) => a.action_type))).join(","));
+            loggedActions = true;
+          }
+          const leads = sumActions(row.actions, LEAD_ACTIONS);
+          const conv = sumActions(row.actions, CONV_ACTIONS);
           const regs = (row.actions || []).find((a: any) => a.action_type === "complete_registration")?.value || 0;
           const spend = Math.round(parseFloat(row.spend || "0") * 100);
-          const cpl = leads > 0 ? Math.round(spend / Number(leads)) : 0;
+          // Para CTWA: se não há lead direto, conversa iniciada vira o denominador do CPL.
+          const cplBase = leads > 0 ? leads : conv;
+          const cpl = cplBase > 0 ? Math.round(spend / cplBase) : 0;
           totalSpend += spend; totalLeads += Number(leads); totalConv += Number(conv);
           maxFreq = Math.max(maxFreq, parseFloat(row.frequency || "0"));
+
           // Lê linha existente pra calcular delta de gasto + atividade incremental no período
           const { data: prev } = await admin
             .from("facebook_metrics_daily")
