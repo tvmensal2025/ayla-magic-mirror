@@ -95,27 +95,21 @@ Foque em mover o lead pra frente (fechamento, captação de dados, ou objeção)
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 1200,
+          maxOutputTokens: 4096,
           responseMimeType: "application/json",
           responseSchema: {
             type: "object",
             properties: {
               suggestions: {
                 type: "array",
+                minItems: 3,
+                maxItems: 3,
                 items: {
                   type: "object",
                   properties: {
                     title: { type: "string" },
                     step_type: { type: "string" },
                     message_text: { type: "string" },
-                    buttons: {
-                      type: "array",
-                      items: {
-                        type: "object",
-                        properties: { id: { type: "string" }, title: { type: "string" } },
-                        required: ["id", "title"],
-                      },
-                    },
                     reasoning: { type: "string" },
                   },
                   required: ["title", "step_type", "message_text", "reasoning"],
@@ -142,7 +136,20 @@ Foque em mover o lead pra frente (fechamento, captação de dados, ou objeção)
 
     let parsed: { suggestions?: Suggestion[] } = {};
     try { parsed = JSON.parse(raw); } catch {
-      return json({ error: "parse_error", raw: raw.slice(0, 200) }, 500);
+      // Tenta reparar JSON truncado: corta no último item completo e fecha braces/brackets
+      try {
+        let s = raw;
+        const lastObjEnd = s.lastIndexOf("}");
+        if (lastObjEnd > 0) s = s.slice(0, lastObjEnd + 1);
+        const opensArr = (s.match(/\[/g) || []).length;
+        const closesArr = (s.match(/\]/g) || []).length;
+        const opensObj = (s.match(/\{/g) || []).length;
+        const closesObj = (s.match(/\}/g) || []).length;
+        s = s + "]".repeat(Math.max(0, opensArr - closesArr)) + "}".repeat(Math.max(0, opensObj - closesObj));
+        parsed = JSON.parse(s);
+      } catch {
+        return json({ error: "parse_error", raw: raw.slice(0, 200) }, 500);
+      }
     }
     const suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 3) : [];
     return json({ ok: true, suggestions });
