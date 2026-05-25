@@ -74,15 +74,29 @@ export default function PosVendaKanban({ consultantId }: { consultantId: string 
   const [rejectReason, setRejectReason] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [recomputing, setRecomputing] = useState(false);
+  const [ownerFilter, setOwnerFilter] = useState<string>("mine"); // "mine" | "assigned" | consultantId | "all"
 
   async function load() {
     setLoading(true);
-    const { data, error } = await supabase
+    let q = supabase
       .from("customers")
       .select("id,name,phone_whatsapp,electricity_bill_value,portal_submitted_at,andamento_igreen,status,consultant_id,assigned_consultant_id,pos_venda_stage,pos_venda_manual,pos_venda_reason")
-      .eq("customer_origin", "igreen_sync")
-      .or(`consultant_id.eq.${consultantId},assigned_consultant_id.eq.${consultantId}`)
-      .order("portal_submitted_at", { ascending: false, nullsFirst: false });
+      .eq("customer_origin", "igreen_sync");
+
+    if (ownerFilter === "mine") {
+      q = q.eq("consultant_id", consultantId);
+    } else if (ownerFilter === "assigned") {
+      q = q.eq("assigned_consultant_id", consultantId);
+    } else if (ownerFilter === "all") {
+      q = q.or(`consultant_id.eq.${consultantId},assigned_consultant_id.eq.${consultantId}`);
+    } else {
+      // specific consultant id selected — só mostra se também atribuído a mim ou se eu sou o dono
+      q = q
+        .eq("consultant_id", ownerFilter)
+        .or(`consultant_id.eq.${consultantId},assigned_consultant_id.eq.${consultantId}`);
+    }
+
+    const { data, error } = await q.order("portal_submitted_at", { ascending: false, nullsFirst: false });
     if (error) {
       toast.error("Erro ao carregar: " + error.message);
     } else {
@@ -96,7 +110,8 @@ export default function PosVendaKanban({ consultantId }: { consultantId: string 
     setConsultants((data as any) || []);
   }
 
-  useEffect(() => { load(); loadConsultants(); }, [consultantId]);
+  useEffect(() => { load(); }, [consultantId, ownerFilter]);
+  useEffect(() => { loadConsultants(); }, []);
 
   const grouped = useMemo(() => {
     const filtered = customers.filter((c) => {
