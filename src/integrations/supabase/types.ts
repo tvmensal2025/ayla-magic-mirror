@@ -2566,6 +2566,7 @@ export type Database = {
           igreen_link: string | null
           intent_signals: Json | null
           is_sandbox: boolean
+          is_test_lead: boolean
           last_bot_interaction_at: string | null
           last_bot_reply_at: string | null
           last_custom_prompt_at: string | null
@@ -2710,6 +2711,7 @@ export type Database = {
           igreen_link?: string | null
           intent_signals?: Json | null
           is_sandbox?: boolean
+          is_test_lead?: boolean
           last_bot_interaction_at?: string | null
           last_bot_reply_at?: string | null
           last_custom_prompt_at?: string | null
@@ -2854,6 +2856,7 @@ export type Database = {
           igreen_link?: string | null
           intent_signals?: Json | null
           is_sandbox?: boolean
+          is_test_lead?: boolean
           last_bot_interaction_at?: string | null
           last_bot_reply_at?: string | null
           last_custom_prompt_at?: string | null
