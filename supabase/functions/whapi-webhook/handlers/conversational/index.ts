@@ -11,7 +11,7 @@ import {
   extractValor, extractValorPermissivo, extractTelefone, extractCPF, extractNome, detectRegexIntents,
 } from "../../../_shared/captureExtractors.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
-import { isMockMode } from "../../../_shared/test-mode.ts";
+import { isMockMode, shouldBypassQuietHours } from "../../../_shared/test-mode.ts";
 // rules-engine removido em Sprint 2.5 (bot_flow_rules = 0 linhas, código morto)
 import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
 import { ensureAudioTranscript } from "../../../_shared/audio-transcript.ts";
@@ -735,7 +735,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     };
   }
 
-  if (isQuietHourBRT()) {
+  if (isQuietHourBRT() && !shouldBypassQuietHours()) {
     logQuietSkip("conversational", { customer_id: ctx.customer?.id });
     return { reply: "", updates: {} } as BotResult;
   }
