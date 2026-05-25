@@ -1,71 +1,52 @@
-## Diagnóstico
+# Plano — Fluxos: IA em dúvidas, Avançado oculto, atalho Captar luz
 
-O simulador já está chamando o `whapi-webhook` real e recebendo resposta 200, mas ele fica lento por dois motivos principais:
+## 1) Dúvida do lead deve cair na IA (não no Rafael)
 
-1. **Modo Real espera duração inteira de áudio/vídeo** em `bot-flow.ts`.
-  - Exemplo atual: áudio sem duração cadastrada espera até 90s; vídeo até 30s.
-  - Isso é fiel ao ritmo humano do bot, mas ruim para teste interativo e pode parecer travado.
-2. `**flow-simulate-run` só retorna depois que o webhook termina + polling de saída**.
-  - Se o passo envia mídia em sequência, OCR, Gemini ou Portal Worker, a tela fica “processando” durante toda a execução.
+Hoje no passo **#6 Esclarecer dúvidas**, quando o lead manda algo fora do FAQ (ou clica "Ainda tenho dúvida"), a regra cai em **handoff humano** e notifica o Rafael. O correto é: bot pausa só quando o lead **pede humano explicitamente**; qualquer outra dúvida deve ser respondida pela IA conversacional que já existe (`handlers/conversational`, Gemini livre).
 
-## Plano de correção
+Mudanças:
+- Em `StepInspector` (aba **Regras**), adicionar nova opção no dropdown "Quando casar, vai para:"
+  - `🤖 Responder com IA` (além de "Falar com humano", "Pular para cadastro", passos…)
+  - Persistir como `next_action = "ai_reply"` numa coluna nova `bot_flow_rules.next_action` (ou reaproveitar `target_step_key = "__ai_reply__"`).
+- Em `whapi-webhook/handlers/bot-flow.ts`, ao resolver transição:
+  - Se `next_action === "ai_reply"` → não faz handoff, chama o pipeline `conversational/index.ts` com o texto do lead, mantém `conversation_step` no passo atual.
+  - Handoff só dispara se intent = `quer_humano` (regex já existente) OU regra explícita "Falar com humano".
+- Atualizar regras default do passo #6 nos templates: "Ainda tenho dúvida" → `ai_reply` em vez de handoff.
 
-### 1. Manter serviços reais, mas acelerar só o relógio do simulador
+## 2) Avançado só para SuperAdmin
 
-Adicionar um flag interno de teste, por exemplo `x-bot-fast-clock: 1`, enviado apenas pelo `flow-simulate-run`.
+`src/components/admin/flow-builder/StepInspector.tsx` linhas 339-379: bloco "Avançado" (step_key, slot_key, text_delay_ms) fica visível pra qualquer consultor.
 
-Com isso:
+- Ler `useUserRole()` no `StepInspector`.
+- Renderizar o toggle/painel "Avançado" **apenas se `role === "super_admin"`**.
+- Consultores comuns continuam vendo Básico/Mídias/Botões/Regras normalmente. `slot_key` segue editável só via SuperAdmin (consultor herda do template).
+- Mesma regra na mensagem placeholder da aba **Mídias** ("Defina uma slot_key em Básico → Avançado…") — trocar copy pra "Peça ao SuperAdmin liberar este slot".
 
-- OCR continua real.
-- Gemini continua real.
-- Portal Worker/OTP/link facial continuam reais.
-- Whapi continua real no número informado.
-- Só as pausas artificiais de cadência entre mensagens/mídias ficam curtas.
+## 3) Atalho "Captar luz" no Simulador (modo real)
 
-### 2. Corrigir `sleepForMedia` do fluxo principal
+Hoje o simulador exige digitar manualmente "oi", "quero simular", "350", upload de imagem etc. Pra validar rápido o fluxo principal (captação da conta de luz), adicionar **quick-actions** no header do `FlowSimulator`:
 
-Em `supabase/functions/whapi-webhook/handlers/bot-flow.ts`, alterar a espera quando estiver no simulador real com fast clock:
+- Botões prontos: `👋 oi` · `💡 Captar luz` · `📸 Mandar conta (fixture)` · `📄 Mandar RG (fixture)` · `🙋 Falar com humano`
+- `💡 Captar luz` envia a mensagem `"quero economizar na conta de luz 350"` — força o regex de valor + intent `quer_cadastrar`, já avançando para `aguardando_conta`.
+- `📸 Mandar conta` reaproveita `fixtures/conta-energia.pdf` e dispara OCR real (Gemini) em Modo Real.
 
-- áudio/vídeo: aguardar ~800ms a 1500ms, não a duração inteira;
-- imagem/texto: manter pausa curta;
-- produção real fora do simulador continua igual.
+Assim, com 2 cliques o operador valida ABCD inteiro (texto sempre reflete o fluxo, independente da variante de áudio).
 
-Isso espelha o que já foi feito no handler conversacional, mas limitado ao simulador.
+### Auditoria dos testes anteriores (erros observados)
+- `welcome → welcome` ficava em loop quando variante D (custom) não tinha resolver — **já corrigido** (router multi-variant).
+- Delays artificiais de áudio (até 90s) travavam UI — **já corrigido** com `x-bot-fast-clock`.
+- Quiet hours bloqueavam simulação 21:30-08:00 — **já corrigido** com `x-bot-bypass-quiet-hours`.
+- Resta: dúvidas caindo em handoff (item 1) e falta de atalhos (item 3).
 
-### 3. Propagar o flag no contexto de teste
+## Detalhes técnicos
 
-Em `supabase/functions/_shared/test-mode.ts`:
+- Migração: `ALTER TABLE bot_flow_rules ADD COLUMN next_action text;` (ou enum `flow_rule_action`).
+- Edge: `bot-flow.ts` precisa importar handler conversational e expor função `respondWithAI(customer, message)` que retorna sem mover `conversation_step`.
+- `FlowSimulator.tsx`: array `QUICK_ACTIONS` com label/payload; botões logo acima do input de mensagem.
+- Tipos Supabase regerados após migração.
 
-- adicionar `fastClock?: boolean` no `TestStore`;
-- criar helper `shouldUseFastClock()`.
-
-Em `supabase/functions/whapi-webhook/index.ts`:
-
-- ler o header interno `x-bot-fast-clock`;
-- salvar no `botRequestStore` somente quando `testMode === true`.
-
-Em `supabase/functions/flow-simulate-run/index.ts`:
-
-- enviar `x-bot-fast-clock: 1` junto com `x-bot-real-services: 1`.
-
-### 4. Reduzir espera morta do polling do simulador
-
-Ajustar a janela em `flow-simulate-run`:
-
-- quando já houver evento de saída, encerrar mais rápido após estabilizar;
-- manter uma janela segura para cold start/primeira resposta;
-- retornar diagnóstico claro quando não houver evento, em vez de parecer travado.
-
-### 5. Validar no fluxo real
-
-Depois de implementar:
-
-- testar `flow-simulate-run` no modo real com a mensagem `oi`;
-- testar clique em `Quero simular`;
-- conferir que responde em poucos segundos e que o estado do customer avança corretamente;
-- revisar logs do `whapi-webhook` para confirmar que o fast clock só ativou em test mode.  
-
-
-## Resultado esperado
-
-O teste continua 100% real nos serviços e decisões, mas deixa de esperar 30–90s por cadência artificial de mídia. Cada mensagem deve voltar em poucos segundos, exceto etapas naturalmente pesadas como OCR/Portal/OTP, que ainda dependem dos serviços reais.
+## Validação
+- Simular: clica `Captar luz` → bot pede foto da conta → upload fixture → OCR → confirma valor.
+- Simular: passo #6, digita "isso é golpe?" → IA responde (não notifica Rafael).
+- Simular: digita "quero falar com humano" → ainda pausa bot + notifica.
+- Logar como consultor comum → aba Básico não mostra "Avançado".

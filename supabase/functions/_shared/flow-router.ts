@@ -171,6 +171,7 @@ export const SPECIAL_GOTO_VALUES: ReadonlySet<string> = new Set([
   "humano",
   "menu",
   "repeat",
+  "ai",
 ]);
 
 export interface MatchTransitionInput {

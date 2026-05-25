@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import StepSuggestions from "./StepSuggestions";
 import {
   Step, Transition, Capture, BUTTON_PRESETS, STEP_TYPE_OPTIONS, getButtons, isOcrStep, isAiAnswerStep,
 } from "./flowTypes";
+import { supabase } from "@/integrations/supabase/client";
 
 
 
@@ -37,6 +38,18 @@ export default function StepInspector({
   step, steps, consultantId, variant, flowId, maxPosition, onClose, onPatch, onReload,
 }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.rpc("is_super_admin", { _user_id: user.id });
+      if (!cancelled) setIsSuperAdmin(Boolean(data));
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   if (!step) return null;
   const buttons = getButtons(step);
@@ -336,46 +349,50 @@ export default function StepInspector({
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={() => setAdvancedOpen((v) => !v)}
-              className="flex w-full items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 text-sm font-medium hover:bg-muted/60"
-            >
-              <span>Avançado</span>
-              {advancedOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </button>
+            {isSuperAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setAdvancedOpen((v) => !v)}
+                  className="flex w-full items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 text-sm font-medium hover:bg-muted/60"
+                >
+                  <span>Avançado <Badge variant="outline" className="ml-2 text-[10px]">SuperAdmin</Badge></span>
+                  {advancedOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </button>
 
-            {advancedOpen && (
-              <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="key">Chave técnica (step_key)</Label>
-                  <Input
-                    id="key"
-                    value={step.step_key ?? ""}
-                    onChange={(e) => onPatch({ step_key: e.target.value || null })}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Usado pra identificar este passo nos relatórios. Mude com cuidado.
-                  </p>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Slot de mídia (slot_key)</Label>
-                  <Input
-                    value={step.slot_key ?? ""}
-                    onChange={(e) => onPatch({ slot_key: e.target.value || null })}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Delay antes do texto (ms)</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={20000}
-                    value={step.text_delay_ms ?? 0}
-                    onChange={(e) => onPatch({ text_delay_ms: Number(e.target.value) || 0 })}
-                  />
-                </div>
-              </div>
+                {advancedOpen && (
+                  <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="key">Chave técnica (step_key)</Label>
+                      <Input
+                        id="key"
+                        value={step.step_key ?? ""}
+                        onChange={(e) => onPatch({ step_key: e.target.value || null })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Usado pra identificar este passo nos relatórios. Mude com cuidado.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Slot de mídia (slot_key)</Label>
+                      <Input
+                        value={step.slot_key ?? ""}
+                        onChange={(e) => onPatch({ slot_key: e.target.value || null })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Delay antes do texto (ms)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={20000}
+                        value={step.text_delay_ms ?? 0}
+                        onChange={(e) => onPatch({ text_delay_ms: Number(e.target.value) || 0 })}
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
 
@@ -460,6 +477,7 @@ export default function StepInspector({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">⚠ Sem destino</SelectItem>
+                          <SelectItem value="special:ai">🤖 Responder com IA (Gemini)</SelectItem>
                           <SelectItem value="special:humano">👤 Falar com humano</SelectItem>
                           <SelectItem value="special:cadastro">📝 Pular para cadastro</SelectItem>
                           {steps
@@ -577,6 +595,7 @@ export default function StepInspector({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">⚠ Sem destino</SelectItem>
+                            <SelectItem value="special:ai">🤖 Responder com IA (Gemini)</SelectItem>
                             <SelectItem value="special:humano">👤 Falar com humano</SelectItem>
                             <SelectItem value="special:cadastro">📝 Pular para cadastro</SelectItem>
                             {steps
