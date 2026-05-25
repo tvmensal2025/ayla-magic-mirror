@@ -19,7 +19,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
-type Stage = "aprovado" | "reprovado" | "d30" | "d60" | "d90" | "d120";
+type Stage = "em_analise" | "aprovado" | "reprovado" | "d30" | "d60" | "d90" | "d120";
 
 interface PosVendaCustomer {
   id: string;
