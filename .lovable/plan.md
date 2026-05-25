@@ -1,52 +1,44 @@
-# Plano — Fluxos: IA em dúvidas, Avançado oculto, atalho Captar luz
+## Objetivo
 
-## 1) Dúvida do lead deve cair na IA (não no Rafael)
+Simulador 100% rápido (mock + delays curtos). **Modo Real run-wide some** — em vez disso, apenas a chamada do Portal Worker (que dispara o SMS de OTP da distribuidora) acontece de verdade, usando o telefone real informado. Toda a conversa (texto, áudio, vídeo, OCR) continua no simulador.
 
-Hoje no passo **#6 Esclarecer dúvidas**, quando o lead manda algo fora do FAQ (ou clica "Ainda tenho dúvida"), a regra cai em **handoff humano** e notifica o Rafael. O correto é: bot pausa só quando o lead **pede humano explicitamente**; qualquer outra dúvida deve ser respondida pela IA conversacional que já existe (`handlers/conversational`, Gemini livre).
+## Mudanças
 
-Mudanças:
-- Em `StepInspector` (aba **Regras**), adicionar nova opção no dropdown "Quando casar, vai para:"
-  - `🤖 Responder com IA` (além de "Falar com humano", "Pular para cadastro", passos…)
-  - Persistir como `next_action = "ai_reply"` numa coluna nova `bot_flow_rules.next_action` (ou reaproveitar `target_step_key = "__ai_reply__"`).
-- Em `whapi-webhook/handlers/bot-flow.ts`, ao resolver transição:
-  - Se `next_action === "ai_reply"` → não faz handoff, chama o pipeline `conversational/index.ts` com o texto do lead, mantém `conversation_step` no passo atual.
-  - Handoff só dispara se intent = `quer_humano` (regex já existente) OU regra explícita "Falar com humano".
-- Atualizar regras default do passo #6 nos templates: "Ainda tenho dúvida" → `ai_reply` em vez de handoff.
+### 1. UI — `src/components/admin/flow-builder/FlowSimulator.tsx`
+- Remover o toggle "🔴 Modo Real" e estados `realMode` relacionados.
+- Substituir por um campo único **"📲 Telefone real para receber OTP (opcional)"** (input com máscara 55 + DDD + número).
+- Se preenchido e válido → enviar `otp_real_phone` no body do `flow-simulate-run`. Se vazio → continua tudo mock (stub do OTP atual: "digite qualquer 4-6 dígitos").
+- Atualizar os badges/legendas para refletir o novo modelo (sem "fluxo 100% real").
 
-## 2) Avançado só para SuperAdmin
+### 2. `supabase/functions/flow-simulate-run/index.ts`
+- Aceitar `otp_real_phone` (string, opcional) no body. Validar 12-13 dígitos.
+- **NÃO** enviar mais `x-bot-real-services` para o webhook.
+- Continuar usando o customer sandbox (`5500000...`), `is_sandbox: true`.
+- Persistir o telefone real no customer em um novo campo `otp_test_phone` (ver migration) para o passo do portal usar.
+- Manter `x-bot-fast-clock` e `x-bot-bypass-quiet-hours`.
 
-`src/components/admin/flow-builder/StepInspector.tsx` linhas 339-379: bloco "Avançado" (step_key, slot_key, text_delay_ms) fica visível pra qualquer consultor.
+### 3. Migration
+```sql
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS otp_test_phone text;
+```
+Coluna nullable, só usada quando `is_sandbox=true` e o simulador informou um telefone real para receber OTP.
 
-- Ler `useUserRole()` no `StepInspector`.
-- Renderizar o toggle/painel "Avançado" **apenas se `role === "super_admin"`**.
-- Consultores comuns continuam vendo Básico/Mídias/Botões/Regras normalmente. `slot_key` segue editável só via SuperAdmin (consultor herda do template).
-- Mesma regra na mensagem placeholder da aba **Mídias** ("Defina uma slot_key em Básico → Avançado…") — trocar copy pra "Peça ao SuperAdmin liberar este slot".
+### 4. `supabase/functions/whapi-webhook/handlers/bot-flow.ts` (linhas ~4910-4960)
+No bloco que entra em `portal_submitting`:
+- Manter o stub `isMockMode()` atual **como default** (rápido, sem portal).
+- **Exceção:** se `isMockMode()` **e** `customer.otp_test_phone` estiver preenchido → pular o stub e executar o caminho real do Portal Worker, **mas** sobrescrevendo o telefone enviado ao worker pelo `otp_test_phone` (para o SMS chegar no número certo). O `sender` continua sendo o `mockSender`, então as mensagens "Aguarde..." e "Código recebido" ficam apenas no simulador.
+- O intercept de OTP existente (whapi-webhook linhas 327-400) já confirma o código no worker quando o usuário digita no simulador — funciona sem mudança.
 
-## 3) Atalho "Captar luz" no Simulador (modo real)
+### 5. Limpeza
+- Remover/ocultar o caminho `realServices = true` do `whapi-webhook/index.ts` para sandbox phones (deixar apenas o sandbox mock + a exceção do portal acima). `mirrorSender` pode ficar para um eventual uso futuro, mas não é mais acionado pelo simulador.
 
-Hoje o simulador exige digitar manualmente "oi", "quero simular", "350", upload de imagem etc. Pra validar rápido o fluxo principal (captação da conta de luz), adicionar **quick-actions** no header do `FlowSimulator`:
+## Validação manual
 
-- Botões prontos: `👋 oi` · `💡 Captar luz` · `📸 Mandar conta (fixture)` · `📄 Mandar RG (fixture)` · `🙋 Falar com humano`
-- `💡 Captar luz` envia a mensagem `"quero economizar na conta de luz 350"` — força o regex de valor + intent `quer_cadastrar`, já avançando para `aguardando_conta`.
-- `📸 Mandar conta` reaproveita `fixtures/conta-energia.pdf` e dispara OCR real (Gemini) em Modo Real.
+1. Sem telefone preenchido: rodar fluxo até `finalizando` → bot responde "modo teste, digite qualquer 4-6 dígitos" instantaneamente.
+2. Com telefone real preenchido: rodar até `finalizando` → recebo SMS no celular real → digito no simulador → bot avança para `cadastro_em_analise`/`complete`.
+3. Cronometrar um turno texto simples: deve voltar em <2s (sem ida ao Whapi real).
 
-Assim, com 2 cliques o operador valida ABCD inteiro (texto sempre reflete o fluxo, independente da variante de áudio).
+## Notas técnicas
 
-### Auditoria dos testes anteriores (erros observados)
-- `welcome → welcome` ficava em loop quando variante D (custom) não tinha resolver — **já corrigido** (router multi-variant).
-- Delays artificiais de áudio (até 90s) travavam UI — **já corrigido** com `x-bot-fast-clock`.
-- Quiet hours bloqueavam simulação 21:30-08:00 — **já corrigido** com `x-bot-bypass-quiet-hours`.
-- Resta: dúvidas caindo em handoff (item 1) e falta de atalhos (item 3).
-
-## Detalhes técnicos
-
-- Migração: `ALTER TABLE bot_flow_rules ADD COLUMN next_action text;` (ou enum `flow_rule_action`).
-- Edge: `bot-flow.ts` precisa importar handler conversational e expor função `respondWithAI(customer, message)` que retorna sem mover `conversation_step`.
-- `FlowSimulator.tsx`: array `QUICK_ACTIONS` com label/payload; botões logo acima do input de mensagem.
-- Tipos Supabase regerados após migração.
-
-## Validação
-- Simular: clica `Captar luz` → bot pede foto da conta → upload fixture → OCR → confirma valor.
-- Simular: passo #6, digita "isso é golpe?" → IA responde (não notifica Rafael).
-- Simular: digita "quero falar com humano" → ainda pausa bot + notifica.
-- Logar como consultor comum → aba Básico não mostra "Avançado".
+- Nenhuma mensagem do bot é enviada para o WhatsApp real em nenhum cenário — só o Portal Worker é chamado, e ele que dispara SMS via distribuidora.
+- O `otp_test_phone` é limpo no "Zerar" junto com os outros campos no `patch` de fresh reset.

@@ -2611,6 +2611,7 @@ export type Database = {
           ocr_review_started_at: string | null
           otp_code: string | null
           otp_received_at: string | null
+          otp_test_phone: string | null
           otp_validated_at: string | null
           pain_point: string | null
           pending_flow_switch: string | null
@@ -2757,6 +2758,7 @@ export type Database = {
           ocr_review_started_at?: string | null
           otp_code?: string | null
           otp_received_at?: string | null
+          otp_test_phone?: string | null
           otp_validated_at?: string | null
           pain_point?: string | null
           pending_flow_switch?: string | null
@@ -2903,6 +2905,7 @@ export type Database = {
           ocr_review_started_at?: string | null
           otp_code?: string | null
           otp_received_at?: string | null
+          otp_test_phone?: string | null
           otp_validated_at?: string | null
           pain_point?: string | null
           pending_flow_switch?: string | null
