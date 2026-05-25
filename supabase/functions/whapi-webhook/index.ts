@@ -1023,7 +1023,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    if ((customer as any).capture_mode === "manual" && hasAudio && messageText && !isFile) {
+    if (!realMode && (customer as any).capture_mode === "manual" && hasAudio && messageText && !isFile) {
       try {
         const multi = extractMultiField(messageText);
         const patch = buildMultiFieldPatch(customer as any, multi);
