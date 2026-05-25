@@ -150,12 +150,12 @@ Deno.serve(async (req) => {
           for (const row of bp?.data || []) {
             const key = `${row.publisher_platform || "?"}:${row.platform_position || "?"}`;
             const spend = Math.round(parseFloat(row.spend || "0") * 100);
-            const leads = Number((row.actions || []).find((a: any) =>
-              a.action_type === "lead" ||
-              a.action_type === "onsite_conversion.messaging_conversation_started_7d"
-            )?.value || 0);
+            const leadsDirect = sumActions(row.actions, LEAD_ACTIONS);
+            const convs = sumActions(row.actions, CONV_ACTIONS);
+            const leads = leadsDirect > 0 ? leadsDirect : convs;
             const cpl = leads > 0 ? Math.round(spend / leads) : 0;
             cplByPlacement[key] = { spend, leads, cpl };
+
           }
         } catch (be) {
           console.warn("[fb-sync] breakdown placement falhou", c.fb_campaign_id, (be as Error).message);
