@@ -33,18 +33,29 @@ Deno.serve(async (req) => {
     const user = userRes?.user;
     if (!user) return json({ error: "unauthenticated" }, 401);
 
-    const body = await req.json().catch(() => ({}));
-    const consultantId = String(body?.consultant_id || user.id);
-
     const svc = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    if (consultantId !== user.id) {
+    const body = await req.json().catch(() => ({}));
+    const requestedConsultantId = String(body?.consultant_id || user.id);
+
+    if (requestedConsultantId !== user.id) {
       const { data: roles } = await svc.from("user_roles").select("role").eq("user_id", user.id);
       const isAdmin = (roles || []).some((r: any) =>
         ["admin", "super_admin", "superadmin"].includes(String(r.role)),
       );
       if (!isAdmin) return json({ error: "forbidden" }, 403);
     }
+
+    // Usa o mesmo consultor canônico do flow-simulate-run/whapi-webhook.
+    // Sem isso, reset limpava o telefone sandbox do usuário e o run usava o superadmin.
+    const { data: sRow } = await svc
+      .from("settings")
+      .select("value")
+      .eq("key", "superadmin_consultant_id")
+      .maybeSingle();
+    const realSuperAdminId = String((sRow as any)?.value || "").trim();
+    if (!realSuperAdminId) return json({ error: "superadmin_consultant_id_missing" }, 500);
+    const consultantId = realSuperAdminId;
 
     // Real mode → reseta pelo telefone real informado. Sandbox → phone determinístico.
     const realMode = body?.real_mode === true;
@@ -53,7 +64,11 @@ Deno.serve(async (req) => {
 
     // Acha customers pelo phone. Em real mode, exige is_test_lead=true
     // pra NUNCA apagar um cliente real por engano.
-    let q = svc.from("customers").select("id, is_test_lead, is_sandbox").eq("phone_whatsapp", phone);
+    let q = svc
+      .from("customers")
+      .select("id, is_test_lead, is_sandbox")
+      .eq("phone_whatsapp", phone)
+      .eq("consultant_id", consultantId);
     if (realMode) q = q.eq("is_test_lead", true);
     const { data: list } = await q;
     const ids = (list || []).map((r: any) => r.id);
