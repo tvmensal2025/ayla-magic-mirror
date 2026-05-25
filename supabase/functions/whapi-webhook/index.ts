@@ -587,6 +587,21 @@ Deno.serve(async (req) => {
     // o webhook respondia de novo o passo welcome em loop.
     if (messageText && !isFile && !isButton && !buttonId && customer && (customer as any).conversation_step && !testMode && !(customer as any).is_sandbox) {
       try {
+        // GUARD adicional: se o lead já está em fluxo custom (flow:<uuid>,
+        // UUID puro legacy ou passo_<ts>), NÃO resetamos. Resetar nesse caso
+        // fazia o engine reentrar no welcome em loop a cada inbound curto.
+        const cs = String((customer as any).conversation_step || "");
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const inCustomFlow = cs.startsWith("flow:") || cs.startsWith("passo_") || UUID_RE.test(cs);
+
+        // Atividade recente em transições = lead engajado, não resetar.
+        const since30 = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+        const { count: recentTrans } = await supabase
+          .from("bot_step_transitions")
+          .select("id", { count: "exact", head: true })
+          .eq("customer_id", customer.id)
+          .gte("created_at", since30);
+
         const { data: lastOut } = await supabase
           .from("conversations")
           .select("created_at")
@@ -603,8 +618,9 @@ Deno.serve(async (req) => {
         const isGreeting = /^(oi+|olá+|ola+|opa+|bom dia|boa tarde|boa noite|eai|e\s*aí|hey+|hello+|hi+|alo+|começar|comecar|iniciar)\W*$/i
           .test(trimmed);
         const shortMsg = trimmed.length <= 24;
-        const shouldRewelcome =
+        const baseShould =
           (hoursSinceBot >= 4 && (isGreeting || shortMsg)) || hoursSinceBot >= 24;
+        const shouldRewelcome = baseShould && !inCustomFlow && (recentTrans ?? 0) === 0;
 
         if (shouldRewelcome) {
           const prevStep = (customer as any).conversation_step;
