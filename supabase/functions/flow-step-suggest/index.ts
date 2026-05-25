@@ -95,27 +95,21 @@ Foque em mover o lead pra frente (fechamento, captação de dados, ou objeção)
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 1200,
+          maxOutputTokens: 4096,
           responseMimeType: "application/json",
           responseSchema: {
             type: "object",
             properties: {
               suggestions: {
                 type: "array",
+                minItems: 3,
+                maxItems: 3,
                 items: {
                   type: "object",
                   properties: {
                     title: { type: "string" },
                     step_type: { type: "string" },
                     message_text: { type: "string" },
-                    buttons: {
-                      type: "array",
-                      items: {
-                        type: "object",
-                        properties: { id: { type: "string" }, title: { type: "string" } },
-                        required: ["id", "title"],
-                      },
-                    },
                     reasoning: { type: "string" },
                   },
                   required: ["title", "step_type", "message_text", "reasoning"],
