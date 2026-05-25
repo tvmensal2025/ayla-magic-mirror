@@ -2550,6 +2550,7 @@ export type Database = {
           document_front_base64: string | null
           document_front_url: string | null
           document_type: string | null
+          document_uploaded: boolean | null
           electricity_bill_photo_url: string | null
           electricity_bill_value: number | null
           email: string | null
@@ -2693,6 +2694,7 @@ export type Database = {
           document_front_base64?: string | null
           document_front_url?: string | null
           document_type?: string | null
+          document_uploaded?: boolean | null
           electricity_bill_photo_url?: string | null
           electricity_bill_value?: number | null
           email?: string | null
@@ -2836,6 +2838,7 @@ export type Database = {
           document_front_base64?: string | null
           document_front_url?: string | null
           document_type?: string | null
+          document_uploaded?: boolean | null
           electricity_bill_photo_url?: string | null
           electricity_bill_value?: number | null
           email?: string | null
