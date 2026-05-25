@@ -59,8 +59,17 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
   const [state, setState] = useState<any>(null);
   const [diagnostic, setDiagnostic] = useState<any>(null);
   const [showData, setShowData] = useState(false);
+  const [realMode, setRealMode] = useState(false);
+  const [realPhone, setRealPhone] = useState(() => {
+    try { return localStorage.getItem("flowSim:realPhone") || ""; } catch { return ""; }
+  });
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Persistir telefone real pra não digitar toda vez
+  useEffect(() => {
+    try { localStorage.setItem("flowSim:realPhone", realPhone); } catch { /* noop */ }
+  }, [realPhone]);
 
   useEffect(() => {
     if (open) handleReset(true);
@@ -76,11 +85,30 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
     setEvents((prev) => [...prev, ...incoming.map((e) => ({ ...e, key: k() }))]);
   }
 
+  function realPhoneDigits(): string {
+    return realPhone.replace(/\D/g, "");
+  }
+
+  function realPhoneValid(): boolean {
+    const d = realPhoneDigits();
+    return d.length === 12 || d.length === 13;
+  }
+
   async function callRun(payload: any) {
+    if (realMode && !realPhoneValid()) {
+      toast.error("Modo Real: informe um telefone válido (55 + DDD + número)");
+      return;
+    }
     setBusy(true);
     try {
       const { data, error } = await supabase.functions.invoke("flow-simulate-run", {
-        body: { consultant_id: consultantId, variant, ...payload },
+        body: {
+          consultant_id: consultantId,
+          variant,
+          real_mode: realMode,
+          real_phone: realMode ? realPhoneDigits() : undefined,
+          ...payload,
+        },
       });
       if (error) throw error;
       const out = data as { events?: any[]; customer_state?: any; diagnostic?: any };
@@ -94,6 +122,7 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
       setBusy(false);
     }
   }
+
 
   async function handleReset(initial = false) {
     setEvents([]);
