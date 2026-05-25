@@ -485,7 +485,9 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
 
         <p className="flex items-start gap-1 text-[10px] text-muted-foreground">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-          Conversa sandbox — não polui CRM, métricas nem envia WhatsApp real. Use o anexo (📎) para simular envio de foto da conta de luz ou documento. O OCR roda em modo mock (dados fictícios pré-definidos). Clique em <strong>👁 Dados</strong> para ver o que foi coletado.
+          {realMode
+            ? <>🔴 <strong>Modo Real:</strong> WhatsApp, OCR (Gemini), Portal Worker, OTP e link facial são reais. O OTP chega no WhatsApp do número acima — digite-o aqui ou diretamente no WhatsApp. Lead marcado como <code>is_test_lead=true</code>, fora das métricas.</>
+            : <>Conversa sandbox — não polui CRM, métricas nem envia WhatsApp real. Use o anexo (📎) para simular envio de foto da conta de luz ou documento. O OCR roda em modo mock (dados fictícios pré-definidos). Clique em <strong>👁 Dados</strong> para ver o que foi coletado.</>}
         </p>
       </DialogContent>
     </Dialog>
