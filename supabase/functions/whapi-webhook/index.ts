@@ -470,15 +470,15 @@ Deno.serve(async (req) => {
         })
         .select().single();
       if (error) {
-        const { data: fallback } = await supabase
+        let fallbackQuery = supabase
           .from("customers")
           .select("*")
           .eq("phone_whatsapp", phone)
           .eq("consultant_id", superAdminConsultantId)
-          .eq(realMode ? "is_test_lead" : "is_test_lead", realMode ? true : false)
           .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(1);
+        if (realMode) fallbackQuery = fallbackQuery.eq("is_test_lead", true);
+        const { data: fallback } = await fallbackQuery.maybeSingle();
         if (fallback) {
           // Mesma regra do bloco principal: NÃO resetar leads pós-cadastro para welcome.
           customer = fallback;
