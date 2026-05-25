@@ -50,7 +50,7 @@ function makeRecorder(): SenderRecorder {
         return true;
       },
       sendMedia: async (_jid: string, url: string, _caption: string, kind: string) => {
-        events.push({ kind: kind as SendEvent["kind"], url });
+        events.push({ kind: kind as "audio" | "video" | "image" | "document", url });
         return true;
       },
       sendButtons: async (_jid: string, _msg: string, _btns: any[]) => true,
