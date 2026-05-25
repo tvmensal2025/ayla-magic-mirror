@@ -457,6 +457,29 @@ export default function FlowSimulator({ open, onOpenChange, consultantId }: Prop
           {busy && <p className="text-center text-[10px] text-muted-foreground"><Loader2 className="inline h-3 w-3 animate-spin" /> processando…</p>}
         </div>
 
+        {/* ⚡ Quick actions: dispara mensagens prontas pra validar o fluxo principal */}
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            { label: "👋 oi", msg: "oi" },
+            { label: "💡 Captar luz", msg: "quero economizar na conta de luz, vem uns 350 por mês" },
+            { label: "📸 Quero simular", msg: "quero simular" },
+            { label: "🤔 Tenho dúvida", msg: "ainda tenho dúvida, isso é golpe?" },
+            { label: "🙋 Falar com humano", msg: "quero falar com um humano" },
+          ].map((qa) => (
+            <Button
+              key={qa.label}
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              disabled={busy}
+              onClick={() => handleSend(qa.msg)}
+            >
+              {qa.label}
+            </Button>
+          ))}
+        </div>
+
         <div className="flex gap-2">
           <input
             ref={fileRef}
