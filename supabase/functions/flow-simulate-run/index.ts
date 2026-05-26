@@ -312,8 +312,12 @@ Deno.serve(async (req) => {
 
     // ── 5) Polling de bot_test_outbound ──
     // Polling agressivo otimizado para o painel OCR aparecer em tempo real.
+    // Engine v3 emite outbounds DENTRO do request do webhook, então quando
+    // a chamada do whapi-webhook acima retorna os inserts já estão no banco
+    // — primeira iteração do polling já encontra todos. Janela maior só
+    // serve para mídia assíncrona (OCR de 2-5s pós-resposta).
     const events: UiEvent[] = [];
-    const deadline = Date.now() + 8_000;
+    const deadline = Date.now() + 30_000;
     const seen = new Set<string>();
     let stableSince = 0;
     while (Date.now() < deadline) {

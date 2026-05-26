@@ -146,8 +146,11 @@ export async function executeActions(
           await args.supabase.from("bot_test_outbound").insert({
             run_id: args.testRunId,
             turn: args.testTurn,
+            direction: "outbound",
             kind: conv.type,
             content: conv.text,
+            conversation_step_after: currentStepIdAfter(args.state, args.result),
+            conversation_step_before: args.state.currentStepId ?? null,
           });
         }
       } catch (e: any) {
