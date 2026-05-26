@@ -62,13 +62,29 @@ jobs:
           deno-version: v1.x
       - name: Run Deno tests
         run: |
-          deno test --allow-env --no-check \
+          deno test --allow-env --allow-read --no-check \
             supabase/functions/_shared/channels/ \
             supabase/functions/_shared/flow-engine/ \
             supabase/functions/_shared/human-pace_test.ts \
             supabase/functions/_shared/text-hash_test.ts \
             supabase/functions/_shared/grounding_test.ts \
             supabase/functions/_shared/bot/dedupe_test.ts
+
+  engine-purity-check:
+    name: Engine purity lint (v3-runner.ts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+      # Verifica que `v3-runner.ts` é puro: sem supabase-js, fetch,
+      # Date.now, Math.random, crypto.randomUUID, setTimeout/Interval.
+      # Spec: flow-engine-v3-rewrite Task 4. Design §2.1, §2.4.
+      - name: Run purity lint
+        run: |
+          deno test --allow-read --no-check \
+            supabase/functions/_shared/flow-engine/__tests__/purity_lint_test.ts
 
   spec-format:
     name: Kiro spec format
