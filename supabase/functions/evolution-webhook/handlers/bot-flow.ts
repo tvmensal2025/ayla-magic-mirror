@@ -23,6 +23,7 @@ import {
 } from "../../_shared/utils.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../_shared/step-media-order.ts";
 import { canSendMediaOnce } from "../../_shared/media-dedupe.ts";
+import { buildCadastroLink } from "../../_shared/keyword-matcher.ts";
 import {
   getReplyForStep,
   getNextMissingStep,
@@ -4377,7 +4378,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     try {
       const { data: c } = await supabase
         .from("consultants")
-        .select("id, phone, igreen_portal_email, cadastro_url")
+        .select("id, phone, igreen_portal_email, cadastro_url, igreen_id")
         .eq("id", customer.consultant_id || consultorId)
         .maybeSingle();
       consultantRow = c;
@@ -4479,7 +4480,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
       // ✅ Regenerar igreen_link a partir do cadastro_url do consultor dono
       // (impede o bug em que o lead é submetido com o link de outro consultor)
-      if (consultantRow?.cadastro_url) {
+      if (consultantRow?.igreen_id) {
+        let partnerCli: string | null = null;
+        if ((customer as any).referral_partner_id) {
+          try {
+            const { data: partner } = await supabase
+              .from("referral_partners")
+              .select("cli")
+              .eq("id", (customer as any).referral_partner_id)
+              .maybeSingle();
+            partnerCli = (partner as any)?.cli || null;
+          } catch (_) { /* segue sem cli */ }
+        }
+        updates.igreen_link = buildCadastroLink(consultantRow.igreen_id, partnerCli);
+        console.log(`🔗 igreen_link regenerado para consultor dono: ${consultantRow.id}${partnerCli ? ` cli=${partnerCli}` : ""}`);
+      } else if (consultantRow?.cadastro_url) {
         updates.igreen_link = consultantRow.cadastro_url;
         console.log(`🔗 igreen_link regenerado para consultor dono: ${consultantRow.id}`);
       }

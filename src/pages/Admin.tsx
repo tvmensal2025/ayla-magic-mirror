@@ -2,7 +2,7 @@ import React, { useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, BarChart3, LinkIcon, Settings, MessageSquare, LayoutGrid, Users, Copy, Download, X, Sparkles, FolderDown, Network, Eye, EyeOff, Megaphone, ClipboardList } from "lucide-react";
+import { LogOut, BarChart3, LinkIcon, Settings, MessageSquare, LayoutGrid, Users, Copy, Download, X, Sparkles, FolderDown, Network, Eye, EyeOff, Megaphone, ClipboardList, Handshake } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { OnboardingGate } from "@/components/admin/OnboardingGate";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
@@ -35,6 +35,7 @@ const PanfletoModal = lazy(() => import("@/components/admin/PanfletoModal").then
 
 const AdsCentralTab = lazy(() => import("@/components/admin/ads/AdsCentralTab").then(m => ({ default: m.AdsCentralTab })));
 const CaptacaoPanel = lazy(() => import("@/components/captacao/CaptacaoPanel").then(m => ({ default: m.CaptacaoPanel })));
+const ParceirosTab = lazy(() => import("@/components/admin/parceiros/ParceirosTab").then(m => ({ default: m.ParceirosTab })));
 const InstallPwaButton = lazy(() => import("@/components/admin/InstallPwaButton").then(m => ({ default: m.InstallPwaButton })));
 import { LayoutLockToggle } from "@/components/layout/LayoutLockToggle";
 
@@ -47,7 +48,7 @@ const AdminContent = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "links" | "whatsapp" | "crm" | "clientes" | "rede" | "central-anuncios" | "captacao">(() => {
+  const [activeTab, setActiveTab] = useState<"materiais" | "dashboard" | "links" | "whatsapp" | "crm" | "clientes" | "rede" | "central-anuncios" | "captacao" | "parceiros">(() => {
     if (typeof window !== "undefined") {
       const tab = new URLSearchParams(window.location.search).get("tab");
       if (tab === "performance" || tab === "anuncios" || tab === "central-anuncios") return "central-anuncios";
@@ -177,6 +178,7 @@ const AdminContent = () => {
     { id: "crm" as const, label: "CRM", icon: LayoutGrid },
     { id: "clientes" as const, label: "Clientes", icon: Users },
     { id: "captacao" as const, label: "Captação", icon: ClipboardList },
+    { id: "parceiros" as const, label: "Parceiros", icon: Handshake },
     { id: "rede" as const, label: "Rede", icon: Network },
     { id: "whatsapp" as const, label: "WhatsApp", icon: MessageSquare },
     { id: "central-anuncios" as const, label: "Central de Anúncios", icon: Megaphone },
@@ -385,6 +387,10 @@ const AdminContent = () => {
               isWhapi={isWhapi}
               onOpenChat={(phone) => { setPendingChatPhone(phone); setActiveTab("whatsapp"); }}
             />
+          )}
+
+          {userId && activeTab === "parceiros" && (
+            <ParceirosTab consultantPhone={form.phone || ""} />
           )}
 
         </Suspense>

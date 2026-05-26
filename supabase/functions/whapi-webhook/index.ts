@@ -25,6 +25,7 @@ import { notifyNewLead } from "../_shared/notify-consultant.ts";
 import { syncDealStageFromStep } from "../_shared/crm-stage-sync.ts";
 import { isCustomerPausedByHuman, isConsultantAIDisabled } from "../_shared/bot/paused.ts";
 import { isBotGloballyEnabled } from "../_shared/bot/global-flag.ts";
+import { matchKeyword, type PartnerKeywords } from "../_shared/keyword-matcher.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -570,6 +571,46 @@ Deno.serve(async (req) => {
         }
       } catch (e) {
         console.warn("[self-intro] falhou:", (e as Error).message);
+      }
+    }
+
+    // ─── Keyword Detection (Detection Window: primeiras 3 mensagens) ───
+    if (customer && !(customer as any).referral_partner_id && messageText && !isFile) {
+      try {
+        const { count: inboundCount } = await supabase
+          .from("conversations")
+          .select("id", { count: "exact", head: true })
+          .eq("customer_id", customer.id)
+          .eq("message_direction", "inbound");
+
+        const DETECTION_WINDOW = 3;
+        if ((inboundCount ?? 0) < DETECTION_WINDOW) {
+          const { data: partners } = await supabase
+            .from("referral_partners")
+            .select("id, keywords")
+            .eq("consultant_id", superAdminConsultantId)
+            .eq("is_active", true);
+
+          if (partners?.length) {
+            const partnerKeywords: PartnerKeywords[] = partners.map((p: any) => ({
+              partnerId: p.id,
+              keywords: p.keywords || [],
+            }));
+
+            const match = matchKeyword(messageText, partnerKeywords);
+            if (match) {
+              await supabase.from("customers").update({
+                referral_partner_id: match.partnerId,
+                referral_keyword_matched: match.keyword,
+                referral_detected_at: new Date().toISOString(),
+              }).eq("id", customer.id);
+              (customer as any).referral_partner_id = match.partnerId;
+              console.log(`[keyword-match] customer=${customer.id} partner=${match.partnerId} keyword="${match.keyword}"`);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("[keyword-match] falhou:", (e as Error).message);
       }
     }
 
