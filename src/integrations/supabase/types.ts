@@ -5147,6 +5147,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      flow_engine_housekeeping: { Args: never; Returns: Json }
       fork_ad_template: { Args: { _origin_id: string }; Returns: string }
       fork_message_template: { Args: { _origin_id: string }; Returns: string }
       fork_public_ai_media: { Args: { _media_id: string }; Returns: string }
