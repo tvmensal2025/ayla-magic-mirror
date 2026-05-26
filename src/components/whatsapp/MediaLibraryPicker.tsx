@@ -182,7 +182,7 @@ export function MediaLibraryPicker({
     async function load() {
       setLoading(true);
       try {
-        const queries: Promise<MediaItem[]>[] = [];
+        const queries: PromiseLike<MediaItem[]>[] = [];
 
         // 1) ai_media_library — mídias do consultor + públicas
         queries.push(
