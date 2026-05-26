@@ -1425,6 +1425,7 @@ export type Database = {
           is_active: boolean
           media_order: Json
           message_text: string | null
+          persuasive_text: string | null
           position: number
           slot_key: string | null
           step_key: string | null
@@ -1450,6 +1451,7 @@ export type Database = {
           is_active?: boolean
           media_order?: Json
           message_text?: string | null
+          persuasive_text?: string | null
           position?: number
           slot_key?: string | null
           step_key?: string | null
@@ -1475,6 +1477,7 @@ export type Database = {
           is_active?: boolean
           media_order?: Json
           message_text?: string | null
+          persuasive_text?: string | null
           position?: number
           slot_key?: string | null
           step_key?: string | null
@@ -2090,6 +2093,7 @@ export type Database = {
           phone: string
           photo_url: string | null
           referred_by: string | null
+          use_engine_v3: boolean
         }
         Insert: {
           ab_test_counter?: number
@@ -2119,6 +2123,7 @@ export type Database = {
           phone: string
           photo_url?: string | null
           referred_by?: string | null
+          use_engine_v3?: boolean
         }
         Update: {
           ab_test_counter?: number
@@ -2148,6 +2153,7 @@ export type Database = {
           phone?: string
           photo_url?: string | null
           referred_by?: string | null
+          use_engine_v3?: boolean
         }
         Relationships: [
           {
@@ -2355,6 +2361,7 @@ export type Database = {
           flow_id: string | null
           last_inbound_at: string | null
           last_outbound_at: string | null
+          last_outbound_content_hash: string | null
           pause_reason: string | null
           retries: number
           status: string
@@ -2369,6 +2376,7 @@ export type Database = {
           flow_id?: string | null
           last_inbound_at?: string | null
           last_outbound_at?: string | null
+          last_outbound_content_hash?: string | null
           pause_reason?: string | null
           retries?: number
           status?: string
@@ -2383,6 +2391,7 @@ export type Database = {
           flow_id?: string | null
           last_inbound_at?: string | null
           last_outbound_at?: string | null
+          last_outbound_content_hash?: string | null
           pause_reason?: string | null
           retries?: number
           status?: string
@@ -3014,6 +3023,61 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_flow_engine_health"
             referencedColumns: ["consultant_id"]
+          },
+        ]
+      }
+      engine_logs: {
+        Row: {
+          at: string
+          customer_id: string
+          flow_id: string
+          id: number
+          kind: string
+          payload: Json
+          side_effect: Json | null
+          step_id: string | null
+        }
+        Insert: {
+          at: string
+          customer_id: string
+          flow_id: string
+          id?: number
+          kind: string
+          payload?: Json
+          side_effect?: Json | null
+          step_id?: string | null
+        }
+        Update: {
+          at?: string
+          customer_id?: string
+          flow_id?: string
+          id?: number
+          kind?: string
+          payload?: Json
+          side_effect?: Json | null
+          step_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "engine_logs_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engine_logs_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "bot_flows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engine_logs_step_id_fkey"
+            columns: ["step_id"]
+            isOneToOne: false
+            referencedRelation: "bot_flow_steps"
+            referencedColumns: ["id"]
           },
         ]
       }
