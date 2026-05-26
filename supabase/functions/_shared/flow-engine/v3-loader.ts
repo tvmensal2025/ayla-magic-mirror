@@ -168,6 +168,8 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
   //   3) step.step_key without leading "d_" (welcome, como_funciona)
   //   4) step.step_key without leading "v_a_" / "v_b_" / "v_d_" prefixes
   // The slot_key for ai_media_library lookup uses the same chain.
+  const warnings: import("./v3-types.ts").StructuredLog[] = [];
+  const nowIso = new Date().toISOString();
   const mediaOrderByStepKey: Record<string, MediaOrderEntry[]> = {};
   for (const stepRow of stepsRaw as any[]) {
     const stepKey = stepRow.step_key as string | null;
