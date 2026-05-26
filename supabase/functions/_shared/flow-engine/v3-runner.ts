@@ -333,6 +333,7 @@ function runEngineInner(input: EngineInput): EngineOutput {
         const stateUpdate: Partial<CustomerSnapshot> = {
           currentStepId: target.id,
           retries: 0,
+          aiQuestionsThisStep: 0,
           enteredStepAt: input.config.now,
           lastOutboundAt: outbound.length > 0 ? input.config.now : input.state.lastOutboundAt ?? null,
         };
@@ -465,9 +466,19 @@ function finalize(
     }
   }
 
-  // Step 10: clamp retries
+  // Step 10: clamp retries + aiQuestionsThisStep
   if (stateUpdate.retries !== undefined) {
     stateUpdate.retries = clampRetries(input.state.retries, stateUpdate.retries);
+  }
+  if (stateUpdate.aiQuestionsThisStep !== undefined) {
+    stateUpdate.aiQuestionsThisStep = clampAiQuestions(
+      input.state.aiQuestionsThisStep,
+      stateUpdate.aiQuestionsThisStep,
+    );
+  }
+  // Auto-reset aiQuestionsThisStep quando o passo muda (mesma política do retries=0).
+  if (stateUpdate.currentStepId !== undefined && stateUpdate.aiQuestionsThisStep === undefined) {
+    stateUpdate.aiQuestionsThisStep = 0;
   }
 
   const out: EngineOutput = {
