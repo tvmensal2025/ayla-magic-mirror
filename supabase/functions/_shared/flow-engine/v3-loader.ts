@@ -235,7 +235,7 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
               kind: "engine_audio_slot_missing",
               at: nowIso,
               customerId,
-              flowId: flow.id,
+              flowId: flowRow.id as string,
               stepId: stepRow.id as string,
               payload: { slot_candidates: candidates, fell_back_to: stepText ? "text" : "skip" },
             });
@@ -288,7 +288,7 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
               kind: "engine_audio_slot_missing",
               at: nowIso,
               customerId,
-              flowId: flow.id,
+              flowId: flowRow.id as string,
               stepId: stepRow.id as string,
               payload: { slot_candidates: candidates, fell_back_to: stepText ? "text" : "skip" },
             });
@@ -349,7 +349,7 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
   const state: CustomerSnapshot = {
     customerId: customer.id as string,
     consultantId,
-    flowId: flow.id,
+    flowId: flowRow.id as string,
     currentStepId: resolvedStepId,
     status: (cfs.status as CustomerSnapshot["status"]) ?? "new",
     pauseReason: cfs.pause_reason ?? null,
