@@ -31,6 +31,11 @@ export interface LoadedContext {
   state: CustomerSnapshot;
   flow: BotFlow;
   capabilities: ChannelCapabilities;
+  /**
+   * Avisos não-fatais detectados durante o load (ex: slot de áudio sem URL).
+   * O dispatcher injeta-os em `engine_logs` junto com `result.logs`.
+   */
+  warnings?: import("./v3-types.ts").StructuredLog[];
 }
 
 export interface LoadContextArgs {
