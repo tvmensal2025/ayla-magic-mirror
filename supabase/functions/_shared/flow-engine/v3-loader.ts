@@ -304,11 +304,20 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
 
   // ─── 6. Materialize CustomerSnapshot ──────────────────────────────────
   const cfs = (customer.customer_flow_state as any) || {};
+  // Normalize legacy `current_step_id` values: the trigger
+  // `trg_create_customer_flow_state` copies `customers.conversation_step`
+  // which may be the literal string "welcome" (not a UUID). The engine
+  // expects either a valid UUID step id or null (new lead). Treat any
+  // non-UUID value as null so `findFirstStep` kicks in.
+  let resolvedStepId: string | null = cfs.current_step_id ?? null;
+  if (resolvedStepId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedStepId)) {
+    resolvedStepId = null;
+  }
   const state: CustomerSnapshot = {
     customerId: customer.id as string,
     consultantId,
     flowId: flow.id,
-    currentStepId: cfs.current_step_id ?? null,
+    currentStepId: resolvedStepId,
     status: (cfs.status as CustomerSnapshot["status"]) ?? "new",
     pauseReason: cfs.pause_reason ?? null,
     retries: Number(cfs.retries) || 0,

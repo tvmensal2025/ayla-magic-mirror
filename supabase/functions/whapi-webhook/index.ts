@@ -1172,6 +1172,52 @@ Deno.serve(async (req) => {
     let updates: Record<string, any> = {};
     let engineUsed: "sys" | "flow" = "sys";
     try {
+      // ─── Engine v3 gate (FIRST — before any legacy routing) ──────────
+      // When v3 is enabled for the consultant, it takes FULL ownership of
+      // the turn. No legacy routing, no auto-cure, no "FONTE ÚNICA DE
+      // VERDADE" block. The v3 entry helper handles everything: load
+      // context, run engine, dispatch outbounds, persist state.
+      const { isEngineV3Enabled } = await import("../_shared/flow-engine/router.ts");
+      if (await isEngineV3Enabled(supabase as any, superAdminConsultantId)) {
+        const { runEngineV3WebhookEntry } = await import("../_shared/flow-engine/v3-webhook-entry.ts");
+        const { getAdapter } = await import("../_shared/channels/index.ts");
+        const v3Adapter = getAdapter({
+          kind: "whapi",
+          input: { apiToken: whapiToken },
+        });
+        const v3Outcome = await runEngineV3WebhookEntry({
+          supabase: supabase as any,
+          adapter: v3Adapter,
+          customerId: customer.id,
+          consultantId: superAdminConsultantId,
+          jid: remoteJid,
+          inbound: {
+            messageText,
+            buttonId,
+            isFile,
+            isButton,
+            hasImage,
+            hasAudio,
+            hasDocument,
+            messageId,
+          },
+          testRunId: testMode ? testRunId : null,
+          testTurn: testMode ? Number(testTurn || 1) : null,
+        });
+        jsonLog(v3Outcome.ok ? "info" : "warn", "engine_v3_handled", {
+          customer_id: customer.id,
+          consultant_id: superAdminConsultantId,
+          ok: v3Outcome.ok,
+          sent: v3Outcome.sent,
+          failed: v3Outcome.failed,
+          error: v3Outcome.error,
+        });
+        return new Response(
+          JSON.stringify({ ok: true, mode: "engine_v3", v3: v3Outcome }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
       const customerOverride = (customer as any).conversational_flow_enabled;
       const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
 
@@ -1341,56 +1387,6 @@ Deno.serve(async (req) => {
 
       // ─── Engine v3 gate (Task 29 — flow-engine-v3-rewrite) ──────────
       // When `consultants.use_engine_v3 = true`, the v3 engine takes
-      // full ownership of this turn: load context, run the pure runner,
-      // and dispatch outbounds via the channel adapter. The legacy
-      // `runConversationalFlow` / `runBotFlow` path is bypassed entirely
-      // for v3-enabled consultors.
-      //
-      // Default flag value is FALSE — zero leads route through v3 until
-      // a consultor is explicitly opted in (Phase 1+ of rollout). On v3
-      // errors, the helper pauses the customer + inserts a handoff
-      // alert (NEVER falls through to legacy) per the safety contract.
-      const { isEngineV3Enabled } = await import("../_shared/flow-engine/router.ts");
-      if (await isEngineV3Enabled(supabase as any, superAdminConsultantId)) {
-        const { runEngineV3WebhookEntry } = await import("../_shared/flow-engine/v3-webhook-entry.ts");
-        const { getAdapter } = await import("../_shared/channels/index.ts");
-        const v3Adapter = getAdapter({
-          kind: "whapi",
-          input: { apiToken: whapiToken },
-        });
-        const v3Outcome = await runEngineV3WebhookEntry({
-          supabase: supabase as any,
-          adapter: v3Adapter,
-          customerId: customer.id,
-          consultantId: superAdminConsultantId,
-          jid: remoteJid,
-          inbound: {
-            messageText,
-            buttonId,
-            isFile,
-            isButton,
-            hasImage,
-            hasAudio,
-            hasDocument,
-            messageId,
-          },
-          testRunId: testMode ? testRunId : null,
-          testTurn: testMode ? Number(testTurn || 1) : null,
-        });
-        jsonLog(v3Outcome.ok ? "info" : "warn", "engine_v3_handled", {
-          customer_id: customer.id,
-          consultant_id: superAdminConsultantId,
-          ok: v3Outcome.ok,
-          sent: v3Outcome.sent,
-          failed: v3Outcome.failed,
-          error: v3Outcome.error,
-        });
-        return new Response(
-          JSON.stringify({ ok: true, mode: "engine_v3", v3: v3Outcome }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-
       const runEngine = async () => engine === "flow"
         ? await runConversationalFlow({
             supabase, sender: engineSender, customer, consultorId, nomeRepresentante,
