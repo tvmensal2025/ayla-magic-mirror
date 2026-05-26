@@ -417,7 +417,9 @@ function outboundToConversationRow(
       return { text: msg.text, type: "text" };
     case "choice": {
       const opts = msg.choice.options ?? [];
-      const numbered = opts.map((o, i) => `${i + 1}. ${o.label}`).join("\n");
+      const numbered = opts
+        .map((o: any, i: number) => `${i + 1}. ${o.title ?? o.label ?? o.id ?? ""}`)
+        .join("\n");
       const text = numbered ? `${msg.prompt}\n\n${numbered}` : msg.prompt;
       return { text, type: "buttons" };
     }

@@ -182,3 +182,60 @@ Os 2 steps do Fluxo D agora respondem ao engine v3 corretamente: lead errando e-
 ### Position 9 (`d_handoff`)
 
 Não é gap real — o step existe mas está `is_active=false`, por isso não aparece nas queries que filtram por ativos. Mantido como está (handoff é tratado por `goto_special: "humano"` nos transitions, não por step explícito).
+
+
+## Pós smoke 26-mai-2026 — gaps de integração fechados
+
+Durante a sessão de validação foram encontrados e corrigidos 4 gaps de integração entre engine v3 e o resto do sistema:
+
+### Gap A: dispatcher v3 não escrevia em `conversations`
+
+Sintoma: ChatView do painel admin ficava vazio para leads servidos pela v3.
+
+Fix: `v3-dispatcher.ts` agora persiste cada outbound em `conversations` (mesmo quando o adapter retorna `ok=false`, escreve com prefixo `[failed]` para audit). Persiste também o inbound recebido.
+
+Arquivos: `supabase/functions/_shared/flow-engine/v3-dispatcher.ts`, `supabase/functions/_shared/flow-engine/v3-webhook-entry.ts`.
+
+### Gap B: dispatcher v3 não escrevia em `bot_test_outbound`
+
+Sintoma: simulador admin (`flow-simulate-run`) não mostrava as respostas da v3.
+
+Fix: dispatcher agora aceita `testRunId` + `testTurn` e replica outbounds em `bot_test_outbound`. Webhook repassa quando recebe headers `x-bot-test-run-id` + `x-bot-test-turn`.
+
+### Gap C: `customers.conversation_step` não era espelhado quando engine v3 atualiza `customer_flow_state`
+
+Sintoma: legacy queries (ChatView, painéis, crons, reactivation) viam o step antigo após v3 transitionar.
+
+Fix: nova migration `20260526104500_engine_v3_state_mirror.sql` cria função `mirror_customer_flow_state_to_customers` + trigger `trg_mirror_customer_flow_state` (AFTER INSERT OR UPDATE em `customer_flow_state`). Espelha `current_step_id`, `last_outbound_at`, `last_inbound_at`, `status` para `customers.*`.
+
+### Gap D: webhook abortava em `manual_capture_text_saved_no_auto_flow` antes de chegar no engine
+
+Sintoma: leads novos com `capture_mode=manual` (default do trigger `customers_default_capture_mode`) caíam no short-circuit do legado e o engine v3 nunca rodava.
+
+Fix: `whapi-webhook` checa `isEngineV3Enabled` antes do short-circuit; se v3 está ON, pula. `v3-webhook-entry` força `capture_mode='auto'` antes de carregar contexto. `evolution-webhook` recebe a mesma assinatura.
+
+### Gap E: variant A/D só renderizava buttons quando `step_type='ask_choice'`
+
+Sintoma: welcome do Fluxo D do super-admin (`step_type='message'` com `_buttons` em captures) só emitia texto, sem opções.
+
+Fix: `synthesizeFromStep` em `variants/a.ts` passa a emitir choice sempre que `choiceOptions.length > 0`, independente de `step_type`. Variant D continua sobrescrevendo `preferred` baseado em `capabilities`.
+
+### Validação ponta-a-ponta (smoke real, customer não-sandbox)
+
+| Validação | Resultado |
+| --- | --- |
+| webhook responde `mode=engine_v3, sent=2, failed=0` | ✅ |
+| `engine_logs` populado com `engine_step_enter` + `engine_repeat` | ✅ |
+| `customer_flow_state.current_step_id` aponta pro welcome | ✅ |
+| `customers.conversation_step` espelhado pelo trigger | ✅ |
+| `conversations` tem inbound + 2 outbounds (texto + buttons) | ✅ |
+| Whapi adapter entrega via `sendChoice`/`sendText` | ✅ |
+
+### Estado dos leads pré-migration (mantidos para humano)
+
+- 41 customers pausados com `bot_paused_reason='engine_v3_migration'` permanecem **pausados**. Humanos assumem via o painel admin.
+- 39 handoff alerts abertos para esses leads. **Não foram resolvidos automaticamente** — operadores devem revisar e fechar manualmente conforme atendem.
+
+### Próximo passo
+
+Tráfego REAL novo (leads que mandam "oi" pela primeira vez via Whapi do super-admin) agora passa pela engine v3 corretamente. Aguardar 24h, ler relatório do `flow-engine-v3-rollout-cron`, e validar G1–G6 = 0 antes de avançar para Phase 2.

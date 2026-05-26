@@ -111,7 +111,7 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
   const mediaOrderByStepKey: Record<string, MediaOrderEntry[]> = {};
   for (const [key, entries] of Object.entries(mediaOrderJson)) {
     if (Array.isArray(entries)) {
-      mediaOrderByStepKey[key] = entries as MediaOrderEntry[];
+      mediaOrderByStepKey[key] = normalizeMediaOrder(entries);
     }
   }
 
@@ -241,4 +241,44 @@ function pipelineKindFor(stepType: string): BotFlowStep["pipelineKind"] {
   if (stepType === "finalizar_cadastro") return "finalizar_cadastro";
   if (stepType === "cadastro") return "cadastro_portal";
   return null;
+}
+
+
+/**
+ * Normalize `flow_step_media_order` entries to canonical `MediaOrderEntry`
+ * shape. Historically the column stores either rich objects
+ * (`{kind: "audio", media_id: "..."}`) or bare strings
+ * (`["audio","image","video","text"]`) declaring only the ordering.
+ *
+ * Variant A's `renderMediaItem` and Variant D's overlay both expect
+ * `item.kind` — passing raw strings crashes with "Cannot read properties
+ * of undefined (reading 'kind')". We coerce strings to
+ * `{kind: "<string>", text: undefined, media_id: undefined}` so the
+ * variant builders can decide whether to skip (no media_id) or render.
+ *
+ * Validates: Requirements 5.1, 5.5 (media ordering across variants).
+ */
+function normalizeMediaOrder(entries: unknown[]): MediaOrderEntry[] {
+  const out: MediaOrderEntry[] = [];
+  for (const e of entries) {
+    if (e === null || e === undefined) continue;
+    if (typeof e === "string") {
+      // Bare string — interpret as kind hint only. media_id absent
+      // means the variant builder MUST fall back to synthesis from
+      // step.messageText (the renderer treats this as "skip").
+      out.push({ kind: e as MediaOrderEntry["kind"] });
+      continue;
+    }
+    if (typeof e === "object") {
+      const o = e as Record<string, unknown>;
+      const kind = typeof o.kind === "string" ? o.kind : undefined;
+      if (!kind) continue;
+      out.push({
+        kind: kind as MediaOrderEntry["kind"],
+        text: typeof o.text === "string" ? o.text : undefined,
+        media_id: typeof o.media_id === "string" ? o.media_id : undefined,
+      } as MediaOrderEntry);
+    }
+  }
+  return out;
 }

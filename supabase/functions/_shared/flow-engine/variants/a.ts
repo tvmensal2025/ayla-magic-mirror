@@ -177,9 +177,35 @@ export const variantA: VariantStrategy = {
       return synthesizeFromStep(step, capabilities);
     }
 
-    return order.flatMap((item: MediaOrderEntry) =>
-      renderMediaItem(item, step, capabilities, config)
+    // Detect "stub" media order entries: bare `{kind: "..."}` with no
+    // payload (text/url/media_id). Those are ORDER HINTS only — the real
+    // content lives on the step (`step.messageText` + step buttons). In
+    // that case fall back to synthesis from the step, which already
+    // emits text + choice when the step has buttons.
+    //
+    // Mixed orders (some entries have real content, others are stubs)
+    // render only the entries with payload.
+    const hasAnyPayload = order.some(
+      (item) =>
+        (item as any).text !== undefined ||
+        (item as any).url !== undefined ||
+        (item as any).media_id !== undefined,
     );
+    if (!hasAnyPayload) {
+      return synthesizeFromStep(step, capabilities);
+    }
+
+    return order.flatMap((item: MediaOrderEntry) => {
+      // Skip stub entries within a mixed order (no payload to render).
+      if (
+        (item as any).text === undefined &&
+        (item as any).url === undefined &&
+        (item as any).media_id === undefined
+      ) {
+        return [];
+      }
+      return renderMediaItem(item, step, capabilities, config);
+    });
   },
 };
 

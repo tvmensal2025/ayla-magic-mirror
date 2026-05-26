@@ -161,6 +161,9 @@ export function runEngine(input: EngineInput): EngineOutput {
     // for user-driven inbounds; for `no_input`/`timer_expired` we return
     // empty (no lead waiting on a reply).
     const errMsg = err instanceof Error ? err.message : String(err);
+    const errStack = err instanceof Error ? (err.stack ?? "") : "";
+    // Surface a tiny stack snippet (line of throw) for production triage.
+    const stackHint = errStack.split("\n").slice(0, 4).join(" ⏎ ").slice(0, 400);
     const stepId = typeof input?.state?.currentStepId === "string"
       ? input.state.currentStepId
       : null;
@@ -168,7 +171,7 @@ export function runEngine(input: EngineInput): EngineOutput {
       return {
         outbound: [],
         stateUpdate: {},
-        logs: [makeLog("engine_safe_text", input, stepId, { error: errMsg, branch: "outer_catch_silent" })],
+        logs: [makeLog("engine_safe_text", input, stepId, { error: errMsg, branch: "outer_catch_silent", stackHint })],
       };
     }
     return {
@@ -181,7 +184,7 @@ export function runEngine(input: EngineInput): EngineOutput {
         retries: clampRetries(input.state?.retries ?? 0, (input.state?.retries ?? 0) + 1),
         lastOutboundAt: input.config.now,
       },
-      logs: [makeLog("engine_safe_text", input, stepId, { error: errMsg, branch: "outer_catch_recover" })],
+      logs: [makeLog("engine_safe_text", input, stepId, { error: errMsg, branch: "outer_catch_recover", stackHint })],
     };
   }
 }
