@@ -1,109 +1,137 @@
-## Objetivo
 
-Reaproveitar a aba **Clientes iGreen** (em `/admin/clientes` → `WhatsAppClientsPage.tsx`) como **CRM Pós-Venda em formato Kanban**, com 6 colunas fixas:
+# Análise profunda — Flow Engine V3 + Pós-Venda Kanban
 
-```
-Aprovado | Reprovado | 30 dias | 60 dias | 90 dias | 120 dias
-```
-
-Sem mexer no funil de Leads WhatsApp (continua igual). Os dados de cliente nunca são apagados — o sync iGreen só faz UPSERT.
+Diferente da análise anterior (só Pós-Venda), agora o **rewrite do flow-engine-v3** foi de fato implementado e cabeado nos webhooks. Resumo do que mudou, do que está bom e do que ainda precisa ajuste.
 
 ---
 
-## 1. Estrutura de colunas
+## 1. O que mudou desde a última análise
 
-- **Aprovado** — `portal_submitted_at` definido E status não-reprovado, e ainda <30 dias desde aprovação (ou recém-aprovado sem tempo de bucket).
-- **30 / 60 / 90 / 120 dias** — buckets calculados a partir de `portal_submitted_at`:
-  - 30d: 30 ≤ dias < 60
-  - 60d: 60 ≤ dias < 90
-  - 90d: 90 ≤ dias < 120
-  - 120d: ≥ 120
-- **Reprovado** — entra por dois caminhos:
-  1. Automático: status iGreen vier como `rejected` / `cancelado` / andamento "reprovado".
-  2. Manual: botão "Marcar como reprovado" no card (com motivo opcional).
+### 1.1 Engine V3 (`supabase/functions/_shared/flow-engine/`)
+Antes existia só o `engine.ts` legado + `webhook-hook.ts` (modo dark/observer). Agora também existe:
 
-Botão global no topo: **Auto / Manual** — quando "Auto" estiver ligado (default), o cron recalcula bucket a cada dia; quando "Manual", o card fica fixo na coluna onde o consultor arrastou.
+| Arquivo | Linhas | Papel |
+|---|---:|---|
+| `v3-runner.ts` | 485 | **Função pura** `runEngine(input) → output`. Sem I/O, sem Date.now, sem fetch — purity é forçada por `__tests__/purity_lint_test.ts`. |
+| `v3-loader.ts` | 449 | Hidrata `LoadedContext` (customer + state + flow + steps + `mediaOrderByStepKey` resolvido + `ai_media_library`). |
+| `v3-dispatcher.ts` | 555 | Aplica efeitos: render template, send via `ChannelAdapter`, mirror em `conversations` + `bot_test_outbound`, persiste `customer_flow_state`, escreve `engine_logs`, dispara `bot_handoff_alerts` com retry+DLQ. |
+| `v3-webhook-entry.ts` | 378 | Helper único compartilhado pelos dois webhooks: `loadContext → runEngine → executeActions`. Em erro: pausa cliente + insere handoff + log — **nunca cai pro legado**. |
+| `v3-types.ts` | 474 | Contratos. |
+| `variants/{a,b,c,d}.ts` | — | Variantes A (áudio), B (sem áudio), C (vídeo), D (botões). |
+| `__tests__/purity_lint_test.ts` | — | CI quebra se runner usar API impura. |
+| `__tests__/v3-runner_test.ts` + `arb.ts` | — | Testes property-based (G1–G6). |
+| `bot-e2e-runner/v3-scenarios.ts` | — | **88 cenários** ponta-a-ponta. |
 
-## 2. Movimentação automática
+### 1.2 Integração nos webhooks
+- `whapi-webhook/index.ts` linha **1216-1259**: gate V3 antes de qualquer roteamento legado. Quando `consultants.use_engine_v3=true`, V3 assume o turno inteiro e retorna `mode:"engine_v3"`.
+- `evolution-webhook/index.ts` linha **1311-1322**: idem.
+- Idempotência: `checkAndMarkProcessed(messageId)` linha 178 já bloqueia entrega duplicada do Whapi (R5 resolvido).
+- Render template centralizado em `_shared/render-vars.ts` — V3 e legado usam o mesmo módulo.
 
-- Novo campo em `customers`:
-  - `pos_venda_stage` (text) — coluna atual no Kanban (`aprovado | reprovado | d30 | d60 | d90 | d120`).
-  - `pos_venda_manual` (boolean default false) — se true, cron não mexe.
-  - `pos_venda_reason` (text null) — motivo da reprovação manual.
-- **Edge function + pg_cron diário (03:00 BRT)** `pos-venda-bucket-cron`:
-  - Para cada customer com `customer_origin='igreen_sync'`, `portal_submitted_at IS NOT NULL`, `pos_venda_manual = false`:
-    - Calcula `dias = now() - portal_submitted_at`.
-    - Atualiza `pos_venda_stage` conforme tabela acima.
-    - Se status iGreen indicar reprovação, força `pos_venda_stage = 'reprovado'`.
-- Arrastar manualmente no Kanban faz UPDATE e marca `pos_venda_manual = true`. Botão "Voltar ao automático" reseta.
+### 1.3 Pós-Venda Kanban
+Sem mudanças desde a análise anterior — segue como descrito (7 colunas, `pos_venda_*`, `assigned_consultant_id`, cron diário, filtro `mine/assigned/all`).
 
-## 3. Regra de propriedade (consultor)
+---
 
-- Cliente sempre pertence ao `consultant_id` original (principal) — esse é o único que aparece no Kanban dele por padrão.
-- Novo campo: `customers.assigned_consultant_id` (uuid null, FK consultants).
-- Se `assigned_consultant_id` estiver setado, o cliente também aparece no Kanban Pós-Venda **daquele** consultor (além do principal). Permite "compartilhar" cliente com outro consultor sem perder o original.
-- Botão no card "Atribuir a consultor…" abre select dos consultores e salva `assigned_consultant_id`. Só o principal ou super-admin pode atribuir/remover.
-- RLS atualizada: SELECT/UPDATE no Pós-Venda permitido se `consultant_id = auth.uid()` **OU** `assigned_consultant_id = auth.uid()` **OU** super_admin. Mas mudar status para Aprovado/Reprovado só pelo principal ou pelo `assigned_consultant_id` corrente.
+## 2. O que está bom (pode considerar 100%)
 
-## 4. Persistência (nada some)
+1. **Pureza do runner** garantida estaticamente pelo lint de purity.
+2. **Webhook entry compartilhado** — zero drift entre whapi e evolution (era um dos riscos #1 da análise antiga).
+3. **Erro em V3 ≠ silêncio**: `fallThroughToHandoff` pausa + alerta + log; webhook nunca cai pro legado em erro V3 (Task 29).
+4. **Idempotência de inbound** já presente (`processed_messages` via `checkAndMarkProcessed`).
+5. **Mirror em `conversations`** — ChatView e Kanban enxergam o output do V3 igualzinho ao legado.
+6. **CRM Kanban sync** chamando `syncDealStageFromStep` após cada turno (linha 353 do entry).
+7. **Retries clamp** (`clampRetries: candidate ∈ [0, prev+1]`) — protege contra runaway (Req 15.4).
+8. **DLQ de handoff** dentro do próprio `engine_logs` com kind sentinel — evita perder alerta se `bot_handoff_alerts.insert` falhar 3x.
 
-- Sync `igreen-sync` continua usando **UPSERT por (consultant_id, igreen_code)** — nunca DELETE.
-- Adicionar guard no edge function de sync: se cliente sumiu do payload iGreen, não apaga — apenas marca `andamento_igreen='Removido do portal'` e mantém histórico.
-- Coluna Reprovado mantém o card visível para sempre; não é "lixeira".
+---
 
-## 5. UI (frontend, em `WhatsAppClientsPage.tsx`)
+## 3. O que ainda precisa ajustar
 
-Quando a aba ativa é **Clientes iGreen**:
+### 3.1 Críticos
 
-```
-┌─ Toggle Auto/Manual ──────────────────── + Atribuir consultor ─┐
-├─Aprovado─┬─Reprovado─┬─30d─┬─60d─┬─90d─┬─120d─┤
-│  card    │  card     │card │card │card │card  │
-│  card    │           │card │     │     │card  │
-└──────────┴───────────┴─────┴─────┴─────┴──────┘
-```
+**C1 — Duas flags V3 coexistindo e divergindo**
+- `consultants.use_engine_v3` (boolean) → gate do `runEngineV3WebhookEntry` (assume o turno).
+- `consultants.flow_engine_v3` (enum `off|dark|canary|on`) → gate do `runEngineV3IfEnabled` (só observa).
+- Ambos rodam no mesmo webhook na mesma request. Risco: um consultor com `flow_engine_v3='on'` mas `use_engine_v3=false` continua no legado mesmo "rollado" — confunde o painel de rollout do SuperAdmin.
+- **Fix:** unificar. Sugestão: `flow_engine_v3='on'` deve setar/refletir `use_engine_v3=true` via trigger, OU o gate do entry passa a ler o enum (`flag === 'on'`).
 
-- Reaproveita componentes `KanbanBoard`/`KanbanColumn`/`KanbanDealCard` já existentes (usados no funil de Leads), passando colunas customizadas.
-- Card mostra: nome, telefone, valor da conta, dias desde aprovação, badge do andamento iGreen, botão "Reprovar / Aprovar / Voltar a auto / Atribuir".
-- Drag & drop com `DropConfirmDialog` (já existe) para confirmar virada manual.
-- Mantém Tabs Leads WhatsApp ↔ Clientes iGreen no topo.
+**C2 — `webhook-hook.ts` (modo dark) não chama `runEngine`**
+- Comentário explícito linha 76: *"o `tick()` completo precisa do EngineStep carregado — quando o webhook estiver wired ao ChannelAdapter v3, passamos a chamar `tick` aqui de fato"*. Hoje só loga snapshot do estado.
+- Consequência: o painel "Rollout V3" mede paridade de **estado**, não de **output**. Você não detecta divergência de texto/áudio entre legado e V3 antes de promover.
+- **Fix:** chamar `runEngine` em modo `isDarkMode=true` e logar o `EngineOutput.outbound` para diff offline contra o que o legado mandou.
 
-## 6. Detalhes técnicos
+**C3 — `audio_slot` sem fallback no dispatcher**
+- `sendOne` para `audio_slot` retorna `ok:false, error:"audio_slot unhandled"` (linha 348). O comentário diz "engine should resolve to media before emitting" — mas se o loader não achar a slot na `ai_media_library` (slot vazio do consultor), o runner ainda pode emitir `audio_slot`.
+- Variant A depende de áudio: silêncio do bot, conta como `failed`, mas turno é dado como `ok:true` (porque `executeActions` não falha o turno inteiro).
+- **Fix:** loader deve filtrar/converter `audio_slot` cujo slot não resolveu → pular para texto; ou dispatcher dispara handoff quando `failed > 0` em Variant A.
 
-**Migration:**
-```sql
-ALTER TABLE public.customers
-  ADD COLUMN pos_venda_stage text,
-  ADD COLUMN pos_venda_manual boolean NOT NULL DEFAULT false,
-  ADD COLUMN pos_venda_reason text,
-  ADD COLUMN assigned_consultant_id uuid REFERENCES public.consultants(id);
+### 3.2 Médios
 
-CREATE INDEX idx_customers_pos_venda
-  ON public.customers (consultant_id, pos_venda_stage)
-  WHERE customer_origin = 'igreen_sync';
+**M1 — `retries` único compartilhado entre repeats e perguntas AI**
+- `v3-types.ts` tem só `retries: number`. Pergunta AI mid-step e retry de validação consomem o mesmo contador. Quando bate `maxRetriesBeforeHandoff=3`, não dá pra distinguir "fez 3 perguntas livres" de "errou validação 3x".
+- **Fix:** adicionar `aiQuestionsThisStep` separado (R3 da análise antiga continua aberto).
 
-CREATE INDEX idx_customers_assigned
-  ON public.customers (assigned_consultant_id)
-  WHERE assigned_consultant_id IS NOT NULL;
-```
+**M2 — `consultantName` fetch a cada inbound**
+- `v3-webhook-entry.ts` linha 306-314 faz `SELECT name FROM consultants WHERE id = ?` toda vez que o V3 roda. Para 10k+ msgs/dia por consultor de alto volume, é round-trip evitável.
+- **Fix:** cachear no `customer_flow_state` (campo `_consultant_name`) ou no scope da request (já existe `botRequestStore`).
 
-**RLS extra (UPDATE/SELECT):** policy adicional permitindo `assigned_consultant_id = auth.uid()` ler/editar campos `pos_venda_*`.
+**M3 — `capture_mode='auto'` UPDATE pré-engine em todo turno**
+- Linha 297-302: faz UPDATE condicional (`.neq("capture_mode","auto")`) — bom, mas ainda é round-trip mesmo quando não muda nada (Postgres avalia o WHERE). Em consultores migrados isso é constante 0-row.
+- **Fix:** ler `capture_mode` no `loadContext` (já carrega customer) e só fazer UPDATE se necessário.
 
-**Edge function:** `supabase/functions/pos-venda-bucket-cron/index.ts` agendada via `pg_cron` (03:00 BRT).
+**M4 — Tela `Rollout V3` não mostra paridade real**
+- Decorrente de C2. View `v_flow_engine_health` só tem métricas agregadas de status; não tem "diff de outbound dark vs legado".
+- **Fix:** quando C2 for resolvido, adicionar coluna `output_parity_pct` na view.
 
-**Sync iGreen:** ajustar `api-voffice` (ou função de sync) para nunca deletar, apenas marcar removidos.
+**M5 — `syncDealStageFromStep` falha silenciosa**
+- Linha 358 do entry: só `console.warn`. Se Kanban dessincronizar, ninguém percebe.
+- **Fix:** quando erro, escrever `engine_logs` kind `engine_crm_sync_failed` (lista existente já tem `engine_safe_text`, basta um novo kind).
 
-**Frontend:** 
-- Novo componente `src/components/whatsapp/PosVendaKanban.tsx`.
-- Hook `usePosVendaCustomers(consultantId)` que retorna lista + agrupamento por `pos_venda_stage`.
-- Substitui a view de lista quando `originTab === "igreen_sync"`.
+### 3.3 Baixos / polimento
 
-## 7. Memórias a salvar
+- **B1** — `engine_logs` sem retenção. Cresce indefinidamente. Adicionar pg_cron mensal `DELETE WHERE at < now() - interval '90 days'` exceto kind in `('engine_handoff','engine_crm_sync_failed')`.
+- **B2** — `router.ts` ainda lê `consultants.use_engine_v3` em **toda** request (sem cache). 30-50ms por turno em consultores grandes. Cachear por 60s no escopo do edge runtime.
+- **B3** — `LEGACY_BRANCH_REMOVED = false` está hardcoded. Após Phase 4, virar `true` apaga o legado (Task 39) — confirmar que existe checklist antes do flip.
+- **B4** — Pós-Venda Kanban (itens 1-4 da análise anterior) seguem abertos: empty state quando consultor sem `igreen_id`, cron sobrescrevendo manual em reprovação iGreen, paginação, badge `registered_by_name` no card.
 
-- `mem://crm/pos-venda-kanban` — colunas fixas, cron de bucket, regra `pos_venda_manual`, propriedade por `assigned_consultant_id`, sync nunca apaga.
+---
 
-## Fora do escopo
+## 4. Veredito
 
-- Não cria nova rota — vive dentro de `/admin/clientes` na tab existente.
-- Não muda o funil de Leads WhatsApp.
-- Não muda formato/origem do sync iGreen além da regra "nunca deletar".
+| Componente | Status |
+|---|---|
+| V3 Engine puro + tests | ✅ Pronto |
+| Dispatcher + handoff fail-safe | ✅ Pronto |
+| Webhook entry unificado | ✅ Pronto |
+| Idempotência inbound | ✅ Pronto |
+| Mirror conversations / CRM sync | ✅ Pronto |
+| **Flags unificadas (C1)** | ⚠️ Refatorar |
+| **Modo dark mede paridade real (C2)** | ⚠️ Faltando |
+| **audio_slot fallback (C3)** | ⚠️ Falha silenciosa |
+| Métricas/painel rollout | ⚠️ Depende C2 |
+| Retries separados (M1) | ⚠️ Aberto |
+| Pós-Venda Kanban polimento | ⚠️ Aberto |
+
+**Não está 100%.** O núcleo do rewrite (runner puro, dispatcher, entry, fail-open p/ handoff) está sólido e seguro pra rodar em produção. Mas **não dá pra promover de canary pra global** sem resolver C1+C2 — sem isso você está promovendo no escuro.
+
+---
+
+## 5. Próximos passos sugeridos
+
+Posso atacar em três pacotes:
+
+1. **Pacote A (1 sessão) — Confiabilidade do rollout:**
+   - C1: unificar flag V3 (trigger ou consolidar leitura).
+   - C2: ativar `runEngine` em dark e logar diff vs legado.
+   - M4: coluna de paridade em `v_flow_engine_health`.
+
+2. **Pacote B (1 sessão) — Robustez do engine:**
+   - C3: fallback de `audio_slot` no loader.
+   - M1: `aiQuestionsThisStep` separado.
+   - M5: log de erro do CRM sync.
+
+3. **Pacote C (1 sessão) — Pós-Venda + housekeeping:**
+   - Itens B4 (Kanban) + B1 (retenção de logs) + B2 (cache router) + M2/M3 (round-trips evitáveis).
+
+Quer que eu comece pelo **Pacote A**, que é o que destrava você seguir o rollout pra mais consultores com segurança?
