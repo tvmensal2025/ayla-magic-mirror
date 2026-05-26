@@ -5019,6 +5019,9 @@ export type Database = {
           consultant_id: string | null
           consultant_name: string | null
           converted_total: number | null
+          dark_output_error_pct: number | null
+          dark_output_errors_24h: number | null
+          dark_outputs_24h: number | null
           delegated_total: number | null
           flag: string | null
           last_tick_at: string | null
