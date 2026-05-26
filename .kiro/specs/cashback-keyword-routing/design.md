@@ -398,8 +398,18 @@ export function useReferralPartners() {
   });
 
   const create = useMutation({
-    mutationFn: async (input: Omit<ReferralPartner, "id" | "is_active" | "created_at">) => {
-      const { error } = await supabase.from("referral_partners").insert(input);
+    mutationFn: async (
+      input: Omit<ReferralPartner, "id" | "is_active" | "created_at">,
+    ) => {
+      // RLS-aware insert: WITH CHECK (consultant_id = auth.uid()) requires
+      // the column to be present in the payload. Frontend resolves the
+      // current user via auth.getUser() and stamps consultant_id explicitly.
+      const { data: authData } = await supabase.auth.getUser();
+      const consultantId = authData?.user?.id;
+      if (!consultantId) throw new Error("Usuário não autenticado");
+      const { error } = await supabase
+        .from("referral_partners")
+        .insert({ ...input, consultant_id: consultantId });
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["referral-partners"] }),
@@ -502,6 +512,7 @@ CREATE POLICY "service_role_all" ON public.referral_partners
 | QR code com telefone inválido | Validação no frontend antes de gerar |
 | Database timeout na busca de partners | Catch + log, continua sem atribuição |
 | Keyword duplicada entre parceiros | Primeiro parceiro na lista (order by created_at) vence |
+| INSERT no painel sem `consultant_id` | RLS `WITH CHECK` rejeita com 403 — frontend SEMPRE estampa `consultant_id = auth.uid()` antes de enviar |
 
 ## Testing Strategy
 
@@ -599,3 +610,9 @@ CREATE POLICY "service_role_all" ON public.referral_partners
 *For any* input string, `normalizeText(normalizeText(input))` SHALL equal `normalizeText(input)` — applying normalization twice produces the same result as applying it once.
 
 **Validates: Requirements 2.1**
+
+### Property 12: Frontend INSERT stamps consultant_id from auth session
+
+*For any* `create` mutation invocation in `useReferralPartners`, the INSERT payload sent to PostgREST SHALL contain a `consultant_id` field equal to `auth.getUser().data.user.id`. If the user is not authenticated, the mutation SHALL throw before issuing the INSERT.
+
+**Validates: Requirements 7.4, 7.5**

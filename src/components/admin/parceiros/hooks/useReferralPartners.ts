@@ -48,9 +48,12 @@ export function useReferralPartners() {
     mutationFn: async (
       input: Omit<ReferralPartner, "id" | "is_active" | "created_at">,
     ) => {
+      const { data: authData } = await supabase.auth.getUser();
+      const consultantId = authData?.user?.id;
+      if (!consultantId) throw new Error("Usuário não autenticado");
       const { error } = await supabase
         .from("referral_partners")
-        .insert(input as never);
+        .insert({ ...input, consultant_id: consultantId } as never);
       if (error) throw error;
     },
     onSuccess: () =>

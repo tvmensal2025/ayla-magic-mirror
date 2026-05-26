@@ -95,3 +95,5 @@ Sistema de roteamento de cashback por palavras-chave que permite consultores cad
 1. THE Sistema SHALL scope all Parceiro_Indicador records to the owning Consultor's ID
 2. WHEN the Keyword_Matcher evaluates messages for a Lead, THE Sistema SHALL only compare against keywords belonging to the Lead's assigned Consultor
 3. IF a Consultor attempts to access or modify another Consultor's Parceiro_Indicador, THEN THE Sistema SHALL deny the request
+4. WHEN the Painel issues an INSERT for a new Parceiro_Indicador, THE Painel SHALL stamp the payload with `consultant_id` resolved from the authenticated session (auth.uid()) so that the RLS `WITH CHECK (consultant_id = auth.uid())` clause passes
+5. IF the Painel attempts to INSERT a Parceiro_Indicador without `consultant_id` in the payload, THEN THE Sistema SHALL reject the request with HTTP 403 (RLS violation)

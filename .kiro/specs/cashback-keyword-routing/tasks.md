@@ -162,6 +162,36 @@ Implementação do sistema de roteamento de cashback por palavras-chave. O plano
 - [x] 13. Final checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
+- [ ] 14. Bugfix: RLS 403 ao criar parceiro no painel
+  - [x] 14.1 Stamp `consultant_id` in `useReferralPartners.create` mutation
+    - In `src/components/admin/parceiros/hooks/useReferralPartners.ts`, resolve current user via `supabase.auth.getUser()` inside the `mutationFn`
+    - Throw `"Usuário não autenticado"` if no user
+    - Add `consultant_id: user.id` to the INSERT payload so RLS `WITH CHECK (consultant_id = auth.uid())` passes
+    - _Requirements: 7.4, 7.5_
+
+  - [x] 14.2 Manual smoke test in admin panel
+    - Open admin panel as authenticated consultant
+    - Click "Novo Parceiro", fill nome + cli + 1 keyword, save
+    - Assert no 403 in network tab and partner appears in list
+    - Edit partner (update mutation also runs under RLS — verify it works)
+    - Soft-delete partner (remove mutation) — verify it disappears from list
+    - _Requirements: 1.2, 1.4, 1.5_
+    - _Validated 2026-05-26 via Playwright: POST 201, PATCH (update) 204, PATCH (soft-delete) 204, list refetched correctly. RLS policy `consultants_own_partners` working as expected._
+
+  - [ ] 14.3 Commit and push the bugfix
+    - Stage `src/components/admin/parceiros/hooks/useReferralPartners.ts`
+    - Stage `.kiro/specs/cashback-keyword-routing/{requirements,design,tasks}.md` (spec alignment)
+    - Commit on branch `fix/flow-engine-v3-rewrite` with message `fix(parceiros): stamp consultant_id on INSERT to satisfy RLS WITH CHECK`
+    - Push to origin
+    - _Requirements: 7.4_
+
+- [ ] 15. Deploy edge functions with keyword-matcher integration
+  - [ ] 15.1 Deploy `whapi-webhook` and `evolution-webhook` to production
+    - Use Supabase CLI or MCP `deploy_edge_function`
+    - Verify deployment with smoke test message containing a registered keyword
+    - Confirm `customers.referral_partner_id` is populated after the inbound
+    - _Requirements: 6.1, 6.2_
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP
