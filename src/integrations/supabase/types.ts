@@ -2646,6 +2646,9 @@ export type Database = {
           possui_procurador: boolean | null
           previous_conversation_step: string | null
           qualification_score: number | null
+          referral_detected_at: string | null
+          referral_keyword_matched: string | null
+          referral_partner_id: string | null
           registered_by_igreen_id: string | null
           registered_by_name: string | null
           rescue_attempts: number
@@ -2797,6 +2800,9 @@ export type Database = {
           possui_procurador?: boolean | null
           previous_conversation_step?: string | null
           qualification_score?: number | null
+          referral_detected_at?: string | null
+          referral_keyword_matched?: string | null
+          referral_partner_id?: string | null
           registered_by_igreen_id?: string | null
           registered_by_name?: string | null
           rescue_attempts?: number
@@ -2948,6 +2954,9 @@ export type Database = {
           possui_procurador?: boolean | null
           previous_conversation_step?: string | null
           qualification_score?: number | null
+          referral_detected_at?: string | null
+          referral_keyword_matched?: string | null
+          referral_partner_id?: string | null
           registered_by_igreen_id?: string | null
           registered_by_name?: string | null
           rescue_attempts?: number
@@ -3023,6 +3032,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_flow_engine_health"
             referencedColumns: ["consultant_id"]
+          },
+          {
+            foreignKeyName: "customers_referral_partner_id_fkey"
+            columns: ["referral_partner_id"]
+            isOneToOne: false
+            referencedRelation: "referral_partners"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -4120,6 +4136,64 @@ export type Database = {
         }
         Relationships: []
       }
+      referral_partners: {
+        Row: {
+          cli: string
+          consultant_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          keywords: string[]
+          nome: string
+          qr_phrase: string | null
+          updated_at: string
+        }
+        Insert: {
+          cli: string
+          consultant_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          keywords?: string[]
+          nome: string
+          qr_phrase?: string | null
+          updated_at?: string
+        }
+        Update: {
+          cli?: string
+          consultant_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          keywords?: string[]
+          nome?: string
+          qr_phrase?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "referral_partners_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "referral_partners_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "referral_partners_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
+        ]
+      }
       rollout_alerts: {
         Row: {
           acknowledged: boolean
@@ -5090,6 +5164,14 @@ export type Database = {
           net_received_cents: number
           refunds_cents: number
           stripe_fees_cents: number
+        }[]
+      }
+      get_referral_partner_metrics: {
+        Args: never
+        Returns: {
+          lead_count: number
+          partner_id: string
+          partner_nome: string
         }[]
       }
       get_team_consultant_ids: { Args: { _leader: string }; Returns: string[] }

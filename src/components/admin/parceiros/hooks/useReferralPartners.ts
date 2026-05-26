@@ -29,7 +29,7 @@ export function useReferralPartners() {
         .eq("is_active", true)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return data as unknown as ReferralPartner[];
+      return (data ?? []) as ReferralPartner[];
     },
   });
 
@@ -37,10 +37,10 @@ export function useReferralPartners() {
     queryKey: ["referral-partner-metrics"],
     queryFn: async () => {
       const { data, error } = await supabase.rpc(
-        "get_referral_partner_metrics" as never,
+        "get_referral_partner_metrics",
       );
       if (error) throw error;
-      return (data as unknown as PartnerMetric[]) ?? [];
+      return (data ?? []) as PartnerMetric[];
     },
   });
 
@@ -48,12 +48,15 @@ export function useReferralPartners() {
     mutationFn: async (
       input: Omit<ReferralPartner, "id" | "is_active" | "created_at">,
     ) => {
+      // RLS-aware insert: WITH CHECK (consultant_id = auth.uid()) requires
+      // the column to be present in the payload. Frontend resolves the
+      // current user via auth.getUser() and stamps consultant_id explicitly.
       const { data: authData } = await supabase.auth.getUser();
       const consultantId = authData?.user?.id;
       if (!consultantId) throw new Error("Usuário não autenticado");
       const { error } = await supabase
         .from("referral_partners")
-        .insert({ ...input, consultant_id: consultantId } as never);
+        .insert({ ...input, consultant_id: consultantId });
       if (error) throw error;
     },
     onSuccess: () =>
@@ -67,7 +70,7 @@ export function useReferralPartners() {
     }: Partial<ReferralPartner> & { id: string }) => {
       const { error } = await supabase
         .from("referral_partners")
-        .update({ ...patch, updated_at: new Date().toISOString() } as never)
+        .update({ ...patch, updated_at: new Date().toISOString() })
         .eq("id", id);
       if (error) throw error;
     },
@@ -82,7 +85,7 @@ export function useReferralPartners() {
         .update({
           is_active: false,
           updated_at: new Date().toISOString(),
-        } as never)
+        })
         .eq("id", id);
       if (error) throw error;
     },

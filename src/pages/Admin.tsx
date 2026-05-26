@@ -390,7 +390,11 @@ const AdminContent = () => {
           )}
 
           {userId && activeTab === "parceiros" && (
-            <ParceirosTab consultantPhone={form.phone || ""} />
+            <ParceirosTab
+              consultantPhone={form.phone || ""}
+              consultantName={form.name || ""}
+              consultantIgreenId={form.igreen_id || ""}
+            />
           )}
 
         </Suspense>

@@ -14,9 +14,15 @@ import { useToast } from "@/hooks/use-toast";
 
 interface ParceirosTabProps {
   consultantPhone: string;
+  consultantName?: string;
+  consultantIgreenId?: string;
 }
 
-export function ParceirosTab({ consultantPhone }: ParceirosTabProps) {
+export function ParceirosTab({
+  consultantPhone,
+  consultantName = "",
+  consultantIgreenId = "",
+}: ParceirosTabProps) {
   const [formOpen, setFormOpen] = useState(false);
   const [editingPartner, setEditingPartner] = useState<ReferralPartner | null>(
     null,
@@ -111,6 +117,8 @@ export function ParceirosTab({ consultantPhone }: ParceirosTabProps) {
           partnerName={qrPartner.nome}
           keyword={qrPartner.keywords?.[0] || ""}
           consultantPhone={consultantPhone}
+          consultantName={consultantName}
+          consultantIgreenId={consultantIgreenId}
           qrPhrase={qrPartner.qr_phrase}
         />
       )}
