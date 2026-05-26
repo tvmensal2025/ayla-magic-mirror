@@ -19,6 +19,18 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getFlowEngineV3 } from "../feature-flag.ts";
 
+// B2: cache in-process do boolean legado `use_engine_v3` (30s).
+// Evita 1 SELECT extra por turno de webhook quando o enum não está 'on'.
+// TTL alinhado ao cache do enum em feature-flag.ts.
+const USE_ENGINE_V3_CACHE_TTL_MS = 30_000;
+interface BoolCacheEntry { value: boolean; expiresAt: number }
+const useEngineV3Cache = new Map<string, BoolCacheEntry>();
+
+/** Test/admin helper: limpa o cache local do boolean legado. */
+export function clearUseEngineV3Cache(): void {
+  useEngineV3Cache.clear();
+}
+
 /**
  * Combina `use_engine_v3` (bool) e `flow_engine_v3` (enum). Retorna
  * `false` em qualquer falha de leitura — legado é o default seguro.
@@ -34,17 +46,27 @@ export async function isEngineV3Enabled(
     if (flag === "on") return true;
   } catch (_) { /* fallthrough para boolean */ }
   // 2. Boolean legado — override manual / consultor migrado fora do enum.
+  const now = Date.now();
+  const cached = useEngineV3Cache.get(consultantId);
+  if (cached && cached.expiresAt > now) return cached.value;
+  let resolved = false;
   try {
     const { data, error } = await supabase
       .from("consultants")
       .select("use_engine_v3")
       .eq("id", consultantId)
       .maybeSingle();
-    if (error || !data) return false;
-    return (data as { use_engine_v3?: boolean }).use_engine_v3 === true;
+    if (!error && data) {
+      resolved = (data as { use_engine_v3?: boolean }).use_engine_v3 === true;
+    }
   } catch (_) {
-    return false;
+    resolved = false;
   }
+  useEngineV3Cache.set(consultantId, {
+    value: resolved,
+    expiresAt: now + USE_ENGINE_V3_CACHE_TTL_MS,
+  });
+  return resolved;
 }
 
 /**
