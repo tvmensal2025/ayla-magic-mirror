@@ -178,19 +178,38 @@ Implementação do sistema de roteamento de cashback por palavras-chave. O plano
     - _Requirements: 1.2, 1.4, 1.5_
     - _Validated 2026-05-26 via Playwright: POST 201, PATCH (update) 204, PATCH (soft-delete) 204, list refetched correctly. RLS policy `consultants_own_partners` working as expected._
 
-  - [ ] 14.3 Commit and push the bugfix
+  - [x] 14.3 Commit and push the bugfix
     - Stage `src/components/admin/parceiros/hooks/useReferralPartners.ts`
     - Stage `.kiro/specs/cashback-keyword-routing/{requirements,design,tasks}.md` (spec alignment)
     - Commit on branch `fix/flow-engine-v3-rewrite` with message `fix(parceiros): stamp consultant_id on INSERT to satisfy RLS WITH CHECK`
     - Push to origin
     - _Requirements: 7.4_
+    - _Done 2026-05-26: commit `97516017`, pushed to origin/fix/flow-engine-v3-rewrite_
 
 - [ ] 15. Deploy edge functions with keyword-matcher integration
-  - [ ] 15.1 Deploy `whapi-webhook` and `evolution-webhook` to production
+  - [x] 15.1 Deploy `whapi-webhook` and `evolution-webhook` to production
     - Use Supabase CLI or MCP `deploy_edge_function`
     - Verify deployment with smoke test message containing a registered keyword
     - Confirm `customers.referral_partner_id` is populated after the inbound
     - _Requirements: 6.1, 6.2_
+    - _Done 2026-05-26: both functions deployed via supabase CLI v2.101.0 to project zlzasfhcxcznaprrragl. Edge logs healthy (200s)._
+
+- [ ] 16. QR Code editor with background upload + draggable positioning
+  - [x] 16.1 Rewrite `PartnerQrCode.tsx` as full editor
+    - Optional background image upload (PNG/JPG via FileReader)
+    - QR overlaid on canvas with pointer-event drag (mouse + touch capture)
+    - Sliders for X/Y position (0–100%) and QR size (15–70%)
+    - Centralizar button to reset to (50%, 50%)
+    - White rounded card behind QR for scanability over busy backgrounds
+    - Download exports 1024×1024 PNG via offscreen canvas (background cover-fitted, QR at exact coordinates)
+    - Coordinates stored as percentages so preview (360px) and export (1024px) render identically
+    - _Validated via Playwright 2026-05-26: drag changes position correctly, Centralizar resets, slider/upload/download all working_
+
+  - [x] 16.2 Commit and push QR editor
+    - Stage `src/components/admin/parceiros/PartnerQrCode.tsx`
+    - Commit on `fix/flow-engine-v3-rewrite` with `feat(parceiros): QR editor with background upload + draggable positioning`
+    - Push to origin
+    - _Done 2026-05-26: commit `c9221260`, pushed to origin/fix/flow-engine-v3-rewrite_
 
 ## Notes
 
