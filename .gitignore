@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright MCP session logs/snapshots
+.playwright-mcp/
+
+# Loose screenshots at repo root (test/debug artifacts)
+/admin-*.png
+/parceiro-*.png
+/parceiros-*.png
+/qr-*.png
+
+# Local document fixtures (private / personal data)
+.tmp/test-docs/
