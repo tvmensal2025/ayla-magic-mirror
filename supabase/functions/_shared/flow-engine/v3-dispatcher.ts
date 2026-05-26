@@ -31,6 +31,7 @@ import type {
 } from "./v3-types.ts";
 import { persistFlowState } from "../customer-flow-state.ts";
 import { renderChoice } from "../channels/dispatch-choice.ts";
+import { renderTemplateVars } from "../render-vars.ts";
 
 // ─── Public API ─────────────────────────────────────────────────────────
 
@@ -61,6 +62,11 @@ export interface ExecuteActionsArgs {
     text: string;
     type: "text" | "audio" | "image" | "video" | "document" | "button";
   } | null;
+  /**
+   * Optional: consultor's display name for `{{representante}}` template
+   * variable rendering. Webhook entry resolves this via a single SELECT.
+   */
+  consultantName?: string | null;
 }
 
 export interface ExecuteActionsOutcome {
@@ -106,6 +112,50 @@ export async function executeActions(
     handoffAlerts: 0,
     sendResults: [],
   };
+
+  // ─── 0. Apply template variable rendering to all outbounds ────────────
+  // The engine emits raw text from `bot_flow_steps.message_text`, which
+  // contains `{{nome}}`, `{{representante}}`, `{{valor_conta}}` etc.
+  // The legacy webhook (whapi-webhook/handlers/bot-flow.ts) renders
+  // these via `renderTemplateVars` before calling sender.sendText.
+  // We do the same here so v3 produces identical user-facing strings.
+  const vars = {
+    name: args.state.customer.name,
+    phone: args.state.customer.phoneWhatsapp,
+    cpf: null,
+    representante: args.consultantName ?? null,
+    valor_conta: args.state.customer.electricityBillValue,
+  };
+  const renderedOutbound: OutboundMessage[] = args.result.outbound.map((m) => {
+    if (m.kind === "text") {
+      return { ...m, text: renderTemplateVars(m.text, vars) };
+    }
+    if (m.kind === "choice") {
+      return {
+        ...m,
+        prompt: renderTemplateVars(m.prompt, vars),
+        choice: {
+          ...m.choice,
+          options: m.choice.options.map((o: any) => ({
+            ...o,
+            title: renderTemplateVars(String(o.title ?? ""), vars),
+          })),
+        },
+      };
+    }
+    if (m.kind === "media" && (m.media as any).caption) {
+      return {
+        ...m,
+        media: {
+          ...m.media,
+          caption: renderTemplateVars((m.media as any).caption, vars),
+        } as any,
+      };
+    }
+    return m;
+  });
+  // Use rendered list for all downstream operations.
+  args.result = { ...args.result, outbound: renderedOutbound };
 
   // ─── 1. Send outbounds in order ───────────────────────────────────────
   // Pre-process: when the engine emits BOTH a text and a choice for the

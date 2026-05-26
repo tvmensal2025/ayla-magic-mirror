@@ -300,6 +300,18 @@ export async function runEngineV3WebhookEntry(
         .neq("capture_mode", "auto");
     } catch (_) {/* swallow */}
 
+    // Pre-engine: fetch consultor's display name for `{{representante}}`
+    // template var. Single round-trip; cached in the request scope.
+    let consultantName: string | null = null;
+    try {
+      const { data: cRow } = await args.supabase
+        .from("consultants")
+        .select("name")
+        .eq("id", args.consultantId)
+        .maybeSingle();
+      consultantName = (cRow as any)?.name ?? null;
+    } catch (_) {/* swallow */}
+
     const ctx = await loadContext({
       supabase: args.supabase,
       customerId: args.customerId,
@@ -330,6 +342,7 @@ export async function runEngineV3WebhookEntry(
       testRunId: args.testRunId ?? null,
       testTurn: args.testTurn ?? null,
       inboundLog,
+      consultantName,
     });
 
     return {
