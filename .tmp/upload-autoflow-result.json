@@ -1,0 +1,164 @@
+[
+  {
+    "name": "public/media/autoflow/01__Boas_Vindas.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/01__Boas_Vindas.mp3",
+    "bytes": 170112,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/02__Analise_de_IA.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/02__Analise_de_IA.mp3",
+    "bytes": 90240,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/03__Pedir_Numero_da_Casa.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/03__Pedir_Numero_da_Casa.mp3",
+    "bytes": 166272,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/04__Pedir_Frente_do_Doc.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/04__Pedir_Frente_do_Doc.mp3",
+    "bytes": 146304,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/05__Pedir_Verso_do_Doc.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/05__Pedir_Verso_do_Doc.mp3",
+    "bytes": 128640,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/06__Analise_Biometrica.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/06__Analise_Biometrica.mp3",
+    "bytes": 120192,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/07__Pedir_Email.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/07__Pedir_Email.mp3",
+    "bytes": 67584,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/08__Conclusao_do_Pre_Cadastro.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/08__Conclusao_do_Pre_Cadastro.mp3",
+    "bytes": 217344,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/09__Fatura_Invalida.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/09__Fatura_Invalida.mp3",
+    "bytes": 226560,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/10__Bloqueio_Tarifa_Social.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/10__Bloqueio_Tarifa_Social.mp3",
+    "bytes": 303360,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/11__Documento_Invalido.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/11__Documento_Invalido.mp3",
+    "bytes": 187392,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/12__Email_Invalido.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/12__Email_Invalido.mp3",
+    "bytes": 153600,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/13__Solicitacao_Cancelamento.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/13__Solicitacao_Cancelamento.mp3",
+    "bytes": 226560,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/14__Envio_de_Contrato.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/14__Envio_de_Contrato.mp3",
+    "bytes": 198912,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/15__Cobranca_Assinatura.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/15__Cobranca_Assinatura.mp3",
+    "bytes": 221952,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/16__Conexao_Aprovada.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/16__Conexao_Aprovada.mp3",
+    "bytes": 198912,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/17__Aviso_de_Boleto.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/17__Aviso_de_Boleto.mp3",
+    "bytes": 173952,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/18__iGreen_Club.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/18__iGreen_Club.mp3",
+    "bytes": 188160,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/19__Indicacao_Cashback.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/19__Indicacao_Cashback.mp3",
+    "bytes": 195072,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/20__Transbordo_Humano.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/20__Transbordo_Humano.mp3",
+    "bytes": 117504,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/21__Timeout.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/21__Timeout.mp3",
+    "bytes": 245760,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/22__Divergencia_Nome.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/22__Divergencia_Nome.mp3",
+    "bytes": 273024,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/23__Atualizacao_Cadastral.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/23__Atualizacao_Cadastral.mp3",
+    "bytes": 255360,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/24__UC_Duplicada.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/24__UC_Duplicada.mp3",
+    "bytes": 296064,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/25__Consumo_Abaixo.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/25__Consumo_Abaixo.mp3",
+    "bytes": 337920,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/26__Atualizacao_Sucesso.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/26__Atualizacao_Sucesso.mp3",
+    "bytes": 172032,
+    "ok": true
+  },
+  {
+    "name": "public/media/autoflow/27__Objeto_Invalido.mp3",
+    "url": "https://igreen-minio.d9v63q.easypanel.host/igreen/public/media/autoflow/27__Objeto_Invalido.mp3",
+    "bytes": 232320,
+    "ok": true
+  }
+]

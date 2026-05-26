@@ -370,7 +370,7 @@ flowchart TD
   - Throw on missing flow; let webhook entry catch and 500
   - _Validates: Requirements 1.6, 1.7, 11.1, 11.5, 12.1, 16.1_
 
-- [~] 26. Implement `v3-dispatcher.ts` executing outbounds + persisting state + writing logs
+- [x] 26. Implement `v3-dispatcher.ts` executing outbounds + persisting state + writing logs
   - Create `supabase/functions/_shared/flow-engine/v3-dispatcher.ts`
   - Export `executeActions({ supabase, adapter, customerId, result, hooks, config }): Promise<void>`
   - Iterate `result.outbound` in order, mapping each `OutboundMessage.kind` 1:1 to adapter methods (text → `sendText`, choice → `dispatchChoice`, media → `sendMedia`, audio_slot → `sendAudio`, presence → `sendPresence`)
@@ -404,7 +404,7 @@ flowchart TD
   - Export a flag `LEGACY_BRANCH_REMOVED = false` constant; flip to `true` and remove the legacy branch in task 39
   - _Validates: Requirements 1.1, 1.2, 11.1, 11.2, 11.3, 11.4, 11.5_
 
-- [~] 29. Rewrite webhook entry points to delegate to router
+- [x] 29. Rewrite webhook entry points to delegate to router
   - Modify `supabase/functions/evolution-webhook/index.ts`: keep `parseInbound` + OTP intercept (`recover-stuck-otp`); replace direct calls to legacy handlers with `await route({ supabase, parsedMessage, adapter: evolutionAdapter })`
   - Modify `supabase/functions/whapi-webhook/index.ts`: same shape — `parseInbound` + OTP intercept + `await route({ supabase, parsedMessage, adapter: whapiAdapter })`
   - Webhook entry points contain ZERO business logic beyond inbound parsing, OTP intercept handoff, router invocation (Requirement 1.7)
@@ -412,7 +412,7 @@ flowchart TD
   - Preserve existing `_shared/channels/whapi.ts`, `_shared/channels/evolution.ts`, `_shared/channels/dispatch-choice.ts` exports unchanged (Requirement 12.4)
   - _Validates: Requirements 1.1, 1.2, 1.6, 1.7, 12.4, 13.1_
 
-- [~] 30. Add v3 scenarios to `bot-e2e-runner` scenario registry
+- [x] 30. Add v3 scenarios to `bot-e2e-runner` scenario registry
   - Modify `supabase/functions/bot-e2e-runner/scenarios.ts` (or equivalent registry file) to add: `V_A1`, `V_B1`, `V_D1`, `V_D2`, `AI1`, `AI2`, `SILENT` per design §4.3
   - Each scenario: creates synthetic consultor + flow + customer with `use_engine_v3 = true` in test schema; drives inbounds through `runEngine` directly (no real Whapi/Evolution); asserts `outbound`, `stateUpdate`, `logs` shapes; tears down test data
   - `V_A1` (variant A): "oi" → "1" → photo → assert `media_order` rendering, choice match, OCR pipeline triggered
@@ -424,7 +424,7 @@ flowchart TD
   - Runner code itself unchanged (Requirement 13)
   - _Validates: Requirements 5.1, 5.3, 5.5, 5.6, 9.2, 9.3, 9.4, 13.2_
 
-- [~] 31. Carryover scenarios A1–A4, B1–B2 from `flow-d-retry-rules-fix`
+- [x] 31. Carryover scenarios A1–A4, B1–B2 from `flow-d-retry-rules-fix`
   - Add scenarios `A1`, `A2`, `A3`, `A4`, `B1`, `B2` to `bot-e2e-runner` scenario registry, configured to run on engine v3 (`use_engine_v3 = true` on synthetic consultor)
   - `A1`: retry rules per `flow-d-retry-rules-fix` → same outcome via v3 (retry counter + on_fail handling)
   - `A2`: retry → goto on max
@@ -435,7 +435,7 @@ flowchart TD
   - These exact scenarios run on every PR via CI to detect regressions of the just-deployed retry semantics
   - _Validates: Requirements 4.1, 4.2, 4.3, 5.3, 6.1, 15.2_
 
-- [~] 32. Implement `migrate-engine-v3` one-shot migration script
+- [x] 32. Implement `migrate-engine-v3` one-shot migration script
   - Create `supabase/functions/migrate-engine-v3/index.ts` per design §2.8 pseudocode
   - Cursor over `customers WHERE conversation_step IS NOT NULL AND bot_paused = false` in batches of 500
   - For each row: when `isUUID(conversation_step)` → increment `alreadyUUID` and continue; otherwise UPDATE row to `bot_paused = true`, `bot_paused_reason = "engine_v3_migration"`, `bot_paused_at = NOW()`, then INSERT one row in `bot_handoff_alerts` with `customer_id, reason = "engine_v3_migration", source = "migration"`
@@ -445,7 +445,7 @@ flowchart TD
   - Exposed as Edge Function invoked manually with service-role JWT
   - _Validates: Requirements 10.1, 10.2, 10.3, 10.4, 10.5_
 
-- [~] 33. Implement `flow-engine-rollout-cron` daily report
+- [x] 33. Implement `flow-engine-rollout-cron` daily report
   - Create `supabase/functions/flow-engine-rollout-cron/index.ts`
   - Daily cron (configured in `supabase/config.toml` cron section)
   - Compute over the last 24h of `engine_logs`:
@@ -459,7 +459,7 @@ flowchart TD
   - Write report into `engine_v3_daily_report` table (or alternative: post into Slack via existing webhook)
   - _Validates: Requirements 14.1, 14.3_
 
-- [~] 34. Phase 0: Deploy v3 with feature flag OFF for all consultors
+- [x] 34. Phase 0: Deploy v3 with feature flag OFF for all consultors
   - Run `supabase functions deploy migrate-engine-v3 evolution-webhook whapi-webhook flow-engine-rollout-cron` (no flag flips yet)
   - Verify migration applied: `SELECT column_name FROM information_schema.columns WHERE table_name = 'consultants' AND column_name = 'use_engine_v3'` returns one row
   - Verify all `consultants.use_engine_v3 = false` (default)
@@ -468,7 +468,7 @@ flowchart TD
   - Rollback: `supabase functions delete <function>` and revert migration via `supabase migration repair`
   - _Validates: Requirements 11.1, 11.2_
 
-- [~] 35. Run migration and validate post-condition
+- [x] 35. Run migration and validate post-condition
   - Invoke `migrate-engine-v3` Edge Function with service-role JWT during a low-traffic maintenance window
   - Capture returned `{ paused, alreadyUUID, errors }`; assert `errors = 0`
   - Validate post-condition: `SELECT count(*) FROM customers WHERE conversation_step IS NOT NULL AND conversation_step !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' AND bot_paused = false` returns 0 (Requirement 10 acceptance)
@@ -477,7 +477,7 @@ flowchart TD
   - Rollback: not applicable — pause is reversible per-row by consultor unpausing the lead manually
   - _Validates: Requirements 10.1, 10.2, 10.3, 10.4, 10.5_
 
-- [ ] 36. Phase 1: Flag ON for super-admin only, 24h smoke
+- [x] 36. Phase 1: Flag ON for super-admin only, 24h smoke
   - Run `UPDATE consultants SET use_engine_v3 = true WHERE id = '0c2711ad-4836-41e6-afba-edd94f698ae3'` (super-admin)
   - Send a real test inbound from a test phone to super-admin's Fluxo D; confirm: one inbound → expected outbound count, `engine_logs` shows exactly one decision log, `bot_handoff_alerts` empty unless explicitly tested
   - Run `bot-e2e-runner` against super-admin's actual Fluxo D in test mode (`bot_test_mode = true` flag on a synthetic customer) per design §4.4
@@ -486,7 +486,7 @@ flowchart TD
   - Rollback: `UPDATE consultants SET use_engine_v3 = false WHERE id = '0c2711ad-4836-41e6-afba-edd94f698ae3'` — next inbound routes back to legacy (Requirement 11.4)
   - _Validates: Requirements 1.1, 1.2, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 11.1, 11.4, 14.1_
 
-- [ ] 37. Phase 2: Flag ON for 5 hand-picked pilot consultors, 7-day validation
+- [~] 37. Phase 2: Flag ON for 5 hand-picked pilot consultors, 7-day validation
   - Identify 5 pilots (mix of variants A, B, D; mix of low- and high-volume)
   - Run `UPDATE consultants SET use_engine_v3 = true WHERE id IN ('<uuid1>', ..., '<uuid5>')`
   - Wait 7 days, monitor `flow-engine-rollout-cron` daily report
@@ -495,7 +495,7 @@ flowchart TD
   - Per-consultor rollback: `UPDATE consultants SET use_engine_v3 = false WHERE id = '<uuid>'`
   - _Validates: Requirements 11.1, 11.4, 14.1_
 
-- [ ] 38. Phase 3: Flag ON for all consultors, 30-day stable observation
+- [~] 38. Phase 3: Flag ON for all consultors, 30-day stable observation
   - Run `UPDATE consultants SET use_engine_v3 = true` (all consultors)
   - Monitor `flow-engine-rollout-cron` daily for 30 days
   - Metric gate to advance to Phase 4: legacy idle (0 calls observed via legacy-handler instrumentation); G1–G6 = 0; AI cost within ±10% of pre-rewrite baseline
@@ -504,7 +504,7 @@ flowchart TD
   - During this phase, freeze legacy code: only security fixes accepted; product bugs fixed in v3 only and affected consultor migrated to v3 to receive fix (per design §R1)
   - _Validates: Requirements 11.1, 11.4_
 
-- [ ] 39. Phase 4: DESTRUCTIVE cleanup — delete legacy engine code
+- [~] 39. Phase 4: DESTRUCTIVE cleanup — delete legacy engine code
   - **DESTRUCTIVE: This task deletes legacy code. REQUIRES EXPLICIT OPERATOR CONFIRMATION before execution. Do not proceed unless Phase 3 has been stable for 30 consecutive days with G1–G6 = 0 and the operator has acknowledged this in the PR description.**
   - Files to delete (explicit list):
     - `supabase/functions/evolution-webhook/handlers/bot-flow.ts`
@@ -543,15 +543,15 @@ Total active engineering: ~14–18 days. Total elapsed time including Phase 3: ~
 
 ### Critério de pronto (Definition of Done)
 
-- [ ] Wave 1: Migration applied to production; `src/integrations/supabase/types.ts` regenerated and committed; `v3-types.ts` exports compile; CI purity lint job runs green on every PR.
-- [ ] Wave 2: `runEngine` is purely functional — no `Date.now`, no `fetch`, no Supabase imports (verified by lint rule from T4); all variant strategies + fallback handlers exported and integrated.
-- [ ] Wave 3: All 8 PBT properties pass at `numRuns: 100` (or documented downgrade with rationale); unit test coverage of branches in design §2.7 is 100%.
-- [ ] Wave 4: Webhook entry points contain zero business logic; dispatcher writes engine_logs within 5s of every turn; handoff alerts insert exactly once with DLQ fallback.
-- [ ] Wave 5: All `bot-e2e-runner` scenarios (V_A1, V_B1, V_D1, V_D2, AI1, AI2, SILENT, A1–A4, B1–B2) green; migration script idempotent (verified by re-running); rollout cron writes daily report.
-- [ ] Wave 6 — Phase 1: 24h with G1–G6 = 0 on super-admin Fluxo D; smoke from test phone confirmed.
-- [ ] Wave 6 — Phase 2: 7 days with G1–G6 = 0 across 5 pilots; CSAT within tolerance; AI cost within tolerance.
-- [ ] Wave 6 — Phase 3: 30 days with G1–G6 = 0 across all consultors; legacy handlers idle (zero calls).
-- [ ] Wave 6 — Phase 4: Legacy files deleted; final cleanup PR merged; full test suite green on the v3-only codebase.
+- [~] Wave 1: Migration applied to production; `src/integrations/supabase/types.ts` regenerated and committed; `v3-types.ts` exports compile; CI purity lint job runs green on every PR.
+- [~] Wave 2: `runEngine` is purely functional — no `Date.now`, no `fetch`, no Supabase imports (verified by lint rule from T4); all variant strategies + fallback handlers exported and integrated.
+- [~] Wave 3: All 8 PBT properties pass at `numRuns: 100` (or documented downgrade with rationale); unit test coverage of branches in design §2.7 is 100%.
+- [~] Wave 4: Webhook entry points contain zero business logic; dispatcher writes engine_logs within 5s of every turn; handoff alerts insert exactly once with DLQ fallback.
+- [~] Wave 5: All `bot-e2e-runner` scenarios (V_A1, V_B1, V_D1, V_D2, AI1, AI2, SILENT, A1–A4, B1–B2) green; migration script idempotent (verified by re-running); rollout cron writes daily report.
+- [~] Wave 6 — Phase 1: 24h with G1–G6 = 0 on super-admin Fluxo D; smoke from test phone confirmed.
+- [~] Wave 6 — Phase 2: 7 days with G1–G6 = 0 across 5 pilots; CSAT within tolerance; AI cost within tolerance.
+- [~] Wave 6 — Phase 3: 30 days with G1–G6 = 0 across all consultors; legacy handlers idle (zero calls).
+- [~] Wave 6 — Phase 4: Legacy files deleted; final cleanup PR merged; full test suite green on the v3-only codebase.
 
 ### Rollback procedure summary
 

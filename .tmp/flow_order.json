@@ -1,0 +1,13 @@
+{
+  "flow_step_media_order": {
+    "welcome": ["audio", "image", "video", "text"],
+    "como_funciona": ["text", "audio", "video", "image"],
+    "fazenda_solar": ["text", "audio", "video", "image"],
+    "passo_mp74wfm5": ["text", "audio", "image", "video"],
+    "passo_mp7o985n": ["video", "image", "audio", "text"],
+    "passo_mp8yc0bp": ["audio", "text"],
+    "d_welcome": ["audio", "text"],
+    "d_como_funciona": ["text", "audio", "image", "video"],
+    "559b8f1b-0630-45b5-aeae-b96cb4d20e9a": ["text", "audio", "image", "video"]
+  }
+}
