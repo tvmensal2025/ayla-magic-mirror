@@ -5,26 +5,35 @@
  * component) + §2.9 (rollout plan).
  * Task: 28.
  *
- * Reads `consultants.use_engine_v3` per request and dispatches to either
- * the v3 runner or the legacy bot-flow handlers. After Phase 4 (30 days
- * stable), this router and the legacy branch are deleted, leaving only
- * v3 wired directly in the webhook entry.
+ * Unified flag read (C1): V3 assume o turno quando **qualquer um** for verdadeiro:
+ *   - `consultants.use_engine_v3` (boolean legado)  = true
+ *   - `consultants.flow_engine_v3` (enum)           = 'on'
+ *
+ * Assim o painel SuperAdmin "Rollout V3" que promove `flow_engine_v3 → 'on'`
+ * passa a refletir no webhook sem precisar setar dois campos em sincronia.
+ * Cache de 30s (via `getFlowEngineV3`) evita 1 round-trip extra por turno.
  *
  * Validates: Requirements 1.1, 1.2, 11.1, 11.2, 11.3, 11.4, 11.5.
  */
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getFlowEngineV3 } from "../feature-flag.ts";
 
 /**
- * Reads `consultants.use_engine_v3` fresh on every call (no cache).
- * Returns `false` on any error so a flag-read failure NEVER routes
- * traffic into v3 — legacy is the safe default during rollout.
+ * Combina `use_engine_v3` (bool) e `flow_engine_v3` (enum). Retorna
+ * `false` em qualquer falha de leitura — legado é o default seguro.
  */
 export async function isEngineV3Enabled(
   supabase: SupabaseClient,
   consultantId: string,
 ): Promise<boolean> {
   if (!consultantId) return false;
+  // 1. Enum (cacheado 30s no helper). Quando 'on', V3 assume.
+  try {
+    const flag = await getFlowEngineV3(supabase, consultantId);
+    if (flag === "on") return true;
+  } catch (_) { /* fallthrough para boolean */ }
+  // 2. Boolean legado — override manual / consultor migrado fora do enum.
   try {
     const { data, error } = await supabase
       .from("consultants")
