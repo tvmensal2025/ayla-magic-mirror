@@ -1328,6 +1328,56 @@ Deno.serve(async (req) => {
         console.warn("[engine-v3-hook] erro não-bloqueante:", e?.message);
       }
 
+      // ─── Engine v3 gate (Task 29 — flow-engine-v3-rewrite) ──────────
+      // When `consultants.use_engine_v3 = true`, the v3 engine takes
+      // full ownership of this turn: load context, run the pure runner,
+      // and dispatch outbounds via the channel adapter. The legacy
+      // `runConversationalFlow` / `runBotFlow` path is bypassed entirely
+      // for v3-enabled consultors.
+      //
+      // Default flag value is FALSE — zero leads route through v3 until
+      // a consultor is explicitly opted in (Phase 1+ of rollout). On v3
+      // errors, the helper pauses the customer + inserts a handoff
+      // alert (NEVER falls through to legacy) per the safety contract.
+      const { isEngineV3Enabled } = await import("../_shared/flow-engine/router.ts");
+      if (await isEngineV3Enabled(supabase as any, superAdminConsultantId)) {
+        const { runEngineV3WebhookEntry } = await import("../_shared/flow-engine/v3-webhook-entry.ts");
+        const { getAdapter } = await import("../_shared/channels/index.ts");
+        const v3Adapter = getAdapter({
+          kind: "whapi",
+          input: { apiToken: whapiToken },
+        });
+        const v3Outcome = await runEngineV3WebhookEntry({
+          supabase: supabase as any,
+          adapter: v3Adapter,
+          customerId: customer.id,
+          consultantId: superAdminConsultantId,
+          jid: remoteJid,
+          inbound: {
+            messageText,
+            buttonId,
+            isFile,
+            isButton,
+            hasImage,
+            hasAudio,
+            hasDocument,
+            messageId,
+          },
+        });
+        jsonLog(v3Outcome.ok ? "info" : "warn", "engine_v3_handled", {
+          customer_id: customer.id,
+          consultant_id: superAdminConsultantId,
+          ok: v3Outcome.ok,
+          sent: v3Outcome.sent,
+          failed: v3Outcome.failed,
+          error: v3Outcome.error,
+        });
+        return new Response(
+          JSON.stringify({ ok: true, mode: "engine_v3", v3: v3Outcome }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
       const runEngine = async () => engine === "flow"
         ? await runConversationalFlow({
             supabase, sender: engineSender, customer, consultorId, nomeRepresentante,
@@ -1344,7 +1394,7 @@ Deno.serve(async (req) => {
             fileUrl, fileBase64, geminiApiKey: GEMINI_API_KEY,
           });
       const result = testMode && testRunId
-        ? await botRequestStore.run({ testMode: true, runId: testRunId, supabase, turn: testTurn, realServices, bypassQuietHours: testMode && headerBypassQuiet, fastClock: testMode && headerFastClock }, runEngine)
+        ? await botRequestStore.run({ testMode: true, runId: testRunId, supabase, turn: testTurn, realServices, bypassQuietHours: testMode && headerBypassQuiet, fastClock: testMode && headerFastClock, forceOcrFail: testMode && headerForceOcrFail }, runEngine)
         : await runEngine();
       reply = result.reply;
       updates = result.updates;

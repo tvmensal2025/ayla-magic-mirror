@@ -30,6 +30,12 @@ import type {
 // Re-export so downstream modules consume the engine's public surface
 // without reaching into `../channels/types.ts` directly.
 export type { ChannelCapabilities, MediaPayload, OutboundChoice };
+// `ChannelAdapter` is re-exported here so the v3-dispatcher (and webhook
+// entry helpers) can import it from the engine's public surface without
+// reaching into `../channels/types.ts` directly. Type-only — no runtime
+// import.
+import type { ChannelAdapter } from "../channels/types.ts";
+export type { ChannelAdapter };
 
 // ─── Engine I/O ──────────────────────────────────────────────────────────────
 
