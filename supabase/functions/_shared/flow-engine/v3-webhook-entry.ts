@@ -69,6 +69,9 @@ export interface V3WebhookEntryArgs {
   /** WhatsApp JID, e.g. "5511999999999@s.whatsapp.net". */
   jid: string;
   inbound: V3WebhookEntryInbound;
+  /** Optional bot test run correlation, forwarded to bot_test_outbound. */
+  testRunId?: string | null;
+  testTurn?: number | null;
 }
 
 export interface V3WebhookEntryResult {
@@ -259,10 +262,44 @@ async function fallThroughToHandoff(
  * engine, writes to DB). It NEVER throws; all failures are caught and
  * routed to `fallThroughToHandoff`.
  */
+/**
+ * Build a normalized inbound row for `conversations`. Returns null when
+ * the webhook (legacy code path) already inserted it; this helper trusts
+ * the caller to pass `inboundAlreadyLogged: true` in that case via the
+ * absence of inboundLog. For v3-only paths, we always log here so the
+ * ChatView mirrors the user's message.
+ */
+function buildInboundLog(parsed: V3WebhookEntryInbound):
+  | { text: string; type: "text" | "audio" | "image" | "video" | "document" | "button" }
+  | null
+{
+  if (parsed.isButton) {
+    return { text: parsed.messageText || `[botão:${parsed.buttonId ?? ""}]`, type: "button" };
+  }
+  if (parsed.hasAudio) return { text: "[áudio]", type: "audio" };
+  if (parsed.hasImage) return { text: "[imagem]", type: "image" };
+  if (parsed.hasDocument) return { text: "[arquivo]", type: "document" };
+  if (parsed.isFile) return { text: "[arquivo]", type: "document" };
+  if (parsed.messageText) return { text: parsed.messageText, type: "text" };
+  return null;
+}
+
 export async function runEngineV3WebhookEntry(
   args: V3WebhookEntryArgs,
 ): Promise<V3WebhookEntryResult> {
   try {
+    // Pre-engine: ensure capture_mode='auto' so the legacy
+    // `manual_capture_text_saved_no_auto_flow` short-circuit doesn't
+    // kick in for v3-driven leads. The default-trigger sets manual on
+    // INSERT for leads without name+cpf; for v3 we always want auto.
+    try {
+      await args.supabase
+        .from("customers")
+        .update({ capture_mode: "auto" })
+        .eq("id", args.customerId)
+        .neq("capture_mode", "auto");
+    } catch (_) {/* swallow */}
+
     const ctx = await loadContext({
       supabase: args.supabase,
       customerId: args.customerId,
@@ -281,6 +318,8 @@ export async function runEngineV3WebhookEntry(
       config,
     });
 
+    const inboundLog = buildInboundLog(args.inbound);
+
     const outcome = await executeActions({
       supabase: args.supabase,
       adapter: args.adapter,
@@ -288,6 +327,9 @@ export async function runEngineV3WebhookEntry(
       state: ctx.state,
       result,
       now: config.now,
+      testRunId: args.testRunId ?? null,
+      testTurn: args.testTurn ?? null,
+      inboundLog,
     });
 
     return {

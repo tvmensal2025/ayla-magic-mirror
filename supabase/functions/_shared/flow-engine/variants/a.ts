@@ -143,21 +143,26 @@ export function synthesizeFromStep(
     });
   }
 
-  if (
-    step.stepType === "ask_choice" &&
-    step.choiceOptions &&
-    step.choiceOptions.length > 0
-  ) {
-    const ids = step.choiceOptions.map((c) => c.id).join("|");
-    out.push({
-      kind: "choice",
-      prompt: text || "Escolha uma opção:",
-      choice: {
-        preferred: step.preferredChoiceKind ?? "button",
-        options: step.choiceOptions,
-      },
-      idempotencyContent: buildIdempotencyContent(step.id, "choice", ids),
-    });
+  // Emit choice when the step has explicit `_buttons` (choiceOptions) regardless
+  // of `stepType`. Legacy flows model "message + buttons" with step_type='message'
+  // and the buttons live inside `captures._buttons`. Restricting choice emission
+  // to `ask_choice` would silently drop the buttons for those flows (Bug fixed in
+  // Phase 1 smoke 2026-05-26).
+  const hasButtons = step.choiceOptions && step.choiceOptions.length > 0;
+  const isChoiceStep = step.stepType === "ask_choice";
+  if (hasButtons || isChoiceStep) {
+    if (step.choiceOptions && step.choiceOptions.length > 0) {
+      const ids = step.choiceOptions.map((c) => c.id).join("|");
+      out.push({
+        kind: "choice",
+        prompt: text || "Escolha uma opção:",
+        choice: {
+          preferred: step.preferredChoiceKind ?? "button",
+          options: step.choiceOptions,
+        },
+        idempotencyContent: buildIdempotencyContent(step.id, "choice", ids),
+      });
+    }
   }
 
   return out;

@@ -195,6 +195,7 @@ function runEngineInner(input: EngineInput): EngineOutput {
   let step = stepLookup(input.state.currentStepId);
 
   const enterLogs: StructuredLog[] = [];
+  let didResetStep = false;
 
   if (!step) {
     // New lead OR currentStepId points to a step that no longer exists.
@@ -244,6 +245,7 @@ function runEngineInner(input: EngineInput): EngineOutput {
     }
     enterLogs.push(makeLog("engine_step_enter", input, first.id, { newLead: !input.state.currentStepId }));
     step = first;
+    didResetStep = true;
   }
 
   // ─── Step 2: variant C short-circuit ─────────────────────────────────
@@ -387,7 +389,9 @@ function runEngineInner(input: EngineInput): EngineOutput {
 
   return finalize(input, step, {
     outbound: result.outbound,
-    stateUpdate: result.stateUpdate,
+    stateUpdate: didResetStep
+      ? { currentStepId: step.id, enteredStepAt: input.config.now, ...result.stateUpdate }
+      : result.stateUpdate,
     logs: [...enterLogs, ...captureLogs, ...decisionLogs, ...result.logs],
     deferred: result.deferred,
   });

@@ -45,6 +45,22 @@ export interface ExecuteActionsArgs {
   result: EngineOutput;
   /** ISO-8601 timestamp from EngineConfig.now (for last_outbound_at). */
   now: string;
+  /**
+   * Optional: when present, every successfully sent outbound is also
+   * persisted to `bot_test_outbound` (run_id + turn) so the simulator
+   * UI can render the engine v3 path identically to legacy.
+   */
+  testRunId?: string | null;
+  testTurn?: number | null;
+  /**
+   * Optional: when present, persists a single inbound row to
+   * `conversations` as `message_direction='inbound'`. Skipped when null
+   * to avoid double-writes when the webhook already logged the inbound.
+   */
+  inboundLog?: {
+    text: string;
+    type: "text" | "audio" | "image" | "video" | "document" | "button";
+  } | null;
 }
 
 export interface ExecuteActionsOutcome {
@@ -97,7 +113,64 @@ export async function executeActions(
     outcome.sendResults.push({ kind: msg.kind, ok: r.ok, error: r.error });
     if (r.ok) outcome.sent++;
     else outcome.failed++;
+
+    // Mirror every outbound to `conversations` so ChatView, panels, and
+    // legacy queries see the v3 engine output. Best-effort: never blocks
+    // the dispatch loop on a logging failure. We log even when the
+    // adapter rejected — operators need to see what the engine TRIED
+    // to send when the channel is offline.
+    try {
+      const cur = currentStepIdAfter(args.state, args.result);
+      const conv = outboundToConversationRow(msg, cur);
+      if (conv) {
+        await args.supabase.from("conversations").insert({
+          customer_id: args.state.customerId,
+          message_direction: "outbound",
+          message_text: r.ok ? conv.text : `[failed] ${conv.text}`,
+          message_type: conv.type,
+          conversation_step: cur,
+        });
+      }
+    } catch (e: any) {
+      console.warn("[v3-dispatcher] conversations outbound insert failed:", e?.message);
+    }
+
+    // Test mode: also persist into bot_test_outbound so the simulator UI
+    // (`flow-simulate-run` polling loop) can render exactly what the
+    // engine sent. Logged for both ok and failed sends so the test
+    // harness can assert on rendering and on adapter errors.
+    if (args.testRunId && args.testTurn != null) {
+      try {
+        const conv = outboundToConversationRow(msg, currentStepIdAfter(args.state, args.result));
+        if (conv) {
+          await args.supabase.from("bot_test_outbound").insert({
+            run_id: args.testRunId,
+            turn: args.testTurn,
+            kind: conv.type,
+            content: conv.text,
+          });
+        }
+      } catch (e: any) {
+        console.warn("[v3-dispatcher] bot_test_outbound insert failed:", e?.message);
+      }
+    }
   }
+
+  // ─── 1b. Persist inbound log (best-effort) ────────────────────────────
+  if (args.inboundLog && args.inboundLog.text) {
+    try {
+      await args.supabase.from("conversations").insert({
+        customer_id: args.state.customerId,
+        message_direction: "inbound",
+        message_text: args.inboundLog.text,
+        message_type: args.inboundLog.type,
+        conversation_step: args.state.currentStepId ?? null,
+      });
+    } catch (e: any) {
+      console.warn("[v3-dispatcher] conversations inbound insert failed:", e?.message);
+    }
+  }
+
 
   // ─── 2. Handoff alerts (BEFORE logs — Requirement 14.4) ───────────────
   const alertLogs = args.result.logs.filter(
@@ -326,4 +399,52 @@ async function insertEngineLogs(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ─── Conversation/test-run mirror helpers ──────────────────────────────
+
+/**
+ * Best-effort renderable summary of an outbound for `conversations` and
+ * `bot_test_outbound`. Skips outbounds that have no displayable form
+ * (e.g. presence indicators).
+ */
+function outboundToConversationRow(
+  msg: OutboundMessage,
+  _stepId: string | null,
+): { text: string; type: string } | null {
+  switch (msg.kind) {
+    case "text":
+      return { text: msg.text, type: "text" };
+    case "choice": {
+      const opts = msg.choice.options ?? [];
+      const numbered = opts.map((o, i) => `${i + 1}. ${o.label}`).join("\n");
+      const text = numbered ? `${msg.prompt}\n\n${numbered}` : msg.prompt;
+      return { text, type: "buttons" };
+    }
+    case "media": {
+      const m = msg.media as any;
+      const kind = m.kind ?? "media";
+      const caption = m.caption ?? "";
+      // Fallback to a sentinel text the legacy code already uses.
+      return { text: caption || `[${kind}]`, type: kind };
+    }
+    case "audio_slot":
+      return { text: "[áudio]", type: "audio" };
+    case "presence":
+      return null;
+  }
+}
+
+/**
+ * Compute the post-turn step id used for the `conversation_step` column
+ * on the conversation rows. Falls back to the pre-turn step id when the
+ * engine didn't change steps.
+ */
+function currentStepIdAfter(
+  state: CustomerSnapshot,
+  result: EngineOutput,
+): string | null {
+  const next = result.stateUpdate.currentStepId;
+  if (typeof next === "string" && next.length > 0) return next;
+  return state.currentStepId ?? null;
 }

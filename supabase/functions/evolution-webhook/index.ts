@@ -1295,6 +1295,8 @@ Deno.serve(async (req) => {
             mediaKind,
             messageId,
           },
+          testRunId: null,
+          testTurn: null,
         });
         jsonLog(v3Outcome.ok ? "info" : "warn", "engine_v3_handled", {
           customer_id: customer.id,

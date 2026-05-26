@@ -893,7 +893,18 @@ Deno.serve(async (req) => {
     // ─── Modo Captação manual: salvar resposta na ficha e PARAR ─────────
     // O consultor controla o próximo tile. Texto livre do lead não deve rodar
     // o motor conversacional nem avançar automaticamente para o próximo passo.
-    if ((customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
+    //
+    // EXCEÇÃO: quando engine v3 está ativo para o consultor, o v3 toma
+    // posse do turno e o helper `runEngineV3WebhookEntry` zera o
+    // `capture_mode` para "auto" antes de chamar o engine. Por isso
+    // aqui pulamos o short-circuit quando a flag está ON — o ramo v3
+    // mais adiante neste mesmo handler vai responder.
+    let _v3Active = false;
+    try {
+      const { isEngineV3Enabled: _isV3 } = await import("../_shared/flow-engine/router.ts");
+      _v3Active = await _isV3(supabase as any, superAdminConsultantId);
+    } catch (_) {/* swallow */}
+    if (!_v3Active && (customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
       try {
         const multi = extractMultiField(messageText);
         const patch = buildMultiFieldPatch(customer as any, multi);
@@ -1089,7 +1100,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    if ((customer as any).capture_mode === "manual" && hasAudio && messageText && !isFile) {
+    if (!_v3Active && (customer as any).capture_mode === "manual" && hasAudio && messageText && !isFile) {
       try {
         const multi = extractMultiField(messageText);
         const patch = buildMultiFieldPatch(customer as any, multi);
@@ -1363,6 +1374,8 @@ Deno.serve(async (req) => {
             hasDocument,
             messageId,
           },
+          testRunId: testMode ? testRunId : null,
+          testTurn: testMode ? Number(testTurn || 1) : null,
         });
         jsonLog(v3Outcome.ok ? "info" : "warn", "engine_v3_handled", {
           customer_id: customer.id,
