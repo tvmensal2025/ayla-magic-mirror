@@ -146,3 +146,39 @@ Após rollback:
 - Cron v3: `supabase/functions/flow-engine-v3-rollout-cron/index.ts`
 - Migration script: `supabase/functions/migrate-engine-v3/index.ts`
 - Scenarios v3: `supabase/functions/bot-e2e-runner/v3-scenarios.ts`
+
+
+## Pre-smoke fix aplicado em produção (26-mai-2026)
+
+Antes da janela de smoke real, identifiquei 2 steps do Fluxo D do super-admin com schema legacy `{ "action": "retry", ... }` que o engine v3 ignora silenciosamente (o parser só lê `mode`). Isso causaria repeat infinito em vez de retry → handoff quando o lead errasse e-mail ou telefone.
+
+### Steps corrigidos
+
+| step_key | step_id | step_type |
+| --- | --- | --- |
+| `d_pedir_email` | `b1e1a001-d001-4001-9001-d00d00d00001` | `capture_email` |
+| `d_confirmar_telefone` | `b1e1a002-d002-4002-9002-d00d00d00002` | `confirm_phone` |
+
+### Fix aplicado (PostgREST PATCH com service role)
+
+```json
+// antes
+{ "action": "retry", "then": "humano", "retry_text": "..." }
+
+// depois
+{ "mode": "retry", "then": "humano", "retry_text": "...", "max_retries": 2 }
+```
+
+### Validação
+
+```sql
+SELECT count(*) FROM bot_flow_steps
+WHERE is_active = true AND fallback ? 'action' AND NOT (fallback ? 'mode');
+-- → 0 (zero steps com schema legacy em todo o banco)
+```
+
+Os 2 steps do Fluxo D agora respondem ao engine v3 corretamente: lead errando e-mail/telefone até `max_retries=2` recebe `retry_text`, ao exceder é escalado pra humano via `then=humano` (handoff alert criado).
+
+### Position 9 (`d_handoff`)
+
+Não é gap real — o step existe mas está `is_active=false`, por isso não aparece nas queries que filtram por ativos. Mantido como está (handoff é tratado por `goto_special: "humano"` nos transitions, não por step explícito).
