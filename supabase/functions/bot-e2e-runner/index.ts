@@ -3,6 +3,11 @@
  * e valida a conversa ponta-a-ponta sem custo de WhatsApp.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  runV3DirectScenario,
+  V3_DIRECT_SCENARIOS,
+  type V3DirectScenario,
+} from "./v3-scenarios.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -34,7 +39,11 @@ type Scenario =
   | "fluxo_d_ocr_retry_exhausted"  // A3: OCR fail 3x → bot_paused + handoff alert
   | "fluxo_a_ocr_fail"             // A4: variant=A sem retry → defaultText hardcoded
   | "ask_choice_retry_1x"          // B1: lixo em ask_choice mode=retry → retry_text
-  | "ask_choice_retry_exhausted";  // B2: lixo 3x → bot_paused
+  | "ask_choice_retry_exhausted"   // B2: lixo 3x → bot_paused
+  // ─── Cenários v3 diretos (Task 30 do spec flow-engine-v3-rewrite, design §4.3) ───
+  // Drive `runEngine` puro com fixtures sintéticos. Não chama whapi-webhook.
+  // Validam G1–G6 + assertivas de cada cenário antes do dispatcher real.
+  | V3DirectScenario;
 
 const RETRY_SCENARIOS = new Set<Scenario>([
   "fluxo_d_ocr_ok",
@@ -724,6 +733,48 @@ Deno.serve(async (req) => {
       .select().single();
     if (runErr) throw runErr;
     const runId = runRow.id;
+
+    // ────────────────────────────────────────────────────────────────────
+    // 🆕 Cenários v3 diretos (Task 30 do flow-engine-v3-rewrite, design §4.3)
+    // Drive `runEngine` puro com fixtures sintéticos. Não cria customer real
+    // nem chama whapi-webhook — valida G1–G6 + assertivas in-process e flipa
+    // `consultants.use_engine_v3 = true` durante a execução (Requirement 11.1).
+    // ────────────────────────────────────────────────────────────────────
+    if (V3_DIRECT_SCENARIOS.has(scenario as V3DirectScenario)) {
+      const v3Result = await runV3DirectScenario({
+        scenario: scenario as V3DirectScenario,
+        supabase,
+        consultantId,
+      });
+      const checksPassed = v3Result.checks.filter((c) => c.passed).length;
+
+      await supabase.from("bot_test_runs").update({
+        status: v3Result.status,
+        finished_at: new Date().toISOString(),
+        summary: {
+          scenario,
+          engine: "v3-direct",
+          checks: v3Result.checks,
+          checksPassed,
+          checksTotal: v3Result.checks.length,
+          turns: v3Result.turns,
+          finalStateUpdate: v3Result.finalStateUpdate,
+        },
+      }).eq("id", runId);
+
+      return new Response(JSON.stringify({
+        ok: v3Result.ok,
+        runId,
+        scenario,
+        engine: "v3-direct",
+        status: v3Result.status,
+        checks: v3Result.checks,
+        checksPassed,
+        checksTotal: v3Result.checks.length,
+        turns: v3Result.turns,
+        finalStateUpdate: v3Result.finalStateUpdate,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     const { data: customer, error: cErr } = await supabase.from("customers").insert({
       phone_whatsapp: phone,
