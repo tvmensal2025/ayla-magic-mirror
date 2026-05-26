@@ -99,3 +99,6 @@ verify_jwt = false
 
 [functions.flow-engine-rollout-cron]
 verify_jwt = false
+
+[functions.migrate-engine-v3]
+verify_jwt = false
