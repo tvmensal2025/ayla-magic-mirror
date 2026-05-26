@@ -14,6 +14,7 @@ import { Loader2, MessageSquareText, UserPlus, UserCheck, KanbanSquare, RotateCc
 import { resetLeadConversation } from "@/services/resetConversation";
 import { CaptureSheet } from "@/components/captacao/CaptureSheet";
 import { useCaptureSession } from "@/hooks/useCaptureSession";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -52,6 +53,15 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const [sendingToCrm, setSendingToCrm] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
+  const isMobile = useIsMobile();
+
+  // Restaura largura do painel lateral de Captação salva pelo consultor.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("whatsapp_capture_side_w");
+      if (saved) document.documentElement.style.setProperty("--cap-side-w", saved);
+    } catch {}
+  }, []);
   const { customer: captureCustomer, filledCount, totalFields } = useCaptureSession(customerId);
   // Captação é SEMPRE manual (default global) — incompleto = pendente.
   const captureIncomplete = !!captureCustomer && !(captureCustomer.name && captureCustomer.cpf && captureCustomer.email && Number(captureCustomer.electricity_bill_value || 0) > 0);
@@ -319,44 +329,47 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
 
   const phoneNumber = chat.remoteJid.split("@")[0];
 
+  // Em desktop, o painel de Captação fica como coluna lateral integrada ao chat.
+  // Em mobile, continua como Sheet (overlay) — única opção razoável em telas pequenas.
+  const showInlineCapture = !isMobile && captureOpen && !!customerId;
+
   return (
-    <div className="flex-1 flex flex-col min-h-0 [body[data-captacao-bar-open]_&]:pb-11">
-      {/* O `pb-11` acima reserva espaço quando a barra minimizada da
-          Captação (h-11 fixed bottom-0) está visível, pra ela nunca
-          cobrir o composer / botão de enviar. */}
-      {/* Chat header */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-card">
-        <Avatar className="h-9 w-9">
+    <div className="flex-1 flex min-h-0 min-w-0">
+      <div className={`flex flex-col min-h-0 min-w-0 ${showInlineCapture ? "flex-1" : "flex-1"}`}>
+      {/* Chat header — h-12, compacto */}
+      <div className="flex items-center gap-2 px-3 h-12 border-b border-border bg-card shrink-0">
+        <Avatar className="h-8 w-8 shrink-0">
           <AvatarImage src={chat.profilePicUrl} />
-          <AvatarFallback className="bg-primary/20 text-primary text-xs">
+          <AvatarFallback className="bg-primary/20 text-primary text-[10px]">
             {chat.name.slice(0, 2).toUpperCase()}
           </AvatarFallback>
         </Avatar>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground truncate sensitive-name">{chat.name}</p>
-          <p className="text-[10px] text-muted-foreground sensitive-phone">{phoneNumber}</p>
+          <p className="text-sm font-semibold text-foreground truncate sensitive-name leading-tight">{chat.name}</p>
+          <p className="text-[10px] text-muted-foreground sensitive-phone leading-tight">{phoneNumber}</p>
         </div>
         {isCustomer ? (
-          <div className="flex items-center gap-1.5 text-primary">
-            <UserCheck className="h-4 w-4" />
-            <span className="text-[10px] font-medium">Cliente</span>
+          <div className="flex items-center gap-1 text-primary shrink-0">
+            <UserCheck className="h-3.5 w-3.5" />
+            <span className="text-[10px] font-medium hidden xl:inline">Cliente</span>
           </div>
         ) : (
           <Button
             size="sm"
             variant="outline"
-            className="h-7 text-[10px] gap-1 border-primary/30 text-primary hover:bg-primary/10"
+            className="h-8 min-w-[32px] text-[10px] gap-1 px-2 border-primary/30 text-primary hover:bg-primary/10 shrink-0"
             onClick={() => setShowAddDialog(true)}
+            title="Adicionar Cliente"
           >
             <UserPlus className="h-3.5 w-3.5" />
-            Adicionar Cliente
+            <span className="hidden lg:inline">Adicionar</span>
           </Button>
         )}
         {kanbanStages.length > 0 && (
           <Select onValueChange={handleSendToCrm} disabled={sendingToCrm}>
-            <SelectTrigger className="h-7 w-auto gap-1 text-[10px] border-accent/30 text-accent-foreground px-2">
+            <SelectTrigger className="h-8 w-auto gap-1 text-[10px] border-accent/30 text-accent-foreground px-2 shrink-0">
               {sendingToCrm ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KanbanSquare className="h-3.5 w-3.5" />}
-              <span>CRM</span>
+              <span className="hidden lg:inline">CRM</span>
             </SelectTrigger>
             <SelectContent>
               {kanbanStages.map((stage) => (
@@ -369,7 +382,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
           <Button
             size="sm"
             variant={captureActive ? "default" : "outline"}
-            className={`h-7 text-[10px] gap-1 ${
+            className={`h-8 min-w-[32px] text-[10px] gap-1 px-2 shrink-0 ${
               captureActive
                 ? "bg-primary text-primary-foreground animate-pulse shadow-md shadow-primary/30"
                 : "border-primary/40 text-primary hover:bg-primary/10"
@@ -378,7 +391,7 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
             title="Abrir painel de captação"
           >
             <ClipboardList className="h-3.5 w-3.5" />
-            Captação {filledCount > 0 ? `${filledCount}/${totalFields}` : ""}
+            <span className="hidden lg:inline">Captação{filledCount > 0 ? ` ${filledCount}/${totalFields}` : ""}</span>
           </Button>
         )}
 
@@ -387,12 +400,12 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
             <Button
               size="sm"
               variant="outline"
-              className="h-7 text-[10px] gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
+              className="h-8 min-w-[32px] text-[10px] gap-1 px-2 border-destructive/40 text-destructive hover:bg-destructive/10 shrink-0"
               disabled={resetting}
               title="Apaga histórico do bot e reinicia o fluxo do zero"
             >
               {resetting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-              Zerar
+              <span className="hidden lg:inline">Zerar</span>
             </Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
@@ -414,10 +427,10 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
         </AlertDialog>
       </div>
 
-      {/* Messages area */}
+      {/* Messages area — flex-1 min-h-0 garante composer sempre visível */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-4 py-3"
+        className="flex-1 min-h-0 overflow-y-auto px-3 py-2"
         style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.02'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }}
       >
         {isLoading && messages.length === 0 && (
@@ -526,9 +539,50 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
           onAdded={handleCustomerAdded}
         />
       )}
+      </div>
 
-      {/* Capture Sheet (mobile-first, fullscreen) */}
-      {customerId && (
+      {/* Painel de Captação — coluna lateral em desktop (resizable), Sheet em mobile */}
+      {showInlineCapture && (
+        <>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            className="hidden md:block w-1 cursor-col-resize bg-border/60 hover:bg-primary/40 transition-colors shrink-0"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const startX = e.clientX;
+              const startW = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--cap-side-w") || "400", 10);
+              const onMove = (ev: MouseEvent) => {
+                const w = Math.min(640, Math.max(320, startW - (ev.clientX - startX)));
+                document.documentElement.style.setProperty("--cap-side-w", `${w}px`);
+              };
+              const onUp = () => {
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+                const w = getComputedStyle(document.documentElement).getPropertyValue("--cap-side-w");
+                try { localStorage.setItem("whatsapp_capture_side_w", w); } catch {}
+              };
+              document.addEventListener("mousemove", onMove);
+              document.addEventListener("mouseup", onUp);
+            }}
+            title="Arraste pra redimensionar"
+          />
+          <div className="hidden md:flex shrink-0" style={{ width: "var(--cap-side-w, 400px)" }}>
+            <CaptureSheet
+              open={captureOpen}
+              onOpenChange={setCaptureOpen}
+              consultantId={consultantId}
+              customerId={customerId!}
+              customerName={chat?.name}
+              phoneNumber={phoneNumber}
+              inline
+            />
+          </div>
+        </>
+      )}
+
+      {/* Capture Sheet (mobile fullscreen) */}
+      {isMobile && customerId && (
         <CaptureSheet
           open={captureOpen}
           onOpenChange={setCaptureOpen}

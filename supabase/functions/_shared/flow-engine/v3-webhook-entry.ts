@@ -34,6 +34,7 @@ import { loadContext } from "./v3-loader.ts";
 import { runEngine } from "./v3-runner.ts";
 import { executeActions } from "./v3-dispatcher.ts";
 import { defaultHooks, withCapturesExtractor } from "./hooks.ts";
+import { syncDealStageFromStep } from "../crm-stage-sync.ts";
 import {
   extractCPF,
   extractNome,
@@ -344,6 +345,19 @@ export async function runEngineV3WebhookEntry(
       inboundLog,
       consultantName,
     });
+
+    // ─── CRM Kanban sync: advance deal stage based on new step ────────
+    // The legacy webhooks call syncDealStageFromStep after each turn.
+    // The v3 engine must do the same so the Kanban board stays in sync.
+    // Uses the post-turn step id (from stateUpdate or pre-existing).
+    try {
+      const postStepId = result.stateUpdate.currentStepId ?? ctx.state.currentStepId;
+      if (postStepId) {
+        await syncDealStageFromStep(args.supabase, args.customerId, postStepId);
+      }
+    } catch (e: any) {
+      console.warn("[v3-webhook-entry] crm-stage-sync failed (non-fatal):", e?.message);
+    }
 
     return {
       handled: true,

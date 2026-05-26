@@ -17,13 +17,11 @@ export function useKanbanDeals(consultantId: string) {
       .eq("consultant_id", consultantId)
       .order("created_at", { ascending: false });
     if (data) {
-      const onlyLeads = data.filter((d: any) => {
-        const origin = d.customers?.customer_origin;
-        return !origin || origin === "whatsapp_lead" || origin === "manual";
-      });
-      const enriched = onlyLeads.map((d: any) => ({
+      // Inclui leads do whatsapp/manual E clientes iGreen (que ficam na coluna "espera")
+      const enriched = data.map((d: any) => ({
         ...d,
         customer_name: d.customers?.name || null,
+        customer_origin: d.customers?.customer_origin || null,
         conversation_step: d.customers?.conversation_step || null,
         last_step_advanced_at: d.customers?.last_step_advanced_at || null,
       }));

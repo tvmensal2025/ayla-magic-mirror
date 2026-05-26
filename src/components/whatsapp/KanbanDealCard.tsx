@@ -1,4 +1,4 @@
-import { GripVertical, User, Pencil, Trash2, MoreVertical, Footprints } from "lucide-react";
+import { GripVertical, User, Pencil, Trash2, MoreVertical, Footprints, Building2 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { KanbanSlaIndicator } from "./KanbanSlaIndicator";
 import type { Tables } from "@/integrations/supabase/types";
@@ -17,6 +17,7 @@ interface KanbanDealCardProps {
 export function KanbanDealCard({ deal, stepInfo, onDragStart, onEdit, onDelete }: KanbanDealCardProps) {
   const lastAdvanced = (deal as any).last_step_advanced_at || deal.updated_at || deal.created_at;
   const hoursStuck = lastAdvanced ? (Date.now() - new Date(lastAdvanced).getTime()) / 36e5 : 0;
+  const isIgreenClient = (deal as any).customer_origin === "igreen_sync";
   const stepTone = !stepInfo
     ? "bg-muted/40 text-muted-foreground border-border/40"
     : hoursStuck > 72
@@ -36,11 +37,16 @@ export function KanbanDealCard({ deal, stepInfo, onDragStart, onEdit, onDelete }
           {(deal as any).customer_name && (
             <div className="flex items-center gap-1.5 mb-0.5">
               <div className="w-4 h-4 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-                <User className="h-2.5 w-2.5 text-primary" />
+                {isIgreenClient ? <Building2 className="h-2.5 w-2.5 text-primary" /> : <User className="h-2.5 w-2.5 text-primary" />}
               </div>
               <span className="text-xs font-medium text-foreground truncate sensitive-data">
                 {(deal as any).customer_name}
               </span>
+              {isIgreenClient && (
+                <span className="text-[8px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 shrink-0" title="Cliente importado do iGreen">
+                  iG
+                </span>
+              )}
             </div>
           )}
           <span className="text-[10px] text-muted-foreground truncate block sensitive-phone">

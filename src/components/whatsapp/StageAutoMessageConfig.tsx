@@ -22,6 +22,7 @@ import { MessageSquare, Image, Video, Mic, X, Check, Bold, Upload, Loader2, Plus
 import { uploadMedia, getAcceptString, formatFileSize } from "@/services/minioUpload";
 import { useToast } from "@/hooks/use-toast";
 import { REJECTION_REASONS } from "./DropConfirmDialog";
+import { MediaLibraryPicker, type MediaKind } from "./MediaLibraryPicker";
 
 interface StageAutoMessageConfigProps {
   stageId: string;
@@ -68,6 +69,7 @@ function MessageItem({
   onRemove,
   showRejectionReason,
   showDealOrigin,
+  consultantId,
 }: {
   msg: AutoMessage;
   index: number;
@@ -75,6 +77,7 @@ function MessageItem({
   onRemove: () => void;
   showRejectionReason: boolean;
   showDealOrigin: boolean;
+  consultantId: string;
 }) {
   const [uploading, setUploading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -177,18 +180,45 @@ function MessageItem({
             <Input
               value={msg.media_url}
               onChange={(e) => onChange({ ...msg, media_url: e.target.value })}
-              placeholder="URL da mídia ou faça upload →"
+              placeholder="URL da mídia, biblioteca ou upload →"
               className="h-7 text-[10px] flex-1"
+            />
+            <MediaLibraryPicker
+              kind={msg.message_type as MediaKind}
+              consultantId={consultantId}
+              onSelect={(url) => onChange({ ...msg, media_url: url })}
+              triggerLabel="Biblioteca"
             />
             <Button variant="outline" size="sm" className="h-7 text-[9px] gap-0.5" disabled={uploading} onClick={() => fileRef.current?.click()}>
               {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
               {uploading ? "..." : "Upload"}
             </Button>
           </div>
+          {msg.media_url && (msg.message_type === "image" || msg.message_type === "video") && (
+            <div className="flex items-center gap-1.5 mt-1">
+              {msg.message_type === "image" ? (
+                <img src={msg.media_url} alt="" className="h-10 w-10 rounded object-cover border border-border/40" onError={(e) => { (e.target as HTMLImageElement).style.opacity = "0.3"; }} />
+              ) : (
+                <video src={msg.media_url} className="h-10 w-10 rounded object-cover bg-black border border-border/40" muted preload="metadata" />
+              )}
+              <Button variant="ghost" size="icon" className="h-5 w-5 text-destructive" onClick={() => onChange({ ...msg, media_url: "" })}>
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
+          {msg.media_url && msg.message_type === "audio" && (
+            <div className="flex items-center gap-1.5 mt-1 px-2 py-1 bg-muted/30 rounded border border-border/40">
+              <Mic className="h-3 w-3 text-primary shrink-0" />
+              <audio src={msg.media_url} controls className="h-7 flex-1 max-w-[280px]" />
+              <Button variant="ghost" size="icon" className="h-5 w-5 text-destructive" onClick={() => onChange({ ...msg, media_url: "" })}>
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Optional image */}
+      {/* Optional image (sent before main message) */}
       {msg.message_type !== "image" && (
         <div className="space-y-1">
           <input ref={imgRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
@@ -197,8 +227,14 @@ function MessageItem({
             <Input
               value={msg.image_url}
               onChange={(e) => onChange({ ...msg, image_url: e.target.value })}
-              placeholder="URL da imagem"
+              placeholder="URL da imagem ou escolha da biblioteca →"
               className="h-7 text-[10px] flex-1"
+            />
+            <MediaLibraryPicker
+              kind="image"
+              consultantId={consultantId}
+              onSelect={(url) => onChange({ ...msg, image_url: url })}
+              triggerLabel="Biblioteca"
             />
             <Button variant="outline" size="sm" className="h-7 text-[9px] gap-0.5" disabled={uploadingImage} onClick={() => imgRef.current?.click()}>
               {uploadingImage ? <Loader2 className="h-3 w-3 animate-spin" /> : <Image className="h-3 w-3" />}
@@ -207,7 +243,7 @@ function MessageItem({
           </div>
           {msg.image_url && (
             <div className="flex items-center gap-1">
-              <img src={msg.image_url} alt="" className="h-8 w-8 rounded object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+              <img src={msg.image_url} alt="" className="h-8 w-8 rounded object-cover border border-border/40" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
               <Button variant="ghost" size="icon" className="h-4 w-4 text-destructive" onClick={() => onChange({ ...msg, image_url: "" })}>
                 <X className="h-2.5 w-2.5" />
               </Button>
@@ -428,6 +464,7 @@ export function StageAutoMessageConfig({
               onRemove={() => removeMessage(i)}
               showRejectionReason={stageKey === "reprovado"}
               showDealOrigin={["30_dias", "60_dias", "90_dias", "120_dias"].includes(stageKey)}
+              consultantId={consultantId}
             />
           ))}
         </div>

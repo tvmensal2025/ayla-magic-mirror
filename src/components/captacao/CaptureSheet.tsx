@@ -28,6 +28,8 @@ interface Props {
   customerId: string;
   customerName?: string | null;
   phoneNumber?: string | null;
+  /** Quando true, renderiza como painel lateral inline (sem overlay/Sheet). Usado em desktop dentro do ChatView. */
+  inline?: boolean;
 }
 
 export function CaptureSheet(props: Props) {
@@ -43,7 +45,7 @@ export function CaptureSheet(props: Props) {
   );
 }
 
-function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, customerName, phoneNumber }: Props) {
+function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, customerName, phoneNumber, inline = false }: Props) {
   const { customer, filledCount, totalFields, progress } = useCaptureSession(customerId);
   const { bump } = useCaptureScoreboard(consultantId);
   const combo = useCaptureCombo();
@@ -260,7 +262,7 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
   // layout do WhatsApp possa reservar espaço no rodapé e o composer não
   // fique coberto pela barra fixa de Captação.
   useEffect(() => {
-    const showingBar = open && minimized;
+    const showingBar = open && minimized && !inline;
     if (showingBar) {
       document.body.dataset.captacaoBarOpen = "1";
     } else {
@@ -269,7 +271,143 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
     return () => {
       delete document.body.dataset.captacaoBarOpen;
     };
-  }, [open, minimized]);
+  }, [open, minimized, inline]);
+
+  // ────────────────────────────────────────────────────────────────────────
+  // INLINE (desktop): painel lateral integrado, sem Sheet/overlay/minimized.
+  // Usado dentro do ChatView do WhatsApp em telas md+ — fica numa coluna
+  // à direita do chat, sempre visível, sem cobrir mensagens nem composer.
+  // ────────────────────────────────────────────────────────────────────────
+  if (inline) {
+    if (!open) return null;
+    return (
+      <aside className="w-full h-full flex flex-col bg-background border-l border-border/60 overflow-hidden">
+        <header className="px-2 py-1.5 border-b border-border/60 bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+              <ClipboardList className="w-3.5 h-3.5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold leading-tight break-words">
+                {customerName || phoneNumber || "Lead"}
+              </p>
+              {phoneNumber && <p className="text-[10px] text-muted-foreground truncate">{phoneNumber}</p>}
+            </div>
+            {needsName && (
+              <Button
+                size="sm"
+                variant="default"
+                className="gap-1 font-bold animate-pulse shrink-0 h-7 px-2 text-[10px]"
+                onClick={handleAskName}
+                disabled={askingName}
+                title="Lead sem nome — peça agora"
+              >
+                {askingName ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />}
+                Nome
+              </Button>
+            )}
+            <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => onOpenChange(false)} title="Fechar painel">
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+          <CaptureProgressBar progress={progress} filled={filledCount} total={totalFields} />
+          <p className="text-[10px] text-center font-semibold text-primary/90 mt-1">{phrase}</p>
+          {nextMissing && !canSubmit && (
+            <p className="text-[10px] text-center mt-0.5 text-muted-foreground">
+              🎯 Próximo: <span className="font-bold text-foreground">{nextMissing.label}</span>
+            </p>
+          )}
+          {combo.isActive && (
+            <div className="mt-1.5">
+              <ComboTimer
+                level={combo.level}
+                secondsLeft={combo.secondsLeft}
+                progressPct={combo.progressPct}
+                bonusXp={combo.bonusXp}
+              />
+            </div>
+          )}
+        </header>
+
+        <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="flex-1 flex flex-col overflow-hidden">
+          <TabsList className="mx-2 mt-1.5 grid grid-cols-2 h-8">
+            <TabsTrigger value="passos" className="gap-0.5 text-[11px]">
+              <ListChecks className="w-3 h-3" /> Passos
+              <span className="ml-0.5 bg-primary/15 px-1 py-px rounded-full font-bold text-[9px]">{sentSteps.size}</span>
+            </TabsTrigger>
+            <TabsTrigger value="ficha" className="gap-0.5 text-[11px]">
+              <IdCard className="w-3 h-3" /> Ficha
+              <span className="ml-0.5 bg-primary/15 px-1 py-px rounded-full font-bold text-[9px]">{filledCount}/{totalFields}</span>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="passos" className="flex-1 overflow-y-auto px-2 py-1.5 mt-1.5 mb-0 data-[state=inactive]:hidden">
+            <CaptureStepsList
+              consultantId={consultantId}
+              customerId={customerId}
+              sentSteps={sentSteps}
+              onSent={async (key) => {
+                setSentSteps((s) => new Set(s).add(key));
+              }}
+              defaultVariant={(customer as any)?.flow_variant || "A"}
+              currentStep={(customer as any)?.conversation_step}
+              onStepsLoaded={setAllSteps}
+            />
+          </TabsContent>
+
+          <TabsContent value="ficha" className="flex-1 overflow-hidden p-0 mt-1 mb-0 data-[state=inactive]:hidden">
+            <FichaWrap customerId={customerId} />
+          </TabsContent>
+        </Tabs>
+
+        <footer className="border-t border-border/60 bg-card/80 backdrop-blur sticky bottom-0 z-20 p-2 space-y-1.5">
+          {customer?.conversation_step && ["finalizando", "portal_submitting", "aguardando_otp", "validando_otp"].includes(customer.conversation_step) && (
+            <p className="text-[10px] text-center text-primary font-semibold animate-pulse">
+              🚀 Portal: {customer.conversation_step.replace("_", " ")}…
+            </p>
+          )}
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 gap-1 font-bold h-9 px-2 text-[10px]"
+              onClick={() => setSeqOpen(true)}
+              disabled={pendingSteps.length === 0 || needsName}
+              title={needsName ? "Peça o nome do lead primeiro" : pendingSteps.length === 0 ? "Tudo enviado" : `Disparar ${pendingSteps.length} passos pendentes`}
+            >
+              <Zap className="w-3.5 h-3.5" /> Enviar tudo ({pendingSteps.length})
+            </Button>
+            <Button
+              size="lg"
+              className={`flex-1 font-bold gap-1 h-9 text-xs ${
+                canSubmit
+                  ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:opacity-95 animate-exec-energy shadow-lg shadow-emerald-500/30"
+                  : "bg-muted text-muted-foreground opacity-60 cursor-not-allowed hover:bg-muted"
+              }`}
+              onClick={handleSubmit}
+              disabled={submitting || !canSubmit}
+              title={submitTooltip}
+            >
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trophy className="w-4 h-4" />}
+              {canSubmit ? "CADASTRAR" : `${filledCount}/${totalFields}${!billConfirmed ? " ·📄" : ""}${!docConfirmed ? " ·🪪" : ""}`}
+            </Button>
+          </div>
+        </footer>
+
+        <SendSequenceDialog
+          open={seqOpen}
+          onOpenChange={setSeqOpen}
+          consultantId={consultantId}
+          customerId={customerId}
+          customerName={customerName || phoneNumber}
+          steps={pendingSteps}
+          variant={(((customer as any)?.flow_variant || "A").toUpperCase()) as "A" | "B" | "C" | "D" | "E"}
+          onStepSent={(key) => setSentSteps((s) => new Set(s).add(key))}
+          onAskName={handleAskName}
+        />
+      </aside>
+    );
+  }
 
   // Barra fina minimizada — h-11, tap em qualquer lugar abre meia-tela.
   if (open && minimized) {
@@ -313,7 +451,7 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
             ? "h-[100dvh] rounded-none"
             : isMobile
               ? "h-[50dvh] min-h-[280px] max-h-[100dvh] rounded-t-2xl"
-              : "h-[38dvh] min-h-[240px] max-h-[100dvh] rounded-t-2xl"
+              : "h-[28dvh] min-h-[200px] max-h-[100dvh] rounded-t-2xl"
         }`}
       >
         {/* Grabber — arraste pra cima vira fullscreen, pra baixo minimiza */}
@@ -335,41 +473,41 @@ function CaptureSheetInner({ open, onOpenChange, consultantId, customerId, custo
 
 
         {/* Header */}
-        <header className={`px-3 border-b border-border/60 bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20 ${expanded ? "pt-2 pb-2" : "py-1"}`}>
-          <div className={`flex items-center gap-2 ${expanded ? "mb-2" : ""}`}>
-            <div className={`rounded-full bg-primary/15 flex items-center justify-center shrink-0 ${expanded ? "w-9 h-9" : "w-7 h-7"}`}>
-              <ClipboardList className={`text-primary ${expanded ? "w-4 h-4" : "w-3.5 h-3.5"}`} />
+        <header className={`px-2 border-b border-border/60 bg-gradient-to-br from-primary/10 via-card to-card sticky top-0 z-20 ${expanded ? "pt-2 pb-2" : "py-0.5"}`}>
+          <div className={`flex items-center gap-1.5 ${expanded ? "mb-2" : ""}`}>
+            <div className={`rounded-full bg-primary/15 flex items-center justify-center shrink-0 ${expanded ? "w-9 h-9" : "w-6 h-6"}`}>
+              <ClipboardList className={`text-primary ${expanded ? "w-4 h-4" : "w-3 h-3"}`} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className={`font-bold truncate ${expanded ? "text-sm" : "text-xs leading-tight"}`}>
+              <p className={`font-bold truncate ${expanded ? "text-sm" : "text-[11px] leading-tight"}`}>
                 {customerName || phoneNumber || "Lead"}
               </p>
-              {phoneNumber && <p className="text-[10px] text-muted-foreground truncate">{phoneNumber}</p>}
+              {phoneNumber && expanded && <p className="text-[10px] text-muted-foreground truncate">{phoneNumber}</p>}
             </div>
             {needsName && (
               <Button
                 size="sm"
                 variant="default"
-                className="gap-1 font-bold animate-pulse shrink-0 h-9 px-3 text-xs"
+                className={`gap-1 font-bold animate-pulse shrink-0 ${expanded ? "h-9 px-3 text-xs" : "h-7 px-2 text-[10px]"}`}
                 onClick={handleAskName}
                 disabled={askingName}
                 title="Lead sem nome — peça agora"
               >
-                {askingName ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+                {askingName ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />}
                 Nome
               </Button>
             )}
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-0.5 shrink-0">
               {!isMobile && (
-                <Button size="icon" variant="ghost" className="h-9 w-9" onClick={() => setExpanded((v) => !v)} title={expanded ? "Recolher" : "Expandir"}>
-                  {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                <Button size="icon" variant="ghost" className={expanded ? "h-9 w-9" : "h-7 w-7"} onClick={() => setExpanded((v) => !v)} title={expanded ? "Recolher" : "Expandir"}>
+                  {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-3.5 h-3.5" />}
                 </Button>
               )}
-              <Button size="icon" variant="ghost" className="h-10 w-10" onClick={() => setMinimized(true)} title="Minimizar">
-                <ChevronDown className="w-5 h-5" />
+              <Button size="icon" variant="ghost" className={expanded ? "h-10 w-10" : "h-7 w-7"} onClick={() => setMinimized(true)} title="Minimizar">
+                <ChevronDown className={expanded ? "w-5 h-5" : "w-4 h-4"} />
               </Button>
-              <Button size="icon" variant="ghost" className="h-10 w-10" onClick={() => onOpenChange(false)} title="Fechar">
-                <X className="w-5 h-5" />
+              <Button size="icon" variant="ghost" className={expanded ? "h-10 w-10" : "h-7 w-7"} onClick={() => onOpenChange(false)} title="Fechar">
+                <X className={expanded ? "w-5 h-5" : "w-4 h-4"} />
               </Button>
             </div>
           </div>

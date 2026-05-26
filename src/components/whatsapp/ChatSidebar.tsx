@@ -93,14 +93,17 @@ export function ChatSidebar({ chats, isLoading, selectedJid, onSelectChat, consu
   );
 
   return (
-    <div className="flex flex-col h-full border-r border-border bg-card">
+    <div className="flex flex-col h-full min-h-0 border-r border-border bg-card">
       {/* Header */}
-      <div className="p-3 border-b border-border flex items-center justify-between">
-        <h3 className="font-semibold text-foreground text-sm">Conversas</h3>
-        <MessageCirclePlus
-          className="h-4 w-4 text-muted-foreground cursor-pointer hover:text-primary transition-colors"
+      <div className="px-3 h-9 border-b border-border flex items-center justify-between shrink-0">
+        <h3 className="font-semibold text-foreground text-xs">Conversas</h3>
+        <button
           onClick={() => setShowNewChat((v) => !v)}
-        />
+          className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-secondary text-muted-foreground hover:text-primary transition-colors"
+          title="Nova conversa"
+        >
+          <MessageCirclePlus className="h-4 w-4" />
+        </button>
       </div>
 
       {/* New chat input */}
@@ -133,9 +136,9 @@ export function ChatSidebar({ chats, isLoading, selectedJid, onSelectChat, consu
       )}
 
       {/* Search */}
-      <div className="p-2">
+      <div className="px-2 py-1.5 shrink-0">
         <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Buscar conversa ou cliente..."
             value={search}
@@ -147,17 +150,17 @@ export function ChatSidebar({ chats, isLoading, selectedJid, onSelectChat, consu
 
       {/* Customer search results from DB */}
       {customerResults.length > 0 && (
-        <div className="border-b border-border">
-          <p className="text-[10px] text-muted-foreground px-3 pt-1.5 pb-1 flex items-center gap-1">
+        <div className="border-b border-border shrink-0">
+          <p className="text-[10px] text-muted-foreground px-3 pt-1 pb-0.5 flex items-center gap-1">
             <Users className="h-3 w-3" /> Clientes encontrados
           </p>
           {customerResults.map((cr) => (
             <button
               key={cr.phone_whatsapp}
               onClick={() => handleStartChatFromCustomer(cr.phone_whatsapp)}
-              className="w-full flex items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-secondary/80"
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-secondary/80"
             >
-              <Avatar className="h-8 w-8 shrink-0">
+              <Avatar className="h-7 w-7 shrink-0">
                 <AvatarFallback className="bg-accent/20 text-accent text-[10px]">
                   {(cr.name || "?").slice(0, 2).toUpperCase()}
                 </AvatarFallback>
@@ -172,7 +175,7 @@ export function ChatSidebar({ chats, isLoading, selectedJid, onSelectChat, consu
       )}
 
       {/* Chat list */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {isLoading && chats.length === 0 && (
           <div className="p-4 text-center text-xs text-muted-foreground">
             Carregando conversas...
@@ -187,19 +190,19 @@ export function ChatSidebar({ chats, isLoading, selectedJid, onSelectChat, consu
           <button
             key={chat.remoteJid}
             onClick={() => onSelectChat(chat.remoteJid)}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-secondary/80 ${
+            className={`w-full flex items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-secondary/80 ${
               selectedJid === chat.remoteJid ? "bg-secondary" : ""
             }`}
           >
-            <Avatar className="h-10 w-10 shrink-0">
+            <Avatar className="h-9 w-9 shrink-0">
               <AvatarImage src={chat.profilePicUrl} />
-              <AvatarFallback className="bg-primary/20 text-primary text-xs">
+              <AvatarFallback className="bg-primary/20 text-primary text-[10px]">
                 {chat.name.slice(0, 2).toUpperCase()}
               </AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-foreground truncate sensitive-name">
+                <span className="text-[13px] font-medium text-foreground truncate sensitive-name">
                   {chat.name}
                 </span>
                 <span className="text-[10px] text-muted-foreground shrink-0 ml-1">
@@ -207,7 +210,7 @@ export function ChatSidebar({ chats, isLoading, selectedJid, onSelectChat, consu
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground truncate">
+                <span className="text-[11px] text-muted-foreground truncate">
                   {chat.lastMessage || "..."}
                 </span>
                 {chat.unreadCount > 0 && (

@@ -135,31 +135,31 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
   const awaiting = (kind === "bill" ? customer?.bill_data_confirmation_by : customer?.doc_data_confirmation_by) === "awaiting_client";
 
   return (
-    <div className={`rounded-md border ${tone} p-2 space-y-1.5 animate-in fade-in slide-in-from-top-1`}>
-      <div className="flex items-center gap-1.5">
-        <Icon className="w-3.5 h-3.5 text-amber-500" />
-        <span className="text-[11px] font-bold uppercase tracking-wide">{title}</span>
+    <div className={`rounded-md border ${tone} px-1.5 py-1 space-y-0.5 animate-in fade-in slide-in-from-top-1`}>
+      <div className="flex items-center gap-1">
+        <Icon className="w-3 h-3 text-amber-500" />
+        <span className="text-[10px] font-bold uppercase tracking-wide truncate">{title}</span>
         {isConfirmed && (
-          <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-bold">
-            ✓ confirmado
+          <span className="ml-auto text-[8px] px-1 py-px rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-bold">
+            ✓
           </span>
         )}
         {!isConfirmed && awaiting && (
-          <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded-full bg-amber-400/20 text-amber-700 dark:text-amber-300 font-bold animate-pulse">
-            aguardando cliente
+          <span className="ml-auto text-[8px] px-1 py-px rounded-full bg-amber-400/20 text-amber-700 dark:text-amber-300 font-bold animate-pulse">
+            aguardando
           </span>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+      <div className="space-y-0.5">
         {fields.map((f) => {
           const v = customer?.[f.key];
           const filled = v !== null && v !== undefined && String(v).trim() !== "";
           if (!filled) return null;
           const isEditing = editing === f.key;
           return (
-            <div key={f.key} className="flex items-center gap-1 min-w-0 text-[10px]">
-              <span className="text-muted-foreground shrink-0 w-14 truncate">{f.label}:</span>
+            <div key={f.key} className="flex items-baseline gap-1.5 min-w-0 text-[10px] leading-snug">
+              <span className="text-muted-foreground shrink-0 w-14 text-right">{f.label}:</span>
               {isEditing ? (
                 <>
                   <Input
@@ -167,14 +167,14 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
                     onChange={(e) => setEditVal(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") void saveEdit(); if (e.key === "Escape") setEditing(null); }}
                     autoFocus
-                    className="h-5 text-[10px] px-1"
+                    className="h-5 text-[10px] px-1 flex-1 min-w-0"
                   />
-                  <button onClick={() => void saveEdit()} className="text-emerald-500 shrink-0"><Check className="w-3 h-3" /></button>
-                  <button onClick={() => setEditing(null)} className="text-muted-foreground shrink-0"><X className="w-3 h-3" /></button>
+                  <button onClick={() => void saveEdit()} className="text-emerald-500 shrink-0"><Check className="w-2.5 h-2.5" /></button>
+                  <button onClick={() => setEditing(null)} className="text-muted-foreground shrink-0"><X className="w-2.5 h-2.5" /></button>
                 </>
               ) : (
                 <>
-                  <span className="flex-1 min-w-0 truncate font-semibold" title={String(v)}>{String(v)}</span>
+                  <span className="flex-1 min-w-0 break-words font-semibold" title={String(v)}>{String(v)}</span>
                   {!isConfirmed && (
                     <button onClick={() => { setEditing(f.key); setEditVal(String(v)); }} className="opacity-60 hover:opacity-100 shrink-0">
                       <Edit2 className="w-2.5 h-2.5" />
@@ -188,14 +188,14 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
       </div>
 
       {!isConfirmed && (
-        <div className="flex items-center gap-1 pt-1">
-          <Button size="sm" className="h-6 flex-1 text-[10px] font-bold gap-1" onClick={() => void confirmSelf()} disabled={busy !== ""}>
-            {busy === "self" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-            Eu confirmo
+        <div className="flex items-center gap-1 pt-0.5">
+          <Button size="sm" className="h-6 flex-1 text-[10px] font-bold gap-1 px-1.5" onClick={() => void confirmSelf()} disabled={busy !== ""}>
+            {busy === "self" ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Check className="w-2.5 h-2.5" />}
+            <span className="truncate">Confirmo</span>
           </Button>
-          <Button size="sm" variant="outline" className="h-6 flex-1 text-[10px] gap-1" onClick={() => void askClient()} disabled={busy !== ""}>
-            {busy === "client" ? <Loader2 className="w-3 h-3 animate-spin" /> : <MessageCircle className="w-3 h-3" />}
-            Pedir ao cliente
+          <Button size="sm" variant="outline" className="h-6 flex-1 text-[10px] gap-1 px-1.5" onClick={() => void askClient()} disabled={busy !== ""} title="Pedir confirmação ao cliente via WhatsApp">
+            {busy === "client" ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <MessageCircle className="w-2.5 h-2.5" />}
+            <span className="truncate">Pedir cliente</span>
           </Button>
         </div>
       )}

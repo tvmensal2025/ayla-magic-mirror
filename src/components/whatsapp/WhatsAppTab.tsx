@@ -165,24 +165,22 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
   const isConnected = connectionStatus === "connected";
 
   return (
-    <div className="flex flex-col gap-0 flex-1 min-h-0">
-      {/* Compact connection status */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-card border border-border rounded-t-lg">
+    <div className="flex flex-col gap-0 flex-1 min-h-0 min-w-0 overflow-hidden">
+      {/* Compact connection status — h-7 */}
+      <div className="flex items-center justify-between px-3 py-1 bg-card border border-border rounded-t-lg shrink-0 h-7">
         {isConnected ? (
-          <>
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-              <span className="text-xs text-foreground font-medium">WhatsApp Conectado</span>
-              {instanceName && (
-                <span className="text-[10px] text-muted-foreground">({instanceName})</span>
-              )}
-            </div>
-          </>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
+            <span className="text-[11px] text-foreground font-medium">WhatsApp Conectado</span>
+            {instanceName && (
+              <span className="text-[10px] text-muted-foreground truncate">({instanceName})</span>
+            )}
+          </div>
         ) : (
           <>
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full bg-destructive" />
-              <span className="text-xs text-foreground font-medium">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="h-1.5 w-1.5 rounded-full bg-destructive shrink-0" />
+              <span className="text-[11px] text-foreground font-medium truncate">
                 {connectionStatus === "connecting" ? "WhatsApp Conectando..." : "WhatsApp Desconectado"}
               </span>
             </div>
@@ -192,7 +190,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
                 if (connectionStatus === "disconnected") createAndConnect();
               }}
               disabled={isLoading}
-              className="text-[10px] text-primary hover:underline font-medium"
+              className="text-[10px] text-primary hover:underline font-medium shrink-0"
             >
               {isLoading || connectionStatus === "connecting" ? "Conectando..." : "Conectar"}
             </button>
@@ -200,8 +198,8 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
         )}
       </div>
 
-      {/* Sub-tab navigation */}
-      <div className="flex border-x border-border bg-card overflow-x-auto">
+      {/* Sub-tab navigation — compacta, h-9 */}
+      <div className="flex border-x border-border bg-card overflow-x-auto shrink-0 h-9">
         {SUB_TABS.map((tab) => {
           const Icon = tab.icon;
           const showBadge = tab.key === "conversas" && totalUnread > 0;
@@ -209,14 +207,14 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
             <button
               key={tab.key}
               onClick={() => setActiveSubTab(tab.key)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors border-b-2 ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium whitespace-nowrap transition-colors border-b-2 min-h-[32px] ${
                 activeSubTab === tab.key
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Icon className="h-3.5 w-3.5" />
-              {tab.label}
+              <Icon className="h-3 w-3" />
+              <span className="hidden sm:inline">{tab.label}</span>
               {showBadge && (
                 <span className="bg-primary text-primary-foreground text-[9px] rounded-full h-4 min-w-[16px] flex items-center justify-center px-1 font-bold">
                   {totalUnread > 99 ? "99+" : totalUnread}
@@ -228,7 +226,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
       </div>
 
       {/* Content area */}
-      <div className="flex-1 min-h-0 border border-t-0 border-border rounded-b-lg overflow-hidden bg-background flex flex-col">
+      <div className="flex-1 min-h-0 min-w-0 border border-t-0 border-border rounded-b-lg overflow-hidden bg-background flex flex-col">
         {activeSubTab === "dashboard" && (
           <Suspense fallback={<LazyFallback />}>
             <WhatsAppDashboard consultantId={userId} />
@@ -241,25 +239,25 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
           // (Evolution API lenta / instabilidade). O painel de QR Code só aparece
           // quando NÃO existe instância configurada (consultor novo).
           instanceName ? (
-            <div className="flex flex-col h-full">
+            <div className="flex flex-col h-full min-h-0">
               {!isConnected && (
-                <div className="px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-[11px] text-amber-200 flex items-center gap-2">
-                  <div className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-                  <span>
+                <div className="px-3 py-1 bg-amber-500/10 border-b border-amber-500/20 text-[11px] text-amber-200 flex items-center gap-2 shrink-0">
+                  <div className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                  <span className="truncate">
                     {connectionStatus === "connecting"
-                      ? "Reconectando ao WhatsApp — você ainda pode ver o histórico, novos envios podem demorar"
-                      : "WhatsApp desconectado — histórico disponível, mas envios podem falhar até reconectar"}
+                      ? "Reconectando — você ainda pode ver o histórico"
+                      : "Desconectado — histórico disponível, envios podem falhar"}
                   </span>
                   <button
                     onClick={() => createAndConnect()}
                     disabled={isLoading}
-                    className="ml-auto text-amber-100 hover:underline font-medium"
+                    className="ml-auto text-amber-100 hover:underline font-medium shrink-0"
                   >
                     {isLoading ? "..." : "Reconectar"}
                   </button>
                 </div>
               )}
-              <div data-resize-scope className="flex flex-1 min-h-0" style={{ "--wa-side-w": "300px" } as React.CSSProperties}>
+              <div data-resize-scope className="flex flex-1 min-h-0 min-w-0" style={{ "--wa-side-w": "280px" } as React.CSSProperties}>
               {/* Mobile: show sidebar OR chat, not both */}
               {isMobile ? (
                 selectedChatJid ? (
@@ -304,7 +302,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
                       consultantId={userId}
                     />
                   </div>
-                  <DragResizer storageKey="whatsapp-side" cssVar="wa-side-w" defaultPx={300} minPx={220} maxPx={520} />
+                  <DragResizer storageKey="whatsapp-side" cssVar="wa-side-w" defaultPx={280} minPx={240} maxPx={420} />
                   <div className="flex-1 min-w-0 min-h-0 flex flex-col">
                     <ChatView
                       instanceName={instanceName}
@@ -347,7 +345,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
 
 
         {activeSubTab === "envio_massa" && (
-          <div className="p-4 overflow-auto h-full">
+          <div className="p-3 overflow-auto h-full min-w-0">
             {isConnected && instanceName ? (
               <Suspense fallback={<LazyFallback />}>
                 <BulkBlockSendPanel
@@ -368,7 +366,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
         )}
 
         {activeSubTab === "templates" && (
-          <div className="p-4 overflow-auto h-full">
+          <div className="p-3 overflow-auto h-full min-w-0">
             <Suspense fallback={<LazyFallback />}>
               <TemplateManager
                 templates={templates}
@@ -384,7 +382,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
         )}
 
         {activeSubTab === "agendamentos" && (
-          <div className="p-4 overflow-auto h-full">
+          <div className="p-3 overflow-auto h-full min-w-0">
             {isConnected && instanceName ? (
               <Suspense fallback={<LazyFallback />}>
                 <SchedulePanel
@@ -401,7 +399,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
         )}
 
         {activeSubTab === "agente" && (
-          <div className="p-4 overflow-auto h-full">
+          <div className="p-3 overflow-auto h-full min-w-0">
             <Suspense fallback={<LazyFallback />}>
               <AIAgentTab userId={userId} />
             </Suspense>
@@ -409,7 +407,7 @@ export function WhatsAppTab({ userId, pendingChatPhone, pendingChatMessage, onPe
         )}
 
         {activeSubTab === "historico" && (
-          <div className="p-4 overflow-auto h-full">
+          <div className="p-3 overflow-auto h-full min-w-0">
             <Suspense fallback={<LazyFallback />}>
               <AutoMessageLog consultantId={userId} />
             </Suspense>

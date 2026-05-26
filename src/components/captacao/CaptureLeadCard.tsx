@@ -169,41 +169,58 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
       )}
 
       {/* Embedded: 2 colunas (ficha | docs) em md+, stacked compacto no mobile */}
-      <div className={embedded ? "flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[1fr_200px] gap-0 overflow-hidden" : "contents"}>
-        <div className={`overflow-y-auto ${embedded ? "p-2 space-y-1" : "p-3 space-y-1.5"}`}>
+      <div className={embedded ? "flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-0 overflow-hidden" : "contents"}>
+        <div className={`overflow-y-auto ${embedded ? "p-1.5" : "p-2.5"} space-y-1.5`}>
           <CaptureDataConfirmCard kind="bill" customer={customer} />
           <CaptureDataConfirmCard kind="doc" customer={customer} />
+          {/*
+            Layout em grid 2-cols pra campos curtos. Ficam side-by-side e
+            poupam altura vertical. Campos longos (nome, email) ocupam linha
+            inteira via col-span-2.
+          */}
+          <div className="grid grid-cols-2 gap-1.5">
           {CAPTURE_FIELDS.filter((f) => f.key !== "document_front_url").map(f => {
             const v = (customer as any)[f.key];
             const filled = v !== null && v !== undefined && String(v).trim() !== "" && (f.key !== "electricity_bill_value" || Number(v) > 0);
             const isEditingThis = editing === f.key;
             const sugg = suggestionByField.get(f.key);
             const isFlashing = flashKey === f.key;
+            // Campos largos ocupam as 2 colunas
+            const wide = f.key === "name" || f.key === "email";
 
             return (
               <div
                 key={f.key}
-                className={`group rounded-md border transition-all ${embedded ? "px-2 py-1" : "p-2"} ${
+                className={`group rounded-md border transition-all px-2 py-1 ${wide ? "col-span-2" : ""} ${
                   isFlashing ? "animate-exec-card border-primary bg-primary/10" :
                   sugg ? "border-amber-400/60 bg-amber-400/5 ring-1 ring-amber-400/30 animate-pulse" :
                   filled ? "border-primary/30 bg-primary/5" : "border-border bg-background hover:border-primary/30"
                 }`}
               >
-                {/* Linha única: ícone + label + valor + edit (densa quando embedded) */}
+                {/* Header da linha: bullet + label + ação */}
                 <div className="flex items-center gap-1.5 min-w-0">
-                  {filled ? <Check className="w-3 h-3 text-primary shrink-0" /> : <div className="w-3 h-3 rounded-full border-2 border-muted-foreground/30 shrink-0" />}
-                  <span className={`font-semibold uppercase tracking-wide text-muted-foreground shrink-0 ${embedded ? "text-[9px] w-16" : "text-[11px]"}`}>{f.label}</span>
-                  {!isEditingThis && (
-                    <span className={`flex-1 min-w-0 truncate ${embedded ? "text-[11px]" : "text-xs"} ${filled ? "text-foreground" : "text-muted-foreground italic"}`} title={filled ? String(v) : undefined}>
-                      {filled ? String(v) : "vazio"}
-                    </span>
-                  )}
-                  {!isEditingThis && (
-                    <button onClick={() => startEdit(f.key)} className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                  {filled ? <Check className="w-3 h-3 text-primary shrink-0" /> : <div className="w-2.5 h-2.5 rounded-full border-2 border-muted-foreground/30 shrink-0" />}
+                  <span className="font-bold uppercase tracking-wider text-muted-foreground shrink-0 text-[9px]">{f.label}</span>
+                  {!isEditingThis && filled && (
+                    <button onClick={() => startEdit(f.key)} className="ml-auto opacity-50 group-hover:opacity-100 transition-opacity shrink-0" title="Editar">
                       <Edit2 className="w-3 h-3 text-muted-foreground hover:text-primary" />
                     </button>
                   )}
+                  {!isEditingThis && !filled && (
+                    <button onClick={() => startEdit(f.key)} className="ml-auto text-[9px] text-primary/80 hover:text-primary font-semibold shrink-0 uppercase tracking-wide">
+                      + add
+                    </button>
+                  )}
                 </div>
+                {/* Valor abaixo (largura total → não corta) */}
+                {!isEditingThis && (
+                  <p
+                    className={`mt-px break-words text-[11px] leading-tight ${filled ? "text-foreground font-medium" : "text-muted-foreground/40 italic"}`}
+                    title={filled ? String(v) : undefined}
+                  >
+                    {filled ? String(v) : "—"}
+                  </p>
+                )}
                 {isEditingThis && (
                   <div className="mt-1 flex items-center gap-1">
                     <Input
@@ -211,10 +228,10 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
                       onChange={(e) => setEditValue(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") void saveEdit(); if (e.key === "Escape") setEditing(null); }}
                       autoFocus
-                      className="h-6 text-xs"
+                      className="h-7 text-xs"
                     />
-                    <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => void saveEdit()}><Check className="w-3 h-3" /></Button>
-                    <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setEditing(null)}><X className="w-3 h-3" /></Button>
+                    <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => void saveEdit()}><Check className="w-3.5 h-3.5" /></Button>
+                    <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => setEditing(null)}><X className="w-3.5 h-3.5" /></Button>
                   </div>
                 )}
                 {sugg && !isEditingThis && (
@@ -237,6 +254,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
               </div>
             );
           })}
+          </div>
         </div>
 
         {/* Documentos: coluna direita em md+, linha abaixo no mobile */}
