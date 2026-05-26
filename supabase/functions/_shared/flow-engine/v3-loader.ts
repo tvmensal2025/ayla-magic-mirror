@@ -64,6 +64,7 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
       bot_paused, bot_paused_reason, conversation_step,
       customer_flow_state (
         current_step_id, status, pause_reason, retries,
+        ai_questions_this_step,
         entered_step_at, expires_at, last_inbound_at,
         last_outbound_at, last_outbound_content_hash, flow_id, updated_at
       )
@@ -354,6 +355,7 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
     status: (cfs.status as CustomerSnapshot["status"]) ?? "new",
     pauseReason: cfs.pause_reason ?? null,
     retries: Number(cfs.retries) || 0,
+    aiQuestionsThisStep: Number(cfs.ai_questions_this_step) || 0,
     enteredStepAt: cfs.entered_step_at ?? new Date(0).toISOString(),
     expiresAt: cfs.expires_at ?? null,
     lastInboundAt: cfs.last_inbound_at ?? null,
