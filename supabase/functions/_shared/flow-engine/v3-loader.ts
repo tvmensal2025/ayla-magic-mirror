@@ -108,10 +108,166 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
 
   const mediaOrderJson = (consultantRow?.flow_step_media_order as Record<string, unknown>) || {};
 
+  // ─── 4b. Read ai_media_library — consultant + public, active only ────
+  // Each step's "audio"/"image"/"video"/"document" entry in
+  // `flow_step_media_order` resolves to a real file via slot_key match.
+  // The legacy webhooks (whapi-webhook + evolution-webhook) do this lookup
+  // per-step; v3 hoists it into the loader so the runner stays pure.
+  // Fallback order: personal slot_key → public slot_key → unkeyed personal.
+  // (Mirrors `evolution-webhook/handlers/bot-flow.ts:1420-1440`.)
+  const { data: mediaLib } = await supabase
+    .from("ai_media_library")
+    .select("id, kind, url, slot_key, send_order, duration_sec, is_public, consultant_id")
+    .or(`consultant_id.eq.${consultantId},is_public.eq.true`)
+    .eq("active", true);
+
+  const mediaBySlotAndKind = new Map<string, Map<string, {
+    url: string;
+    durationSec: number | null;
+    isPublic: boolean;
+  }>>();
+  for (const m of (mediaLib as any[]) || []) {
+    const slot = m.slot_key as string | null;
+    if (!slot) continue;
+    if (!mediaBySlotAndKind.has(slot)) {
+      mediaBySlotAndKind.set(slot, new Map());
+    }
+    const slotMap = mediaBySlotAndKind.get(slot)!;
+    // Personal trumps public (we may have both).
+    const existing = slotMap.get(m.kind);
+    if (!existing || (existing.isPublic && !m.is_public)) {
+      slotMap.set(m.kind, {
+        url: m.url,
+        durationSec: m.duration_sec ?? null,
+        isPublic: !!m.is_public,
+      });
+    }
+  }
+
+  function resolveMediaForSlot(
+    slotKey: string,
+    kind: "audio" | "image" | "video" | "document",
+  ): { url: string; durationSec: number | null } | null {
+    const slotMap = mediaBySlotAndKind.get(slotKey);
+    if (!slotMap) return null;
+    const m = slotMap.get(kind);
+    return m ? { url: m.url, durationSec: m.durationSec } : null;
+  }
+
+  // ─── 4c. Build mediaOrderByStepKey resolving each entry to real URL ───
+  // For each step, look up `flow_step_media_order` using a precedence
+  // chain so the consultor's configuration works regardless of how
+  // they keyed it:
+  //   1) step.step_key (e.g. "d_welcome")
+  //   2) step.slot_key (e.g. "como_funciona")
+  //   3) step.step_key without leading "d_" (welcome, como_funciona)
+  //   4) step.step_key without leading "v_a_" / "v_b_" / "v_d_" prefixes
+  // The slot_key for ai_media_library lookup uses the same chain.
   const mediaOrderByStepKey: Record<string, MediaOrderEntry[]> = {};
-  for (const [key, entries] of Object.entries(mediaOrderJson)) {
-    if (Array.isArray(entries)) {
-      mediaOrderByStepKey[key] = normalizeMediaOrder(entries);
+  for (const stepRow of stepsRaw as any[]) {
+    const stepKey = stepRow.step_key as string | null;
+    if (!stepKey) continue;
+    const slotKey = (stepRow.slot_key as string | null) || null;
+    const stepText = (stepRow.message_text as string | null) || "";
+
+    // Build candidate lookup keys for both the order map AND the slot match.
+    const stripped = stepKey.replace(/^([a-z]_|v_[a-d]_|d_)/i, "");
+    const candidates = Array.from(new Set([
+      stepKey,
+      slotKey,
+      stripped,
+    ].filter(Boolean) as string[]));
+
+    // Find the first candidate that has an order configured.
+    let entries: unknown[] | null = null;
+    let resolvedSlot: string = stepKey;
+    for (const c of candidates) {
+      const e = mediaOrderJson[c];
+      if (Array.isArray(e) && e.length > 0) {
+        entries = e;
+        resolvedSlot = c;
+        break;
+      }
+    }
+    if (!entries) continue;
+
+    // Resolve each entry. Bare strings ("audio"/"image"/"video"/"text"/"document")
+    // are ordering hints — look up real file in ai_media_library by
+    // candidate slot keys (in same precedence). Rich objects with
+    // {kind, url|media_id|text} are honored as-is.
+    const resolved: MediaOrderEntry[] = [];
+    for (const raw of entries) {
+      // Bare string entry.
+      if (typeof raw === "string") {
+        if (raw === "text") {
+          if (stepText) {
+            resolved.push({ kind: "text", text: stepText } as MediaOrderEntry);
+          }
+          continue;
+        }
+        if (raw === "audio" || raw === "image" || raw === "video" || raw === "document") {
+          // Try each candidate slot until we find a match.
+          let found: { url: string; durationSec: number | null } | null = null;
+          for (const c of candidates) {
+            const m = resolveMediaForSlot(c, raw);
+            if (m) { found = m; break; }
+          }
+          if (found) {
+            resolved.push({
+              kind: raw,
+              url: found.url,
+              durationSec: found.durationSec ?? undefined,
+            } as MediaOrderEntry);
+          }
+          continue;
+        }
+        continue;
+      }
+      // Rich object entry.
+      if (raw && typeof raw === "object") {
+        const o = raw as Record<string, unknown>;
+        const k = typeof o.kind === "string" ? o.kind : undefined;
+        if (!k) continue;
+        if (typeof o.url === "string") {
+          resolved.push(raw as MediaOrderEntry);
+          continue;
+        }
+        if (typeof o.media_id === "string") {
+          const found = ((mediaLib as any[]) || []).find((m) => m.id === o.media_id);
+          if (found?.url) {
+            resolved.push({
+              kind: k as MediaOrderEntry["kind"],
+              url: found.url,
+              durationSec: found.duration_sec ?? undefined,
+            } as MediaOrderEntry);
+          }
+          continue;
+        }
+        if (k === "text") {
+          if (stepText) resolved.push({ kind: "text", text: stepText } as MediaOrderEntry);
+          continue;
+        }
+        if (k === "audio" || k === "image" || k === "video" || k === "document") {
+          let found: { url: string; durationSec: number | null } | null = null;
+          for (const c of candidates) {
+            const m = resolveMediaForSlot(c, k);
+            if (m) { found = m; break; }
+          }
+          if (found) {
+            resolved.push({
+              kind: k,
+              url: found.url,
+              durationSec: found.durationSec ?? undefined,
+            } as MediaOrderEntry);
+          }
+        }
+      }
+    }
+
+    // Index by step.step_key so variantA's
+    // `flow.mediaOrderByStepKey[step.stepKey]` lookup hits.
+    if (resolved.length > 0) {
+      mediaOrderByStepKey[stepKey] = resolved;
     }
   }
 

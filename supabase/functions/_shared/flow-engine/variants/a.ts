@@ -195,7 +195,7 @@ export const variantA: VariantStrategy = {
       return synthesizeFromStep(step, capabilities);
     }
 
-    return order.flatMap((item: MediaOrderEntry) => {
+    const out = order.flatMap((item: MediaOrderEntry) => {
       // Skip stub entries within a mixed order (no payload to render).
       if (
         (item as any).text === undefined &&
@@ -206,6 +206,36 @@ export const variantA: VariantStrategy = {
       }
       return renderMediaItem(item, step, capabilities, config);
     });
+
+    // Append choice when the step has buttons configured. The
+    // mediaOrder entries don't carry buttons; we always append the
+    // choice as the last outbound so the lead can interact after
+    // consuming media. Without this, steps with audio/video + buttons
+    // would emit only the media and the lead never sees the options.
+    const hasButtons = step.choiceOptions && step.choiceOptions.length > 0;
+    const alreadyHasChoice = out.some((m) => m.kind === "choice");
+    if (hasButtons && !alreadyHasChoice && step.choiceOptions) {
+      const ids = step.choiceOptions.map((c) => c.id).join("|");
+      // Use the step's text as the choice prompt, or the last text outbound
+      // already emitted, falling back to a generic prompt.
+      const lastText = [...out].reverse().find((m) => m.kind === "text") as
+        | { kind: "text"; text: string }
+        | undefined;
+      const prompt = (step.messageText ?? "").trim()
+        || lastText?.text
+        || "Escolha uma opção:";
+      out.push({
+        kind: "choice",
+        prompt,
+        choice: {
+          preferred: step.preferredChoiceKind ?? "button",
+          options: step.choiceOptions,
+        },
+        idempotencyContent: buildIdempotencyContent(step.id, "choice", ids),
+      });
+    }
+
+    return out;
   },
 };
 
