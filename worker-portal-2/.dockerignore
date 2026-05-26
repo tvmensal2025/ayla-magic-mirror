@@ -1,0 +1,6 @@
+node_modules
+*.log
+.env
+.env.local
+fixtures/screenshots
+.DS_Store
