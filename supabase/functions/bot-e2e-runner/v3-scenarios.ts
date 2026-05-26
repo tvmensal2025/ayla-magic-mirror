@@ -21,13 +21,22 @@
  *  - G6: `flow.strictMode === true` ⇒ no `engine_ai_*_deferred` logs.
  *
  * Scenarios:
- *   V_A1   — variant A audio-first happy path
- *   V_B1   — variant B persuasive-text-only (no audio, ai_answer deferred)
- *   V_D1   — variant D buttons happy (Whapi capabilities)
- *   V_D2   — variant D buttons → retry → handoff (lead types free text)
- *   AI1    — `ai_answer` mode (deferred FAQ answer)
- *   AI2    — `ai` decide mode (deferred decision with candidate list)
- *   SILENT — `no_input` cron tick produces zero outbound (G2 carve-out)
+ *   V_A1                    — variant A audio-first happy path
+ *   V_B1                    — variant B persuasive-text-only (no audio, ai_answer deferred)
+ *   V_D1                    — variant D buttons happy (Whapi capabilities)
+ *   V_D2                    — variant D buttons → retry → handoff (lead types free text)
+ *   AI1                     — `ai_answer` mode (deferred FAQ answer)
+ *   AI2                     — `ai` decide mode (deferred decision with candidate list)
+ *   SILENT                  — `no_input` cron tick produces zero outbound (G2 carve-out)
+ *
+ * Carryover regression (Task 31, scenarios A1–A4 + B1–B2 from
+ * `flow-d-retry-rules-fix`, validated under engine v3):
+ *   R_A1_OCR_OK             — variant D, OCR-style media inbound advances normally
+ *   R_A2_OCR_RETRY1         — variant D, retry mode, fail 1x → retry_text emitted, retries=1
+ *   R_A3_OCR_RETRY_EXHAUSTED — variant D, retry exhausted → paused_system + handoff alert
+ *   R_A4_NO_RETRY           — variant A, no retry config (mode=repeat) → SAFE_TEXT_FALLBACK
+ *   R_B1_CHOICE_RETRY1      — variant B ask_choice, lixo 1x → retry_text, retries=1
+ *   R_B2_CHOICE_RETRY_EXHAUSTED — variant B ask_choice retry exhausted → paused_system + handoff alert
  *
  * Side effects: each scenario flips `consultants.use_engine_v3 = true`
  * for the test consultor before running, then restores the previous
@@ -61,7 +70,17 @@ export type V3DirectScenario =
   | "V_D2"
   | "AI1"
   | "AI2"
-  | "SILENT";
+  | "SILENT"
+  // Task 31 carryover from `flow-d-retry-rules-fix` (A1–A4, B1–B2),
+  // re-validated under engine v3. `R_` prefix avoids collision with
+  // `V_A1`/`V_B1` above and with the legacy whapi-webhook scenarios
+  // (`fluxo_d_ocr_ok` etc.) which still exercise the legacy path.
+  | "R_A1_OCR_OK"
+  | "R_A2_OCR_RETRY1"
+  | "R_A3_OCR_RETRY_EXHAUSTED"
+  | "R_A4_NO_RETRY"
+  | "R_B1_CHOICE_RETRY1"
+  | "R_B2_CHOICE_RETRY_EXHAUSTED";
 
 export const V3_DIRECT_SCENARIOS: ReadonlySet<V3DirectScenario> = new Set<
   V3DirectScenario
@@ -73,6 +92,12 @@ export const V3_DIRECT_SCENARIOS: ReadonlySet<V3DirectScenario> = new Set<
   "AI1",
   "AI2",
   "SILENT",
+  "R_A1_OCR_OK",
+  "R_A2_OCR_RETRY1",
+  "R_A3_OCR_RETRY_EXHAUSTED",
+  "R_A4_NO_RETRY",
+  "R_B1_CHOICE_RETRY1",
+  "R_B2_CHOICE_RETRY_EXHAUSTED",
 ]);
 
 export interface V3ScenarioCheck {
@@ -1109,6 +1134,691 @@ function buildSILENT(consultantId: string): ScenarioFixture {
   };
 }
 
+// ─── Task 31 carryover scenarios (R_A1–R_A4, R_B1–R_B2) ────────────────────
+//
+// These six fixtures re-encode the regression scenarios from
+// `.kiro/specs/flow-d-retry-rules-fix` under engine v3. They drive
+// `runEngine` directly with synthetic `EngineInput` (no Supabase, no
+// real OCR) and assert on the retry-counter / handoff-alert invariants
+// that the legacy `flow-d-retry-rules-fix` deploy fixed in the legacy
+// engines. Engine v3 must reproduce the same behaviour by construction
+// — `retryHandler` (alias `repeatHandler`) in
+// `_shared/flow-engine/fallbacks.ts` consumes
+// `step.fallback.{max_retries,on_fail,handoff_reason}` and either
+// re-emits the step (retries < max) or escalates to `humanoHandler`
+// (retries >= max + on_fail = "handoff").
+//
+// Naming uses an `R_` prefix to keep them disjoint from `V_A1`/`V_B1`
+// above (Task 30) and from the legacy whapi-webhook IDs
+// `fluxo_d_ocr_ok` etc., which still exercise the legacy path until
+// Phase 4 (Task 39) deletes it.
+
+// R_A1_OCR_OK — variant D, OCR-style media inbound advances normally.
+//
+// Maps to legacy `fluxo_d_ocr_ok` / `flow-d-retry-rules-fix` A1: when
+// the lead sends a valid photo on a step waiting for media, the
+// transition with `trigger_intent = "media_received"` matches and the
+// engine advances. Retry counter resets to 0. No handoff.
+function buildR_A1_OCR_OK(consultantId: string): ScenarioFixture {
+  const flowId = uuid();
+  const stepWelcome = uuid();
+  const stepCapture = uuid();
+  const stepConfirm = uuid();
+  const reachable = [stepWelcome, stepCapture, stepConfirm];
+
+  const flow: BotFlow = {
+    id: flowId,
+    consultantId,
+    variant: "D",
+    strictMode: false,
+    steps: [
+      makeStep({
+        id: stepWelcome,
+        flowId,
+        stepKey: "welcome",
+        stepType: "text_message",
+        position: 1,
+        messageText: "Olá! Tudo bem?",
+        transitions: [
+          { trigger_phrases: ["oi"], goto_step_id: stepCapture },
+        ],
+        fallback: { mode: "repeat" },
+        reachableStepIds: reachable,
+      }),
+      makeStep({
+        id: stepCapture,
+        flowId,
+        stepKey: "capture_conta",
+        stepType: "ask_media",
+        position: 2,
+        messageText: "Pode me enviar a foto da conta de luz? 📸",
+        transitions: [
+          {
+            trigger_intent: "media_received",
+            goto_step_id: stepConfirm,
+          },
+        ],
+        fallback: {
+          mode: "retry",
+          max_retries: 2,
+          on_fail: "handoff",
+          handoff_reason: "capture_conta_retry_exhausted",
+        },
+        reachableStepIds: reachable,
+      }),
+      makeStep({
+        id: stepConfirm,
+        flowId,
+        stepKey: "confirmando",
+        stepType: "text_message",
+        position: 3,
+        messageText: "Recebi! Vou validar aqui ✅",
+        fallback: { mode: "repeat" },
+        reachableStepIds: reachable,
+      }),
+    ],
+    mediaOrderByStepKey: {},
+  };
+
+  return {
+    flow,
+    initialState: makeState(flow, { currentStepId: stepWelcome }),
+    capabilities: CAPS_WHAPI,
+    inbounds: [
+      { kind: "text", text: "oi" },
+      { kind: "media", mediaKind: "image", mediaRef: "https://test/conta.jpg" },
+    ],
+    assert: (finalState, outputs) => {
+      const checks: V3ScenarioCheck[] = [];
+
+      // Turn 1: welcome → capture_conta.
+      checks.push({
+        name: "R_A1 turn 1: advanced to capture_conta",
+        passed: outputs[0].stateUpdate.currentStepId === stepCapture,
+        detail: `currentStepId=${outputs[0].stateUpdate.currentStepId}`,
+      });
+
+      // Turn 2: media inbound → trigger_intent="media_received" matches → confirm.
+      const t2 = outputs[1];
+      checks.push({
+        name: "R_A1 turn 2: media inbound matched media_received transition",
+        passed: t2.stateUpdate.currentStepId === stepConfirm,
+        detail: `currentStepId=${t2.stateUpdate.currentStepId}`,
+      });
+      checks.push({
+        name: "R_A1 turn 2: emitted engine_transition_match log",
+        passed: t2.logs.some((l) => l.kind === "engine_transition_match"),
+      });
+      checks.push({
+        name: "R_A1 turn 2: retries reset to 0 on transition",
+        passed: t2.stateUpdate.retries === 0,
+        detail: `retries=${t2.stateUpdate.retries}`,
+      });
+      checks.push({
+        name: "R_A1 turn 2: NO handoff (status not paused_system)",
+        passed: t2.stateUpdate.status !== "paused_system",
+        detail: `status=${t2.stateUpdate.status ?? "(unchanged)"}`,
+      });
+      checks.push({
+        name: "R_A1 final: lead reached confirming step",
+        passed: finalState.currentStepId === stepConfirm,
+      });
+      return checks;
+    },
+  };
+}
+
+// R_A2_OCR_RETRY1 — variant D, retry mode, fail 1x → retry_text emitted.
+//
+// Maps to legacy `fluxo_d_ocr_retry_1x` / A2: when the lead sends a
+// non-matching inbound on a `retry`-mode step, the engine re-emits the
+// step's outbound (retry_text fallback) and increments retries. No
+// handoff fires while retries < max_retries.
+function buildR_A2_OCR_RETRY1(consultantId: string): ScenarioFixture {
+  const flowId = uuid();
+  const stepCapture = uuid();
+  const stepConfirm = uuid();
+  const reachable = [stepCapture, stepConfirm];
+
+  const flow: BotFlow = {
+    id: flowId,
+    consultantId,
+    variant: "D",
+    strictMode: false,
+    steps: [
+      makeStep({
+        id: stepCapture,
+        flowId,
+        stepKey: "capture_conta",
+        stepType: "ask_media",
+        position: 1,
+        messageText: "Pode me enviar a foto da conta de luz? 📸",
+        transitions: [
+          {
+            trigger_intent: "media_received",
+            goto_step_id: stepConfirm,
+          },
+        ],
+        fallback: {
+          mode: "retry",
+          max_retries: 2,
+          on_fail: "handoff",
+          handoff_reason: "capture_conta_retry_exhausted",
+        },
+        reachableStepIds: reachable,
+      }),
+      makeStep({
+        id: stepConfirm,
+        flowId,
+        stepKey: "confirmando",
+        stepType: "text_message",
+        position: 2,
+        messageText: "Recebi!",
+        fallback: { mode: "repeat" },
+        reachableStepIds: reachable,
+      }),
+    ],
+    mediaOrderByStepKey: {},
+  };
+
+  return {
+    flow,
+    initialState: makeState(flow, { currentStepId: stepCapture }),
+    capabilities: CAPS_WHAPI,
+    inbounds: [
+      // Wrong inbound: a text instead of media. No transition matches
+      // (trigger_intent="media_received" is the only one), so the
+      // retry-mode fallback fires.
+      { kind: "text", text: "isso é uma conta?" },
+    ],
+    assert: (finalState, outputs) => {
+      const checks: V3ScenarioCheck[] = [];
+      const t1 = outputs[0];
+
+      checks.push({
+        name: "R_A2 turn 1: emitted at least one outbound (retry_text)",
+        passed: t1.outbound.length >= 1,
+        detail: `outboundCount=${t1.outbound.length}`,
+      });
+      checks.push({
+        name: "R_A2 turn 1: emitted engine_repeat log (retry handler fired)",
+        passed: t1.logs.some((l) => l.kind === "engine_repeat"),
+      });
+      checks.push({
+        name: "R_A2 turn 1: retries=1",
+        passed: t1.stateUpdate.retries === 1,
+        detail: `retries=${t1.stateUpdate.retries}`,
+      });
+      checks.push({
+        name: "R_A2 turn 1: NO handoff (status unchanged)",
+        passed: t1.stateUpdate.status !== "paused_system",
+        detail: `status=${t1.stateUpdate.status ?? "(unchanged)"}`,
+      });
+      checks.push({
+        name: "R_A2 turn 1: stayed on capture_conta (no advance)",
+        passed:
+          (t1.stateUpdate.currentStepId === undefined ||
+            t1.stateUpdate.currentStepId === stepCapture) &&
+          finalState.currentStepId === stepCapture,
+        detail: `currentStepId=${finalState.currentStepId}`,
+      });
+      return checks;
+    },
+  };
+}
+
+// R_A3_OCR_RETRY_EXHAUSTED — variant D, retry exhausted → paused + handoff.
+//
+// Maps to legacy `fluxo_d_ocr_retry_exhausted` / A3: when retries
+// exceed `max_retries` and `on_fail = "handoff"`, the retry handler
+// delegates to `humanoHandler`, which sets `status = paused_system` and
+// emits a single `insert_handoff_alert` sentinel log (G5).
+function buildR_A3_OCR_RETRY_EXHAUSTED(
+  consultantId: string,
+): ScenarioFixture {
+  const flowId = uuid();
+  const stepCapture = uuid();
+  const stepConfirm = uuid();
+  const reachable = [stepCapture, stepConfirm];
+
+  const flow: BotFlow = {
+    id: flowId,
+    consultantId,
+    variant: "D",
+    strictMode: false,
+    steps: [
+      makeStep({
+        id: stepCapture,
+        flowId,
+        stepKey: "capture_conta",
+        stepType: "ask_media",
+        position: 1,
+        messageText: "Pode me enviar a foto da conta de luz? 📸",
+        transitions: [
+          {
+            trigger_intent: "media_received",
+            goto_step_id: stepConfirm,
+          },
+        ],
+        fallback: {
+          mode: "retry",
+          max_retries: 2,
+          on_fail: "handoff",
+          handoff_reason: "capture_conta_retry_exhausted",
+        },
+        reachableStepIds: reachable,
+      }),
+      makeStep({
+        id: stepConfirm,
+        flowId,
+        stepKey: "confirmando",
+        stepType: "text_message",
+        position: 2,
+        messageText: "Recebi!",
+        fallback: { mode: "repeat" },
+        reachableStepIds: reachable,
+      }),
+    ],
+    mediaOrderByStepKey: {},
+  };
+
+  return {
+    flow,
+    initialState: makeState(flow, { currentStepId: stepCapture }),
+    capabilities: CAPS_WHAPI,
+    inbounds: [
+      // 3 wrong inbounds (text instead of media). max_retries=2, so the
+      // 3rd attempt (retries goes 0→1, 1→2, 2→3 attempted) triggers
+      // escalation to humanoHandler.
+      { kind: "text", text: "lixo 1" },
+      { kind: "text", text: "lixo 2" },
+      { kind: "text", text: "lixo 3" },
+    ],
+    assert: (finalState, outputs) => {
+      const checks: V3ScenarioCheck[] = [];
+
+      // Turns 1 & 2: retry, no escalation.
+      for (let i = 0; i < 2; i++) {
+        const t = outputs[i];
+        checks.push({
+          name: `R_A3 turn ${i + 1}: retry, status not paused`,
+          passed: t.stateUpdate.status !== "paused_system",
+          detail: `status=${t.stateUpdate.status ?? "(unchanged)"}, retries=${t.stateUpdate.retries}`,
+        });
+        checks.push({
+          name: `R_A3 turn ${i + 1}: emitted engine_repeat log`,
+          passed: t.logs.some((l) => l.kind === "engine_repeat"),
+        });
+      }
+
+      // Turn 3: retries exhausted → handoff.
+      const tFinal = outputs[2];
+      checks.push({
+        name: "R_A3 turn 3: status = paused_system",
+        passed: tFinal.stateUpdate.status === "paused_system",
+        detail: `status=${tFinal.stateUpdate.status}`,
+      });
+      checks.push({
+        name: "R_A3 turn 3: pauseReason = capture_conta_retry_exhausted",
+        passed: tFinal.stateUpdate.pauseReason ===
+          "capture_conta_retry_exhausted",
+        detail: `pauseReason=${tFinal.stateUpdate.pauseReason}`,
+      });
+      checks.push({
+        name: "R_A3 turn 3: engine_handoff log present",
+        passed: tFinal.logs.some((l) => l.kind === "engine_handoff"),
+      });
+      checks.push({
+        name: "R_A3 turn 3: G5 — exactly one insert_handoff_alert sentinel",
+        passed: tFinal.logs.filter((l) =>
+          l.sideEffect?.kind === "insert_handoff_alert"
+        ).length === 1,
+      });
+      checks.push({
+        name: "R_A3 final: status = paused_system",
+        passed: finalState.status === "paused_system",
+      });
+      return checks;
+    },
+  };
+}
+
+// R_A4_NO_RETRY — variant A, no retry config (mode=repeat) → SAFE_TEXT.
+//
+// Maps to legacy `fluxo_a_ocr_fail` / A4: when the step has no `retry`
+// fallback configured (just default `repeat`) and the inbound doesn't
+// match any transition, the engine still re-emits the step (via
+// repeatHandler — alias for retryHandler with default max). The lead
+// sees the step's `messageText` again. No handoff fires unless retries
+// climb past the engine's default ceiling
+// (`config.limits.maxRetriesBeforeHandoff = 3` — see makeConfig).
+//
+// This scenario asserts the *baseline* behaviour: with the engine's
+// default limits, a single mismatched inbound bumps retries to 1 and
+// re-emits the step. No SAFE_TEXT_FALLBACK should fire on the first
+// attempt — the runner only invokes safe-text when the variant-built
+// outbound is empty (G2). With variant A + a non-empty messageText,
+// repeatHandler produces a non-empty outbound on its own.
+function buildR_A4_NO_RETRY(consultantId: string): ScenarioFixture {
+  const flowId = uuid();
+  const stepStart = uuid();
+  const reachable = [stepStart];
+
+  const flow: BotFlow = {
+    id: flowId,
+    consultantId,
+    variant: "A",
+    strictMode: false,
+    steps: [
+      makeStep({
+        id: stepStart,
+        flowId,
+        stepKey: "start",
+        stepType: "ask_text",
+        position: 1,
+        messageText: "Manda 'sim' pra continuar.",
+        // No retry_text on fallback — bare `repeat` mode. retryHandler
+        // (alias for repeatHandler) will re-emit the step's messageText
+        // via variant A's synthesizeFromStep.
+        transitions: [
+          { trigger_phrases: ["sim"], goto_step_id: null },
+        ],
+        fallback: { mode: "repeat" },
+        reachableStepIds: reachable,
+      }),
+    ],
+    mediaOrderByStepKey: {},
+  };
+
+  return {
+    flow,
+    initialState: makeState(flow, { currentStepId: stepStart }),
+    capabilities: CAPS_WHAPI,
+    inbounds: [
+      // Inbound that doesn't match the "sim" transition.
+      { kind: "text", text: "qualquer coisa" },
+    ],
+    assert: (_finalState, outputs) => {
+      const checks: V3ScenarioCheck[] = [];
+      const t1 = outputs[0];
+
+      checks.push({
+        name: "R_A4 turn 1: emitted engine_repeat log (repeat handler fired)",
+        passed: t1.logs.some((l) => l.kind === "engine_repeat"),
+      });
+      checks.push({
+        name: "R_A4 turn 1: emitted at least one outbound (re-emit step)",
+        passed: t1.outbound.length >= 1,
+        detail: `outboundCount=${t1.outbound.length}`,
+      });
+      // Outbound text should match the step's messageText (re-emit).
+      const t1Text = t1.outbound.find((m) => m.kind === "text");
+      checks.push({
+        name: "R_A4 turn 1: outbound text re-emits messageText",
+        passed: t1Text?.kind === "text" &&
+          t1Text.text === "Manda 'sim' pra continuar.",
+        detail: `text='${t1Text?.kind === "text" ? t1Text.text : "(none)"}'`,
+      });
+      checks.push({
+        name: "R_A4 turn 1: retries=1",
+        passed: t1.stateUpdate.retries === 1,
+        detail: `retries=${t1.stateUpdate.retries}`,
+      });
+      checks.push({
+        name: "R_A4 turn 1: NO handoff",
+        passed: t1.stateUpdate.status !== "paused_system",
+        detail: `status=${t1.stateUpdate.status ?? "(unchanged)"}`,
+      });
+      return checks;
+    },
+  };
+}
+
+// R_B1_CHOICE_RETRY1 — variant B ask_choice, lixo 1x → retry_text, retries=1.
+//
+// Maps to legacy `ask_choice_retry_1x` / B1: a variant-B `ask_choice`
+// step with `fallback.mode = "retry"`. Lead sends garbage; the engine
+// re-emits the choice and increments retries. Variant B's static
+// guarantee: no audio outbound regardless of step config (G4b).
+function buildR_B1_CHOICE_RETRY1(consultantId: string): ScenarioFixture {
+  const flowId = uuid();
+  const stepMenu = uuid();
+  const stepNext = uuid();
+  const reachable = [stepMenu, stepNext];
+
+  const optSimId = uuid();
+  const optNaoId = uuid();
+
+  const flow: BotFlow = {
+    id: flowId,
+    consultantId,
+    variant: "B",
+    strictMode: false,
+    steps: [
+      makeStep({
+        id: stepMenu,
+        flowId,
+        stepKey: "menu",
+        stepType: "ask_choice",
+        position: 1,
+        messageText: "Quer continuar?",
+        persuasiveText:
+          "Tô aqui pra te ajudar a economizar até 20% na conta. Bora?",
+        choiceOptions: [
+          { id: optSimId, title: "Sim, bora" },
+          { id: optNaoId, title: "Agora não" },
+        ],
+        preferredChoiceKind: "number",
+        transitions: [
+          { trigger_phrases: [optSimId, "sim"], goto_step_id: stepNext },
+        ],
+        fallback: {
+          mode: "retry",
+          max_retries: 2,
+          on_fail: "handoff",
+          handoff_reason: "menu_retry_exhausted",
+        },
+        reachableStepIds: reachable,
+      }),
+      makeStep({
+        id: stepNext,
+        flowId,
+        stepKey: "next",
+        stepType: "text_message",
+        position: 2,
+        messageText: "Boa!",
+        fallback: { mode: "repeat" },
+        reachableStepIds: reachable,
+      }),
+    ],
+    // Variant B static guarantee: even when audio is configured, it
+    // must be suppressed. Putting an audio entry here ensures we
+    // exercise the strip path.
+    mediaOrderByStepKey: {
+      menu: [
+        { kind: "audio", url: "https://test/audio.ogg", durationSec: 8 },
+      ],
+    },
+  };
+
+  return {
+    flow,
+    initialState: makeState(flow, { currentStepId: stepMenu }),
+    capabilities: CAPS_WHAPI,
+    inbounds: [
+      { kind: "text", text: "lixo aleatório 🤡" },
+    ],
+    assert: (finalState, outputs) => {
+      const checks: V3ScenarioCheck[] = [];
+      const t1 = outputs[0];
+
+      checks.push({
+        name: "R_B1 turn 1: emitted engine_repeat log",
+        passed: t1.logs.some((l) => l.kind === "engine_repeat"),
+      });
+      checks.push({
+        name: "R_B1 turn 1: emitted at least one outbound (retry_text)",
+        passed: t1.outbound.length >= 1,
+        detail: `outboundCount=${t1.outbound.length}`,
+      });
+      checks.push({
+        name: "R_B1 turn 1: retries=1",
+        passed: t1.stateUpdate.retries === 1,
+        detail: `retries=${t1.stateUpdate.retries}`,
+      });
+      checks.push({
+        name: "R_B1 turn 1: NO handoff",
+        passed: t1.stateUpdate.status !== "paused_system",
+        detail: `status=${t1.stateUpdate.status ?? "(unchanged)"}`,
+      });
+      // Variant B static guarantee: no audio outbound, even when
+      // mediaOrderByStepKey configures one.
+      const hasAudio = t1.outbound.some((m) =>
+        m.kind === "audio_slot" ||
+        (m.kind === "media" && m.media.kind === "audio")
+      );
+      checks.push({
+        name: "R_B1 turn 1: NO audio outbound (variant B static guarantee)",
+        passed: !hasAudio,
+        detail: `audioCount=${
+          t1.outbound.filter((m) =>
+            m.kind === "audio_slot" ||
+            (m.kind === "media" && m.media.kind === "audio")
+          ).length
+        }`,
+      });
+      checks.push({
+        name: "R_B1 turn 1: stayed on menu step",
+        passed:
+          (t1.stateUpdate.currentStepId === undefined ||
+            t1.stateUpdate.currentStepId === stepMenu) &&
+          finalState.currentStepId === stepMenu,
+        detail: `currentStepId=${finalState.currentStepId}`,
+      });
+      return checks;
+    },
+  };
+}
+
+// R_B2_CHOICE_RETRY_EXHAUSTED — variant B ask_choice retry exhausted.
+//
+// Maps to legacy `ask_choice_retry_exhausted` / B2: lead sends garbage
+// 3x on a variant-B `ask_choice` step with max_retries=2. The 3rd
+// attempt escalates to handoff (status=paused_system, handoff alert
+// sentinel emitted exactly once — G5).
+function buildR_B2_CHOICE_RETRY_EXHAUSTED(
+  consultantId: string,
+): ScenarioFixture {
+  const flowId = uuid();
+  const stepMenu = uuid();
+  const stepNext = uuid();
+  const reachable = [stepMenu, stepNext];
+
+  const optSimId = uuid();
+  const optNaoId = uuid();
+
+  const flow: BotFlow = {
+    id: flowId,
+    consultantId,
+    variant: "B",
+    strictMode: false,
+    steps: [
+      makeStep({
+        id: stepMenu,
+        flowId,
+        stepKey: "menu",
+        stepType: "ask_choice",
+        position: 1,
+        messageText: "Quer continuar?",
+        persuasiveText:
+          "Tô aqui pra te ajudar a economizar até 20% na conta. Bora?",
+        choiceOptions: [
+          { id: optSimId, title: "Sim, bora" },
+          { id: optNaoId, title: "Agora não" },
+        ],
+        preferredChoiceKind: "number",
+        transitions: [
+          { trigger_phrases: [optSimId, "sim"], goto_step_id: stepNext },
+        ],
+        fallback: {
+          mode: "retry",
+          max_retries: 2,
+          on_fail: "handoff",
+          handoff_reason: "menu_retry_exhausted",
+        },
+        reachableStepIds: reachable,
+      }),
+      makeStep({
+        id: stepNext,
+        flowId,
+        stepKey: "next",
+        stepType: "text_message",
+        position: 2,
+        messageText: "Boa!",
+        fallback: { mode: "repeat" },
+        reachableStepIds: reachable,
+      }),
+    ],
+    mediaOrderByStepKey: {},
+  };
+
+  return {
+    flow,
+    initialState: makeState(flow, { currentStepId: stepMenu }),
+    capabilities: CAPS_WHAPI,
+    inbounds: [
+      { kind: "text", text: "lixo 1 🤡" },
+      { kind: "text", text: "lixo 2 🤡" },
+      { kind: "text", text: "lixo 3 🤡" },
+    ],
+    assert: (finalState, outputs) => {
+      const checks: V3ScenarioCheck[] = [];
+
+      // Turns 1 & 2: retry, no escalation.
+      for (let i = 0; i < 2; i++) {
+        const t = outputs[i];
+        checks.push({
+          name: `R_B2 turn ${i + 1}: retry, status not paused`,
+          passed: t.stateUpdate.status !== "paused_system",
+          detail: `status=${t.stateUpdate.status ?? "(unchanged)"}, retries=${t.stateUpdate.retries}`,
+        });
+        checks.push({
+          name: `R_B2 turn ${i + 1}: emitted engine_repeat log`,
+          passed: t.logs.some((l) => l.kind === "engine_repeat"),
+        });
+      }
+
+      // Turn 3: retries exhausted → handoff.
+      const tFinal = outputs[2];
+      checks.push({
+        name: "R_B2 turn 3: status = paused_system",
+        passed: tFinal.stateUpdate.status === "paused_system",
+        detail: `status=${tFinal.stateUpdate.status}`,
+      });
+      checks.push({
+        name: "R_B2 turn 3: pauseReason = menu_retry_exhausted",
+        passed: tFinal.stateUpdate.pauseReason === "menu_retry_exhausted",
+        detail: `pauseReason=${tFinal.stateUpdate.pauseReason}`,
+      });
+      checks.push({
+        name: "R_B2 turn 3: engine_handoff log present",
+        passed: tFinal.logs.some((l) => l.kind === "engine_handoff"),
+      });
+      checks.push({
+        name: "R_B2 turn 3: G5 — exactly one insert_handoff_alert sentinel",
+        passed: tFinal.logs.filter((l) =>
+          l.sideEffect?.kind === "insert_handoff_alert"
+        ).length === 1,
+      });
+      checks.push({
+        name: "R_B2 final: status = paused_system",
+        passed: finalState.status === "paused_system",
+      });
+      return checks;
+    },
+  };
+}
+
 // ─── Scenario dispatch table ────────────────────────────────────────────────
 
 const SCENARIO_BUILDERS: Record<
@@ -1122,6 +1832,12 @@ const SCENARIO_BUILDERS: Record<
   AI1: buildAI1,
   AI2: buildAI2,
   SILENT: buildSILENT,
+  R_A1_OCR_OK: buildR_A1_OCR_OK,
+  R_A2_OCR_RETRY1: buildR_A2_OCR_RETRY1,
+  R_A3_OCR_RETRY_EXHAUSTED: buildR_A3_OCR_RETRY_EXHAUSTED,
+  R_A4_NO_RETRY: buildR_A4_NO_RETRY,
+  R_B1_CHOICE_RETRY1: buildR_B1_CHOICE_RETRY1,
+  R_B2_CHOICE_RETRY_EXHAUSTED: buildR_B2_CHOICE_RETRY_EXHAUSTED,
 };
 
 // ─── Apply state update helper (mirrors dispatcher merge) ───────────────────
