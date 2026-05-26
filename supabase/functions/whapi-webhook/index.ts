@@ -1420,7 +1420,11 @@ Deno.serve(async (req) => {
           customerId: customer.id,
           consultantId: superAdminConsultantId,
           legacyStep: stepBefore,
-          inboundKind: isButton ? "button_click" : (hasImage || hasDocument ? "media" : "text"),
+          inboundKind: isButton ? "button_click" : (hasImage || hasDocument || hasAudio ? "media" : "text"),
+          inboundText: messageText ?? null,
+          inboundButtonId: buttonId ?? null,
+          inboundMediaKind: hasAudio ? "audio" : hasImage ? "image" : hasDocument ? "document" : null,
+          inboundMessageId: messageId ?? null,
         });
       } catch (e: any) {
         console.warn("[engine-v3-hook] erro não-bloqueante:", e?.message);
