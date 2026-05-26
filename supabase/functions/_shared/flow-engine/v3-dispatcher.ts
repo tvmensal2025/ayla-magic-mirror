@@ -108,17 +108,26 @@ export async function executeActions(
   };
 
   // ─── 1. Send outbounds in order ───────────────────────────────────────
+  // Pre-process: when the engine emits BOTH a text and a choice for the
+  // same step (typical for Variant D welcome with `step_type='message'`
+  // + `_buttons`), the text is the choice prompt — so we render only the
+  // choice in mirrored tables to avoid duplicating the message in
+  // ChatView and bot_test_outbound. The adapter still receives both
+  // because Whapi's `messages/interactive` body shape needs them
+  // separately.
+  const outboundForMirror = pruneTextDuplicatedByChoice(args.result.outbound);
+
   for (const msg of args.result.outbound) {
     const r = await sendOne(args.adapter, args.jid, msg);
     outcome.sendResults.push({ kind: msg.kind, ok: r.ok, error: r.error });
     if (r.ok) outcome.sent++;
     else outcome.failed++;
+  }
 
+  for (const msg of outboundForMirror) {
     // Mirror every outbound to `conversations` so ChatView, panels, and
     // legacy queries see the v3 engine output. Best-effort: never blocks
-    // the dispatch loop on a logging failure. We log even when the
-    // adapter rejected — operators need to see what the engine TRIED
-    // to send when the channel is offline.
+    // the dispatch loop on a logging failure.
     try {
       const cur = currentStepIdAfter(args.state, args.result);
       const conv = outboundToConversationRow(msg, cur);
@@ -126,7 +135,7 @@ export async function executeActions(
         await args.supabase.from("conversations").insert({
           customer_id: args.state.customerId,
           message_direction: "outbound",
-          message_text: r.ok ? conv.text : `[failed] ${conv.text}`,
+          message_text: conv.text,
           message_type: conv.type,
           conversation_step: cur,
         });
@@ -410,6 +419,11 @@ function sleep(ms: number): Promise<void> {
  * Best-effort renderable summary of an outbound for `conversations` and
  * `bot_test_outbound`. Skips outbounds that have no displayable form
  * (e.g. presence indicators).
+ *
+ * Choice outbounds are serialized as JSON so the simulator UI's
+ * `mapOutbound` can deserialize and render real clickable buttons. The
+ * shape `{ "text": prompt, "buttons": [{id, title}] }` matches the
+ * "Formato novo (JSON)" branch in `flow-simulate-run.mapOutbound`.
  */
 function outboundToConversationRow(
   msg: OutboundMessage,
@@ -420,11 +434,17 @@ function outboundToConversationRow(
       return { text: msg.text, type: "text" };
     case "choice": {
       const opts = msg.choice.options ?? [];
-      const numbered = opts
-        .map((o: any, i: number) => `${i + 1}. ${o.title ?? o.label ?? o.id ?? ""}`)
-        .join("\n");
-      const text = numbered ? `${msg.prompt}\n\n${numbered}` : msg.prompt;
-      return { text, type: "buttons" };
+      // Emit JSON envelope so `mapOutbound` renders REAL clickable buttons.
+      // ChatView also accepts JSON in `message_text` for buttons (the same
+      // path the legacy emitted via outbound_message_log).
+      const payload = {
+        text: msg.prompt,
+        buttons: opts.map((o: any) => ({
+          id: String(o.id ?? ""),
+          title: String(o.title ?? o.label ?? o.id ?? ""),
+        })),
+      };
+      return { text: JSON.stringify(payload), type: "buttons" };
     }
     case "media": {
       const m = msg.media as any;
@@ -438,6 +458,36 @@ function outboundToConversationRow(
     case "presence":
       return null;
   }
+}
+
+/**
+ * When the engine emits BOTH a text outbound and a choice outbound for
+ * the same step where the text content equals the choice's prompt
+ * (typical for Variant D `welcome` step with `step_type='message'` plus
+ * `_buttons`), drop the standalone text from mirroring. The choice
+ * already carries the prompt as its text. Without this, ChatView and
+ * bot_test_outbound show the message twice.
+ *
+ * Order is preserved. Adapter call still receives both messages because
+ * Whapi's `messages/interactive` body needs `body.text` and `action.buttons`
+ * separately — only the mirror to log tables is collapsed.
+ */
+function pruneTextDuplicatedByChoice(messages: OutboundMessage[]): OutboundMessage[] {
+  const out: OutboundMessage[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const cur = messages[i];
+    const next = messages[i + 1];
+    if (
+      cur.kind === "text" &&
+      next?.kind === "choice" &&
+      next.prompt === cur.text
+    ) {
+      // Drop the duplicate text; the choice carries the prompt.
+      continue;
+    }
+    out.push(cur);
+  }
+  return out;
 }
 
 /**
