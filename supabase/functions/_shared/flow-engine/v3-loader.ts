@@ -370,7 +370,7 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
     },
   };
 
-  return { state, flow, capabilities };
+  return { state, flow, capabilities, warnings: warnings.length > 0 ? warnings : undefined };
 }
 
 // ─── Parsers (defensive — shape of stored JSONB varies historically) ───
