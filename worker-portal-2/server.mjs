@@ -89,7 +89,15 @@ async function processLead(job) {
 const redisConn = (() => {
   try {
     const u = new URL(REDIS_URL);
-    return { host: u.hostname, port: Number(u.port || 6379), password: u.password || undefined };
+    return {
+      host: u.hostname,
+      port: Number(u.port || 6379),
+      password: u.password ? decodeURIComponent(u.password) : undefined,
+      username: u.username ? decodeURIComponent(u.username) : undefined,
+      // não fica spamando reconexões em loop quando senha está errada
+      maxRetriesPerRequest: 3,
+      retryStrategy: (times) => (times > 5 ? null : Math.min(times * 1000, 5000)),
+    };
   } catch { return { host: 'evolution-api-redis', port: 6379 }; }
 })();
 
@@ -100,11 +108,18 @@ let queueAvailable = false;
 async function initQueue() {
   try {
     queue = new Queue(QUEUE_NAME, { connection: redisConn });
+    // suprime spam de erros de conexão antes de declararmos indisponível
+    queue.on('error', (e) => {
+      if (queueAvailable) console.warn(`  queue error: ${e.message}`);
+    });
     await queue.getJobCounts();
     worker = new Worker(QUEUE_NAME, processLead, {
       connection: redisConn,
       concurrency: 1, // 1 cadastro por vez (evita problemas com Playwright singleton)
       limiter: { max: 6, duration: 60_000 }, // máximo 6 cadastros/min
+    });
+    worker.on('error', (e) => {
+      if (queueAvailable) console.warn(`  worker conn error: ${e.message}`);
     });
     worker.on('failed', (job, err) => console.error(`  worker fail job=${job?.id}: ${err.message}`));
     worker.on('completed', (job) => console.log(`  worker done job=${job.id}`));
@@ -112,6 +127,12 @@ async function initQueue() {
     console.log(`✅ BullMQ conectado (${redisConn.host}:${redisConn.port}) fila="${QUEUE_NAME}"`);
   } catch (e) {
     console.warn(`⚠️ Redis indisponível: ${e.message} — funcionando em modo síncrono`);
+    // limpa connections que ficaram tentando reconectar em loop
+    try { if (worker) await worker.close(); } catch {}
+    try { if (queue) await queue.close(); } catch {}
+    queue = null;
+    worker = null;
+    queueAvailable = false;
   }
 }
 
