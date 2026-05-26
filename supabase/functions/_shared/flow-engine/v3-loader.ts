@@ -223,6 +223,20 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
               url: found.url,
               durationSec: found.durationSec ?? undefined,
             } as MediaOrderEntry);
+          } else if (raw === "audio") {
+            // C3: áudio sem URL na ai_media_library. Fallback gracioso
+            // para texto (se existir) e registra warning para auditoria.
+            if (stepText) {
+              resolved.push({ kind: "text", text: stepText } as MediaOrderEntry);
+            }
+            warnings.push({
+              kind: "engine_audio_slot_missing",
+              at: nowIso,
+              customerId,
+              flowId: flow.id,
+              stepId: stepRow.id as string,
+              payload: { slot_candidates: candidates, fell_back_to: stepText ? "text" : "skip" },
+            });
           }
           continue;
         }
@@ -264,6 +278,18 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
               url: found.url,
               durationSec: found.durationSec ?? undefined,
             } as MediaOrderEntry);
+          } else if (k === "audio") {
+            if (stepText) {
+              resolved.push({ kind: "text", text: stepText } as MediaOrderEntry);
+            }
+            warnings.push({
+              kind: "engine_audio_slot_missing",
+              at: nowIso,
+              customerId,
+              flowId: flow.id,
+              stepId: stepRow.id as string,
+              payload: { slot_candidates: candidates, fell_back_to: stepText ? "text" : "skip" },
+            });
           }
         }
       }
