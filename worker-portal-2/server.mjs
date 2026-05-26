@@ -14,6 +14,7 @@ import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { Queue, Worker } from 'bullmq';
 import dotenv from 'dotenv';
+import ws from 'ws';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -29,8 +30,22 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_S
 const REDIS_URL = process.env.REDIS_URL || 'redis://evolution-api-redis:6379';
 const QUEUE_NAME = 'portal-worker-2-leads';
 
-const supabase = SUPABASE_URL && SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
-if (!supabase) console.warn('⚠️ Supabase não configurado — leads não serão persistidos');
+const supabase = (() => {
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    console.warn('⚠️ Supabase não configurado — leads não serão persistidos');
+    return null;
+  }
+  try {
+    return createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      // Node <22 não tem WebSocket nativo; passamos `ws` pra realtime-js
+      realtime: { transport: ws },
+    });
+  } catch (e) {
+    console.warn(`⚠️ Supabase init falhou: ${e.message} — seguindo sem persistência`);
+    return null;
+  }
+})();
 
 // ─── Auth middleware ────────────────────────────────────────────────────────
 function authRequired(req, res, next) {
