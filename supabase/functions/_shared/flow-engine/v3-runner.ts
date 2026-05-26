@@ -104,6 +104,15 @@ function clampRetries(prev: number, candidate: number | undefined): number | und
   return Math.floor(candidate);
 }
 
+/** Clamp aiQuestionsThisStep to [0, prev + 1] — mesma disciplina do retries. */
+function clampAiQuestions(prev: number, candidate: number | undefined): number | undefined {
+  if (candidate === undefined) return undefined;
+  if (!Number.isFinite(candidate)) return prev;
+  if (candidate < 0) return 0;
+  if (candidate > prev + 1) return prev + 1;
+  return Math.floor(candidate);
+}
+
 /** Find the first active step (lowest `position`) — entry point for new leads. */
 function findFirstStep(steps: BotFlowStep[]): BotFlowStep | null {
   if (!Array.isArray(steps) || steps.length === 0) return null;

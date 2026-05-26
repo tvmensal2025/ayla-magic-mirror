@@ -124,6 +124,8 @@ export interface PersistFlowStateInput {
   pauseReason?: CustomerPauseReason | null;
   pauseMeta?: Record<string, unknown>;
   retries?: number;
+  /** M1: contador de perguntas livres à IA dentro do passo atual. */
+  aiQuestionsThisStep?: number;
   enteredStepAt?: string;
   expiresAt?: string | null;
   assignedHumanId?: string | null;
@@ -153,6 +155,7 @@ export async function persistFlowState(
     if (input.pauseReason !== undefined) patch.pause_reason = input.pauseReason;
     if (input.pauseMeta !== undefined) patch.pause_meta = input.pauseMeta;
     if (input.retries !== undefined) patch.retries = input.retries;
+    if (input.aiQuestionsThisStep !== undefined) patch.ai_questions_this_step = input.aiQuestionsThisStep;
     if (input.enteredStepAt !== undefined) patch.entered_step_at = input.enteredStepAt;
     if (input.expiresAt !== undefined) patch.expires_at = input.expiresAt;
     if (input.assignedHumanId !== undefined) patch.assigned_human_id = input.assignedHumanId;
