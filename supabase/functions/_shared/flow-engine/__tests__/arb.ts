@@ -314,6 +314,7 @@ export function arbCustomerSnapshot(
       { nil: null },
     ),
     retries: fc.integer({ min: 0, max: 5 }),
+    aiQuestionsThisStep: fc.integer({ min: 0, max: 5 }),
     enteredStepAt: arbIso,
     expiresAt: arbIsoNullable,
     lastInboundAt: arbIsoNullable,

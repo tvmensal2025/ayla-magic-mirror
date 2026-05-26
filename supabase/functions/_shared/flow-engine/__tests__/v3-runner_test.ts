@@ -96,6 +96,7 @@ function makeState(overrides: Partial<CustomerSnapshot> = {}): CustomerSnapshot 
     status: "running",
     pauseReason: null,
     retries: 0,
+    aiQuestionsThisStep: 0,
     enteredStepAt: T0,
     expiresAt: null,
     lastInboundAt: null,

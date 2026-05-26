@@ -93,6 +93,15 @@ export interface CustomerSnapshot {
     | "paused_manual" | "paused_system" | "converted" | "lost";
   pauseReason: string | null;
   retries: number;
+  /**
+   * Contador independente do `retries`: conta apenas as perguntas livres
+   * que o usuário fez à IA dentro do passo atual (`fallback.mode = "ai_answer"`).
+   * Persistido em `customer_flow_state.ai_questions_this_step`. Resetado
+   * automaticamente quando `currentStepId` muda. Permite distinguir
+   * "errou OCR 3x" (consome `retries`) de "fez 3 perguntas livres"
+   * (consome `aiQuestionsThisStep`).
+   */
+  aiQuestionsThisStep: number;
   /** ISO-8601 from DB; engine treats as opaque. */
   enteredStepAt: string;
   expiresAt: string | null;
@@ -404,7 +413,10 @@ export type LogKind =
   | "engine_strict_mode_blocked_ai"
   | "engine_dedupe_blocked"
   | "engine_outbound_limit_exceeded"
-  | "engine_invalid_step";
+  | "engine_invalid_step"
+  | "engine_audio_slot_missing"
+  | "engine_audio_slot_unhandled"
+  | "engine_crm_sync_failed";
 
 /**
  * Per design §2.6. Structured log row. Persisted by the dispatcher into

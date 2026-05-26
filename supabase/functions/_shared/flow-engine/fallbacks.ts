@@ -360,7 +360,9 @@ export const aiAnswerHandler: FallbackHandler = {
       1,
       Number(ctx.step.fallback.max_questions ?? ctx.config.limits.maxAiQuestionsPerStep),
     );
-    if (ctx.state.retries >= max) {
+    // M1: contador separado para perguntas livres à IA (não consome retries
+    // de validação). Resetado quando o passo muda — ver v3-runner.finalize.
+    if (ctx.state.aiQuestionsThisStep >= max) {
       return humanoHandler.handle(
         withHandoffReason(ctx, "ai_limit_atingido"),
       );
@@ -376,7 +378,7 @@ export const aiAnswerHandler: FallbackHandler = {
 
     return {
       outbound: [],
-      stateUpdate: { retries: ctx.state.retries + 1 },
+      stateUpdate: { aiQuestionsThisStep: ctx.state.aiQuestionsThisStep + 1 },
       logs: [
         buildLog("engine_ai_answer_deferred", ctx, {
           question: ctx.inbound.text,

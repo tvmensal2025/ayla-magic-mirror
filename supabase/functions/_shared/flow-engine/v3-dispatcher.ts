@@ -172,6 +172,22 @@ export async function executeActions(
     outcome.sendResults.push({ kind: msg.kind, ok: r.ok, error: r.error });
     if (r.ok) outcome.sent++;
     else outcome.failed++;
+
+    // C3 suspensórios: audio_slot que chegou ao adapter é falha silenciosa
+    // do loader. Anexa log com sideEffect=insert_handoff_alert para o
+    // bloco §2 já no próximo ciclo (idempotente porque o ciclo é único
+    // por turno). O áudio em si nunca sai — só o alerta de handoff.
+    if (!r.ok && msg.kind === "audio_slot") {
+      args.result.logs.push({
+        kind: "engine_audio_slot_unhandled",
+        at: args.now,
+        customerId: args.state.customerId,
+        flowId: args.state.flowId,
+        stepId: currentStepIdAfter(args.state, args.result),
+        payload: { slotKey: (msg as any).slotKey ?? null, error: r.error },
+        sideEffect: { kind: "insert_handoff_alert", reason: "audio_slot_unhandled" },
+      });
+    }
   }
 
   for (const msg of outboundForMirror) {
@@ -250,6 +266,7 @@ export async function executeActions(
     su.status !== undefined ||
     su.pauseReason !== undefined ||
     su.retries !== undefined ||
+    su.aiQuestionsThisStep !== undefined ||
     su.enteredStepAt !== undefined ||
     su.expiresAt !== undefined ||
     su.lastInboundAt !== undefined ||
@@ -263,6 +280,7 @@ export async function executeActions(
       status: su.status as any,
       pauseReason: su.pauseReason as any,
       retries: su.retries,
+      aiQuestionsThisStep: su.aiQuestionsThisStep,
       enteredStepAt: su.enteredStepAt,
       expiresAt: su.expiresAt,
       lastInboundAt: su.lastInboundAt,

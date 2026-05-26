@@ -331,6 +331,12 @@ export async function runEngineV3WebhookEntry(
       config,
     });
 
+    // C3: anexa warnings do loader (ex: engine_audio_slot_missing) ao
+    // result.logs para que o dispatcher persista em `engine_logs`.
+    if (ctx.warnings && ctx.warnings.length > 0) {
+      result.logs.push(...ctx.warnings);
+    }
+
     const inboundLog = buildInboundLog(args.inbound);
 
     const outcome = await executeActions({
@@ -350,13 +356,24 @@ export async function runEngineV3WebhookEntry(
     // The legacy webhooks call syncDealStageFromStep after each turn.
     // The v3 engine must do the same so the Kanban board stays in sync.
     // Uses the post-turn step id (from stateUpdate or pre-existing).
+    const postStepId = result.stateUpdate.currentStepId ?? ctx.state.currentStepId;
     try {
-      const postStepId = result.stateUpdate.currentStepId ?? ctx.state.currentStepId;
       if (postStepId) {
         await syncDealStageFromStep(args.supabase, args.customerId, postStepId);
       }
     } catch (e: any) {
       console.warn("[v3-webhook-entry] crm-stage-sync failed (non-fatal):", e?.message);
+      // M5: persiste falha em engine_logs para a view de saúde contabilizar.
+      try {
+        await args.supabase.from("engine_logs").insert({
+          at: new Date().toISOString(),
+          kind: "engine_crm_sync_failed",
+          customer_id: args.customerId,
+          flow_id: ctx.flow.id,
+          step_id: postStepId,
+          payload: { error: e?.message ?? String(e), post_step_id: postStepId },
+        });
+      } catch (_) {/* last resort */}
     }
 
     return {

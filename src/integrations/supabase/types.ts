@@ -2353,6 +2353,7 @@ export type Database = {
       }
       customer_flow_state: {
         Row: {
+          ai_questions_this_step: number
           assigned_human_id: string | null
           current_step_id: string | null
           customer_id: string
@@ -2368,6 +2369,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          ai_questions_this_step?: number
           assigned_human_id?: string | null
           current_step_id?: string | null
           customer_id: string
@@ -2383,6 +2385,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          ai_questions_this_step?: number
           assigned_human_id?: string | null
           current_step_id?: string | null
           customer_id?: string
@@ -5019,6 +5022,7 @@ export type Database = {
           consultant_id: string | null
           consultant_name: string | null
           converted_total: number | null
+          crm_sync_errors_24h: number | null
           dark_output_error_pct: number | null
           dark_output_errors_24h: number | null
           dark_outputs_24h: number | null

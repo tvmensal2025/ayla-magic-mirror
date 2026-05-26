@@ -31,6 +31,11 @@ export interface LoadedContext {
   state: CustomerSnapshot;
   flow: BotFlow;
   capabilities: ChannelCapabilities;
+  /**
+   * Avisos não-fatais detectados durante o load (ex: slot de áudio sem URL).
+   * O dispatcher injeta-os em `engine_logs` junto com `result.logs`.
+   */
+  warnings?: import("./v3-types.ts").StructuredLog[];
 }
 
 export interface LoadContextArgs {
@@ -59,6 +64,7 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
       bot_paused, bot_paused_reason, conversation_step,
       customer_flow_state (
         current_step_id, status, pause_reason, retries,
+        ai_questions_this_step,
         entered_step_at, expires_at, last_inbound_at,
         last_outbound_at, last_outbound_content_hash, flow_id, updated_at
       )
@@ -163,6 +169,8 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
   //   3) step.step_key without leading "d_" (welcome, como_funciona)
   //   4) step.step_key without leading "v_a_" / "v_b_" / "v_d_" prefixes
   // The slot_key for ai_media_library lookup uses the same chain.
+  const warnings: import("./v3-types.ts").StructuredLog[] = [];
+  const nowIso = new Date().toISOString();
   const mediaOrderByStepKey: Record<string, MediaOrderEntry[]> = {};
   for (const stepRow of stepsRaw as any[]) {
     const stepKey = stepRow.step_key as string | null;
@@ -218,6 +226,20 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
               url: found.url,
               durationSec: found.durationSec ?? undefined,
             } as MediaOrderEntry);
+          } else if (raw === "audio") {
+            // C3: áudio sem URL na ai_media_library. Fallback gracioso
+            // para texto (se existir) e registra warning para auditoria.
+            if (stepText) {
+              resolved.push({ kind: "text", text: stepText } as MediaOrderEntry);
+            }
+            warnings.push({
+              kind: "engine_audio_slot_missing",
+              at: nowIso,
+              customerId,
+              flowId: flowRow.id as string,
+              stepId: stepRow.id as string,
+              payload: { slot_candidates: candidates, fell_back_to: stepText ? "text" : "skip" },
+            });
           }
           continue;
         }
@@ -259,6 +281,18 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
               url: found.url,
               durationSec: found.durationSec ?? undefined,
             } as MediaOrderEntry);
+          } else if (k === "audio") {
+            if (stepText) {
+              resolved.push({ kind: "text", text: stepText } as MediaOrderEntry);
+            }
+            warnings.push({
+              kind: "engine_audio_slot_missing",
+              at: nowIso,
+              customerId,
+              flowId: flowRow.id as string,
+              stepId: stepRow.id as string,
+              payload: { slot_candidates: candidates, fell_back_to: stepText ? "text" : "skip" },
+            });
           }
         }
       }
@@ -316,11 +350,12 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
   const state: CustomerSnapshot = {
     customerId: customer.id as string,
     consultantId,
-    flowId: flow.id,
+    flowId: flowRow.id as string,
     currentStepId: resolvedStepId,
     status: (cfs.status as CustomerSnapshot["status"]) ?? "new",
     pauseReason: cfs.pause_reason ?? null,
     retries: Number(cfs.retries) || 0,
+    aiQuestionsThisStep: Number(cfs.ai_questions_this_step) || 0,
     enteredStepAt: cfs.entered_step_at ?? new Date(0).toISOString(),
     expiresAt: cfs.expires_at ?? null,
     lastInboundAt: cfs.last_inbound_at ?? null,
@@ -335,7 +370,7 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
     },
   };
 
-  return { state, flow, capabilities };
+  return { state, flow, capabilities, warnings: warnings.length > 0 ? warnings : undefined };
 }
 
 // ─── Parsers (defensive — shape of stored JSONB varies historically) ───
