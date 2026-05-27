@@ -245,7 +245,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
             <ExecHudBar progress={progress} />
           </div>
 
-          <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "12rem", "--cap-aside-w": "17rem" } as React.CSSProperties}>
+          <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "12rem", "--cap-aside-w": "15rem" } as React.CSSProperties}>
             {/* Mobile: lead list visível só quando NÃO há lead selecionado. Desktop: sempre. */}
             <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 md:border-r border-border overflow-hidden`}>
 
@@ -388,7 +388,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                 </>
               )}
             </main>
-              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={272} minPx={220} maxPx={520} invert />
+              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={240} minPx={200} maxPx={520} invert />
             {/* Desktop aside: ficha quando há lead, achievements quando não */}
             <div className="hidden md:flex md:flex-col md:w-[var(--cap-aside-w)] md:border-l border-border/60 overflow-hidden">
 
@@ -403,7 +403,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           </div>
         </GameShell>
       ) : (
-        <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "12rem", "--cap-aside-w": "17rem" } as React.CSSProperties}>
+        <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "12rem", "--cap-aside-w": "15rem" } as React.CSSProperties}>
           {/* Lista: full-width no mobile sem seleção; escondida no mobile com seleção; sidebar fixa em md+ */}
           <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 overflow-hidden`}>
             <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
@@ -513,7 +513,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           {/* Ficha desktop fixa à direita */}
           {selectedId && (
             <>
-              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={272} minPx={220} maxPx={520} invert />
+              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={240} minPx={200} maxPx={520} invert />
               <div className="hidden md:flex md:w-[var(--cap-aside-w)] md:shrink-0">
                 <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />
               </div>

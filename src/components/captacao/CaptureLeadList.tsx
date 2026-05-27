@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Search, UserPlus, Clock } from "lucide-react";
+import { Search, UserPlus, Clock, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { CAPTURE_FIELDS } from "@/hooks/useCaptureSession";
 
@@ -141,8 +141,8 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect, gameOn = f
           })}
         </ul>
       </div>
-      <div className="p-2 border-t border-border space-y-1.5 shrink-0">
-        <Button size="sm" variant="default" className="w-full text-xs gap-1.5" onClick={async () => {
+      <div className="p-1.5 border-t border-border flex items-center gap-1 shrink-0">
+        <Button size="sm" variant="default" className="flex-1 h-7 text-[11px] gap-1" onClick={async () => {
           const phone = window.prompt("Telefone do lead (com DDD) para entrar em captação:");
           if (!phone) return;
           const digits = phone.replace(/\D/g, "");
@@ -159,8 +159,10 @@ export function CaptureLeadList({ consultantId, selectedId, onSelect, gameOn = f
             if (created?.id) onSelect(created.id);
           }
           void load();
-        }}><UserPlus className="w-3.5 h-3.5" /> Adicionar lead</Button>
-        <Button size="sm" variant="ghost" className="w-full text-xs" onClick={() => void load()}>Atualizar</Button>
+        }}><UserPlus className="w-3 h-3" /> Novo lead</Button>
+        <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" title="Atualizar lista" onClick={() => void load()}>
+          <RefreshCw className="w-3.5 h-3.5" />
+        </Button>
       </div>
     </aside>
   );
