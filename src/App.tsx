@@ -23,6 +23,7 @@ const AdminKnowledge = lazy(() => import("./pages/AdminKnowledge"));
 const AdminReaquecimento = lazy(() => import("./pages/AdminReaquecimento"));
 const AdminMetaAds = lazy(() => import("./pages/AdminMetaAds"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin"));
+const SaudeProducao = lazy(() => import("./pages/SaudeProducao"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const InstallPage = lazy(() => import("./pages/InstallPage"));
 const PoliticaPrivacidade = lazy(() => import("./pages/PoliticaPrivacidade"));
@@ -57,6 +58,7 @@ const App = () => (
               <Route path="/admin/whatsapp-clients" element={<WhatsAppClientsPage />} />
               <Route path="/admin/fluxos" element={<FluxoBuilder />} />
               <Route path="/admin/saude-bot" element={<SaudeBot />} />
+              <Route path="/admin/saude-producao" element={<SaudeProducao />} />
               <Route path="/admin/conhecimento" element={<AdminKnowledge />} />
               <Route path="/admin/reaquecimento" element={<AdminReaquecimento />} />
               <Route path="/admin/meta-ads" element={<AdminMetaAds />} />
