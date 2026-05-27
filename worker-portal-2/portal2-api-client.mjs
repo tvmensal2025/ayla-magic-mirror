@@ -183,7 +183,32 @@ export class Portal2Client {
   }
 
   // ──── Lookups / pré-validações ─────────────────────────────────────────────
-  documentLookup(cpf) { return this._fetch('GET', '/document-lookup', { query: { document: onlyDigits(cpf) } }); }
+  /**
+   * Busca dados do cliente na base do iGreen + Receita Federal.
+   * Retorna `null` se CPF inválido, não cadastrado, ou backend retornou 5xx
+   * (em vez de quebrar). Quem chama decide se cai pro fluxo manual.
+   */
+  async documentLookup(cpf) {
+    const digits = onlyDigits(cpf);
+    if (digits.length !== 11 && digits.length !== 14) return null;
+    try {
+      return await this._fetch('GET', '/document-lookup', { query: { document: digits } });
+    } catch (e) {
+      if (e.status >= 500 || e.status === 404 || e.status === 400) return null;
+      throw e;
+    }
+  }
+  /**
+   * Verifica duplicidade. Retorna `{exists, consultantConflict}`.
+   *
+   * ⚠️ Importante: a API só considera `exists=true` quando o cadastro estiver
+   * **completo e assinado**. Cadastros em "pending" / "validação humana" / sem
+   * OTP confirmado retornam `exists=false` — então isso NÃO previne criar
+   * múltiplos cadastros pro mesmo CPF se nenhum foi finalizado ainda.
+   *
+   * Pra detecção mais agressiva, combinar com `getCustomerByCpf` (Portal 1) ou
+   * checar nosso próprio Supabase.
+   */
   checkCustomerExists({ email, document, idconsultor = this.idconsultor }) {
     return this._fetch('GET', '/customers/check-exists', { query: { email, document, idconsultor: String(idconsultor) } });
   }
@@ -193,7 +218,16 @@ export class Portal2Client {
   checkConsultantConflict({ document, idconsultor = this.idconsultor }) {
     return this._fetch('GET', '/customers/check-consultant', { query: { document, idconsultor: String(idconsultor) } });
   }
-  viacep(cep) { return this._fetch('GET', `/viacep/${onlyDigits(cep)}`); }
+  /** ViaCEP — retorna `null` quando CEP não existe (em vez de propagar 5xx). */
+  async viacep(cep) {
+    try {
+      const r = await this._fetch('GET', `/viacep/${onlyDigits(cep)}`);
+      return r?.erro ? null : r;
+    } catch (e) {
+      if (e.status >= 500 || e.status === 404) return null;
+      throw e;
+    }
+  }
   consultantLicense(id = this.idconsultor) { return this._fetch('GET', `/consultants/${id}/license`); }
   indicator(id) { return this._fetch('GET', `/customers/indicator/${id}`); }
 
