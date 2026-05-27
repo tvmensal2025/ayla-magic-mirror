@@ -1,58 +1,115 @@
-## O que está grande demais
+# Plano de Hardening Pré-Produção
 
-Olhando o print da aba **Captação** (viewport 948px), três blocos consomem espaço desproporcional:
+Confirmei via linter + queries diretas no Postgres: todos os achados do diagnóstico estão corretos (10 tabelas RLS sem policy, 28 funções SECURITY DEFINER executáveis por `anon`, 6 buckets públicos, 100+ policies com `auth.uid()` não-cacheado). O plano abaixo separa o que é **bloqueador de go-live** do que é **dívida pra semana 1**.
 
-1. **Cards "Passos do Fluxo"** (`CaptureStepsGrid`)
-   - `min-h-[128px]` + grid `minmax(110px, 1fr)` → só cabem 3 cards na largura, cada um quase quadrado.
-   - Botão "Ver e enviar" altura `h-7` ocupa quase 1/3 do card.
-   - Padding `p-2`, gap `gap-1.5`, badge "Passo X" e ícones em linha separada.
+---
 
-2. **Coluna direita "Ficha do Cliente"** (`CaptureLeadCard` → `CaptureDocumentTiles` no modo não-embedded)
-   - Tiles de documento renderizam **`aspect-square`** (≈ 110×110px cada) com câmera 6×6 e label `text-[10px]`.
-   - Botão **"CADASTRAR TUDO"** é `size="lg"` + `text-base` + shadow-glow + padding pesado.
-   - Cabeçalho HUD (`CaptureHud`) com tier/combo/xp ocupa banda inteira mesmo fora do game mode.
+## FASE 1 — Bloqueadores de go-live (uma migration por bloco)
 
-3. **Sub-header do alvo** (linha "Conversando com / Kelly" + "Abrir conversa")
-   - Linhas duplas (label "Conversando com" em cima do nome) + `Button size="sm"` quebram em mobile-narrow.
+### 1.1 RLS sem policy → fechar acesso autenticado, manter service_role
 
-## Plano: enxugar mantendo a identidade (glassmorphism verde, dark)
+Tabelas: `ai_cooldown_state`, `customer_flow_state`, `customer_processing_lock`, `gemini_quota_bucket`, `inbound_media_failures`, `inbound_media_retry`, `outbound_message_log`, `pending_outbound_media`, `webhook_message_dedup`, `webhook_rate_limit`.
 
-### 1. `CaptureStepsGrid.tsx`
-- Trocar `min-h-[128px]` → `min-h-[96px]` e `minmax(110px,1fr)` → `minmax(96px,1fr)` (cabem 4–5 cards visíveis).
-- Reduzir `p-2` → `p-1.5`, `gap-1` → `gap-1`, badge "Passo X" para `text-[9px] px-1 py-px`.
-- Tirar a linha de ícones de mídia (Mic/Image/Video) — virar **um único cluster compacto** ao lado do título: `<div className="flex gap-0.5 ml-auto">` com ícones `w-2.5 h-2.5`.
-- Esconder o preview inline (“Kelly me conta uma coisa…”) por padrão; revelar só no hover (`opacity-0 group-hover:opacity-100 hidden xl:block`). Encurta o card e fica mais clean.
-- Botão "Ver e enviar" → `h-6 text-[9px]` com label só ícone (`Eye` w-3) em telas <xl; texto completo em xl+. O ícone Edit3 vira `h-6 w-6`.
+Padrão por tabela (todas são internas, usadas por edge functions):
 
-### 2. `CaptureDocumentTiles.tsx`
-- Adotar **modo compact por padrão** quando o componente está no aside da `CaptureLeadCard` não-embedded (passar `compact` baseado em viewport ou simplesmente sempre `compact`).  
-  → Tiles passam de `aspect-square` (110×110) para `h-14` (56px) com câmera `w-4 h-4` e label `text-[9px]`.
-- Manter modo grande só dentro de modal ou quando o usuário expandir o aside.
+```sql
+REVOKE ALL ON public.<t> FROM anon, authenticated;
+GRANT ALL ON public.<t> TO service_role;
+CREATE POLICY "service_role_only" ON public.<t> FOR ALL TO service_role USING (true) WITH CHECK (true);
+```
 
-### 3. `CaptureLeadCard.tsx`
-- Botão "CADASTRAR TUDO" → `size="default"` em vez de `size="lg"`, `text-sm` em vez de `text-base`, shadow reduzida (`shadow-[0_0_14px_hsl(var(--primary)/0.25)]`). Continua com gradient verde, só menor.
-- Esconder `CaptureHud` quando `gameOn === false` (já é o caso) — confirmar que nenhuma versão duplicada está renderizando. Trocar `p-2.5` da coluna principal por `p-2`.
-- Compactar `CaptureDataConfirmCard` bill/doc para `text-[10px]` e padding `px-2 py-1` (hoje são "cards" verdes destacados maiores que precisam).
+Exceção: `customer_flow_state` deve permitir SELECT ao dono via join em `customers.consultant_id = auth.uid()` (já lido pelo painel).
 
-### 4. Sub-header do alvo (`CaptacaoPanel.tsx` linhas 264-295 e 414-432)
-- Colocar "Alvo atual:" + nome **na mesma linha** (`<span class="text-[10px] text-muted-foreground mr-1">Alvo:</span><span class="text-sm font-semibold">Kelly</span>`) — economiza 1 linha.
-- Botão "Abrir conversa" → `size="xs"` (h-6) com label somente em `lg:` (`hidden lg:inline`).
-- A/B/C toggle (linhas 273-284): `text-[10px]` e `px-1.5 py-0` (já é pequeno, só afinar).
+### 1.2 Policies "Always True" em INSERT — `crm_page_events`, `page_events`, `page_views`
 
-### 5. Cluster de counters do header (0/3, 0/5, 0/5, Hoje 0, Semana 5…)
-- Já são `CaptureScoreboard` / `CaptureMissionsPanel`. Encurtar separadores e rodar gap `gap-1.5` → `gap-1`. Sem mudança estrutural, só tightening de espaçamento (faço numa varredura visual).
+- Manter INSERT aberto (são telemetria pública), mas:
+  - Adicionar `WITH CHECK (consultant_id IS NOT NULL AND length(coalesce(path,'')) < 2048 AND pg_column_size(payload) < 8192)` para limitar lixo.
+  - Adicionar rate-limit por IP via edge function (`track-event`) no lugar de PostgREST direto; revogar INSERT de `anon` para forçar passar pela função.
 
-## O que NÃO vou mudar
-- Layout em 3 colunas (lista | conversa | ficha) e o DragResizer.
-- Cores, gradients, tokens semânticos do design system (continua dark/glassmorphism verde).
-- Comportamento de envio, A/B/C, OCR, finalize button.
-- Estado/dados, hooks, edge functions.
+### 1.3 REVOKE EXECUTE em funções SECURITY DEFINER sensíveis
 
-## Resultado esperado
+```sql
+REVOKE EXECUTE ON FUNCTION
+  public.clone_bot_flow_as(uuid,text),
+  public.consume_gemini_token(uuid,integer),
+  public.try_acquire_rate_limit(text,integer,integer),
+  public.seed_flow_d(uuid),
+  public.reserve_media_send(uuid,uuid,uuid,text,text),
+  public.confirm_media_send(uuid,boolean),
+  public.ai_cooldown_check_and_set(text,integer,text),
+  public.try_acquire_customer_lock(uuid,integer),
+  public.release_customer_lock(uuid,uuid),
+  public.sweep_orphan_media_reservations(integer)
+FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION ... TO service_role;
+```
 
-- **Cards de Passo**: 4–5 visíveis em vez de 3, altura ~30% menor.
-- **Tiles de Documento**: ~60% menores, viram chips compactos com câmera + label curta.
-- **Botão "CADASTRAR TUDO"**: caber confortavelmente sem dominar o aside.
-- **Header do alvo**: 1 linha em vez de 2.
+Wallet (`credit/debit/refund_consultant_wallet`) e `admin_unpause_global_bot`:
 
-Tudo só CSS/Tailwind — zero mudança de lógica.
+- `REVOKE EXECUTE FROM anon, authenticated;` (já existem; só edge functions com service_role chamam).
+- `fb_emit_capi` / `fb_trigger_*`: revogar de authenticated; são triggers + edge.
+
+### 1.4 Buckets públicos — bloquear LIST, manter GET por URL
+
+Para cada bucket (`ai-agent-media`, `consultant-photos`, `IMAGE`, `simulator-uploads`, `video igreen`, `whatsapp-media`):
+
+- Manter `public=true` (URL direta funciona sem policy).
+- Dropar policies `SELECT` abertas em `storage.objects` e substituir por policy que só responde com `bucket_id = '<bucket>' AND auth.role() = 'service_role'` para LIST; `anon` continua acessando via URL pública diretamente (não passa por policy).
+
+### 1.5 Auth — Leaked Password Protection
+
+Habilitar no painel: Authentication → Providers → Email → "Prevent use of leaked passwords". Não é migration; instrução manual no runbook + link.
+
+### 1.6 Validação dos callers de wallet
+
+- Auditar `src/**` e `supabase/functions/**`: confirmar que nenhum caller frontend chama `supabase.rpc('credit/debit/refund_consultant_wallet')` direto.
+- Único caller permitido: `wallet-stripe-webhook` (já usa service_role).
+- Adicionar comentário SQL `COMMENT ON FUNCTION ... IS 'INTERNAL: service_role only';` para futuras revisões.
+
+---
+
+## FASE 2 — Hardening de semana 1
+
+### 2.1 Performance Postgres
+
+- Migration que reescreve policies críticas em `customers`, `bot_flows`, `crm_deals`, `conversations`, `messages`, `ai_decisions`, `ai_agent_logs` substituindo `auth.uid()` por `(select auth.uid())`.
+- Migration consolidando policies múltiplas (FOR ALL vs FOR SELECT redundantes) — reduzir de 5 para 2 por tabela quando possível.
+- Migration: drop dos 9 índices duplicados; criar índice nas 15 FKs sem cobertura; remover 30+ índices nunca usados (validar via `pg_stat_user_indexes`).
+- Adicionar PK em `webhook_message_dedup (message_id)`.
+
+### 2.2 Testes regressão (Vitest + Deno test)
+
+Mínimos para destravar deploy seguro:
+
+- `supabase/functions/wallet-stripe-webhook/*_test.ts`: crédito idempotente, refund, débito sem saldo (gera debt).
+- `src/lib/whatsapp/__tests__/`: roteamento whapi vs evolution.
+- `supabase/functions/__tests__/rls_regression_test.ts`: cliente anon NÃO consegue `select * from customers`, NÃO consegue `rpc credit_consultant_wallet`, NÃO consegue listar `storage.objects` em buckets sensíveis.
+- OCR happy-path com fixture (`fixtures/conta-energia.pdf`).
+
+---
+
+## FASE 3 — Runbook de execução
+
+1. Backup snapshot (Supabase → Database → Backups).
+2. Aplicar migrations 1.1 → 1.4 em ordem; rodar smoke-test do bot em sandbox (1 lead novo end-to-end).
+3. Habilitar 1.5 no painel.
+4. Deploy + monitorar `edge_function_logs` por 24h (whapi-webhook, wallet-stripe-webhook).
+5. Fase 2 aplicada gradualmente, uma migration por dia, validando query plan com `EXPLAIN`.
+
+---
+
+## Detalhes técnicos
+
+- Engine do flow, edge functions e Deno NÃO serão tocados — apenas grants/policies/funções.
+- Nenhuma migration altera dados; só DDL + REVOKE/GRANT.
+- Rollback: cada bloco vem com migration reversa (pre-existente em git history).
+- Estimativa total: Fase 1 ≈ 4-6h de implementação + 2h smoke; Fase 2 ≈ 2-3 dias com testes.
+
+## Confirmação necessária antes de implementar
+
+1. Posso considerar `customer_flow_state` como **leitura pelo dono via consultant_id**? (afeta painel /admin) FLOW PODE SER COMPARTILHADO EM PUBLICO OU PRIVADO
+2. Algum frontend chama `rpc('clone_bot_flow_as'|'seed_flow_d')` direto? Se sim, mover para edge function antes do REVOKE. AINDA NAO PODE SER FUTURAMENTE
+3. Buckets `IMAGE` e `simulator-uploads` — posso assumir que servem só por URL pública (sem LIST no app)? SIM IMAGENS MUITAS SERAO PUBLICAS E OUTRAS PRIVADAS, ENTAO IMAGEM VIDEO AUDIO, SEMPRE DEIXE UM BOTAO PARA DEICAR PUBLICO OU PRIVADO  
+  
+CUIDADO BLOQUEAR ALGO E NAO FUCNIOAR 
+4. &nbsp;
