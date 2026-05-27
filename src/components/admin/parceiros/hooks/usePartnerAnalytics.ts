@@ -22,8 +22,7 @@ export function usePartnerAnalytics() {
   return useQuery({
     queryKey: ["referral-partner-analytics"],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc(
-        // @ts-expect-error - função criada via migração recente
+      const { data, error } = await (supabase.rpc as any)(
         "get_referral_partner_analytics",
       );
       if (error) throw error;
