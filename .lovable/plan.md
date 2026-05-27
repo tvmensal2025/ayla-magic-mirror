@@ -1,139 +1,90 @@
-# Plano: Go-Live Hardening — CTWA + QR + Variantes A/B/D
 
-## Contexto confirmado
+# Redesign: Página de Parceiros → Dashboard de Performance
 
-- **Variantes ativas em produção:** A (áudio), B (texto), D (botões/auto). C fica desligada até ter vídeo.
-- **Entrada de leads:** Facebook/Instagram Ads (CTWA) + QR code físico. Excel é só sync de clientes iGreen, não cria lead.
-- **Objetivo:** auditar os 7 pontos críticos do fluxo, fechar gaps, e criar um dashboard de monitoramento pros primeiros dias.
+A aba atual (`ParceirosTab`) é só um card simples com lista de parceiros + bloco de "leads por parceiro". Vamos transformá-la num **dashboard analítico** estilo `/admin/saude-producao`, mantendo a CRUD existente mas adicionando KPIs, gráficos e ranking visual.
 
----
+## O que muda visualmente
 
-## Fase 1 — Round-robin A/B/D (remover C da rotação)
+```text
+┌─────────────────────────────────────────────────────────────┐
+│  Parceiros Indicadores                       [+ Novo]       │
+│  Acompanhe captação, conversão e cashback por parceiro      │
+├─────────────────────────────────────────────────────────────┤
+│ [KPI] Parceiros ativos  [KPI] Leads 30d                     │
+│ [KPI] Conversão média   [KPI] Top parceiro do mês           │
+├──────────────────────────┬──────────────────────────────────┤
+│ Leads por parceiro       │  Evolução 30 dias (linha)        │
+│ (barras horizontais)     │  por parceiro, multi-série       │
+├──────────────────────────┼──────────────────────────────────┤
+│ Funil por parceiro       │  Origem dos leads                │
+│ Lead → Conta → Aprovado  │  (QR vs Palavra-chave - donut)   │
+├──────────────────────────┴──────────────────────────────────┤
+│  Ranking detalhado (tabela) — substitui PartnerList         │
+│  Nome | Keywords | Leads | Aprovados | Conv% | Últ.30d | ⋯ │
+└─────────────────────────────────────────────────────────────┘
+```
 
-**Onde mexer:** lógica de atribuição de `flow_variant` no `whapi-webhook` e em `lead-attribution`.
+## KPIs no topo (4 cards)
 
-- Trocar round-robin atual (A/B/C ou A/B/C/D) por **A → B → D → A …** baseado em `count(customers) % 3` por consultor.
-- Garantir que o router (`bot_flows` lookup com filtro `variant`) caia em A como fallback se a variante sorteada não tiver fluxo ativo pro consultor.
-- Atualizar `dev-fire-all-steps` e `ai-generate-step-text` pra aceitar D (já aceita) e remover sugestões de C nos seletores do `/admin/fluxos`.
-- Atualizar `ManualStepDialog` e `StepMediaPanel` pra esconder C quando o consultor não tem `bot_flows` com `variant='C'`.
+Usar `StatCard` já existente (`src/components/admin/StatCard.tsx`) com ícones lucide:
+- **Parceiros ativos** — `partners.length`
+- **Leads 30 dias** — soma de `customers` com `referral_partner_id` not null nos últimos 30d
+- **Taxa de conversão média** — % de leads que chegaram em `pos_venda_stage` aprovado
+- **Top parceiro do mês** — nome + nº leads
 
----
+## Gráficos (Recharts — já no projeto)
 
-## Fase 2 — Hardening dos 7 pontos críticos
+1. **Barras horizontais** — Leads totais por parceiro (substitui o `PartnerMetrics` atual, mais visual)
+2. **Linha multi-série 30d** — `referral_detected_at` agrupado por dia, uma série por parceiro (top 5)
+3. **Funil empilhado** — por parceiro: novo_lead → enviou_conta → aprovado (a partir de `customers.conversation_step` / `pos_venda_stage`)
+4. **Donut origem** — distribuição entre QR Code (`lead_source_detail->>'source' = 'qr_code'`) vs palavra-chave (texto) vs outros
 
-### 2.1 Atribuição de campanha Facebook (CTWA)
+## Ranking (substitui PartnerList)
 
-- Auditar `facebook_campaigns`: toda campanha ativa precisa ter `initial_message` preenchido com a frase exata do anúncio.
-- Expandir `ADS_REGEX` em `_shared/lead-attribution.ts` e `_shared/captation/lead-source.ts` com as frases reais que o time roda hoje (pedir lista pro time de tráfego).
-- Adicionar fallback: se vier `ctwa_clid` no payload do Whapi → marcar `lead_source='facebook_ad'` mesmo sem match de regex.
+Tabela densa com:
+- Avatar/iniciais coloridas, nome
+- Keywords como chips
+- Métricas numéricas tabulares (leads, aprovados, conv%, últimos 30d com mini-sparkline)
+- Trend arrow (↑/↓ vs 30d anteriores)
+- Ações (QR, editar, excluir) num menu `⋯`
+- Ordenação por coluna; busca por nome/keyword
 
-### 2.2 Pixel + CAPI por consultor
+## Estados vazios
 
-- Validar que cada consultor com ads ativos tem:
-  - `consultants.facebook_pixel_id` preenchido
-  - `facebook_connections` com `access_token` válido (não expirado)
-- Adicionar widget no `/admin` mostrando status do Pixel + última chamada CAPI bem-sucedida.
-
-### 2.3 Instância WhatsApp connected
-
-- Cron novo `instance-health-cron` (a cada 10 min) verifica todas as instâncias `is_active=true`:
-  - Se `connection_status != 'connected'` por > 15 min → notificar `consultants.notification_phone` + Super Admin.
-- Badge no `/admin` em vermelho pulsante quando a instância do consultor logado está desconectada.
-
-### 2.4 Variante D — bot_flows obrigatório
-
-- Migration de validação: trigger em `consultants` que bloqueia `is_active=true` se não existir `bot_flows` com `variant in ('A','B','D')` e `is_active=true` pra cada uma.
-- Seed script: pra cada consultor sem fluxo D, clonar o fluxo A e marcar `variant='D'` + adicionar nós de botão padrão (sim/não na captura de conta).
-
-### 2.5 Cron `flow-d-health-cron`
-
-- Confirmar agendamento no `pg_cron` (rodar a cada 30 min).
-- Adicionar métrica: nº de leads destravados por execução → grava em nova tabela `flow_d_health_runs`.
-
-### 2.6 QR code rastreável
-
-- Cada material físico do consultor deve apontar pra `/c/:slug?src=qr&utm_campaign={local}` (ex: `?src=qr&utm_campaign=feira-sp-jan`).
-- LP já passa `utm_*` pro WhatsApp via wa.me `text=` → garantir que `lead-attribution.ts` lê `utm_campaign` da primeira mensagem e grava em `customers.lead_source_detail`.
-
-### 2.7 LP `/c/:slug` com `?src=ads`
-
-- Já funciona. Adicionar teste E2E (Deno test) que valida: GET `/c/:slug?src=ads` retorna HTML com Pixel injetado + WhatsApp button com `ctwa_clid` placeholder.
-
----
-
-## Fase 3 — Dashboards de monitoramento (`/admin/saude-producao`)
-
-Nova página acessível só pro Super Admin com 4 painéis em tempo real (refresh 30s):
-
-1. **Funil últimas 24h por variante**
-  - Tabela: A / B / D × etapas (lead_recebido → conta_enviada → ocr_ok → pitch → club → aprovado).
-  - Conversão % por etapa.
-2. **Origem do lead**
-  - Pizza: Facebook Ad / Instagram Ad / QR code / Orgânico / WhatsApp direto.
-  - Top 5 campanhas (`facebook_campaigns.name`) por leads recebidos hoje.
-3. **Saúde técnica**
-  - Instâncias `connected` vs `disconnected` por consultor.
-  - Última execução de cada cron (`flow-d-health-cron`, `pos-venda-cron`, `ocr-fallback`, `instance-health-cron`).
-  - Erros de CAPI nas últimas 6h.
-4. **Leads travados (alerta)**
-  - Leads sem resposta do bot > 2h em qualquer `capture_*`.
-  - Leads em D com `custom_step_retries > 2`.
-  - Botão "Devolver pro humano" inline.
-
----
-
-## Fase 4 — Smoke test guiado de go-live
-
-Checklist na própria UI do `/admin/saude-producao`:
-
-1. ✅ Pixel ID configurado
-2. ✅ CAPI token válido
-3. ✅ Instância WhatsApp connected
-4. ✅ Fluxos A, B, D ativos
-5. ✅ Crons agendados
-6. ✅ `facebook_campaigns.initial_message` populado (≥ 1 campanha)
-7. ✅ Notification phone configurado
-8. ✅ Teste manual: enviar mensagem do número do consultor → confirmar que recebe saudação em < 30s
-
-Só libera "🚀 Modo Produção ON" quando todos os 8 estiverem verdes.
-
----
+- Sem parceiros: hero ilustrado convidando a criar o primeiro
+- Sem leads ainda: KPIs em 0 e gráficos com placeholder "Aguardando primeiros leads"
 
 ## Detalhes técnicos
 
-**Tabelas novas:**
+**Arquivos novos:**
+- `src/components/admin/parceiros/PartnerDashboard.tsx` — container do novo layout
+- `src/components/admin/parceiros/PartnerKpiRow.tsx` — 4 StatCards
+- `src/components/admin/parceiros/PartnerLeadsBarChart.tsx` — barras horizontais
+- `src/components/admin/parceiros/PartnerTrendChart.tsx` — linha 30d
+- `src/components/admin/parceiros/PartnerFunnelChart.tsx` — funil
+- `src/components/admin/parceiros/PartnerOriginDonut.tsx` — donut origem
+- `src/components/admin/parceiros/PartnerRankingTable.tsx` — substitui `PartnerList`
+- `src/components/admin/parceiros/hooks/usePartnerAnalytics.ts` — query consolidada
 
-- `flow_d_health_runs (id, ran_at, leads_unstuck, errors)`
-- `production_health_snapshot (consultant_id, captured_at, instance_status, pixel_ok, capi_ok, flows_ok, last_lead_at)` — populada por cron a cada 5 min, base dos dashboards.
+**Arquivos editados:**
+- `src/components/admin/parceiros/ParceirosTab.tsx` — usar `PartnerDashboard` no lugar de `PartnerMetrics` + `Card<PartnerList>`
+- (manter `PartnerForm` e `PartnerQrCode` inalterados)
 
-**Edge functions novas/alteradas:**
+**Backend (1 migração nova):**
+RPC `get_referral_partner_analytics()` retornando, por parceiro do `auth.uid()`:
+- `partner_id`, `nome`, `keywords`
+- `leads_total`, `leads_30d`, `leads_prev_30d` (para trend)
+- `aprovados`, `conv_rate`
+- `qr_count`, `keyword_count`
+- `daily_series JSONB` (array `{date, count}` últimos 30d)
+- `funnel JSONB` (`{novo_lead, conta_recebida, aprovado, reprovado}`)
 
-- `instance-health-cron` (nova)
-- `production-health-snapshot` (nova, roda a cada 5 min)
-- `whapi-webhook` (round-robin A/B/D + leitura de `utm_campaign`)
-- `lead-attribution` (`ctwa_clid` fallback + regex expandida)
+Mantém `get_referral_partner_metrics()` (não quebra nada). Função `STABLE SECURITY DEFINER` com `search_path = public`, filtrando por `consultant_id = auth.uid()`. Sem alterações de tabela, sem novas RLS.
 
-**RLS:**
+**Design system:** usa apenas tokens semânticos (`bg-card`, `text-primary`, `border-border`), Recharts com cores HSL do tema, mesmo estilo glassmorphism dark já usado em `/admin/saude-producao` e `StatCard`.
 
-- `flow_d_health_runs` e `production_health_snapshot`: select apenas via `is_super_admin(auth.uid())`, insert/update apenas `service_role`.
+## Fora do escopo
 
-**Migrations:**
-
-- Trigger em `consultants.is_active` bloqueando ativação sem fluxos A/B/D.
-- Seed de Fluxo D pra consultores existentes.
-
-**Dependências externas:**
-
-- Lista das frases reais dos anúncios atuais (precisamos pedir pro time de tráfego antes de mexer no regex).
-
----
-
-## Ordem de execução sugerida
-
-1. Round-robin A/B/D + seed Fluxo D (Fase 1 + 2.4) OU APENAS D ( DEACORDO COM A VARIAVEL SELECIONADA ) 
-2. Crons + snapshot table (Fase 2.5 + infra do dashboard)
-3. Atribuição CTWA + UTM QR (Fase 2.1 + 2.6)
-4. Dashboard `/admin/saude-producao` (Fase 3)
-5. Checklist de go-live + smoke test guiado (Fase 4)
-
-Estimativa: cada fase 1 sessão. Total ~5 sessões pra estar 100% pronto pra abrir produção com confiança.
+- Não mexe em `PartnerForm`, `PartnerQrCode`, `useReferralPartners` (CRUD intacto)
+- Não altera webhook, lógica de atribuição de parceiro, ou tabelas
+- Não toca em outras abas do `/admin`
