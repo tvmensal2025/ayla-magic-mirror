@@ -2689,6 +2689,7 @@ export type Database = {
           rg: string | null
           sales_phase: string | null
           senha_pdf: string | null
+          source_campaign_id: string | null
           status: string
           status_financeiro: string | null
           summary_updated_at: string | null
@@ -2853,6 +2854,7 @@ export type Database = {
           rg?: string | null
           sales_phase?: string | null
           senha_pdf?: string | null
+          source_campaign_id?: string | null
           status?: string
           status_financeiro?: string | null
           summary_updated_at?: string | null
@@ -3017,6 +3019,7 @@ export type Database = {
           rg?: string | null
           sales_phase?: string | null
           senha_pdf?: string | null
+          source_campaign_id?: string | null
           status?: string
           status_financeiro?: string | null
           summary_updated_at?: string | null
@@ -3092,6 +3095,13 @@ export type Database = {
             columns: ["referral_partner_id"]
             isOneToOne: false
             referencedRelation: "referral_partners"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customers_source_campaign_id_fkey"
+            columns: ["source_campaign_id"]
+            isOneToOne: false
+            referencedRelation: "facebook_campaigns"
             referencedColumns: ["id"]
           },
         ]
