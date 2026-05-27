@@ -1541,7 +1541,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     asReply: boolean,
   ): Promise<{ replyText: string; inlineSent: boolean }> => {
     const text = renderStepText(st);
-    const textDelay = Math.max(0, Math.min(120_000, st.text_delay_ms ?? 1500));
+    const defaultTextDelay = isFlowInstantMode() ? 0 : 1500;
+    const textDelay = Math.max(0, Math.min(120_000, st.text_delay_ms ?? defaultTextDelay));
     // Botões configurados no passo (captures._buttons). Quando o passo é o
     // reply final do turno, enviamos via sender.sendButtons em vez de texto puro
     // para que o WhatsApp (e o simulador) mostrem os botões reais.
