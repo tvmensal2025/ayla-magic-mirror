@@ -8,7 +8,7 @@ import { CaptureScoreboard } from "@/components/captacao/CaptureScoreboard";
 import { CaptureMissionsPanel, bumpMission } from "@/components/captacao/CaptureMissionsPanel";
 import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
 import { Button } from "@/components/ui/button";
-import { ClipboardList, ExternalLink, MessageCircle, ChevronLeft, ChevronDown } from "lucide-react";
+import { ClipboardList, ExternalLink, MessageCircle, ChevronLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { GameModeToggle } from "@/components/captacao/game/GameModeToggle";
 import { GameShell } from "@/components/captacao/game/GameShell";
@@ -55,6 +55,10 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
   const [mismatch, setMismatch] = useState<{ flag: boolean; bill: string; doc: string; acked: boolean }>({ flag: false, bill: "", doc: "", acked: false });
   const [missionsVersion, setMissionsVersion] = useState(0);
   const [showAside, setShowAside] = useState(false);
+  const [stepsOpen, setStepsOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem("cap_steps_open") === "1"; } catch { return false; }
+  });
+  const toggleSteps = () => setStepsOpen((v) => { const n = !v; try { localStorage.setItem("cap_steps_open", n ? "1" : "0"); } catch {} return n; });
   const { today, week, streak, bump } = useCaptureScoreboard(consultantId);
   const { toast } = useToast();
   const { templates } = useTemplates(consultantId);
@@ -318,15 +322,26 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                     )}
                   </div>
                   <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                    {/* Passos — fixo no topo */}
-                    <div className="shrink-0 px-2 pt-1 pb-1.5 border-b border-border/40">
-                      <CaptureStepsGrid
-                        consultantId={consultantId}
-                        customerId={selectedId}
-                        variant={variant}
-                        sentSteps={sentSteps}
-                        onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
-                      />
+                    {/* Passos — colapsável para liberar espaço da conversa/composer */}
+                    <div className="shrink-0 border-b border-border/40">
+                      <button
+                        onClick={toggleSteps}
+                        className="w-full flex items-center justify-between px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground hover:bg-secondary/40 transition"
+                      >
+                        <span>Passos · {sentSteps.size}/10 enviados</span>
+                        {stepsOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      </button>
+                      {stepsOpen && (
+                        <div className="px-2 pb-1.5">
+                          <CaptureStepsGrid
+                            consultantId={consultantId}
+                            customerId={selectedId}
+                            variant={variant}
+                            sentSteps={sentSteps}
+                            onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
+                          />
+                        </div>
+                      )}
                     </div>
 
                     {/* Conversa — flex-1 com scroll interno */}
@@ -430,14 +445,25 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
 
                 {/* Desktop: passos (topo fixo) + conversa (flex-1 scroll interno) — sem scroll externo */}
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  {/* Passos — altura fixa/compacta no desktop, scroll no mobile */}
-                  <div className="shrink-0 px-2 pt-1 pb-1.5 border-b border-border/40">
-                    <CaptureStepsGrid
-                      consultantId={consultantId}
-                      customerId={selectedId}
-                      sentSteps={sentSteps}
-                      onSent={(stepId) => setSentSteps((s) => new Set(s).add(stepId))}
-                    />
+                  {/* Passos — colapsável */}
+                  <div className="shrink-0 border-b border-border/40">
+                    <button
+                      onClick={toggleSteps}
+                      className="w-full flex items-center justify-between px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground hover:bg-secondary/40 transition"
+                    >
+                      <span>Passos · {sentSteps.size}/10 enviados</span>
+                      {stepsOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    </button>
+                    {stepsOpen && (
+                      <div className="px-2 pb-1.5">
+                        <CaptureStepsGrid
+                          consultantId={consultantId}
+                          customerId={selectedId}
+                          sentSteps={sentSteps}
+                          onSent={(stepId) => setSentSteps((s) => new Set(s).add(stepId))}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {/* Conversa — ocupa o espaço restante com scroll interno */}
