@@ -12,6 +12,7 @@ import {
 } from "../../../_shared/captureExtractors.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
 import { isMockMode, shouldBypassQuietHours } from "../../../_shared/test-mode.ts";
+import { isFlowInstantMode } from "../../../_shared/flow-pace.ts";
 // rules-engine removido em Sprint 2.5 (bot_flow_rules = 0 linhas, código morto)
 import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
 import { ensureAudioTranscript } from "../../../_shared/audio-transcript.ts";
@@ -472,7 +473,7 @@ async function sendStepMedia(
       // Teto duro de 12s para não estourar o limite de 60s da Edge Function
       // quando uma sequência tem 4+ itens. Consultor que precisa de pausa
       // maior deve quebrar em dois passos.
-      if (!isMockMode()) {
+      if (!isMockMode() && !isFlowInstantMode()) {
         const wait = Math.max(0, Math.min(item.delayMs, 12_000));
         if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       }
@@ -543,7 +544,7 @@ async function sendStepMedia(
     // O teto duro de 12s evita estourar o limite de 60s da Edge Function
     // mesmo com 5+ mídias na sequência.
     const configuredDelay = Number(m.delay_before_ms || 0);
-    if (!isMockMode()) {
+    if (!isMockMode() && !isFlowInstantMode()) {
       if (configuredDelay > 0) {
         const wait = Math.min(configuredDelay, 12_000);
         await new Promise((r) => setTimeout(r, wait));
@@ -834,7 +835,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     !ctx.customer.conversation_step ||
     ctx.customer.conversation_step === "welcome" ||
     ctx.customer.conversation_step === "menu_inicial";
-  if (isFirstMessage && !isMockMode()) {
+  if (isFirstMessage && !isMockMode() && !isFlowInstantMode()) {
     try {
       const { data: flowRow } = await ctx.supabase
         .from("bot_flows")
@@ -1540,7 +1541,8 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     asReply: boolean,
   ): Promise<{ replyText: string; inlineSent: boolean }> => {
     const text = renderStepText(st);
-    const textDelay = Math.max(0, Math.min(120_000, st.text_delay_ms ?? 1500));
+    const defaultTextDelay = isFlowInstantMode() ? 0 : 1500;
+    const textDelay = Math.max(0, Math.min(120_000, st.text_delay_ms ?? defaultTextDelay));
     // Botões configurados no passo (captures._buttons). Quando o passo é o
     // reply final do turno, enviamos via sender.sendButtons em vez de texto puro
     // para que o WhatsApp (e o simulador) mostrem os botões reais.

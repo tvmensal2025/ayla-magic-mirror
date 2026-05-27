@@ -46,6 +46,7 @@ import { detectDocumentType } from "../../_shared/detect-doc-type.ts";
 import { uploadMediaToMinio, OCR_CONFIDENCE_THRESHOLD } from "../_helpers.ts";
 import { jsonLog } from "../../_shared/audit.ts";
 import { isMockMode, isCustomerSandbox, shouldBypassQuietHours, shouldUseFastClock } from "../../_shared/test-mode.ts";
+import { isFlowInstantMode } from "../../_shared/flow-pace.ts";
 import { notifyHandoff } from "../../_shared/notify-consultant.ts";
 import type { BotContext, BotResult } from "./types.ts";
 
@@ -70,6 +71,7 @@ function trigramSim(a: string, b: string): number {
 // ── Sleep based on media duration (lets audio finish before sending video) ──
 async function sleepForMedia(kind: string, durationSec?: number | null): Promise<void> {
   if (isMockMode()) return; // 🧪 modo teste: zero espera entre mídias
+  if (isFlowInstantMode()) return; // ⚡ modo instantâneo: zero espera entre mídias
   // Simulador real → cadência curta (serviços reais continuam reais, só corta espera artificial)
   if (shouldUseFastClock()) {
     const ms = (kind === "audio" || kind === "video") ? 1200 : 600;
@@ -1237,7 +1239,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             });
             sent = true;
             // 🧪 mock: zero pausa entre textos (simulador roda turnos em ~1s)
-            if (!isLast && !isMockMode()) await new Promise((r) => setTimeout(r, 800));
+            if (!isLast && !isMockMode() && !isFlowInstantMode()) await new Promise((r) => setTimeout(r, 800));
           } catch (e) {
             console.warn(`[dispatch:${stepKey}] envio de texto falhou:`, (e as any)?.message);
           }
@@ -1264,7 +1266,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
         const delayMs = Number(m.delay_before_ms || 0);
         // 🧪 mock: pula delay configurado pelo consultor (simulador é apenas validação)
-        if (delayMs > 0 && !isMockMode()) await new Promise((r) => setTimeout(r, Math.min(delayMs, 10_000)));
+        if (delayMs > 0 && !isMockMode() && !isFlowInstantMode()) await new Promise((r) => setTimeout(r, Math.min(delayMs, 10_000)));
 
         try {
           const ok = await sendMedia(remoteJid, m.url, "", kind, Number(m.duration_sec || 0) || undefined);
@@ -1297,7 +1299,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }));
           const prompt = "👇 Escolha uma opção:";
           // 🧪 mock: pula pausa antes dos botões
-          if (!isMockMode()) await new Promise((r) => setTimeout(r, 600));
+          if (!isMockMode() && !isFlowInstantMode()) await new Promise((r) => setTimeout(r, 600));
           await sendButtons(remoteJid, prompt, renderedButtons);
           await supabase.from("conversations").insert({
             customer_id: customer.id,
@@ -2286,7 +2288,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               if (!canSend) continue;
               try {
                 await sendMedia(remoteJid, m.url, cap, k, Number((m as any).duration_sec || 0) || undefined);
-                if (i < ordered.length - 1 && !isMockMode()) await new Promise((r) => setTimeout(r, 1500));
+                if (i < ordered.length - 1 && !isMockMode() && !isFlowInstantMode()) await new Promise((r) => setTimeout(r, 1500));
               } catch (e) {
                 console.warn("[bot-flow] sendMedia (AI) falhou:", (e as any)?.message);
               }
@@ -2811,7 +2813,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 }
                 if (!nxt) break;
                 console.log(`[chain-skip] from=${current.position} to=${nxt.position}`);
-                if (!isMockMode()) await new Promise((r) => setTimeout(r, 1500));
+                if (!isMockMode() && !isFlowInstantMode()) await new Promise((r) => setTimeout(r, 1500));
                 current = nxt;
               }
               const ntype = String(current.step_type || "message");
