@@ -388,7 +388,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           </div>
         </GameShell>
       ) : (
-        <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "13rem", "--cap-aside-w": "22rem" } as React.CSSProperties}>
+        <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "12rem", "--cap-aside-w": "17rem" } as React.CSSProperties}>
           {/* Lista: full-width no mobile sem seleção; escondida no mobile com seleção; sidebar fixa em md+ */}
           <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 overflow-hidden`}>
             <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
