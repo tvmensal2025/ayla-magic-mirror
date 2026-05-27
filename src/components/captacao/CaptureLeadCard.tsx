@@ -283,7 +283,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
             {canSubmit ? "FINALIZAR" : "CADASTRAR TUDO"}
           </Button>
           <p className="text-[9px] text-center text-muted-foreground leading-tight">
-            {canSubmit ? "Confirme para registrar." : `Faltam ${totalFields - filledCount} ${totalFields - filledCount === 1 ? "dado" : "dados"}.`}
+            {canSubmit ? "Confirme" : `Faltam ${totalFields - filledCount}`}
           </p>
         </div>
       )}
