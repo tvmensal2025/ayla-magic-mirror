@@ -270,20 +270,20 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
 
 
       {!embedded && (
-        <div className="p-2 border-t border-border space-y-1.5">
+        <div className="px-2 py-1.5 border-t border-border space-y-1">
           <Button
-            size="default"
-            className={`w-full gap-2 font-bold text-sm ${canSubmit
-              ? "bg-gradient-to-r from-primary via-emerald-400 to-primary bg-[length:200%_100%] text-primary-foreground hover:opacity-95 exec-bar-active shadow-[0_0_14px_hsl(var(--primary)/0.25)]"
+            size="sm"
+            className={`w-full h-8 gap-1.5 font-bold text-xs ${canSubmit
+              ? "bg-gradient-to-r from-primary via-emerald-400 to-primary bg-[length:200%_100%] text-primary-foreground hover:opacity-95 exec-bar-active shadow-[0_0_10px_hsl(var(--primary)/0.25)]"
               : ""}`}
             disabled={!canSubmit || submitting}
             onClick={() => void handleSubmit()}
           >
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trophy className="w-3.5 h-3.5" />}
-            {canSubmit ? "FINALIZAR CADASTRO" : "CADASTRAR TUDO"}
+            {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trophy className="w-3 h-3" />}
+            {canSubmit ? "FINALIZAR" : "CADASTRAR TUDO"}
           </Button>
-          <p className="text-[10px] text-center text-muted-foreground">
-            {canSubmit ? "Cadastro completo — confirme para registrar." : `Faltam ${totalFields - filledCount} ${totalFields - filledCount === 1 ? "dado" : "dados"}.`}
+          <p className="text-[9px] text-center text-muted-foreground leading-tight">
+            {canSubmit ? "Confirme para registrar." : `Faltam ${totalFields - filledCount} ${totalFields - filledCount === 1 ? "dado" : "dados"}.`}
           </p>
         </div>
       )}
