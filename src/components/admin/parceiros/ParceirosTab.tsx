@@ -1,10 +1,6 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
-import { PartnerList } from "./PartnerList";
+import { PartnerDashboard } from "./PartnerDashboard";
 import { PartnerForm } from "./PartnerForm";
-import { PartnerMetrics } from "./PartnerMetrics";
 import { PartnerQrCode } from "./PartnerQrCode";
 import {
   useReferralPartners,
@@ -28,8 +24,7 @@ export function ParceirosTab({
     null,
   );
   const [qrPartner, setQrPartner] = useState<ReferralPartner | null>(null);
-  const { partners, metrics, create, update, remove, isLoading } =
-    useReferralPartners();
+  const { partners, create, update, remove, isLoading } = useReferralPartners();
   const { toast } = useToast();
 
   const handleSave = (data: {
@@ -82,26 +77,15 @@ export function ParceirosTab({
   };
 
   return (
-    <div className="space-y-6">
-      <PartnerMetrics metrics={metrics} />
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Parceiros Indicadores</CardTitle>
-          <Button onClick={() => setFormOpen(true)} className="gap-2">
-            <Plus className="h-4 w-4" /> Novo Parceiro
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <PartnerList
-            partners={partners}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-            onQrCode={setQrPartner}
-            isLoading={isLoading}
-          />
-        </CardContent>
-      </Card>
+    <>
+      <PartnerDashboard
+        partners={partners}
+        isLoading={isLoading}
+        onNew={() => setFormOpen(true)}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+        onQrCode={setQrPartner}
+      />
 
       <PartnerForm
         open={formOpen}
@@ -122,6 +106,6 @@ export function ParceirosTab({
           qrPhrase={qrPartner.qr_phrase}
         />
       )}
-    </div>
+    </>
   );
 }

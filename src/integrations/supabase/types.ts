@@ -5370,6 +5370,25 @@ export type Database = {
           stripe_fees_cents: number
         }[]
       }
+      get_referral_partner_analytics: {
+        Args: never
+        Returns: {
+          aprovados: number
+          conta_recebida: number
+          daily_series: Json
+          funnel: Json
+          keyword_count: number
+          keywords: string[]
+          last_lead_at: string
+          leads_30d: number
+          leads_prev_30d: number
+          leads_total: number
+          partner_id: string
+          partner_nome: string
+          qr_count: number
+          reprovados: number
+        }[]
+      }
       get_referral_partner_metrics: {
         Args: never
         Returns: {
