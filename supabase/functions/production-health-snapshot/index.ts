@@ -25,7 +25,8 @@ Deno.serve(async (req) => {
   try {
     const { data: consultants } = await supabase
       .from("consultants")
-      .select("id, name, slug, active_variants, facebook_pixel_id, notification_phone");
+      .select("id, name, active_variants, facebook_pixel_id, notification_phone")
+      .eq("approved", true);
 
     if (!consultants?.length) {
       return new Response(JSON.stringify({ ok: true, written: 0 }), {
