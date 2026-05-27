@@ -835,7 +835,7 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     !ctx.customer.conversation_step ||
     ctx.customer.conversation_step === "welcome" ||
     ctx.customer.conversation_step === "menu_inicial";
-  if (isFirstMessage && !isMockMode()) {
+  if (isFirstMessage && !isMockMode() && !isFlowInstantMode()) {
     try {
       const { data: flowRow } = await ctx.supabase
         .from("bot_flows")
