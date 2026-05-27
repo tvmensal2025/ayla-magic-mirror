@@ -9,6 +9,7 @@
 import { fetchWithTimeout, logStructured, TIMEOUT_WHAPI } from "./utils.ts";
 import { captureError } from "./sentry.ts";
 import { shouldUseFastClock } from "./test-mode.ts";
+import { isFlowInstantMode } from "./flow-pace.ts";
 
 export interface WhapiButton {
   id: string;
