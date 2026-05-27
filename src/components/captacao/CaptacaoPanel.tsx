@@ -373,7 +373,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                 </>
               )}
             </main>
-              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={352} minPx={260} maxPx={560} invert />
+              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={272} minPx={220} maxPx={520} invert />
             {/* Desktop aside: ficha quando há lead, achievements quando não */}
             <div className="hidden md:flex md:flex-col md:w-[var(--cap-aside-w)] md:border-l border-border/60 overflow-hidden">
 
