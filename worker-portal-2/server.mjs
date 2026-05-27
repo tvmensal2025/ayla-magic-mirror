@@ -167,8 +167,19 @@ app.get('/health', (req, res) => {
 });
 
 app.post('/submit-lead', authRequired, async (req, res) => {
-  const { customer_id, dados } = req.body || {};
-  if (!dados?.idconsultor) return res.status(400).json({ ok: false, error: 'dados.idconsultor obrigatório' });
+  let { customer_id, dados } = req.body || {};
+
+  // Se não veio dados, busca do Supabase a partir do customer_id
+  if (!dados && customer_id && supabase) {
+    try {
+      dados = await fetchDadosFromSupabase(customer_id);
+      if (!dados) return res.status(404).json({ ok: false, error: 'customer não encontrado ou sem igreen_id do consultor' });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: `falha ao buscar customer: ${e.message}` });
+    }
+  }
+
+  if (!dados?.idconsultor) return res.status(400).json({ ok: false, error: 'dados.idconsultor obrigatório (ou customer_id válido)' });
   if (!dados?.cpf) return res.status(400).json({ ok: false, error: 'dados.cpf obrigatório' });
 
   try {
@@ -188,6 +199,55 @@ app.post('/submit-lead', authRequired, async (req, res) => {
     return res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+// ─── Helper: monta payload a partir do customers do Supabase ─────────────────
+async function fetchDadosFromSupabase(customerId) {
+  const { data: c, error } = await supabase
+    .from('customers')
+    .select(`
+      id,
+      cpf, name, doc_holder_name, bill_holder_name,
+      data_nascimento,
+      phone_whatsapp,
+      email,
+      cep, address_street, address_number, address_complement,
+      address_neighborhood, address_city, address_state,
+      numero_instalacao, media_consumo,
+      distribuidora, debitos_aberto, possui_procurador,
+      referral_partner_id, consultant_id,
+      consultants:consultant_id(igreen_id, name, portal_kind),
+      referral_partners:referral_partner_id(cli)
+    `)
+    .eq('id', customerId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!c) return null;
+  const consultant = c.consultants;
+  const partner = c.referral_partners;
+  const igreenId = consultant?.igreen_id ? Number(consultant.igreen_id) : null;
+  if (!igreenId) return null;
+  return {
+    idconsultor: igreenId,
+    indcli: partner?.cli ? Number(partner.cli) : 0,
+    cpf: c.cpf || '',
+    nome: c.doc_holder_name || c.name || '',
+    dataNascimento: c.data_nascimento || '',
+    whatsapp: c.phone_whatsapp || '',
+    email: c.email || '',
+    cep: c.cep || '',
+    endereco: c.address_street || '',
+    numero: c.address_number || '',
+    complemento: c.address_complement || '',
+    bairro: c.address_neighborhood || '',
+    cidade: c.address_city || '',
+    uf: c.address_state || '',
+    numeroInstalacao: c.numero_instalacao || '',
+    consumoMedio: Number(c.media_consumo || 0),
+    concessionaria: c.distribuidora || '',
+    possuiPlacas: false,
+    sendcontract: true,
+  };
+}
 
 app.post('/confirm-otp', authRequired, async (req, res) => {
   const { idconsultor, idcliente, code } = req.body || {};
