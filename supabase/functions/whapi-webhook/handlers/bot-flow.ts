@@ -1299,7 +1299,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }));
           const prompt = "👇 Escolha uma opção:";
           // 🧪 mock: pula pausa antes dos botões
-          if (!isMockMode()) await new Promise((r) => setTimeout(r, 600));
+          if (!isMockMode() && !isFlowInstantMode()) await new Promise((r) => setTimeout(r, 600));
           await sendButtons(remoteJid, prompt, renderedButtons);
           await supabase.from("conversations").insert({
             customer_id: customer.id,
