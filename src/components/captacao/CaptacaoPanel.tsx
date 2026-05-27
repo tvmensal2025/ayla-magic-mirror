@@ -322,15 +322,26 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                     )}
                   </div>
                   <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                    {/* Passos — fixo no topo */}
-                    <div className="shrink-0 px-2 pt-1 pb-1.5 border-b border-border/40">
-                      <CaptureStepsGrid
-                        consultantId={consultantId}
-                        customerId={selectedId}
-                        variant={variant}
-                        sentSteps={sentSteps}
-                        onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
-                      />
+                    {/* Passos — colapsável para liberar espaço da conversa/composer */}
+                    <div className="shrink-0 border-b border-border/40">
+                      <button
+                        onClick={toggleSteps}
+                        className="w-full flex items-center justify-between px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground hover:bg-secondary/40 transition"
+                      >
+                        <span>Passos · {sentSteps.size}/10 enviados</span>
+                        {stepsOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      </button>
+                      {stepsOpen && (
+                        <div className="px-2 pb-1.5">
+                          <CaptureStepsGrid
+                            consultantId={consultantId}
+                            customerId={selectedId}
+                            variant={variant}
+                            sentSteps={sentSteps}
+                            onSent={(stepId) => { setSentSteps((s) => new Set(s).add(stepId)); sfx.ding(sound); }}
+                          />
+                        </div>
+                      )}
                     </div>
 
                     {/* Conversa — flex-1 com scroll interno */}
