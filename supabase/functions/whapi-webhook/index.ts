@@ -1018,21 +1018,47 @@ Deno.serve(async (req) => {
         const adsRegex = /(tenho interesse.*mais informa[çc][õo]es|gostaria de saber mais|quero saber mais|vi seu an[uú]ncio|vim do an[uú]ncio|do an[uú]ncio|pelo an[uú]ncio|vi o an[uú]ncio|facebook|instagram|\bfb ads?\b|\bmeta ads?\b|patrocinad|reels|stories|sponsored)/i;
         const textMatch = !hasAudio && !isFile && messageText && adsRegex.test(messageText);
 
-        if (hasReferral || textMatch || sourceCampaignId) {
-          const patch: Record<string, any> = { lead_source: "meta_ads" };
+        // UTM capture do QR code (formato: ?utm_source=qr&utm_campaign=feira-sp)
+        let utmDetail: Record<string, string> | null = null;
+        if (messageText) {
+          const utmMatches = messageText.match(/utm_(?:source|campaign|medium|content|term)=([^\s&]+)/gi);
+          if (utmMatches) {
+            utmDetail = {};
+            for (const m of utmMatches) {
+              const [k, v] = m.split("=");
+              utmDetail[k.toLowerCase()] = decodeURIComponent(v || "");
+            }
+          }
+        }
+
+        if (hasReferral || textMatch || sourceCampaignId || utmDetail || ctwaClid) {
+          const patch: Record<string, any> = {};
+          if (hasReferral || ctwaClid || sourceCampaignId || textMatch) {
+            patch.lead_source = "meta_ads";
+          } else if (utmDetail?.utm_source === "qr") {
+            patch.lead_source = "qr_code";
+          } else if (utmDetail) {
+            patch.lead_source = utmDetail.utm_source || "utm";
+          }
           if (sourceCampaignId) patch.source_campaign_id = sourceCampaignId;
-          if (ctwaClid) patch.source_ctwa_clid = ctwaClid;
-          if (referralPayload) patch.source_referral = referralPayload;
+          if (ctwaClid) patch.ctwa_clid = ctwaClid;
+          const detail: Record<string, any> = {};
+          if (referralPayload) detail.referral = referralPayload;
+          if (utmDetail) Object.assign(detail, utmDetail);
+          if (Object.keys(detail).length > 0) patch.lead_source_detail = detail;
 
-          await supabase.from("customers").update(patch).eq("id", customer.id);
-          Object.assign(customer, patch);
-
-          const reason = sourceCampaignId
-            ? `campaign_match id=${sourceCampaignId}`
-            : hasReferral
-            ? `referral=${JSON.stringify(referral).slice(0, 120)} ctwa=${ctwaClid}`
-            : `regex msg="${(messageText || "").slice(0, 80)}"`;
-          console.log(`[lead-source] customer ${customer.id} marcado como meta_ads (${reason})`);
+          const { error: tagErr } = await supabase.from("customers").update(patch).eq("id", customer.id);
+          if (tagErr) {
+            console.warn(`[lead-source] update falhou: ${tagErr.message}`);
+          } else {
+            Object.assign(customer, patch);
+            const reason = sourceCampaignId ? `campaign_match id=${sourceCampaignId}`
+              : ctwaClid ? `ctwa=${ctwaClid}`
+              : hasReferral ? `referral`
+              : utmDetail ? `utm=${JSON.stringify(utmDetail)}`
+              : `regex msg="${(messageText || "").slice(0, 80)}"`;
+            console.log(`[lead-source] customer ${customer.id} tagged ${patch.lead_source} (${reason})`);
+          }
         }
       }
     } catch (e) {
