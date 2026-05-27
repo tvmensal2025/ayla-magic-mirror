@@ -87,7 +87,7 @@ export function CaptureDocumentTiles({ customerId, customer, onUploaded, compact
                 disabled={isBusy}
                 onClick={() => inputs.current[s.key]?.click()}
                 className={`relative w-full rounded-md overflow-hidden bg-secondary/40 border border-border/50 flex items-center justify-center active:scale-95 transition ${
-                  compact ? "h-10" : "h-14"
+                  compact ? "h-9" : "h-11"
                 }`}
               >
                 {isBusy ? (
