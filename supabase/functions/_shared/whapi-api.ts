@@ -55,6 +55,9 @@ export function createWhapiSender(apiToken: string, baseUrl = "https://gate.whap
   // Limite seguro: 1s mínimo, 15s máximo.
   function typingTimeFor(text: string): number {
     if (shouldUseFastClock()) return 1; // simulador real → typing mínimo
+    // Modo instantâneo: typing mínimo aceito pelo Whapi (1s).
+    // Whapi não suporta typing_time=0, então 1s é o "instantâneo real".
+    if (isFlowInstantMode()) return 1;
     const len = (text || "").length;
     const ms = 1500 + len * 35; // ~mesma curva do humanPace
     return Math.max(1, Math.min(15, Math.round(ms / 1000)));
