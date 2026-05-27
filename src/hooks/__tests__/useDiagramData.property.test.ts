@@ -124,7 +124,7 @@ function arbStepsWithRefs() {
       if (stepArbs.length === 0) return fc.constant([] as Step[]);
       return fc.tuple(...stepArbs).map((arr) => {
         // Normaliza para shape canônico do tipo Step.
-        return arr.map((s, idx): Step => ({
+        return (arr as Array<Record<string, unknown>>).map((s, idx): Step => ({
           id: s.id as string,
           flow_id: "flow-x",
           position: idx,
@@ -150,8 +150,9 @@ function arbStepsWithRefs() {
 const EMPTY_VALIDATION: FlowValidation = {
   warnings: [],
   byStep: {},
-  errorCount: 0,
-  warningCount: 0,
+  total: 0,
+  errors: 0,
+  autoFixablePatches: [],
 };
 
 function runHook(steps: Step[]) {
