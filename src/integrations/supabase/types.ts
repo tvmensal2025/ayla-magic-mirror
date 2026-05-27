@@ -1415,6 +1415,8 @@ export type Database = {
       bot_flow_steps: {
         Row: {
           auto_detect_doc_type: boolean
+          business_hour_end: string | null
+          business_hour_start: string | null
           captures: Json
           condition_text: string | null
           created_at: string
@@ -1423,10 +1425,14 @@ export type Database = {
           icon: string
           id: string
           is_active: boolean
+          layout: Json | null
           media_order: Json
           message_text: string | null
+          pause_on_holiday: boolean
+          pause_on_weekend: boolean
           persuasive_text: string | null
           position: number
+          respect_business_hours: boolean
           slot_key: string | null
           step_key: string | null
           step_type: string
@@ -1441,6 +1447,8 @@ export type Database = {
         }
         Insert: {
           auto_detect_doc_type?: boolean
+          business_hour_end?: string | null
+          business_hour_start?: string | null
           captures?: Json
           condition_text?: string | null
           created_at?: string
@@ -1449,10 +1457,14 @@ export type Database = {
           icon?: string
           id?: string
           is_active?: boolean
+          layout?: Json | null
           media_order?: Json
           message_text?: string | null
+          pause_on_holiday?: boolean
+          pause_on_weekend?: boolean
           persuasive_text?: string | null
           position?: number
+          respect_business_hours?: boolean
           slot_key?: string | null
           step_key?: string | null
           step_type: string
@@ -1467,6 +1479,8 @@ export type Database = {
         }
         Update: {
           auto_detect_doc_type?: boolean
+          business_hour_end?: string | null
+          business_hour_start?: string | null
           captures?: Json
           condition_text?: string | null
           created_at?: string
@@ -1475,10 +1489,14 @@ export type Database = {
           icon?: string
           id?: string
           is_active?: boolean
+          layout?: Json | null
           media_order?: Json
           message_text?: string | null
+          pause_on_holiday?: boolean
+          pause_on_weekend?: boolean
           persuasive_text?: string | null
           position?: number
+          respect_business_hours?: boolean
           slot_key?: string | null
           step_key?: string | null
           step_type?: string
@@ -3574,6 +3592,30 @@ export type Database = {
         }
         Relationships: []
       }
+      holidays: {
+        Row: {
+          consultant_id: string | null
+          created_at: string
+          date: string
+          id: string
+          label: string | null
+        }
+        Insert: {
+          consultant_id?: string | null
+          created_at?: string
+          date: string
+          id?: string
+          label?: string | null
+        }
+        Update: {
+          consultant_id?: string | null
+          created_at?: string
+          date?: string
+          id?: string
+          label?: string | null
+        }
+        Relationships: []
+      }
       inbound_media_failures: {
         Row: {
           consultant_id: string
@@ -4405,6 +4447,7 @@ export type Database = {
           remote_jid: string
           scheduled_at: string
           sent_at: string | null
+          source_step_id: string | null
           status: string
         }
         Insert: {
@@ -4416,6 +4459,7 @@ export type Database = {
           remote_jid: string
           scheduled_at: string
           sent_at?: string | null
+          source_step_id?: string | null
           status?: string
         }
         Update: {
@@ -4427,9 +4471,18 @@ export type Database = {
           remote_jid?: string
           scheduled_at?: string
           sent_at?: string | null
+          source_step_id?: string | null
           status?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_messages_source_step_id_fkey"
+            columns: ["source_step_id"]
+            isOneToOne: false
+            referencedRelation: "bot_flow_steps"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       settings: {
         Row: {
