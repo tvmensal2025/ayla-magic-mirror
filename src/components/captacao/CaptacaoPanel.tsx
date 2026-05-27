@@ -241,7 +241,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
             <ExecHudBar progress={progress} />
           </div>
 
-          <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "13rem", "--cap-aside-w": "22rem" } as React.CSSProperties}>
+          <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "12rem", "--cap-aside-w": "17rem" } as React.CSSProperties}>
             {/* Mobile: lead list visível só quando NÃO há lead selecionado. Desktop: sempre. */}
             <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 md:border-r border-border overflow-hidden`}>
 
