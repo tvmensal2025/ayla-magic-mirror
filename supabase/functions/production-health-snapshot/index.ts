@@ -62,10 +62,10 @@ Deno.serve(async (req) => {
         // CAPI: tem facebook_connections válido?
         const { data: fbConn } = await supabase
           .from("facebook_connections")
-          .select("access_token, token_expires_at")
+          .select("access_token_encrypted, token_expires_at, status")
           .eq("consultant_id", c.id)
           .maybeSingle();
-        const capiOk = !!(fbConn?.access_token && (!fbConn.token_expires_at || new Date(fbConn.token_expires_at) > new Date()));
+        const capiOk = !!(fbConn?.access_token_encrypted && fbConn.status === 'active' && (!fbConn.token_expires_at || new Date(fbConn.token_expires_at) > new Date()));
 
         // Leads
         const { count: leads24 } = await supabase
