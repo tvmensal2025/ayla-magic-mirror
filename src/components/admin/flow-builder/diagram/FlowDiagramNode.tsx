@@ -76,12 +76,11 @@ const BUTTON_TITLE_MAX_LEN = 20;
 const AI_PROMPT_TOOLTIP_MAX_LEN = 200;
 /** R19 — atenuação adicional aplicada quando `searchState === "dim"`.
  *
- * Spec original (R3.7) cita 30%, mas aplicar isso a um nó inteiro torna o
- * texto interno ilegível em ambos os temas. Mantemos 50% como mínimo
- * absoluto: o nó visivelmente "apaga" mas o texto continua legível para
- * confirmar visualmente que ele NÃO casou com a busca/seleção. Coerente
- * com o espírito de R14.8 (contraste WCAG AA) sobre R3.7 estritamente. */
-const SEARCH_DIM_OPACITY = 0.5;
+ * Alinhado a R3.7/R19.5 da spec: "no máximo 30%" é o teto; aplicamos 0.3
+ * para garantir que o nó visivelmente "apaga". O Consultor sabe que esse
+ * nó NÃO casou com a busca; clicar fora do input ou pressionar `Esc`
+ * (R19.5) restaura a opacidade. */
+const SEARCH_DIM_OPACITY = 0.3;
 
 // Altura aproximada do cabeçalho onde o handle default fica alinhado.
 // Mantém o ponto de saída visualmente no centro do card quando não há botões.

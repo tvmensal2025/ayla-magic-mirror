@@ -139,13 +139,12 @@ const TERMINAL_META: Record<TerminalKind, { label: string; icon: string }> = {
 
 // Faixa "inativa" (R2.4): opacidade entre 40% e 60%. Escolhemos 50% (centro).
 const INACTIVE_OPACITY = 0.5;
-// Atenuação por seleção (R3.7): no máximo 30% no spec, mas 30% aplicado ao
-// wrapper inteiro do nó torna o texto ilegível em ambos os temas. Subimos
-// para 0.45 — o nó visivelmente "apaga" e o texto continua respeitando
-// WCAG 2.1 AA (R14.8). É uma reinterpretação consciente: a regra de
-// "no máximo 30%" garante apenas o teto; usar um valor pouco maior preserva
-// legibilidade sem violar o objetivo de "atenuar".
-const SELECTED_DIM_OPACITY = 0.45;
+// Atenuação por seleção (R3.7): "demais Arestas e Nós para no máximo 30%".
+// Aplicamos exatamente 30% — esse é o teto explícito da spec. O nó perde
+// legibilidade, o que é intencional: é assim que o Consultor identifica
+// imediatamente que o nó NÃO está conectado ao selecionado. Para "trazer
+// de volta", basta clicar fora ou em outro nó (R5.1 limpa selectedId).
+const SELECTED_DIM_OPACITY = 0.3;
 
 // ---------------------------------------------------------------------------
 // Helpers puros

@@ -632,6 +632,12 @@ export default function FluxoBuilder() {
                 onDeleteStep={deleteStep}
                 onAutoFixAll={autoFixAll}
                 onCreateFromTemplate={() => setCreateFromTemplateOpen(true)}
+                // task 10.10 — recarrega `steps` após `autoLayoutAll`
+                // zerar `bot_flow_steps.layout` para manter a fonte
+                // única de verdade alinhada com o banco.
+                onReloadAfterAutoLayout={() =>
+                  userId ? reload(userId, editingVariant) : Promise.resolve()
+                }
               />
             </Suspense>
           </section>

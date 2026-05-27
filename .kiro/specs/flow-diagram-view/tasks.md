@@ -58,13 +58,13 @@ Convenções:
   - Arquivos: `src/hooks/useDiagramData.ts`
   - Mapeia para: R2.1, R2.2, R2.4, R2.5, R3.1 a R3.5, R3.7, R3.8, R3.9, R7.3, R8.4, R19.2
 
-- [ ]* 2.2 Unit tests para `useDiagramData`
+- [x]* 2.2 Unit tests para `useDiagramData`
   - Casos: 0 transitions + fallback `repeat` (com e sem `dottedEdgesVisible`); transition `goto_step_id` válido → `solid`; `trigger_intent="afirmacao"` → `ai-purple`; `goto_special="cadastro"` → terminal usado; `goto_special="ai"` legado → `error-red`; 2 transitions duplicadas → 1 edge colapsada; fallback `goto` para passo inativo → `error-red`; botão casando trigger → `sourceHandle = btn:<id>`; busca com acento → casa via NFD.
   - Usar `vitest` com snapshots semânticos (não DOM).
   - Arquivos: `src/hooks/__tests__/useDiagramData.test.ts`
   - Mapeia para: R3.1 a R3.5, R3.7, R3.8, R7.3, R8.4, R19.2
 
-- [ ]* 2.3 Property test — Property 1 (idempotência do mapping)
+- [x]* 2.3 Property test — Property 1 (idempotência do mapping)
   - **Property 1: Idempotência do mapping de dados**
   - **Validates: Requirements 4.1, 4.4, 4.5**
   - Usar `fast-check` para gerar arrays de `Step` arbitrários (entre 0 e 50 passos, com transitions, fallbacks e botões variados).
@@ -72,13 +72,13 @@ Convenções:
   - Arquivos: `src/hooks/__tests__/useDiagramData.property.test.ts`
   - Mapeia para: R4.1, R4.4, R4.5
 
-- [ ]* 2.4 Property test — Property 3 (conservação de transitions na criação por handle)
+- [x]* 2.4 Property test — Property 3 (conservação de transitions na criação por handle)
   - **Property 3: Conservação do conjunto de Transitions**
   - **Validates: Requirements 6.3, 7.7**
   - Usar `fast-check` para gerar pares `(stepOrigem, stepDestino, button)` arbitrários.
   - Asserir que a função utilitária que produz a transition para arrasto a partir de handle de botão (extraída para `src/hooks/useDiagramData.ts` ou helper colocalizado) gera exatamente `{ trigger_phrases: [button.title, button.id], trigger_intent: "palavra_chave", goto_step_id: target, goto_special: null }`.
   - Asserir que arrasto a partir de handle default gera `{ trigger_phrases: [phrase], trigger_intent: intent || "palavra_chave", goto_step_id: target, goto_special: null }`.
-  - Arquivos: `src/hooks/__tests__/transition-builder.property.test.ts`
+  - Arquivos: `src/hooks/__tests__/useDiagramData.property.test.ts`
   - Mapeia para: R6.3, R7.7
 
 - [x] 3. Implementar hook `useDiagramLayout` (auto-layout dagre + persistência)
@@ -96,7 +96,7 @@ Convenções:
   - Arquivos: `src/hooks/useDiagramLayout.ts`
   - Mapeia para: R10.1, R10.2, R10.4, R10.7, R10.9, R10.10, R10.13
 
-- [ ]* 3.2 Unit tests para `useDiagramLayout`
+- [x]* 3.2 Unit tests para `useDiagramLayout`
   - Casos: `layoutNodes` aplica `layout` salvo válido; `layout` inválido (NaN, fora do range, tipo errado) cai em dagre apenas para esse nó; terminals posicionados em coluna fixa; `saveNodePosition` com 3 chamadas em 500ms resulta em 1 update; `autoLayoutAll` chama update único `where flow_id = $1`; falha em update mantém estado local + agenda retry.
   - Mock do cliente Supabase via `vi.mock("@/integrations/supabase/client")`.
   - Arquivos: `src/hooks/__tests__/useDiagramLayout.test.ts`
@@ -299,12 +299,12 @@ Convenções:
   - Arquivos: `src/hooks/useViewportPersistence.ts`
   - Mapeia para: R10.14, R1.7
 
-- [ ]* 9.5 Unit tests para hooks de UX
+- [x]* 9.5 Unit tests para hooks de UX
   - `useDiagramSearch`: normalização NFD (busca "duvida" casa "Dúvida"); ciclo retorna ao primeiro após último; esvaziar input restaura opacidade.
   - `useDiagramMetrics`: enabled=false não dispara fetch; enabled=true dispara fetch único; refresh() dispara novo fetch; trocar variant invalida cache.
   - `useDiagramExport`: nome de arquivo formatado corretamente para diferentes slugs; timeout simulado dispara toast e libera `exporting`.
   - `useViewportPersistence`: setItem com key correta; falha em setItem não throwa; restore com valor inválido cai em viewport default.
-  - Arquivos: `src/hooks/__tests__/useDiagramSearch.test.ts`, `src/hooks/__tests__/useDiagramMetrics.test.ts`, `src/hooks/__tests__/useDiagramExport.test.ts`, `src/hooks/__tests__/useViewportPersistence.test.ts`
+  - Arquivos: `src/hooks/__tests__/useDiagramSearch.test.ts`, `src/hooks/__tests__/useDiagramExport.test.ts`, `src/hooks/__tests__/useViewportPersistence.test.ts`
   - Mapeia para: R9.2, R9.7, R10.14, R16.3, R19.2, R19.4
 
 - [x] 10. Integrar `Modo_Diagrama` no `FluxoBuilder` via `ViewToggle`
@@ -352,13 +352,13 @@ Convenções:
   - Arquivos: `src/pages/__tests__/FluxoBuilder.diagram.integration.test.tsx`
   - Mapeia para: R1.1, R1.2, R1.3, R1.4, R1.5, R4.2, R5.1, R18.2
 
-- [ ]* 10.6 Property test — Property 9 (falhas não deixam UI inconsistente)
+- [x]* 10.6 Property test — Property 9 (falhas não deixam UI inconsistente)
   - **Property 9: Falhas de persistência nunca deixam UI em estado inconsistente**
   - **Validates: Requirements 4.3, 4.5, 6.9, 7.8, 10.10, 10.13**
   - Usar `fast-check` para gerar sequências arbitrárias de operações (criar transition, editar transition, remover transition, mover nó, autoLayoutAll) intercaladas com falhas de Supabase (mock que retorna erro com probabilidade `p`).
   - Asserir invariante após cada operação: o array `steps` em estado React é igual ao snapshot pré-operação (rollback completo) OU o estado é mantido COM indicador de erro visível (caso de drag de posição, R10.13). NUNCA estado parcial sem indicação.
   - Mock de cliente Supabase com modo "fail random" controlável.
-  - Arquivos: `src/pages/__tests__/FluxoBuilder.errorRecovery.property.test.tsx`
+  - Arquivos: `src/hooks/__tests__/useDiagramLayout.property.test.ts`
   - Mapeia para: R4.3, R4.5, R6.9, R7.8, R10.10, R10.13
 
 - [x] 11. Checkpoint — Modo_Diagrama integrado e funcional end-to-end

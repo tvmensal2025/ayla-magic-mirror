@@ -279,6 +279,14 @@ export interface FlowDiagramProps {
   onDeleteStep: (id: string) => Promise<void>;
   onAutoFixAll: () => Promise<void>;
   /**
+   * R10.10 — disparado pelo canvas após `autoLayoutAll` concluir com
+   * sucesso a limpeza de `bot_flow_steps.layout` no banco. O consumidor
+   * (`FluxoBuilder`) deve usar este callback para recarregar `steps` do
+   * Supabase, mantendo `step.layout` em sincronia com a coluna recém
+   * limpada. Opcional para retro-compatibilidade.
+   */
+  onReloadAfterAutoLayout?: () => void | Promise<void>;
+  /**
    * R11.5 — atalho do estado vazio. Quando o Consultor está em uma Variante
    * sem Passos, o `FlowDiagramEmptyState` exibe um botão extra
    * "Criar a partir de template" que dispara este callback (que abre o
@@ -371,6 +379,7 @@ function FlowDiagramInner(props: FlowDiagramProps) {
     onDuplicateStep,
     onDeleteStep,
     onCreateFromTemplate,
+    onReloadAfterAutoLayout,
   } = props;
 
   // -------------------------------------------------------------------
@@ -424,6 +433,7 @@ function FlowDiagramInner(props: FlowDiagramProps) {
         onAddStep={onAddStep}
         onDuplicateStep={onDuplicateStep}
         onDeleteStep={onDeleteStep}
+        onReloadAfterAutoLayout={onReloadAfterAutoLayout}
       />
     </div>
   );
@@ -462,6 +472,8 @@ interface FlowDiagramCanvasProps {
   ) => Promise<Step | null>;
   onDuplicateStep: (id: string) => Promise<void>;
   onDeleteStep: (id: string) => Promise<void>;
+  /** R10.10 — recarrega `steps` após `autoLayoutAll` zerar `layout` no banco. */
+  onReloadAfterAutoLayout?: () => void | Promise<void>;
 }
 
 function FlowDiagramCanvas({
@@ -484,6 +496,7 @@ function FlowDiagramCanvas({
   onAddStep,
   onDuplicateStep,
   onDeleteStep,
+  onReloadAfterAutoLayout,
 }: FlowDiagramCanvasProps) {
   // -------------------------------------------------------------------
   // Instância do React Flow — usada por busca, export e viewport persist.
@@ -549,6 +562,7 @@ function FlowDiagramCanvas({
     flowId,
     steps,
     terminalsUsed,
+    onAfterAutoLayout: onReloadAfterAutoLayout,
   });
 
   // `layoutNodes` é uma função pura que recebe `Node[]` e devolve `Node[]`
@@ -663,11 +677,19 @@ function FlowDiagramCanvas({
 
   const pendingConnectionRef = useRef<OnConnectStartParams | null>(null);
   const connectMadeRef = useRef(false);
+  // Guarda a posição do drop em coordenadas relativas ao wrapper, capturada
+  // de forma "leve" via `onPointerUp` global porque o React Flow chama
+  // `onConnect` *antes* de `onConnectEnd`, e queremos posicionar o popover
+  // exatamente sob o ponteiro (R6.2 — "abrir popover próximo ao ponto de
+  // soltura"). Mantemos a posição em ref, não em state, para evitar
+  // re-render extra entre o pointer-up e a abertura do popover.
+  const lastPointerPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const closeTransitionPopover = useCallback(() => {
     setTransitionPopover(null);
     pendingConnectionRef.current = null;
     connectMadeRef.current = false;
+    lastPointerPosRef.current = null;
   }, []);
 
   // -------------------------------------------------------------------
@@ -827,12 +849,71 @@ function FlowDiagramCanvas({
   );
 
   const handleConnectStart = useCallback<OnConnectStart>(
-    (_event, params) => {
+    (event, params) => {
       // Memoriza o início. Limpa qualquer popover anterior para garantir o
       // requisito R6.5 (apenas um popover aberto por vez).
       pendingConnectionRef.current = params;
       connectMadeRef.current = false;
+      lastPointerPosRef.current = null;
       setTransitionPopover(null);
+
+      // Captura a posição do ponteiro durante o drag para que `onConnect` /
+      // `onConnectEnd` possam posicionar o popover sob o ponto de soltura
+      // (R6.2). React Flow não passa o evento original para `onConnect`,
+      // mas o pointer up sempre é capturado pelo listener temporário.
+      const isPointer = (e: Event): e is PointerEvent =>
+        typeof PointerEvent !== "undefined" && e instanceof PointerEvent;
+      const isMouse = (e: Event): e is MouseEvent =>
+        typeof MouseEvent !== "undefined" && e instanceof MouseEvent;
+      const onPointerMove = (e: Event) => {
+        if (isPointer(e) || isMouse(e)) {
+          const rect = wrapperRef.current?.getBoundingClientRect();
+          if (rect) {
+            lastPointerPosRef.current = {
+              x: e.clientX - rect.left,
+              y: e.clientY - rect.top,
+            };
+          }
+        } else if (
+          typeof TouchEvent !== "undefined" &&
+          e instanceof TouchEvent &&
+          e.touches.length > 0
+        ) {
+          const t = e.touches[0];
+          const rect = wrapperRef.current?.getBoundingClientRect();
+          if (rect) {
+            lastPointerPosRef.current = {
+              x: t.clientX - rect.left,
+              y: t.clientY - rect.top,
+            };
+          }
+        }
+      };
+      const cleanup = () => {
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("mousemove", onPointerMove);
+        window.removeEventListener("touchmove", onPointerMove);
+        window.removeEventListener("pointerup", cleanup);
+        window.removeEventListener("mouseup", cleanup);
+        window.removeEventListener("touchend", cleanup);
+      };
+      window.addEventListener("pointermove", onPointerMove);
+      window.addEventListener("mousemove", onPointerMove);
+      window.addEventListener("touchmove", onPointerMove, { passive: true });
+      window.addEventListener("pointerup", cleanup);
+      window.addEventListener("mouseup", cleanup);
+      window.addEventListener("touchend", cleanup);
+
+      // Posição inicial do drag a partir do `event` recebido (mouse/pointer).
+      if (event && "clientX" in event && typeof event.clientX === "number") {
+        const rect = wrapperRef.current?.getBoundingClientRect();
+        if (rect) {
+          lastPointerPosRef.current = {
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+          };
+        }
+      }
     },
     [],
   );
@@ -846,29 +927,31 @@ function FlowDiagramCanvas({
       const { source, target, sourceHandle } = connection;
       if (!source || !target) return;
 
-      // Posição do popover: usamos o evento global mais recente do mouse?
-      // O React Flow não passa um evento aqui. Aproximação: posicionamos no
-      // centro do nó de destino (consultando `positionedNodes`). Se o nó
-      // destino não estiver positioned (raro), caímos no centro do wrapper.
-      const targetNode = positionedNodes.find((n) => n.id === target);
+      // R6.2 — popover deve abrir próximo ao ponto de soltura. Preferimos
+      // a última posição do ponteiro capturada durante o drag; se por algum
+      // motivo ela não estiver disponível (hot-reload, teste), caímos no
+      // centro do nó destino e por fim no centro do wrapper.
       let popoverX = 0;
       let popoverY = 0;
-      if (targetNode) {
-        // O popover é renderizado em coordenadas do wrapper (CSS pixels);
-        // o `targetNode.position` está em coordenadas do canvas (pré-zoom).
-        // Converto para coordenadas de tela via `flowToScreenPosition` e
-        // depois subtraio o offset do wrapper.
-        const screen = reactFlow.flowToScreenPosition({
-          x: targetNode.position.x,
-          y: targetNode.position.y,
-        });
-        const rel = wrapperRelativePos(screen.x, screen.y);
-        popoverX = rel.x;
-        popoverY = rel.y;
+      const pointer = lastPointerPosRef.current;
+      if (pointer) {
+        popoverX = pointer.x;
+        popoverY = pointer.y;
       } else {
-        const rect = wrapperRef.current?.getBoundingClientRect();
-        popoverX = rect ? rect.width / 2 : 200;
-        popoverY = rect ? rect.height / 2 : 200;
+        const targetNode = positionedNodes.find((n) => n.id === target);
+        if (targetNode) {
+          const screen = reactFlow.flowToScreenPosition({
+            x: targetNode.position.x,
+            y: targetNode.position.y,
+          });
+          const rel = wrapperRelativePos(screen.x, screen.y);
+          popoverX = rel.x;
+          popoverY = rel.y;
+        } else {
+          const rect = wrapperRef.current?.getBoundingClientRect();
+          popoverX = rect ? rect.width / 2 : 200;
+          popoverY = rect ? rect.height / 2 : 200;
+        }
       }
 
       setTransitionPopover({

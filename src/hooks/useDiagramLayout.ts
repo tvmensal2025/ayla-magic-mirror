@@ -47,6 +47,21 @@ export interface UseDiagramLayoutArgs {
   steps: Step[];
   /** Conjunto de Nós_Terminais visíveis (derivado de `useDiagramData`). */
   terminalsUsed: Set<GotoSpecial>;
+  /**
+   * Callback opcional disparado **após** um `autoLayoutAll` bem-sucedido
+   * persistir `layout = null` para todos os passos da Variante.
+   *
+   * O consumidor (`FluxoBuilder`) deve recarregar o array `steps` a partir
+   * do banco para manter o `step.layout` em sincronia com a coluna recém
+   * limpada. Sem esse reload, o estado em React conviveria com `step.layout`
+   * antigos enquanto o override local em `localLayouts` os sobrepõe — não
+   * causa bug visual, mas deixa a fonte única de verdade desalinhada e
+   * pode confundir property tests / unit tests que comparam estado.
+   *
+   * Em falha do reload, o consumidor é responsável por exibir seu próprio
+   * `toast.error` e revertir overrides locais se quiser.
+   */
+  onAfterAutoLayout?: () => void | Promise<void>;
 }
 
 export interface UseDiagramLayoutResult {
@@ -81,6 +96,7 @@ export function useDiagramLayout({
   flowId,
   steps,
   terminalsUsed,
+  onAfterAutoLayout,
 }: UseDiagramLayoutArgs): UseDiagramLayoutResult {
   const confirm = useConfirm();
 
@@ -369,8 +385,28 @@ export function useDiagramLayout({
         .update({ layout: null } as never)
         .eq("flow_id", flowId);
       if (error) throw error;
-      // Em sucesso, mantemos os overrides em `null`. A página pai deve
-      // recarregar `steps` para sincronizar `step.layout` (=null) com o estado.
+      // Em sucesso, mantemos os overrides em `null` enquanto o consumidor
+      // recarrega `steps` do banco. Após o reload, `step.layout` virá
+      // como `null` e o `resolveLayout` cairá em dagre naturalmente; nessa
+      // hora limpamos os overrides para evitar que persistam após reloads
+      // futuros que possam trazer layouts vindos de outros consultores em
+      // sessões paralelas (R10.10).
+      try {
+        await onAfterAutoLayout?.();
+      } catch (reloadErr) {
+        // Reload falhou — não é crítico; o canvas continua funcional via
+        // overrides locais. O consumidor já exibiu seu próprio toast em
+        // `reload()` se necessário.
+        if (typeof console !== "undefined") {
+          console.warn("[useDiagramLayout] onAfterAutoLayout failed", reloadErr);
+        }
+      }
+      // Limpa overrides após o reload (ou após a tentativa de reload).
+      // Se o consumidor não fornecer `onAfterAutoLayout`, mantemos os
+      // overrides em `null` para forçar dagre — comportamento prévio.
+      if (onAfterAutoLayout && !unmountedRef.current) {
+        setLocalLayouts(new Map());
+      }
     } catch (err) {
       // R10.10: restaura snapshot + toast.error.
       setLocalLayouts(overridesSnapshot);
@@ -379,7 +415,7 @@ export function useDiagramLayout({
       inFlightCountRef.current = Math.max(0, inFlightCountRef.current - 1);
       if (inFlightCountRef.current === 0) setSaving(false);
     }
-  }, [confirm, flowId, localLayouts, steps]);
+  }, [confirm, flowId, localLayouts, steps, onAfterAutoLayout]);
 
   return useMemo(
     () => ({ layoutNodes, saveNodePosition, autoLayoutAll, saving, saveError }),

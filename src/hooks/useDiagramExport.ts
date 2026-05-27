@@ -20,7 +20,7 @@
 // O hook não realiza upload nem gera links públicos — download local apenas
 // (R16.6 já é garantido pelo uso de `<a download>` no próprio navegador).
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toPng, toSvg } from "html-to-image";
 import {
   getNodesBounds,
@@ -105,12 +105,24 @@ function triggerDownload(dataUrl: string, filename: string): void {
   document.body.removeChild(a);
 }
 
-/** Promise que rejeita após `ms` ms — usada via `Promise.race` para o timeout. */
-function timeoutAfter(ms: number, label: string): Promise<never> {
+/** Promise que rejeita após `ms` ms — usada via `Promise.race` para o timeout.
+ *
+ * Recebe um `setHandle` callback para que o consumidor possa registrar o
+ * `setTimeout` em uma ref e cancelá-lo no unmount, evitando late-rejections
+ * em testes (`act()` warnings) e em remount rápido durante hot-reload. O
+ * timer é limpo automaticamente no `finally` do `runExport` — esse callback
+ * só importa quando o componente desmonta antes da exportação completar.
+ */
+function timeoutAfter(
+  ms: number,
+  label: string,
+  setHandle?: (h: ReturnType<typeof setTimeout>) => void,
+): Promise<never> {
   return new Promise((_, reject) => {
-    setTimeout(() => {
+    const handle = setTimeout(() => {
       reject(new Error(`Export timed out after ${ms}ms (${label})`));
     }, ms);
+    setHandle?.(handle);
   });
 }
 
@@ -134,6 +146,20 @@ export function useDiagramExport({
   // Guarda a referência síncrona para evitar disparos concorrentes mesmo
   // antes do `setExporting` ter sido aplicado pelo React (R16.8).
   const inFlightRef = useRef(false);
+  // Handle do timeout em voo — limpamos no unmount para evitar late
+  // rejections após o componente sair da árvore.
+  const timeoutHandleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmountedRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      unmountedRef.current = true;
+      if (timeoutHandleRef.current) {
+        clearTimeout(timeoutHandleRef.current);
+        timeoutHandleRef.current = null;
+      }
+    };
+  }, []);
 
   const runExport = useCallback(
     async (format: "png" | "svg"): Promise<void> => {
@@ -198,7 +224,9 @@ export function useDiagramExport({
 
         const dataUrl = await Promise.race([
           exportPromise,
-          timeoutAfter(EXPORT_TIMEOUT_MS, format),
+          timeoutAfter(EXPORT_TIMEOUT_MS, format, (h) => {
+            timeoutHandleRef.current = h;
+          }),
         ]);
 
         const filename = buildFilename(consultantSlug, variant, format);
@@ -211,8 +239,15 @@ export function useDiagramExport({
         }
         toast.error("Não foi possível exportar o diagrama. Tente novamente.");
       } finally {
+        // Limpa o timeout pendente em todos os caminhos (sucesso ou erro):
+        // após o `Promise.race` resolver, o timer "perdedor" precisa ser
+        // cancelado para não rejeitar tardiamente.
+        if (timeoutHandleRef.current) {
+          clearTimeout(timeoutHandleRef.current);
+          timeoutHandleRef.current = null;
+        }
         inFlightRef.current = false;
-        setExporting(false);
+        if (!unmountedRef.current) setExporting(false);
       }
     },
     [consultantSlug, variant, reactFlowInstance],
