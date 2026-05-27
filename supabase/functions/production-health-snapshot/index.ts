@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
         // Instância
         const { data: inst } = await supabase
           .from("whatsapp_instances")
-          .select("connection_status, last_seen, updated_at")
+          .select("status, last_health_check_at, updated_at, connected_phone")
           .eq("consultant_id", c.id)
           .order("updated_at", { ascending: false })
           .limit(1)
