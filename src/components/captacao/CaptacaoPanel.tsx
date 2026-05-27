@@ -263,19 +263,19 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                 <>
                   <div className="px-3 py-1.5 border-b border-border/60 bg-card/40 flex flex-col gap-1.5 shrink-0">
                     <div className="flex items-center justify-between gap-2">
-                      <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setSelectedId(null)} title="Voltar">
+                      <Button size="icon" variant="ghost" className="md:hidden h-7 w-7 shrink-0" onClick={() => setSelectedId(null)} title="Voltar">
                         <ChevronLeft className="w-4 h-4" />
                       </Button>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[10px] md:text-xs text-muted-foreground">Alvo atual</p>
-                        <p className="text-sm font-semibold leading-tight break-words">{customerName || phone || "—"}</p>
+                      <div className="min-w-0 flex-1 flex items-baseline gap-1.5">
+                        <span className="text-[10px] text-muted-foreground shrink-0">Alvo:</span>
+                        <span className="text-sm font-semibold leading-tight truncate">{customerName || phone || "—"}</span>
                       </div>
-                      <div className="hidden sm:flex items-center gap-1 rounded-md border border-border/60 p-0.5 bg-background/40">
+                      <div className="hidden sm:flex items-center gap-0.5 rounded-md border border-border/60 p-0.5 bg-background/40">
                         {(["A", "B", "C"] as const).map((v) => (
                           <button
                             key={v}
                             onClick={() => changeVariant(v)}
-                            className={`px-2 py-0.5 text-[11px] font-bold rounded-sm transition ${variant === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40"}`}
+                            className={`px-1.5 py-0 text-[10px] font-bold rounded-sm transition ${variant === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40"}`}
                             title={`Fluxo variante ${v}`}
                           >
                             {v}
@@ -283,13 +283,13 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                         ))}
                       </div>
                       {phone && onOpenChat && (
-                        <Button size="sm" variant="outline" className="gap-1.5 shrink-0" onClick={() => onOpenChat(phone)}>
-                          <MessageCircle className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">Abrir conversa</span>
-                          <ExternalLink className="w-3 h-3" />
+                        <Button size="sm" variant="outline" className="gap-1 h-7 px-2 text-[11px] shrink-0" onClick={() => onOpenChat(phone)}>
+                          <MessageCircle className="w-3 h-3" />
+                          <span className="hidden lg:inline">Abrir conversa</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
                         </Button>
                       )}
-                      <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setShowAside((s) => !s)} title="Ficha">
+                      <Button size="icon" variant="ghost" className="md:hidden h-7 w-7 shrink-0" onClick={() => setShowAside((s) => !s)} title="Ficha">
                         <ChevronDown className={`w-4 h-4 transition-transform ${showAside ? "rotate-180" : ""}`} />
                       </Button>
                     </div>
@@ -412,21 +412,21 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
               <>
                 {/* Sub-header: nome do lead + botões */}
                 <div className="px-3 py-1.5 border-b border-border bg-card/40 flex items-center justify-between gap-2 shrink-0">
-                  <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setSelectedId(null)} title="Voltar">
+                  <Button size="icon" variant="ghost" className="md:hidden h-7 w-7 shrink-0" onClick={() => setSelectedId(null)} title="Voltar">
                     <ChevronLeft className="w-4 h-4" />
                   </Button>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[10px] md:text-xs text-muted-foreground">Conversando com</p>
-                    <p className="text-sm font-semibold leading-tight break-words">{customerName || phone || "—"}</p>
+                  <div className="min-w-0 flex-1 flex items-baseline gap-1.5">
+                    <span className="text-[10px] text-muted-foreground shrink-0">Conversando com:</span>
+                    <span className="text-sm font-semibold leading-tight truncate">{customerName || phone || "—"}</span>
                   </div>
                   {phone && onOpenChat && (
-                    <Button size="sm" variant="outline" className="gap-1.5 shrink-0" onClick={() => onOpenChat(phone)}>
-                      <MessageCircle className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Abrir conversa</span>
-                      <ExternalLink className="w-3 h-3" />
+                    <Button size="sm" variant="outline" className="gap-1 h-7 px-2 text-[11px] shrink-0" onClick={() => onOpenChat(phone)}>
+                      <MessageCircle className="w-3 h-3" />
+                      <span className="hidden lg:inline">Abrir conversa</span>
+                      <ExternalLink className="w-2.5 h-2.5" />
                     </Button>
                   )}
-                  <Button size="icon" variant="ghost" className="md:hidden h-8 w-8 shrink-0" onClick={() => setShowAside((s) => !s)} title="Ficha do lead">
+                  <Button size="icon" variant="ghost" className="md:hidden h-7 w-7 shrink-0" onClick={() => setShowAside((s) => !s)} title="Ficha do lead">
                     <ChevronDown className={`w-4 h-4 transition-transform ${showAside ? "rotate-180" : ""}`} />
                   </Button>
                 </div>

@@ -270,16 +270,16 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
 
 
       {!embedded && (
-        <div className="p-3 border-t border-border space-y-2">
+        <div className="p-2 border-t border-border space-y-1.5">
           <Button
-            size="lg"
-            className={`w-full gap-2 font-black text-base ${canSubmit
-              ? "bg-gradient-to-r from-primary via-emerald-400 to-primary bg-[length:200%_100%] text-primary-foreground hover:opacity-95 exec-bar-active shadow-[0_0_24px_hsl(var(--primary)/0.4)]"
+            size="default"
+            className={`w-full gap-2 font-bold text-sm ${canSubmit
+              ? "bg-gradient-to-r from-primary via-emerald-400 to-primary bg-[length:200%_100%] text-primary-foreground hover:opacity-95 exec-bar-active shadow-[0_0_14px_hsl(var(--primary)/0.25)]"
               : ""}`}
             disabled={!canSubmit || submitting}
             onClick={() => void handleSubmit()}
           >
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trophy className="w-4 h-4" />}
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trophy className="w-3.5 h-3.5" />}
             {canSubmit ? "FINALIZAR CADASTRO" : "CADASTRAR TUDO"}
           </Button>
           <p className="text-[10px] text-center text-muted-foreground">

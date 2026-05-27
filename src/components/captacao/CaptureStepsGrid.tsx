@@ -204,7 +204,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
           <div className="h-full bg-gradient-to-r from-emerald-500 to-lime-400 transition-all duration-500"
                style={{ width: `${Math.round((sentSteps.size / Math.max(display.length, 1)) * 100)}%` }} />
         </div>
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] 2xl:grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-1 capture-card-flip">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(96px,1fr))] 2xl:grid-cols-[repeat(auto-fit,minmax(108px,1fr))] gap-1 capture-card-flip">
           {display.map((s: StepRow, i: number) => {
             const sent = sentSteps.has(s.id);
             const isSending = sending === s.id;
@@ -213,39 +213,36 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
             return (
               <div
                 key={s.id}
-                className={`group relative rounded-md border p-2 flex flex-col h-full min-h-[128px] transition-all duration-300 ${
+                className={`group relative rounded-md border p-1.5 flex flex-col h-full min-h-[88px] transition-all duration-300 ${
                   sent
-                    ? "border-primary/60 bg-gradient-to-br from-primary/15 to-emerald-500/5 shadow-[0_0_14px_hsl(var(--primary)/0.2)] animate-exec-card"
+                    ? "border-primary/60 bg-gradient-to-br from-primary/15 to-emerald-500/5 shadow-[0_0_10px_hsl(var(--primary)/0.18)] animate-exec-card"
                     : isNext
                         ? "border-primary bg-card hover:border-primary/80 hover:shadow-lg hover:-translate-y-0.5 ring-1 ring-primary/30"
                         : "border-border bg-card hover:border-primary/40"
                 }`}
               >
-                <div className="flex items-start justify-between mb-1.5">
-                  <span className={`text-[10px] font-black tabular-nums px-1.5 py-0.5 rounded ${sent ? "bg-primary text-primary-foreground" : "bg-secondary text-primary"}`}>Passo {s.position}</span>
-                  {sent ? (
-                    <Check className="w-3.5 h-3.5 text-primary drop-shadow-[0_0_4px_hsl(var(--primary))]" />
-                  ) : null}
+                <div className="flex items-center gap-1 mb-1">
+                  <span className={`text-[9px] font-black tabular-nums px-1 py-px rounded ${sent ? "bg-primary text-primary-foreground" : "bg-secondary text-primary"}`}>P{s.position}</span>
+                  <div className="flex items-center gap-0.5 ml-auto">
+                    <Mic className={`w-2.5 h-2.5 ${s.has_audio ? "text-emerald-400" : "text-muted-foreground/25"}`} />
+                    <ImageIcon className={`w-2.5 h-2.5 ${s.has_image ? "text-amber-400" : "text-muted-foreground/25"}`} />
+                    <Video className={`w-2.5 h-2.5 ${s.has_video ? "text-cyan-400" : "text-muted-foreground/25"}`} />
+                    {sent && <Check className="w-3 h-3 text-primary drop-shadow-[0_0_4px_hsl(var(--primary))] ml-0.5" />}
+                  </div>
                 </div>
-                <p className="text-[11px] font-semibold leading-tight line-clamp-2 break-words">
+                <p className="text-[10.5px] font-semibold leading-tight line-clamp-2 break-words">
                   {s.title || s.step_key || "Passo"}
                 </p>
                 {inlinePreview && (
-                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground line-clamp-2 italic break-words">
+                  <p className="hidden xl:block mt-0.5 text-[10px] leading-snug text-muted-foreground line-clamp-1 italic break-words">
                     “{inlinePreview}”
                   </p>
                 )}
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <MessageCircle className="w-3 h-3 text-emerald-400/80" />
-                  <Mic className={`w-3 h-3 ${s.has_audio ? "text-emerald-400" : "text-muted-foreground/30"}`} />
-                  <ImageIcon className={`w-3 h-3 ${s.has_image ? "text-amber-400" : "text-muted-foreground/30"}`} />
-                  <Video className={`w-3 h-3 ${s.has_video ? "text-cyan-400" : "text-muted-foreground/30"}`} />
-                </div>
-                <div className="mt-auto pt-2 flex items-center gap-1">
+                <div className="mt-auto pt-1 flex items-center gap-0.5">
                   <Button
                     size="sm"
                     variant={sent ? "outline" : "default"}
-                    className="h-7 px-2 text-[10px] flex-1 min-w-0"
+                    className="h-6 px-1.5 text-[9px] flex-1 min-w-0"
                     onClick={() => setPreviewStep(s)}
                     disabled={isSending}
                     aria-busy={isSending}
@@ -255,8 +252,8 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                       <Loader2 className="w-3 h-3 animate-spin" />
                     ) : (
                       <>
-                        <Eye className="w-3 h-3 mr-1 shrink-0" />
-                        <span className="truncate">{sent ? "Reenviar" : "Ver e enviar"}</span>
+                        <Eye className="w-3 h-3 xl:mr-1 shrink-0" />
+                        <span className="hidden xl:inline truncate">{sent ? "Reenviar" : "Ver e enviar"}</span>
                       </>
                     )}
                   </Button>
@@ -264,7 +261,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-8 w-8 p-0 shrink-0"
+                      className="h-6 w-6 p-0 shrink-0"
                       onClick={() => void loadTemplate(s.id, s.step_key)}
                       title="Editar antes de enviar"
                     >
