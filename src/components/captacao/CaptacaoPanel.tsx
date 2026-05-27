@@ -241,7 +241,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
             <ExecHudBar progress={progress} />
           </div>
 
-          <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "13rem", "--cap-aside-w": "22rem" } as React.CSSProperties}>
+          <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "12rem", "--cap-aside-w": "17rem" } as React.CSSProperties}>
             {/* Mobile: lead list visível só quando NÃO há lead selecionado. Desktop: sempre. */}
             <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 md:border-r border-border overflow-hidden`}>
 
@@ -266,9 +266,8 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       <Button size="icon" variant="ghost" className="md:hidden h-7 w-7 shrink-0" onClick={() => setSelectedId(null)} title="Voltar">
                         <ChevronLeft className="w-4 h-4" />
                       </Button>
-                      <div className="min-w-0 flex-1 flex items-baseline gap-1.5">
-                        <span className="text-[10px] text-muted-foreground shrink-0">Alvo:</span>
-                        <span className="text-sm font-semibold leading-tight truncate">{customerName || phone || "—"}</span>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-xs font-semibold leading-tight truncate block">{customerName || phone || "—"}</span>
                       </div>
                       <div className="hidden sm:flex items-center gap-0.5 rounded-md border border-border/60 p-0.5 bg-background/40">
                         {(["A", "B", "C"] as const).map((v) => (
@@ -374,7 +373,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                 </>
               )}
             </main>
-              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={352} minPx={260} maxPx={560} invert />
+              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={272} minPx={220} maxPx={520} invert />
             {/* Desktop aside: ficha quando há lead, achievements quando não */}
             <div className="hidden md:flex md:flex-col md:w-[var(--cap-aside-w)] md:border-l border-border/60 overflow-hidden">
 
@@ -389,7 +388,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           </div>
         </GameShell>
       ) : (
-        <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "13rem", "--cap-aside-w": "22rem" } as React.CSSProperties}>
+        <div data-resize-scope className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden" style={{ "--cap-list-w": "12rem", "--cap-aside-w": "17rem" } as React.CSSProperties}>
           {/* Lista: full-width no mobile sem seleção; escondida no mobile com seleção; sidebar fixa em md+ */}
           <div className={`${selectedId ? "hidden md:flex" : "flex"} md:flex flex-col md:w-[var(--cap-list-w)] md:shrink-0 overflow-hidden`}>
             <CaptureLeadList consultantId={consultantId} selectedId={selectedId} onSelect={setSelectedId} />
@@ -414,9 +413,8 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                   <Button size="icon" variant="ghost" className="md:hidden h-7 w-7 shrink-0" onClick={() => setSelectedId(null)} title="Voltar">
                     <ChevronLeft className="w-4 h-4" />
                   </Button>
-                  <div className="min-w-0 flex-1 flex items-baseline gap-1.5">
-                    <span className="text-[10px] text-muted-foreground shrink-0">Conversando com:</span>
-                    <span className="text-sm font-semibold leading-tight truncate">{customerName || phone || "—"}</span>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs font-semibold leading-tight truncate block">{customerName || phone || "—"}</span>
                   </div>
                   {phone && onOpenChat && (
                     <Button size="sm" variant="outline" className="gap-1 h-7 px-2 text-[11px] shrink-0" onClick={() => onOpenChat(phone)}>
@@ -489,7 +487,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           {/* Ficha desktop fixa à direita */}
           {selectedId && (
             <>
-              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={352} minPx={260} maxPx={560} invert />
+              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={272} minPx={220} maxPx={520} invert />
               <div className="hidden md:flex md:w-[var(--cap-aside-w)] md:shrink-0">
                 <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />
               </div>
