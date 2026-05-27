@@ -178,51 +178,45 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
             poupam altura vertical. Campos longos (nome, email) ocupam linha
             inteira via col-span-2.
           */}
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="flex flex-col gap-1">
           {CAPTURE_FIELDS.filter((f) => f.key !== "document_front_url").map(f => {
             const v = (customer as any)[f.key];
             const filled = v !== null && v !== undefined && String(v).trim() !== "" && (f.key !== "electricity_bill_value" || Number(v) > 0);
             const isEditingThis = editing === f.key;
             const sugg = suggestionByField.get(f.key);
             const isFlashing = flashKey === f.key;
-            // Campos largos ocupam as 2 colunas
-            const wide = f.key === "name" || f.key === "email";
 
             return (
               <div
                 key={f.key}
-                className={`group rounded-md border transition-all px-2 py-1 ${wide ? "col-span-2" : ""} ${
+                onClick={() => { if (!isEditingThis) startEdit(f.key); }}
+                className={`group cursor-text rounded-md border transition-all px-2 py-1 ${
                   isFlashing ? "animate-exec-card border-primary bg-primary/10" :
-                  sugg ? "border-amber-400/60 bg-amber-400/5 ring-1 ring-amber-400/30 animate-pulse" :
-                  filled ? "border-primary/30 bg-primary/5" : "border-border bg-background hover:border-primary/30"
+                  sugg ? "border-amber-400/60 bg-amber-400/5 ring-1 ring-amber-400/30" :
+                  filled ? "border-primary/25 bg-primary/[0.04] hover:border-primary/40" : "border-border/60 bg-background/40 hover:border-primary/30 hover:bg-background"
                 }`}
               >
-                {/* Header da linha: bullet + label + ação */}
                 <div className="flex items-center gap-1.5 min-w-0">
-                  {filled ? <Check className="w-3 h-3 text-primary shrink-0" /> : <div className="w-2.5 h-2.5 rounded-full border-2 border-muted-foreground/30 shrink-0" />}
-                  <span className="font-bold uppercase tracking-wider text-muted-foreground shrink-0 text-[9px]">{f.label}</span>
-                  {!isEditingThis && filled && (
-                    <button onClick={() => startEdit(f.key)} className="ml-auto opacity-50 group-hover:opacity-100 transition-opacity shrink-0" title="Editar">
-                      <Edit2 className="w-3 h-3 text-muted-foreground hover:text-primary" />
-                    </button>
+                  {filled ? (
+                    <Check className="w-3 h-3 text-primary shrink-0" />
+                  ) : (
+                    <div className="w-2 h-2 rounded-full border border-muted-foreground/40 shrink-0" />
                   )}
-                  {!isEditingThis && !filled && (
-                    <button onClick={() => startEdit(f.key)} className="ml-auto text-[9px] text-primary/80 hover:text-primary font-semibold shrink-0 uppercase tracking-wide">
-                      + add
-                    </button>
+                  <span className="font-semibold uppercase tracking-wide text-muted-foreground/80 shrink-0 text-[9px] w-[68px]">{f.label}</span>
+                  {!isEditingThis && (
+                    <p
+                      className={`flex-1 min-w-0 truncate text-[11px] leading-tight ${filled ? "text-foreground font-medium" : "text-muted-foreground/40 italic"}`}
+                      title={filled ? String(v) : undefined}
+                    >
+                      {filled ? String(v) : "toque para preencher"}
+                    </p>
+                  )}
+                  {!isEditingThis && filled && (
+                    <Edit2 className="w-3 h-3 text-muted-foreground/40 group-hover:text-primary shrink-0 transition" />
                   )}
                 </div>
-                {/* Valor abaixo (largura total → não corta) */}
-                {!isEditingThis && (
-                  <p
-                    className={`mt-px break-words text-[11px] leading-tight ${filled ? "text-foreground font-medium" : "text-muted-foreground/40 italic"}`}
-                    title={filled ? String(v) : undefined}
-                  >
-                    {filled ? String(v) : "—"}
-                  </p>
-                )}
                 {isEditingThis && (
-                  <div className="mt-1 flex items-center gap-1">
+                  <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     <Input
                       value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
@@ -235,7 +229,7 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
                   </div>
                 )}
                 {sugg && !isEditingThis && (
-                  <div className="mt-1 flex items-center gap-1 rounded bg-amber-400/10 border border-amber-400/40 px-1 py-0.5">
+                  <div className="mt-1 flex items-center gap-1 rounded bg-amber-400/10 border border-amber-400/40 px-1 py-0.5" onClick={(e) => e.stopPropagation()}>
                     <Bot className="w-3 h-3 text-amber-500 shrink-0" />
                     <span className="text-[10px] flex-1 truncate text-amber-700 dark:text-amber-300">
                       IA: <strong>{sugg.suggested_value}</strong>
