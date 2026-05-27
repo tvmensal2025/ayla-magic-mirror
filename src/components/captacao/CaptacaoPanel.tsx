@@ -8,7 +8,7 @@ import { CaptureScoreboard } from "@/components/captacao/CaptureScoreboard";
 import { CaptureMissionsPanel, bumpMission } from "@/components/captacao/CaptureMissionsPanel";
 import { useCaptureScoreboard } from "@/hooks/useCaptureScoreboard";
 import { Button } from "@/components/ui/button";
-import { ClipboardList, ExternalLink, MessageCircle, ChevronLeft, ChevronDown } from "lucide-react";
+import { ClipboardList, ExternalLink, MessageCircle, ChevronLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { GameModeToggle } from "@/components/captacao/game/GameModeToggle";
 import { GameShell } from "@/components/captacao/game/GameShell";
