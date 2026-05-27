@@ -46,6 +46,7 @@ import { detectDocumentType } from "../../_shared/detect-doc-type.ts";
 import { uploadMediaToMinio, OCR_CONFIDENCE_THRESHOLD } from "../_helpers.ts";
 import { jsonLog } from "../../_shared/audit.ts";
 import { isMockMode, isCustomerSandbox, shouldBypassQuietHours, shouldUseFastClock } from "../../_shared/test-mode.ts";
+import { isFlowInstantMode } from "../../_shared/flow-pace.ts";
 import { notifyHandoff } from "../../_shared/notify-consultant.ts";
 import type { BotContext, BotResult } from "./types.ts";
 
