@@ -40,6 +40,19 @@ export const HUMAN_PACE_IA_PAUSE_CAP_SEC = 8;
  * Não inclui pausa pedida pela IA — caller soma separado se quiser.
  */
 export function computeHumanDelayMs(charLen: number): number {
+  // Modo instantâneo: zero pausa antes de cada mensagem outbound.
+  // Lazy import para não quebrar testes que rodam human-pace isolado.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { isFlowInstantMode } = require("./flow-pace.ts");
+    if (isFlowInstantMode()) return 0;
+  } catch (_) {
+    // Deno: usa import dinâmico ou env direto como fallback.
+    try {
+      const raw = (Deno.env.get("FLOW_INSTANT_MODE") ?? "true").toLowerCase();
+      if (raw !== "false" && raw !== "0" && raw !== "off") return 0;
+    } catch (_) { /* segue cálculo normal */ }
+  }
   const len = Math.max(0, Math.floor(charLen || 0));
   const floor = len <= HUMAN_PACE_SHORT_THRESHOLD
     ? HUMAN_PACE_FLOOR_SHORT_MS
