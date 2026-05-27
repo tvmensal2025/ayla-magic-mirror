@@ -266,9 +266,8 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
                       <Button size="icon" variant="ghost" className="md:hidden h-7 w-7 shrink-0" onClick={() => setSelectedId(null)} title="Voltar">
                         <ChevronLeft className="w-4 h-4" />
                       </Button>
-                      <div className="min-w-0 flex-1 flex items-baseline gap-1.5">
-                        <span className="text-[10px] text-muted-foreground shrink-0">Alvo:</span>
-                        <span className="text-sm font-semibold leading-tight truncate">{customerName || phone || "—"}</span>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-xs font-semibold leading-tight truncate block">{customerName || phone || "—"}</span>
                       </div>
                       <div className="hidden sm:flex items-center gap-0.5 rounded-md border border-border/60 p-0.5 bg-background/40">
                         {(["A", "B", "C"] as const).map((v) => (
