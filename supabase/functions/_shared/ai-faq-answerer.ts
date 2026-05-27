@@ -1,54 +1,29 @@
-// AI FAQ Answerer — fallback Lovable AI quando lead pergunta algo
-// que NÃO existe em bot_flow_qa. Usa ai_knowledge_sections como RAG.
+// AI FAQ Answerer — busca DETERMINÍSTICA na base de conhecimento.
 //
-// Filosofia:
-// - Resposta curta (máx 3 frases)
-// - Tom conversacional brasileiro, sem emoji exagerado
-// - Se não souber responder com confiança → retorna null (bot mantém comportamento default: repete passo ou faz handoff)
-// - NUNCA inventa números, prazos ou taxas que não estejam no conhecimento.
+// Política (atualizada 2026-05-26):
+//   - NUNCA chama LLM para gerar texto criativo.
+//   - Usa `lookupKnowledge` (knowledge-lookup.ts) que faz:
+//       1. Match exato em `bot_flow_qa.text_response` via triggers
+//       2. Match fuzzy por keywords em `bot_flow_qa_triggers`
+//       3. Match em `ai_knowledge_sections.keywords[]` ou content
+//   - Se nenhum match → shouldHandoff=true, source="skipped".
 //
-// Task 30 (whatsapp-flow-reliability-fix): antes de chamar o LLM, prefere
-// `bot_flow_qa.text_response` quando há match exato (case-insensitive,
-// trim, colapso de whitespace) entre a pergunta do lead e qualquer
-// `phrase` em `bot_flow_qa_triggers` para o flow do consultor. Mantém
-// o LLM como fallback quando não há QA cadastrada ou quando a pergunta
-// só "encosta" em alguma trigger sem ser exata.
+// O parâmetro `model` permanece na assinatura por compatibilidade com
+// callers legacy (ai-agent-router) mas é IGNORADO. A IA não escreve
+// texto livre em nenhum cenário.
 
-import { aiChatCascade } from "./ai-gateway.ts";
-import { trackAIUsage } from "./ai-cost-tracker.ts";
+import { lookupKnowledge } from "./knowledge-lookup.ts";
 
 export interface FaqAnswer {
   text: string;
   confidence: number;          // 0..1
   shouldHandoff: boolean;      // true → pergunta exige humano
-  source: "ai" | "skipped" | "exact_qa";
+  source: "ai" | "skipped" | "exact_qa" | "fuzzy_qa" | "keyword_section";
 }
-
-interface KnowledgeSection {
-  title: string;
-  content: string;
-}
-
-const SYSTEM_PROMPT = `Você é a assistente sênior da iGreen Energy respondendo dúvidas de leads no WhatsApp. Sua missão é tirar QUALQUER dúvida do lead de forma clara, segura e que dê confiança para ele seguir com o cadastro.
-
-REGRAS RÍGIDAS:
-1. Responda APENAS com base no CONHECIMENTO fornecido + no contexto da conversa. NUNCA invente preços, prazos, taxas, distribuidoras, números ou benefícios que não estejam ali.
-2. Resposta clara e completa: 2 a 5 frases. Sem listas longas, sem markdown pesado, no máximo 1 emoji simples.
-3. Tom brasileiro, simpático, direto e profissional. Trate o lead pelo primeiro nome quando souber.
-4. Se a pergunta exigir cálculo individual da conta dele, negociação, análise de documento específico, cancelamento, reclamação séria, raiva, desistência ou pedido explícito de humano → shouldHandoff=true (e ainda assim escreva uma resposta curta acolhedora).
-5. Sempre termine com um convite leve para continuar (ex: "Posso seguir com seu cadastro?" / "Quer que eu te ajude com o próximo passo?").
-6. confidence: 0.9+ se a resposta está claramente coberta; 0.6-0.8 se parcial; <0.6 se você não sabe — nesse caso shouldHandoff=true.
-7. NUNCA mencione áudio, vídeo ou que vai "mandar de novo" o material. Você está respondendo só com texto.
-
-Retorne JSON: {"text": "...", "confidence": 0.0-1.0, "shouldHandoff": true|false}`;
-
 
 /**
- * Normaliza texto para match exato de FAQ:
- *   - lowercase
- *   - remove diacríticos (NFD + remove combining marks)
- *   - trim + colapsa whitespace
- *   - remove pontuação final comum (?, !, ., ,)
+ * Normaliza texto para match exato. Mantida exportada para backward
+ * compat com callers legacy (`evolution-webhook`, `whapi-webhook`).
  */
 export function normalizeFaqQuestion(text: string): string {
   if (!text) return "";
@@ -63,67 +38,18 @@ export function normalizeFaqQuestion(text: string): string {
 }
 
 /**
- * Tenta resolver a pergunta direto em `bot_flow_qa.text_response` quando
- * existe match exato (após `normalizeFaqQuestion`) com qualquer phrase
- * em `bot_flow_qa_triggers` para o flow ativo do consultor.
+ * Resposta de FAQ baseada APENAS em conteúdo persistido.
  *
- * Retorna null se não houver match — caller deve seguir com LLM.
+ * Hierarquia (em ordem de confiança):
+ *   1. `bot_flow_qa` match exato (consultor cadastrou pergunta literal)
+ *   2. `bot_flow_qa` match fuzzy (palavras-chave do lead encostam)
+ *   3. `ai_knowledge_sections` (seções com keywords[] ou content)
+ *   4. Sem match → `shouldHandoff=true` + texto vazio
  *
- * Implementação cuidadosa:
- *   - Filtra QA por `consultant_id` via JOIN com `bot_flows.is_active=true`.
- *   - Match por igualdade direta entre triggers normalizados e a pergunta
- *     normalizada (sem fuzzy/ILIKE — Task 30 pede EXATO).
- *   - Se múltiplas QA cobrem o mesmo trigger, escolhe a de menor `position`
- *     (mais "alta" no fluxo) e ignora QA sem `text_response` (que provavelmente
- *     dependem só de mídia).
+ * Nunca chama LLM. Nunca inventa texto. Confiança 1.0 (exato), 0.7
+ * (fuzzy QA), 0.5 (seção). Caller pode escolher só agir com
+ * `confidence ≥ 0.7` se quiser ser conservador.
  */
-async function findExactFaqMatch(opts: {
-  supabase: any;
-  question: string;
-  consultantId?: string;
-}): Promise<{ text: string } | null> {
-  const norm = normalizeFaqQuestion(opts.question);
-  if (!norm) return null;
-
-  // Pega flow ativo do consultor (qualquer variante; QA é por consultor).
-  let flowIds: string[] = [];
-  if (opts.consultantId) {
-    const { data: flows } = await opts.supabase
-      .from("bot_flows")
-      .select("id")
-      .eq("consultant_id", opts.consultantId)
-      .eq("is_active", true);
-    flowIds = ((flows as Array<{ id: string }>) || []).map((f) => f.id);
-  }
-  if (flowIds.length === 0) return null;
-
-  // Carrega triggers + QA de uma vez. RLS dos JOINs é coberto pelo filtro
-  // explícito por flow_id nos campos selecionados.
-  const { data: triggers } = await opts.supabase
-    .from("bot_flow_qa_triggers")
-    .select("phrase, qa_id, bot_flow_qa!inner(id, flow_id, position, text_response)")
-    .in("bot_flow_qa.flow_id", flowIds);
-
-  type Row = {
-    phrase: string;
-    qa_id: string;
-    bot_flow_qa: { id: string; flow_id: string; position: number; text_response: string | null };
-  };
-  const rows = ((triggers as unknown) as Row[]) || [];
-  const candidates: Array<{ position: number; text: string }> = [];
-  for (const row of rows) {
-    const text = (row.bot_flow_qa?.text_response || "").trim();
-    if (!text) continue;
-    if (normalizeFaqQuestion(row.phrase) === norm) {
-      candidates.push({ position: row.bot_flow_qa.position, text });
-    }
-  }
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => a.position - b.position);
-  return { text: candidates[0].text };
-}
-
-
 export async function answerFaqWithAI(opts: {
   supabase: any;
   question: string;
@@ -131,114 +57,73 @@ export async function answerFaqWithAI(opts: {
   currentStepLabel?: string;
   consultantId?: string;
   recentHistory?: string;
+  /** @deprecated kept for backward compat; LLM is never invoked. */
   model?: string;
+  /** @deprecated kept for backward compat; lookups are synchronous-ish. */
   signal?: AbortSignal;
 }): Promise<FaqAnswer> {
-
   const q = (opts.question || "").trim();
   if (!q || q.length < 3) {
     return { text: "", confidence: 0, shouldHandoff: false, source: "skipped" };
   }
 
-  // Task 30: shortcut exato em bot_flow_qa antes de pagar LLM.
-  // Garante consistência (resposta cadastrada pelo consultor sempre vence
-  // o que a IA inventaria) e poupa quota Gemini para perguntas que
-  // realmente precisam de raciocínio.
-  try {
-    const exact = await findExactFaqMatch({
-      supabase: opts.supabase,
-      question: q,
-      consultantId: opts.consultantId,
-    });
-    if (exact) {
-      return {
-        text: exact.text.slice(0, 1200),
-        confidence: 1,
-        shouldHandoff: false,
-        source: "exact_qa",
-      };
-    }
-  } catch (e) {
-    console.warn("[ai-faq-answerer] exact-match lookup failed (fallback to LLM):", (e as Error).message);
-  }
+  const consultantId = opts.consultantId || "";
 
-  // Busca knowledge base: seções do consultor + globais (max ~6KB de contexto pra ficar barato)
-  const { data: sections } = await opts.supabase
-    .from("ai_knowledge_sections")
-    .select("title, content")
-    .eq("is_active", true)
-    .or(`consultant_id.is.null${opts.consultantId ? `,consultant_id.eq.${opts.consultantId}` : ""}`)
-    .order("position", { ascending: true })
-    .limit(20);
-
-  const knowledge = ((sections as KnowledgeSection[]) || [])
-    .map((s) => `### ${s.title}\n${(s.content || "").slice(0, 800)}`)
-    .join("\n\n")
-    .slice(0, 6000);
-
-  if (!knowledge) {
-    // Sem base de conhecimento: melhor mandar pra humano
-    return { text: "", confidence: 0, shouldHandoff: true, source: "skipped" };
-  }
-
-  const userPrompt = `CONHECIMENTO IGREEN:
-${knowledge}
-
-CONTEXTO:
-- Nome do lead: ${opts.leadName || "(desconhecido)"}
-- Passo atual do funil: ${opts.currentStepLabel || "(início)"}
-${opts.recentHistory ? `\nÚLTIMAS MENSAGENS DA CONVERSA:\n${opts.recentHistory.slice(0, 2000)}\n` : ""}
-PERGUNTA DO LEAD: "${q.slice(0, 600)}"`;
-
-  try {
-    const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 15_000);
-    const res = await aiChatCascade({
-      model: opts.model || "google/gemini-3.1-pro-preview",
-      temperature: 0.35,
-      maxTokens: 500,
-      jsonSchema: {
-        name: "faq_answer",
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            text: { type: "string" },
-            confidence: { type: "number" },
-            shouldHandoff: { type: "boolean" },
-          },
-          required: ["text", "confidence", "shouldHandoff"],
-        },
-      },
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userPrompt },
-      ],
-      signal: opts.signal || ctrl.signal,
-    });
-    clearTimeout(to);
-
-    void trackAIUsage({
-      supabase: opts.supabase,
-      consultantId: opts.consultantId,
-      model: res.modelUsed,
-      phase: "faq",
-      usage: res.usage,
-    });
-
-    const parsed = res.json;
-    if (!parsed || typeof parsed.text !== "string") {
+  if (consultantId) {
+    try {
+      const r = await lookupKnowledge({
+        supabase: opts.supabase,
+        question: q,
+        consultantId,
+      });
+      if (r.found) {
+        return {
+          text: r.text.slice(0, 1200),
+          confidence: r.confidence,
+          shouldHandoff: false,
+          source: r.source as FaqAnswer["source"],
+        };
+      }
+      return { text: "", confidence: 0, shouldHandoff: r.shouldHandoff, source: "skipped" };
+    } catch (e) {
+      console.warn("[ai-faq-answerer] lookupKnowledge failed:", (e as Error).message);
       return { text: "", confidence: 0, shouldHandoff: true, source: "skipped" };
     }
+  }
 
-    return {
-      text: String(parsed.text).trim().slice(0, 1200),
-      confidence: Number(parsed.confidence) || 0,
-      shouldHandoff: !!parsed.shouldHandoff,
-      source: "ai",
-    };
+  // Sem consultantId: tenta apenas ai_knowledge_sections global.
+  try {
+    const { data: sections } = await opts.supabase
+      .from("ai_knowledge_sections")
+      .select("title, content, keywords")
+      .eq("is_active", true);
+    type Row = { title: string; content: string; keywords: string[] | null };
+    const rows = ((sections as unknown) as Row[]) || [];
+    if (rows.length === 0) {
+      return { text: "", confidence: 0, shouldHandoff: true, source: "skipped" };
+    }
+    const norm = (s: string) =>
+      s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const qNorm = norm(q);
+    const tokens = qNorm.split(/\s+/).filter((t) => t.length >= 3);
+    let best: { score: number; row: Row } | null = null;
+    for (const row of rows) {
+      const kwBag = (row.keywords || []).map(norm);
+      let score = 0;
+      for (const t of tokens) {
+        if (kwBag.some((k) => k.includes(t))) score += 2;
+        else if (norm(row.title).includes(t)) score += 1;
+        else if (norm(row.content).includes(t)) score += 1;
+      }
+      if (score > 0 && (!best || score > best.score)) best = { score, row };
+    }
+    if (!best || best.score < 2) {
+      return { text: "", confidence: 0, shouldHandoff: true, source: "skipped" };
+    }
+    const text = (best.row.content || "").slice(0, 600);
+    return { text, confidence: 0.5, shouldHandoff: false, source: "keyword_section" };
   } catch (e) {
-    console.warn("[ai-faq-answerer] failed:", (e as Error).message);
-    return { text: "", confidence: 0, shouldHandoff: false, source: "skipped" };
+    console.warn("[ai-faq-answerer] global knowledge lookup failed:", (e as Error).message);
+    return { text: "", confidence: 0, shouldHandoff: true, source: "skipped" };
   }
 }

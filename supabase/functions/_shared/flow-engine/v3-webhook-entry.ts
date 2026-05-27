@@ -73,6 +73,13 @@ export interface V3WebhookEntryArgs {
   /** Optional bot test run correlation, forwarded to bot_test_outbound. */
   testRunId?: string | null;
   testTurn?: number | null;
+  /**
+   * Quando true, o engine pula DeferredAction de OCR/portal em capture
+   * steps e avança seco. Usado pelo simulador para que leads-fake
+   * percorram o fluxo sem precisar mandar foto real. Default: false
+   * (produção real chama OCR via deferred).
+   */
+  testFastForward?: boolean;
 }
 
 export interface V3WebhookEntryResult {
@@ -177,12 +184,13 @@ function bindCaptures(args: { inbound: InboundEvent; specs: CaptureSpec[] }): Re
  * Build the per-turn `EngineConfig`. Time and randomness are surfaced
  * here (the runner stays pure) — see design §2.1.4.
  */
-function makeConfig(): EngineConfig {
+function makeConfig(opts?: { testFastForward?: boolean }): EngineConfig {
   const nowMs = Date.now();
   return {
     now: new Date(nowMs).toISOString(),
     minuteBucket: Math.floor(nowMs / 60_000),
     isDarkMode: false,
+    testFastForward: opts?.testFastForward === true,
     allowedDomains: ["igreen.energy"],
     idempotencyKeyFn: (parts) =>
       `${parts.stepId}:${parts.content}:${parts.minuteBucket}`,
@@ -319,7 +327,22 @@ export async function runEngineV3WebhookEntry(
       capabilities: args.adapter.capabilities,
     });
     const inbound = toInboundEvent(args.inbound);
-    const config = makeConfig();
+    // Habilita testFastForward quando:
+    //  - chamador passou explicitamente (E2E runner via flag)
+    //  - OU o customer está em test mode (header x-test-mode com
+    //    realServices=false → simulador sandbox tradicional)
+    //  - OU phone do customer é sandbox (5500000…) / is_sandbox=true
+    // Em produção real (cliente normal) → false → engine emite deferred
+    // OCR/portal e o dispatcher resolve via legacy pipeline.
+    let ctxIsTest = false;
+    try {
+      const tm = await import("../test-mode.ts");
+      ctxIsTest = (typeof tm.isMockMode === "function" && tm.isMockMode()) ||
+        (typeof tm.isTestPhone === "function" && tm.isTestPhone(args.jid));
+    } catch (_) { /* test-mode optional */ }
+    const config = makeConfig({
+      testFastForward: args.testFastForward === true || ctxIsTest === true,
+    });
     const hooks = makeHooks();
 
     const result = runEngine({
@@ -335,6 +358,124 @@ export async function runEngineV3WebhookEntry(
     // result.logs para que o dispatcher persista em `engine_logs`.
     if (ctx.warnings && ctx.warnings.length > 0) {
       result.logs.push(...ctx.warnings);
+    }
+
+    // ─── Deferred ai_answer: resolução SEM LLM ──────────────────────
+    // Política IA = só RAG (busca em bot_flow_qa + ai_knowledge_sections).
+    // Se achou resposta na base → emite outbound com texto do banco.
+    // Se NÃO achou → converte em handoff (não chama LLM, não inventa).
+    // Mantém o engine puro (resolução acontece aqui no dispatcher impuro).
+    if (result.deferred?.kind === "ai_answer") {
+      try {
+        const { lookupKnowledge } = await import("../knowledge-lookup.ts");
+        const lookup = await lookupKnowledge({
+          supabase: args.supabase,
+          question: result.deferred.question,
+          consultantId: args.consultantId,
+        });
+        if (lookup.found && lookup.text) {
+          // Encontrou resposta na base — anexa como outbound de texto
+          // ANTES do que o engine emitiu (geralmente vazio para ai_answer).
+          const stepId = result.deferred.stepId;
+          result = {
+            ...result,
+            outbound: [
+              {
+                kind: "text" as const,
+                text: lookup.text,
+                idempotencyContent: `kb:${stepId}:${lookup.source}:${lookup.text.slice(0, 60)}`,
+              },
+              ...result.outbound,
+            ],
+            logs: [
+              ...result.logs,
+              {
+                kind: "engine_ai_answer_deferred" as const,
+                at: config.now,
+                customerId: args.customerId,
+                flowId: ctx.flow.id,
+                stepId,
+                payload: {
+                  resolved_via: "knowledge_lookup",
+                  source: lookup.source,
+                  confidence: lookup.confidence,
+                  text_len: lookup.text.length,
+                },
+              },
+            ],
+          };
+          // Limpa deferred — não é mais async pendente.
+          delete result.deferred;
+        } else {
+          // Nada na base → handoff humano com mensagem fixa (sem LLM).
+          const stepId = result.deferred.stepId;
+          result = {
+            ...result,
+            outbound: [
+              ...result.outbound,
+              {
+                kind: "text" as const,
+                text: "Vou pedir para alguém do time te explicar essa parte 🙌",
+                idempotencyContent: `kb-handoff:${stepId}`,
+              },
+            ],
+            stateUpdate: {
+              ...result.stateUpdate,
+              status: "paused_system",
+              pauseReason: "ai_no_kb_match",
+            },
+            logs: [
+              ...result.logs,
+              {
+                kind: "engine_handoff" as const,
+                at: config.now,
+                customerId: args.customerId,
+                flowId: ctx.flow.id,
+                stepId,
+                payload: {
+                  reason: "ai_no_kb_match",
+                  question: result.deferred.question,
+                },
+                sideEffect: { kind: "insert_handoff_alert", reason: "ai_no_kb_match" },
+              },
+            ],
+          };
+          delete result.deferred;
+        }
+      } catch (e) {
+        console.warn("[v3-webhook-entry] ai_answer KB lookup failed:", (e as Error).message);
+        // Em erro, escala humano sem perder o turno.
+        const stepId = result.deferred.stepId;
+        result = {
+          ...result,
+          outbound: [
+            ...result.outbound,
+            {
+              kind: "text" as const,
+              text: "Vou pedir para alguém do time te explicar essa parte 🙌",
+              idempotencyContent: `kb-error:${stepId}`,
+            },
+          ],
+          stateUpdate: {
+            ...result.stateUpdate,
+            status: "paused_system",
+            pauseReason: "ai_kb_lookup_error",
+          },
+          logs: [
+            ...result.logs,
+            {
+              kind: "engine_handoff" as const,
+              at: config.now,
+              customerId: args.customerId,
+              flowId: ctx.flow.id,
+              stepId,
+              payload: { error: (e as Error).message },
+              sideEffect: { kind: "insert_handoff_alert", reason: "ai_kb_lookup_error" },
+            },
+          ],
+        };
+        delete result.deferred;
+      }
     }
 
     const inboundLog = buildInboundLog(args.inbound);

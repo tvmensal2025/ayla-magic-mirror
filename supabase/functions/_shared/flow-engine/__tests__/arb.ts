@@ -373,6 +373,7 @@ export const arbConfig: fc.Arbitrary<EngineConfig> = fc.record({
   ),
   minuteBucket: fc.integer({ min: 0, max: 50_000_000 }),
   isDarkMode: fc.constant(false),
+  testFastForward: fc.constant(false),
   allowedDomains: fc.constant([] as string[]),
   idempotencyKeyFn: fc.constant(
     (parts: { stepId: string; content: string; minuteBucket: number }) =>

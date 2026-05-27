@@ -158,12 +158,22 @@ export interface FallbackSpec {
   mode:
     | "repeat" | "retry" | "goto" | "ai" | "ai_answer" | "humano" | "advance";
   goto_step_id?: string | null;
+  /**
+   * Para capture steps (capture_conta, capture_documento, capture_email,
+   * confirm_phone, etc): id do step para o qual avançar quando a captura
+   * é bem-sucedida. Quando ausente, o engine usa o próximo step por
+   * `position` (advance natural). Pré-existe no JSONB de muitos fluxos
+   * (ex: Fluxo D) e agora é honrado pelo runner.
+   */
+  success_goto_step_id?: string | null;
   ai_prompt?: string;
   max_questions?: number;
   max_retries?: number;
   on_fail?: "advance" | "handoff" | "repeat" | "next";
   handoff_reason?: string;
   then?: "humano" | "next" | "repeat";
+  /** Texto opcional usado em modo `retry` quando o lead falha a captura. */
+  retry_text?: string;
 }
 
 /**
@@ -185,7 +195,15 @@ export interface BotFlowStep {
   stepType:
     | "text_message" | "media_message" | "audio_slot"
     | "ask_text" | "ask_choice" | "ask_media"
-    | "branch" | "system_capture";
+    | "branch" | "system_capture"
+    // Tipos legacy presentes no banco (Fluxo D + outros) — o loader
+    // popula `stepType: s.step_type` direto da coluna do Postgres.
+    // Estes tipos disparam o ramo "capture step" no runner V3.
+    | "message"
+    | "capture_conta" | "capture_documento" | "capture_doc"
+    | "capture_email" | "capture_cpf" | "capture_cep"
+    | "capture_name" | "capture_bill_value"
+    | "confirm_phone" | "finalizar_cadastro" | "cadastro";
   position: number;
   messageText: string | null;
   /**
@@ -269,6 +287,23 @@ export interface EngineConfig {
    * dry-run mode and by `flow-engine-rollout-cron` shadow comparison.
    */
   isDarkMode: boolean;
+  /**
+   * Quando true, capture steps (capture_conta / capture_documento /
+   * capture_email / confirm_phone / etc) avançam para o
+   * `success_goto_step_id` (ou próximo step por position) **sem**
+   * emitir DeferredAction de OCR/portal. Usado pelo simulador
+   * (`flow-simulate-run`, `bot-e2e-runner`) e por testes E2E para
+   * permitir que o lead fake percorra o fluxo completo sem depender de
+   * Gemini/portal.
+   *
+   * Em produção (webhook real) DEVE ser `false` — capture steps emitem
+   * DeferredAction que o dispatcher resolve chamando OCR real e
+   * persistindo o resultado em `customers.electricity_bill_value` /
+   * `customers.document_uploaded`.
+   *
+   * Default: `false`.
+   */
+  testFastForward: boolean;
   /** Allowed domains for any URL the engine emits in outbound text. */
   allowedDomains: string[];
   /** Pure idempotency-key derivation. Same args → same key. */
@@ -410,6 +445,8 @@ export type LogKind =
   | "engine_variant_unsupported"
   | "engine_capture_extracted"
   | "engine_capture_validation_failed"
+  | "engine_capture_advanced"
+  | "engine_capture_deferred"
   | "engine_strict_mode_blocked_ai"
   | "engine_dedupe_blocked"
   | "engine_outbound_limit_exceeded"

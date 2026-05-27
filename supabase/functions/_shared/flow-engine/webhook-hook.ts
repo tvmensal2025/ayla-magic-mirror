@@ -143,6 +143,7 @@ export async function runEngineV3IfEnabled(
         now: new Date(nowMs).toISOString(),
         minuteBucket: Math.floor(nowMs / 60_000),
         isDarkMode: true,
+        testFastForward: false,
         allowedDomains: ["igreen.energy"],
         idempotencyKeyFn: (parts: any) => `${parts.stepId}:${parts.content}:${parts.minuteBucket}`,
         humanDelayFn: (charLen: number) => Math.min(12_000, Math.max(2_000, charLen * 60)),

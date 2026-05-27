@@ -20,6 +20,7 @@
  */
 
 import type {
+  BotFlow,
   BotFlowStep,
   CustomerSnapshot,
   EngineInput,
@@ -298,6 +299,35 @@ function runEngineInner(input: EngineInput): EngineOutput {
     );
   }
 
+  // ─── Step 3.5: capture step auto-advance ─────────────────────────────
+  // Quando o step é uma captura (capture_conta, capture_documento,
+  // capture_email, confirm_phone, etc), as transitions ficam vazias por
+  // design — a "transição" é o próprio sucesso da captura. Sem este
+  // bloco, o lead sempre cai no fallback `retry`, repetindo a pergunta
+  // até estourar `max_retries` e ir pra handoff. Era o motivo de o
+  // fluxo D nunca chegar até `d_finalizar`.
+  //
+  // Comportamento:
+  //  - inbound apropriado (mídia para OCR, texto para email/phone/cpf):
+  //    avança para `step.fallback.success_goto_step_id` se existir,
+  //    senão para o próximo step por position.
+  //  - testFastForward=true (simulator/E2E): pula deferred OCR/portal e
+  //    avança direto.
+  //  - testFastForward=false (produção): emite DeferredAction
+  //    correspondente (ocr / portal_submit) que o dispatcher resolve
+  //    chamando os pipelines reais antes de re-entrar com `no_input`.
+  //  - inbound impróprio (ex: lead manda texto onde precisava foto):
+  //    cai no fallback `retry` normal — comportamento preservado.
+  const captureAdvance = tryCaptureStepAdvance(input, step, stepLookup);
+  if (captureAdvance) {
+    return finalize(input, captureAdvance.target ?? step, {
+      outbound: captureAdvance.outbound,
+      stateUpdate: captureAdvance.stateUpdate,
+      logs: [...enterLogs, ...captureLogs, ...captureAdvance.logs],
+      deferred: captureAdvance.deferred,
+    });
+  }
+
   // ─── Step 4: try transition match ─────────────────────────────────────
   const matched = matchTransition(step.transitions, input.inbound, captured);
   if (matched) {
@@ -501,5 +531,170 @@ function makeFallbackContext(input: EngineInput, step: BotFlowStep): FallbackCon
     capabilities: input.capabilities,
     config: input.config,
     hooks: input.hooks,
+  };
+}
+
+// ─── Capture step advance (Step 3.5) ────────────────────────────────────
+
+/**
+ * Tipos de step considerados "capture" — onde o avanço ocorre via
+ * sucesso da captura, não via `transitions[]`. Quando o step é desta
+ * família E o inbound é apropriado, o engine avança automaticamente.
+ *
+ * Mantém alinhamento com `pipelineKindFor` em `v3-loader.ts` e com a
+ * lista do `manual-step-send` para que UI / engine / legacy compartilhem
+ * a mesma classificação.
+ */
+const CAPTURE_STEP_TYPES = new Set<string>([
+  "capture_conta",
+  "capture_documento",
+  "capture_doc",
+  "capture_email",
+  "capture_cpf",
+  "capture_cep",
+  "capture_name",
+  "capture_bill_value",
+  "confirm_phone",
+  "ask_text",
+  "ask_media",
+]);
+
+/**
+ * Retorna true quando o inbound atual preenche o requisito do step de
+ * captura. Mídia para steps que precisam OCR; texto/botão/número para
+ * steps de campo livre.
+ */
+function isCaptureInboundValid(step: BotFlowStep, inbound: InboundEvent): boolean {
+  if (!CAPTURE_STEP_TYPES.has(step.stepType)) return false;
+  // Steps que pedem mídia
+  if (step.stepType === "capture_conta" || step.stepType === "capture_documento" || step.stepType === "capture_doc" || step.stepType === "ask_media") {
+    if (inbound.kind === "media") return true;
+    // Em testFastForward aceitamos texto/botão como "captura simulada"
+    // para o lead conseguir percorrer o fluxo sem precisar mandar foto.
+    if (inbound.kind === "text" || inbound.kind === "button_click") return true;
+    return false;
+  }
+  // Steps que pedem texto livre / confirmação
+  if (
+    step.stepType === "capture_email" ||
+    step.stepType === "capture_cpf" ||
+    step.stepType === "capture_cep" ||
+    step.stepType === "capture_name" ||
+    step.stepType === "capture_bill_value" ||
+    step.stepType === "confirm_phone" ||
+    step.stepType === "ask_text"
+  ) {
+    return inbound.kind === "text" || inbound.kind === "button_click" || inbound.kind === "number_reply";
+  }
+  return false;
+}
+
+/**
+ * Resolve o step destino para um capture step. Prioridade:
+ *  1. `step.fallback.success_goto_step_id` (configurado no JSONB).
+ *  2. Próximo step ativo por `position` (advance natural).
+ */
+function resolveCaptureTarget(
+  flow: BotFlow,
+  step: BotFlowStep,
+  stepLookup: (id: string | null) => BotFlowStep | null,
+): BotFlowStep | null {
+  const explicit = step.fallback?.success_goto_step_id;
+  if (explicit && step.reachableStepIds.includes(explicit)) {
+    const t = stepLookup(explicit);
+    if (t) return t;
+  }
+  // advance natural
+  const sorted = flow.steps
+    .filter((s) => s.position > step.position)
+    .sort((a, b) => a.position - b.position);
+  return sorted[0] ?? null;
+}
+
+/**
+ * Tenta avançar o step quando ele é uma captura e o inbound é válido.
+ * Retorna `null` quando NÃO deve avançar (deixa runner seguir o fluxo
+ * normal de transitions/fallback).
+ *
+ * Em modo `testFastForward`: avança direto, sem deferred.
+ * Em produção: emite DeferredAction de OCR / portal e avança o estado
+ *              para o target. O dispatcher resolve a action e re-entra
+ *              com `no_input` para emitir o outbound do target.
+ */
+function tryCaptureStepAdvance(
+  input: EngineInput,
+  step: BotFlowStep,
+  stepLookup: (id: string | null) => BotFlowStep | null,
+): {
+  target: BotFlowStep | null;
+  outbound: OutboundMessage[];
+  stateUpdate: Partial<CustomerSnapshot>;
+  logs: StructuredLog[];
+  deferred?: import("./v3-types.ts").DeferredAction;
+} | null {
+  if (!CAPTURE_STEP_TYPES.has(step.stepType)) return null;
+  if (!isCaptureInboundValid(step, input.inbound)) return null;
+
+  const target = resolveCaptureTarget(input.flow, step, stepLookup);
+  if (!target) return null;
+
+  const variant = pickVariant(input.flow.variant);
+  const outbound = variant.buildStepOutbound({
+    step: target,
+    flow: input.flow,
+    capabilities: input.capabilities,
+    config: input.config,
+  });
+
+  const stateUpdate: Partial<CustomerSnapshot> = {
+    currentStepId: target.id,
+    retries: 0,
+    aiQuestionsThisStep: 0,
+    enteredStepAt: input.config.now,
+    lastOutboundAt: outbound.length > 0 ? input.config.now : input.state.lastOutboundAt ?? null,
+  };
+
+  const logs: StructuredLog[] = [
+    makeLog("engine_capture_advanced", input, step.id, {
+      from: step.id,
+      to: target.id,
+      step_type: step.stepType,
+      pipeline_kind: step.pipelineKind,
+      test_fast_forward: input.config.testFastForward,
+    }),
+  ];
+
+  // Em produção, emite DeferredAction para OCR/portal — o dispatcher
+  // resolve a chamada externa e atualiza customers.* com os dados
+  // extraídos. Em testFastForward, pula o deferred (avanço seco).
+  let deferred: import("./v3-types.ts").DeferredAction | undefined;
+  if (!input.config.testFastForward && step.pipelineKind && input.inbound.kind === "media") {
+    const pipeline = step.pipelineKind;
+    if (pipeline === "ocr_conta" || pipeline === "ocr_documento") {
+      deferred = {
+        kind: "ocr",
+        stepId: step.id,
+        flowId: input.flow.id,
+        pipeline,
+        mediaRef: (input.inbound as Extract<InboundEvent, { kind: "media" }>).mediaRef,
+      };
+      logs.push(makeLog("engine_capture_deferred", input, step.id, { pipeline }));
+    } else if (pipeline === "cadastro_portal" || pipeline === "finalizar_cadastro") {
+      deferred = {
+        kind: "portal_submit",
+        stepId: step.id,
+        flowId: input.flow.id,
+        pipeline,
+      };
+      logs.push(makeLog("engine_capture_deferred", input, step.id, { pipeline }));
+    }
+  }
+
+  return {
+    target,
+    outbound,
+    stateUpdate,
+    logs,
+    deferred,
   };
 }

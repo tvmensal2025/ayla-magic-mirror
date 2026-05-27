@@ -36,6 +36,7 @@ function makeConfig(now = T0): EngineConfig {
     now,
     minuteBucket: Math.floor(Date.parse(now) / 60000),
     isDarkMode: false,
+    testFastForward: false,
     allowedDomains: [],
     idempotencyKeyFn: (parts) => `${parts.stepId}:${parts.content}:${parts.minuteBucket}`,
     humanDelayFn: (n) => Math.min(n * 50, 5000),
@@ -429,4 +430,162 @@ Deno.test("PBT retry clamp: stateUpdate.retries is in [0, prev+1]", () => {
     if (out.stateUpdate.retries === undefined) return true;
     return out.stateUpdate.retries >= 0 && out.stateUpdate.retries <= input.state.retries + 1;
   }), { numRuns: 100 });
+});
+
+// ─── Capture step advance (Step 3.5 — fix lead-não-chega-ao-fim) ───────
+//
+// O fluxo D do Rodrigo tem `transitions: []` em capture_conta /
+// capture_documento / capture_email / confirm_phone, com
+// `fallback.success_goto_step_id` apontando pra o próximo step. Sem
+// este bloco, o engine sempre cai no fallback `retry`, repetindo a
+// pergunta até estourar `max_retries` e ir pra handoff. O fix faz
+// capture step avançar quando o inbound é apropriado (mídia para OCR
+// steps, texto para email/phone).
+
+Deno.test("capture step: capture_conta + media inbound avança para success_goto_step_id", () => {
+  const stepConta = makeStep({
+    id: "step-conta",
+    stepKey: "d_pedir_conta",
+    stepType: "capture_conta",
+    position: 2,
+    pipelineKind: "ocr_conta",
+    transitions: [],
+    fallback: {
+      mode: "retry",
+      max_retries: 2,
+      then: "humano",
+      success_goto_step_id: "step-resultado",
+    },
+    reachableStepIds: ["step-conta", "step-resultado"],
+  });
+  const stepResultado = makeStep({
+    id: "step-resultado",
+    stepKey: "d_resultado",
+    messageText: "Pronto, conta lida!",
+    position: 3,
+  });
+  const flow = makeFlow([stepConta, stepResultado], "D");
+  const state = makeState({ currentStepId: "step-conta" });
+
+  const out = runEngine(makeInput({
+    flow,
+    state,
+    inbound: { kind: "media", mediaKind: "image", mediaRef: "msg-123" },
+  }));
+
+  assertEquals(out.stateUpdate.currentStepId, "step-resultado");
+  assert(out.logs.some((l) => l.kind === "engine_capture_advanced"));
+  // testFastForward=false → emite deferred OCR
+  assertEquals(out.deferred?.kind, "ocr");
+  assert(out.outbound.length > 0, "deve emitir outbound do step destino");
+});
+
+Deno.test("capture step: capture_email + text inbound avança sem deferred", () => {
+  const stepEmail = makeStep({
+    id: "step-email",
+    stepKey: "d_pedir_email",
+    stepType: "capture_email",
+    position: 6,
+    transitions: [],
+    fallback: { mode: "retry", max_retries: 2, then: "humano" },
+    reachableStepIds: ["step-email", "step-fone"],
+  });
+  const stepFone = makeStep({
+    id: "step-fone",
+    stepKey: "d_confirmar_telefone",
+    stepType: "confirm_phone",
+    position: 7,
+    messageText: "Confirma seu telefone?",
+  });
+  const flow = makeFlow([stepEmail, stepFone], "D");
+  const state = makeState({ currentStepId: "step-email" });
+
+  const out = runEngine(makeInput({
+    flow,
+    state,
+    inbound: { kind: "text", text: "maria@exemplo.com" },
+  }));
+
+  // Sem success_goto_step_id → avança natural por position (próximo step ativo)
+  assertEquals(out.stateUpdate.currentStepId, "step-fone");
+  assert(out.logs.some((l) => l.kind === "engine_capture_advanced"));
+  // capture_email sem pipelineKind → não emite deferred
+  assertEquals(out.deferred, undefined);
+});
+
+Deno.test("capture step: testFastForward=true pula deferred mesmo com pipelineKind", () => {
+  const stepConta = makeStep({
+    id: "step-conta",
+    stepKey: "d_pedir_conta",
+    stepType: "capture_conta",
+    position: 2,
+    pipelineKind: "ocr_conta",
+    transitions: [],
+    fallback: {
+      mode: "retry",
+      max_retries: 2,
+      success_goto_step_id: "step-resultado",
+    },
+    reachableStepIds: ["step-conta", "step-resultado"],
+  });
+  const stepResultado = makeStep({
+    id: "step-resultado",
+    stepKey: "d_resultado",
+    messageText: "Pronto!",
+    position: 3,
+  });
+  const flow = makeFlow([stepConta, stepResultado], "D");
+  const state = makeState({ currentStepId: "step-conta" });
+  const config = { ...makeConfig(), testFastForward: true };
+
+  const out = runEngine(makeInput({
+    flow,
+    state,
+    inbound: { kind: "media", mediaKind: "image", mediaRef: "ref" },
+    config,
+  }));
+
+  assertEquals(out.stateUpdate.currentStepId, "step-resultado");
+  assertEquals(out.deferred, undefined, "fast-forward não emite deferred");
+});
+
+Deno.test("capture step: sem inbound apropriado cai no retry normal (preserva comportamento)", () => {
+  // Lead manda só "ping" num capture_conta (sem mídia) → fallback retry
+  const stepConta = makeStep({
+    id: "step-conta",
+    stepKey: "d_pedir_conta",
+    stepType: "capture_conta",
+    position: 2,
+    pipelineKind: "ocr_conta",
+    messageText: "Manda a foto da conta",
+    transitions: [],
+    fallback: {
+      mode: "retry",
+      max_retries: 2,
+      success_goto_step_id: "step-resultado",
+    },
+    reachableStepIds: ["step-conta", "step-resultado"],
+  });
+  const stepResultado = makeStep({
+    id: "step-resultado",
+    stepKey: "d_resultado",
+    position: 3,
+  });
+  const flow = makeFlow([stepConta, stepResultado], "D");
+  const state = makeState({ currentStepId: "step-conta", retries: 0 });
+
+  // Atenção: nosso fix aceita text/button_click em capture_conta como
+  // "captura simulada" pra desbloquear leads que respondem "sim/ok".
+  // Para testar o caminho retry puro precisamos de um inbound que não
+  // seja text/media/button — número_reply NÃO é aceito por capture_conta.
+  const out = runEngine(makeInput({
+    flow,
+    state,
+    inbound: { kind: "number_reply", raw: "1" },
+  }));
+
+  // number_reply em capture_conta não preenche → fallback retry
+  assert(out.logs.some((l) => l.kind === "engine_repeat"), `esperava engine_repeat, peguei ${JSON.stringify(out.logs.map((l) => l.kind))}`);
+  // Step não muda
+  assertEquals(out.stateUpdate.currentStepId, undefined);
 });

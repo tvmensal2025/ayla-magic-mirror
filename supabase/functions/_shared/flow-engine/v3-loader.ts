@@ -426,18 +426,21 @@ function parseFallback(raw: unknown): FallbackSpec {
   return {
     mode,
     goto_step_id: typeof r.goto_step_id === "string" ? r.goto_step_id : null,
+    success_goto_step_id: typeof r.success_goto_step_id === "string" ? r.success_goto_step_id : null,
     ai_prompt: typeof r.ai_prompt === "string" ? r.ai_prompt : undefined,
     max_questions: typeof r.max_questions === "number" ? r.max_questions : undefined,
     max_retries: typeof r.max_retries === "number" ? r.max_retries : undefined,
     on_fail: r.on_fail as FallbackSpec["on_fail"] ?? undefined,
     handoff_reason: typeof r.handoff_reason === "string" ? r.handoff_reason : undefined,
     then: r.then as FallbackSpec["then"] ?? undefined,
+    retry_text: typeof r.retry_text === "string" ? r.retry_text : undefined,
   };
 }
 
 function pipelineKindFor(stepType: string): BotFlowStep["pipelineKind"] {
   if (stepType === "capture_conta") return "ocr_conta";
   if (stepType === "capture_documento") return "ocr_documento";
+  if (stepType === "capture_doc") return "ocr_documento";
   if (stepType === "finalizar_cadastro") return "finalizar_cadastro";
   if (stepType === "cadastro") return "cadastro_portal";
   return null;

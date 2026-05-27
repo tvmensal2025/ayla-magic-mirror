@@ -131,6 +131,7 @@ function makeConfig(now = T0): EngineConfig {
     now,
     minuteBucket: Math.floor(Date.parse(now) / 60000),
     isDarkMode: false,
+    testFastForward: true,
     allowedDomains: [],
     idempotencyKeyFn: (parts) =>
       `${parts.stepId}:${parts.content}:${parts.minuteBucket}`,
