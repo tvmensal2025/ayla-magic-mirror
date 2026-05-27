@@ -51,6 +51,4 @@ INSERT INTO settings (key, value)
 VALUES
   ('portal2_worker_url',    'http://igreen_portal-worker-2:3101'),
   ('portal2_worker_secret', 'b77ac5db653b3e500d8ce45ed4a1c40de31476dba616a51b016ddcf86c2cab36')
-ON CONFLICT (key) DO UPDATE SET
-  value = EXCLUDED.value,
-  updated_at = now();
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
