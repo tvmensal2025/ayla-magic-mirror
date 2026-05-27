@@ -195,16 +195,16 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
 
   return (
     <>
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between text-[11px]">
-          <span className="font-bold uppercase tracking-wide text-muted-foreground">Passos do fluxo</span>
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="font-bold uppercase tracking-wide text-muted-foreground">Passos · clique para enviar</span>
           <span className="tabular-nums font-bold text-primary">{sentSteps.size}/{display.length}</span>
         </div>
-        <div className="h-1 rounded-full bg-secondary overflow-hidden">
+        <div className="h-0.5 rounded-full bg-secondary overflow-hidden">
           <div className="h-full bg-gradient-to-r from-emerald-500 to-lime-400 transition-all duration-500"
                style={{ width: `${Math.round((sentSteps.size / Math.max(display.length, 1)) * 100)}%` }} />
         </div>
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(96px,1fr))] 2xl:grid-cols-[repeat(auto-fit,minmax(108px,1fr))] gap-1 capture-card-flip">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(84px,1fr))] 2xl:grid-cols-[repeat(auto-fit,minmax(96px,1fr))] gap-1 capture-card-flip">
           {display.map((s: StepRow, i: number) => {
             const sent = sentSteps.has(s.id);
             const isSending = sending === s.id;
@@ -213,7 +213,7 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
             return (
               <div
                 key={s.id}
-                className={`group relative rounded-md border p-1.5 flex flex-col h-full min-h-[88px] transition-all duration-300 ${
+                className={`group relative rounded-md border p-1 flex flex-col h-full min-h-[72px] transition-all duration-300 ${
                   sent
                     ? "border-primary/60 bg-gradient-to-br from-primary/15 to-emerald-500/5 shadow-[0_0_10px_hsl(var(--primary)/0.18)] animate-exec-card"
                     : isNext
