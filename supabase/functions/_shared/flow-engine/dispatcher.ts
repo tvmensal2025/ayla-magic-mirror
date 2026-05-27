@@ -23,6 +23,7 @@ import {
   recordOutboundResult,
 } from "../idempotency.ts";
 import { persistFlowState } from "../customer-flow-state.ts";
+import { isFlowInstantMode } from "../flow-pace.ts";
 import { jsonLog } from "../audit.ts";
 import type {
   EngineAction,
