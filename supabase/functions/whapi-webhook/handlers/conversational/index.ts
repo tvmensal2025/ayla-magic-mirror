@@ -12,6 +12,7 @@ import {
 } from "../../../_shared/captureExtractors.ts";
 import { getStepMediaOrder, makeKindComparator } from "../../../_shared/step-media-order.ts";
 import { isMockMode, shouldBypassQuietHours } from "../../../_shared/test-mode.ts";
+import { isFlowInstantMode } from "../../../_shared/flow-pace.ts";
 // rules-engine removido em Sprint 2.5 (bot_flow_rules = 0 linhas, código morto)
 import { answerFaqWithAI } from "../../../_shared/ai-faq-answerer.ts";
 import { ensureAudioTranscript } from "../../../_shared/audio-transcript.ts";
