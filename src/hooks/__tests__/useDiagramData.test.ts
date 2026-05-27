@@ -31,8 +31,9 @@ import type { Step, Transition } from "@/components/admin/flow-builder/flowTypes
 const EMPTY_VALIDATION: FlowValidation = {
   warnings: [],
   byStep: {},
-  errorCount: 0,
-  warningCount: 0,
+  total: 0,
+  errors: 0,
+  autoFixablePatches: [],
 };
 
 function makeStep(overrides: Partial<Step> & { id: string; position: number }): Step {
