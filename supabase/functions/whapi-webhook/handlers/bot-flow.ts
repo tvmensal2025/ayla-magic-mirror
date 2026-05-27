@@ -4940,68 +4940,40 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
       console.log(`✅ Lead completo: ${merged.name} (${merged.id}) - disparando worker-portal`);
 
-      const { data: settingsRows } = await supabase.from("settings").select("*");
-      const settings: Record<string, string> = {};
-      settingsRows?.forEach((s: any) => { settings[s.key] = s.value; });
-
-      const portalWorkerUrl = (settings.portal_worker_url || Deno.env.get("PORTAL_WORKER_URL") || "").replace(/\/$/, "");
-      const workerSecret = settings.worker_secret || settings.portal_worker_secret || Deno.env.get("WORKER_SECRET") || "";
-
-      if (portalWorkerUrl && workerSecret) {
-        let workerOnline = false;
-        try {
-          const healthRes = await fetchInsecure(`${portalWorkerUrl}/health`, { timeout: 5_000 });
-          workerOnline = healthRes.ok;
-          console.log(`🏥 Health check: ${healthRes.status} (online: ${workerOnline})`);
-        } catch (e: any) {
-          console.warn(`🏥 Health check falhou: ${e?.message}`);
-        }
-
-        if (!workerOnline) {
-          logStructured("warn", "worker_offline", { customer_id: customer.id, url: portalWorkerUrl });
-          console.warn("⚠️ Worker offline — lead ficará em fila para reprocessamento automático");
-          await supabase.from("customers").update({ status: "worker_offline", error_message: "Worker offline no momento do envio" }).eq("id", customer.id);
+      // Roteamento + retry + payload Portal2 fica no helper compartilhado.
+      // Ele lê consultant.portal_kind do customer e escolhe entre worker-portal (digital)
+      // ou worker-portal-2 (autoconexao).
+      try {
+        const { dispatchPortalWorker } = await import("../../_shared/portal-worker.ts");
+        const dr = await dispatchPortalWorker(supabase, customer.id);
+        logStructured("info", "lead_complete", {
+          customer_id: customer.id,
+          step: "data_complete",
+          worker: dr.worker || "unknown",
+          mode: dr.mode,
+          status: dr.status,
+        });
+        if (!dr.ok && dr.mode !== "not_configured") {
           try {
             await sendText(remoteJid,
               "⏳ Estamos com um pequeno atraso no processamento. Em até *alguns minutos* você receberá o link para continuar pelo celular.\n\n" +
               "Se não receber em *10 minutos*, responda aqui que verificamos para você. Obrigado!"
             );
           } catch (_) {}
-        } else {
-          try {
-            logStructured("info", "lead_complete", { customer_id: customer.id, step: "data_complete", worker: "dispatching" });
-            await withRetry(
-              async () => {
-                const portalRes = await fetchInsecure(`${portalWorkerUrl}/submit-lead`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", "Authorization": `Bearer ${workerSecret}` },
-                  body: JSON.stringify({ customer_id: customer.id }),
-                  timeout: 25_000,
-                });
-                const portalData = await portalRes.text();
-                console.log(`📡 Worker-portal resposta (${portalRes.status}): ${portalData.substring(0, 200)}`);
-                if (!portalRes.ok) {
-                  logStructured("warn", "worker_portal_error", { customer_id: customer.id, status: portalRes.status, body: portalData.substring(0, 150) });
-                  throw new Error(`Worker ${portalRes.status}: ${portalData.substring(0, 100)}`);
-                }
-              },
-              { maxAttempts: 3, delayMs: 2000, retryOn: () => true }
-            );
-          } catch (e: any) {
-            logStructured("error", "worker_portal_fetch_failed", { customer_id: customer.id, error: e?.message });
-            console.error("⚠️ Erro ao disparar worker-portal (após 3 tentativas):", e?.message);
-            await supabase.from("customers").update({ status: "worker_offline", error_message: `Worker falhou: ${e?.message?.substring(0, 200)}` }).eq("id", customer.id);
-            try {
-              await sendText(remoteJid,
-                "⏳ Estamos com um pequeno atraso no processamento. Em até *alguns minutos* você receberá o link para continuar pelo celular.\n\n" +
-                "Se não receber em *10 minutos*, responda aqui que verificamos para você. Obrigado!"
-              );
-            } catch (_) {}
-          }
         }
-      } else {
-        logStructured("info", "lead_complete", { customer_id: customer.id, step: "data_complete", worker: "not_configured" });
-        console.log("⚠️ PORTAL_WORKER_URL ou WORKER_SECRET não configurados - worker-portal terá que pegar via polling");
+      } catch (e: any) {
+        logStructured("error", "worker_portal_dispatch_failed", { customer_id: customer.id, error: e?.message });
+        console.error("⚠️ Erro ao disparar worker-portal:", e?.message);
+        await supabase.from("customers").update({
+          status: "worker_offline",
+          error_message: `Dispatch falhou: ${(e?.message || "").substring(0, 200)}`,
+        }).eq("id", customer.id);
+        try {
+          await sendText(remoteJid,
+            "⏳ Estamos com um pequeno atraso no processamento. Em até *alguns minutos* você receberá o link para continuar pelo celular.\n\n" +
+            "Se não receber em *10 minutos*, responda aqui que verificamos para você. Obrigado!"
+          );
+        } catch (_) {}
       }
 
       // Updates ja foram salvos acima — limpar para o caller nao salvar de novo

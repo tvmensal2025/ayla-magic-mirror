@@ -178,6 +178,115 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, skipped: "agent_disabled" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // ─── KB-only gate (2026-05-26): IA = só lookup, nunca gera texto ───
+    // Política: o ai-agent-router NÃO chama mais o LLM para escrever
+    // resposta criativa. Em vez disso, faz lookup determinístico em
+    // bot_flow_qa + ai_knowledge_sections. Se achar → envia texto da
+    // base. Se NÃO achar → handoff humano (sem chamar Gemini).
+    //
+    // Gate desligável via setting `ai_kb_only_mode`. Default ON (kb-only).
+    // Para reativar geração LLM, setar `settings.ai_kb_only_mode = "false"`.
+    const { data: kbOnlySetting } = await supabase
+      .from("settings")
+      .select("value")
+      .eq("key", "ai_kb_only_mode")
+      .maybeSingle();
+    const kbOnlyMode = (kbOnlySetting as any)?.value !== "false"; // default true
+
+    if (kbOnlyMode) {
+      try {
+        const { lookupKnowledge } = await import("../_shared/knowledge-lookup.ts");
+        const lookup = await lookupKnowledge({
+          supabase,
+          question: user_input || "",
+          consultantId,
+        });
+        const sender = createEvolutionSender(EVOLUTION_API_URL, EVOLUTION_API_KEY, instance_name);
+
+        if (lookup.found && lookup.text) {
+          // Envia texto da base.
+          try {
+            await sender.sendText(remote_jid, lookup.text);
+          } catch (e: any) {
+            console.warn("[ai-agent-router/kb_only] sendText failed:", e?.message);
+          }
+          // Log
+          try {
+            await supabase.from("ai_agent_logs").insert({
+              consultant_id: consultantId,
+              customer_id,
+              phone: customer.phone_whatsapp,
+              step_before: customer.conversation_step,
+              step_after: customer.conversation_step,
+              llm_output: { kb_only: true, source: lookup.source, confidence: lookup.confidence },
+              handoff: false,
+              latency_ms: Date.now() - t0,
+            });
+          } catch (_) { /* swallow */ }
+          return new Response(
+            JSON.stringify({ ok: true, mode: "kb_only", source: lookup.source }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+
+        // Sem match → handoff. Mensagem fixa (sem LLM).
+        try {
+          await sender.sendText(remote_jid, "Vou pedir para alguém do time te explicar essa parte 🙌");
+        } catch (e: any) {
+          console.warn("[ai-agent-router/kb_only] handoff sendText failed:", e?.message);
+        }
+        try {
+          await supabase
+            .from("customers")
+            .update({
+              bot_paused: true,
+              bot_paused_reason: "ai_no_kb_match",
+              bot_paused_at: new Date().toISOString(),
+            })
+            .eq("id", customer_id);
+          await supabase.from("bot_handoff_alerts").insert({
+            customer_id,
+            consultant_id: consultantId,
+            reason: "ai_no_kb_match",
+            metadata: { source: "ai_agent_router_kb_only", question: user_input },
+          });
+          await supabase.from("ai_agent_logs").insert({
+            consultant_id: consultantId,
+            customer_id,
+            phone: customer.phone_whatsapp,
+            step_before: customer.conversation_step,
+            step_after: "handoff_humano",
+            llm_output: { kb_only: true, no_match: true },
+            handoff: true,
+            latency_ms: Date.now() - t0,
+          });
+        } catch (_) { /* swallow */ }
+        return new Response(
+          JSON.stringify({ ok: true, mode: "kb_only", handoff: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      } catch (e: any) {
+        console.error("[ai-agent-router/kb_only] failed:", e?.message);
+        // Em erro do lookup, escala humano. Não cai em LLM.
+        try {
+          await supabase
+            .from("customers")
+            .update({
+              bot_paused: true,
+              bot_paused_reason: "ai_kb_lookup_error",
+              bot_paused_at: new Date().toISOString(),
+            })
+            .eq("id", customer_id);
+        } catch (_) { /* swallow */ }
+        return new Response(
+          JSON.stringify({ ok: false, mode: "kb_only", error: e?.message }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+    }
+    // Caminho LLM tradicional só executa se kbOnlyMode=false (override
+    // explícito via setting).
+
     // 4) Histórico (últimas 12 msgs)
     const { data: history } = await supabase
       .from("conversations")
@@ -910,18 +1019,16 @@ RESPONDA APENAS com o JSON do schema. reply_text deve ser CURTO (1-3 frases). Se
     }
     if (hasBill && hasDoc && !["cadastro_portal", "aguardando_otp", "aguardando_facial", "complete", "handoff_humano"].includes(updates.conversation_step || stepBefore)) {
       updates.conversation_step = "cadastro_portal";
-      // Dispara portal worker direto (fire-and-forget)
-      try {
-        const portalWorkerUrl = (Deno.env.get("PORTAL_WORKER_URL") || "").replace(/\/$/, "");
-        const workerSecret = Deno.env.get("WORKER_SECRET") || "";
-        if (portalWorkerUrl && workerSecret) {
-          fetch(`${portalWorkerUrl}/submit-lead`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${workerSecret}` },
-            body: JSON.stringify({ customer_id }),
-          }).catch((e) => console.error("portal worker submit-lead error:", e));
+      // Dispara portal worker via helper compartilhado (rotear por consultant.portal_kind).
+      // Fire-and-forget: não trava o fluxo da IA.
+      (async () => {
+        try {
+          const { dispatchPortalWorker } = await import("../_shared/portal-worker.ts");
+          await dispatchPortalWorker(supabase, customer_id);
+        } catch (e: any) {
+          console.error("portal worker dispatch error:", e?.message);
         }
-      } catch (e) { console.error("portal worker invoke error:", e); }
+      })().catch(() => {});
     }
 
     // Enviar mídias primeiro (mais humano: áudio chega antes do texto)
