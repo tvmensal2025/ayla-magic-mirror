@@ -473,7 +473,7 @@ async function sendStepMedia(
       // Teto duro de 12s para não estourar o limite de 60s da Edge Function
       // quando uma sequência tem 4+ itens. Consultor que precisa de pausa
       // maior deve quebrar em dois passos.
-      if (!isMockMode()) {
+      if (!isMockMode() && !isFlowInstantMode()) {
         const wait = Math.max(0, Math.min(item.delayMs, 12_000));
         if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       }
