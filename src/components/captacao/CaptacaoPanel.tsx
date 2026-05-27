@@ -487,7 +487,7 @@ export function CaptacaoPanel({ consultantId, onOpenChat, instanceName = null, i
           {/* Ficha desktop fixa à direita */}
           {selectedId && (
             <>
-              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={352} minPx={260} maxPx={560} invert />
+              <DragResizer storageKey="captacao-aside" cssVar="cap-aside-w" defaultPx={272} minPx={220} maxPx={520} invert />
               <div className="hidden md:flex md:w-[var(--cap-aside-w)] md:shrink-0">
                 <CaptureLeadCard customerId={selectedId} onSubmitted={handleSubmitted} sentStepsCount={sentSteps.size} />
               </div>
