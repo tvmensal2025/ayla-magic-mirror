@@ -17,6 +17,7 @@ interface DadosTabProps {
     google_analytics_id: string;
     igreen_portal_email: string;
     igreen_portal_password: string;
+    portal_kind: "digital" | "autoconexao";
   };
   photoPreview: string | null;
   saving: boolean;
@@ -111,16 +112,90 @@ export function DadosTab({ form, photoPreview, saving, onFormChange, onPhotoChan
             <Label htmlFor="igreen_id" className="text-sm text-muted-foreground">ID iGreen</Label>
             <Input id="igreen_id" value={form.igreen_id} onChange={(e) => {
               const id = e.target.value;
+              const isAutoconexao = form.portal_kind === "autoconexao";
               onFormChange({
                 igreen_id: id,
-                cadastro_url: id ? `https://digital.igreenenergy.com.br/?id=${id}&sendcontract=true` : "",
+                cadastro_url: id
+                  ? (isAutoconexao
+                      ? `https://green.igreenenergy.com.br/autoconexao/?id=${id}`
+                      : `https://digital.igreenenergy.com.br/?id=${id}&sendcontract=true`)
+                  : "",
                 licenciada_cadastro_url: id ? `https://expansao.igreenenergy.com.br/?id=${id}&checkout=true` : "",
               });
             }} placeholder="ex: 126928" className="bg-secondary border-border" />
           </div>
         </div>
+
+        {/* Seletor de Portal de cadastro */}
+        <div className="mt-6 space-y-3 rounded-xl border border-border bg-secondary/30 p-4">
+          <div>
+            <Label className="text-sm font-semibold text-foreground">Qual portal usar para cadastrar clientes?</Label>
+            <p className="text-xs text-muted-foreground mt-1">
+              Você pode escolher entre o portal antigo (Conta de Energia) e o novo (Autoconexão).
+              O link de divulgação muda conforme a opção.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className={`flex flex-col gap-1 cursor-pointer rounded-lg border p-3 transition-colors ${
+              form.portal_kind !== "autoconexao"
+                ? "border-primary bg-primary/5"
+                : "border-border bg-secondary hover:border-primary/40"
+            }`}>
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="portal_kind"
+                  value="digital"
+                  checked={form.portal_kind !== "autoconexao"}
+                  onChange={() => {
+                    const id = form.igreen_id;
+                    onFormChange({
+                      portal_kind: "digital",
+                      cadastro_url: id ? `https://digital.igreenenergy.com.br/?id=${id}&sendcontract=true` : "",
+                    });
+                  }}
+                  className="accent-primary"
+                />
+                <span className="font-semibold text-sm text-foreground">Conta de Energia (digital)</span>
+              </div>
+              <span className="text-xs text-muted-foreground pl-6">
+                Portal antigo. Cliente preenche tudo numa página única. Cadastro via automação no servidor.
+              </span>
+            </label>
+
+            <label className={`flex flex-col gap-1 cursor-pointer rounded-lg border p-3 transition-colors ${
+              form.portal_kind === "autoconexao"
+                ? "border-primary bg-primary/5"
+                : "border-border bg-secondary hover:border-primary/40"
+            }`}>
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="portal_kind"
+                  value="autoconexao"
+                  checked={form.portal_kind === "autoconexao"}
+                  onChange={() => {
+                    const id = form.igreen_id;
+                    onFormChange({
+                      portal_kind: "autoconexao",
+                      cadastro_url: id ? `https://green.igreenenergy.com.br/autoconexao/?id=${id}` : "",
+                    });
+                  }}
+                  className="accent-primary"
+                />
+                <span className="font-semibold text-sm text-foreground">Autoconexão (novo)</span>
+              </div>
+              <span className="text-xs text-muted-foreground pl-6">
+                Wizard de 5 passos com OCR de documento e conta. Cadastro via API direta — mais rápido (~3-5s).
+              </span>
+            </label>
+          </div>
+        </div>
+
         <div className="mt-4 space-y-2">
-          <Label htmlFor="cadastro_url" className="text-sm text-muted-foreground">Link de cadastro iGreen (Conta de Energia)</Label>
+          <Label htmlFor="cadastro_url" className="text-sm text-muted-foreground">
+            Link de cadastro {form.portal_kind === "autoconexao" ? "(Autoconexão)" : "(Conta de Energia)"}
+          </Label>
           <Input id="cadastro_url" value={form.cadastro_url} readOnly className="bg-secondary/50 border-border text-muted-foreground cursor-not-allowed" />
         </div>
         <div className="mt-4 space-y-2">

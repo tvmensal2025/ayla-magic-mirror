@@ -7,6 +7,9 @@ const DEFAULT_CONSULTANT_FORM = {
   name: "", license: "", phone: "", notification_phone: "", cadastro_url: "", igreen_id: "",
   licenciada_cadastro_url: "", facebook_pixel_id: "", google_analytics_id: "",
   igreen_portal_email: "", igreen_portal_password: "",
+  // Portal 1 ('digital') = Playwright UI; Portal 2 ('autoconexao') = API direta.
+  // Default 'digital' mantém comportamento atual; consultor opta pelo novo no painel.
+  portal_kind: "digital" as "digital" | "autoconexao",
 };
 
 export type ConsultantForm = typeof DEFAULT_CONSULTANT_FORM;
@@ -74,6 +77,7 @@ export function useAdminAuth() {
         licenciada_cadastro_url: id ? `https://expansao.igreenenergy.com.br/?id=${id}&checkout=true` : (consultant.licenciada_cadastro_url as string) || "",
         facebook_pixel_id: (consultant.facebook_pixel_id as string) || "", google_analytics_id: (consultant.google_analytics_id as string) || "",
         igreen_portal_email: (consultant.igreen_portal_email as string) || "", igreen_portal_password: (consultant.igreen_portal_password as string) || "",
+        portal_kind: ((consultant.portal_kind as string) === "autoconexao" ? "autoconexao" : "digital"),
       });
       if (consultant.photo_url) setPhotoPreview(consultant.photo_url as string);
     };

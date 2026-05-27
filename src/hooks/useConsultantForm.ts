@@ -76,6 +76,7 @@ export function useConsultantForm(
         licenciada_cadastro_url: form.licenciada_cadastro_url || null,
         facebook_pixel_id: form.facebook_pixel_id || null, google_analytics_id: form.google_analytics_id || null,
         igreen_portal_email: form.igreen_portal_email || null, igreen_portal_password: form.igreen_portal_password || null,
+        portal_kind: form.portal_kind === "autoconexao" ? "autoconexao" : "digital",
       };
       if (photo_url) consultantFields.photo_url = photo_url;
       const saveConsultant = async (licenseToSave: string) => {
@@ -90,6 +91,7 @@ export function useConsultantForm(
           licenciada_cadastro_url: form.licenciada_cadastro_url || null,
           facebook_pixel_id: form.facebook_pixel_id || null, google_analytics_id: form.google_analytics_id || null,
           igreen_portal_email: form.igreen_portal_email || null, igreen_portal_password: form.igreen_portal_password || null,
+          portal_kind: form.portal_kind === "autoconexao" ? "autoconexao" : "digital",
           ...(photo_url ? { photo_url } : {}),
         };
         return supabase.from("consultants").insert(insertPayload).select("*").single();

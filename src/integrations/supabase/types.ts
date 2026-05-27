@@ -2092,6 +2092,7 @@ export type Database = {
           notification_phone: string | null
           phone: string
           photo_url: string | null
+          portal_kind: string
           referred_by: string | null
           use_engine_v3: boolean
         }
@@ -2122,6 +2123,7 @@ export type Database = {
           notification_phone?: string | null
           phone: string
           photo_url?: string | null
+          portal_kind?: string
           referred_by?: string | null
           use_engine_v3?: boolean
         }
@@ -2152,6 +2154,7 @@ export type Database = {
           notification_phone?: string | null
           phone?: string
           photo_url?: string | null
+          portal_kind?: string
           referred_by?: string | null
           use_engine_v3?: boolean
         }
@@ -2643,6 +2646,14 @@ export type Database = {
           phone_landline: string | null
           phone_whatsapp: string
           portal_submitted_at: string | null
+          portal2_contract_link: string | null
+          portal2_created_at: string | null
+          portal2_error: string | null
+          portal2_idcliente: number | null
+          portal2_idsolcontratovalidacao: number | null
+          portal2_otp_sent_at: string | null
+          portal2_otp_validated_at: string | null
+          portal2_status: string | null
           pos_venda_manual: boolean
           pos_venda_reason: string | null
           pos_venda_stage: string | null
@@ -2797,6 +2808,14 @@ export type Database = {
           phone_landline?: string | null
           phone_whatsapp: string
           portal_submitted_at?: string | null
+          portal2_contract_link?: string | null
+          portal2_created_at?: string | null
+          portal2_error?: string | null
+          portal2_idcliente?: number | null
+          portal2_idsolcontratovalidacao?: number | null
+          portal2_otp_sent_at?: string | null
+          portal2_otp_validated_at?: string | null
+          portal2_status?: string | null
           pos_venda_manual?: boolean
           pos_venda_reason?: string | null
           pos_venda_stage?: string | null
@@ -2951,6 +2970,14 @@ export type Database = {
           phone_landline?: string | null
           phone_whatsapp?: string
           portal_submitted_at?: string | null
+          portal2_contract_link?: string | null
+          portal2_created_at?: string | null
+          portal2_error?: string | null
+          portal2_idcliente?: number | null
+          portal2_idsolcontratovalidacao?: number | null
+          portal2_otp_sent_at?: string | null
+          portal2_otp_validated_at?: string | null
+          portal2_status?: string | null
           pos_venda_manual?: boolean
           pos_venda_reason?: string | null
           pos_venda_stage?: string | null
