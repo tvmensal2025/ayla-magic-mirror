@@ -101,7 +101,7 @@ async function processLead(job) {
 }
 
 // ─── Setup BullMQ ───────────────────────────────────────────────────────────
-const redisConn = (() => {
+function buildRedisConn(forWorker = false) {
   try {
     const u = new URL(REDIS_URL);
     return {
@@ -109,12 +109,12 @@ const redisConn = (() => {
       port: Number(u.port || 6379),
       password: u.password ? decodeURIComponent(u.password) : undefined,
       username: u.username ? decodeURIComponent(u.username) : undefined,
-      // não fica spamando reconexões em loop quando senha está errada
-      maxRetriesPerRequest: 3,
+      // Worker (blocking) precisa maxRetriesPerRequest=null; Queue não.
+      maxRetriesPerRequest: forWorker ? null : 3,
       retryStrategy: (times) => (times > 5 ? null : Math.min(times * 1000, 5000)),
     };
   } catch { return { host: 'evolution-api-redis', port: 6379 }; }
-})();
+}
 
 let queue = null;
 let worker = null;
@@ -122,14 +122,14 @@ let queueAvailable = false;
 
 async function initQueue() {
   try {
-    queue = new Queue(QUEUE_NAME, { connection: redisConn });
+    queue = new Queue(QUEUE_NAME, { connection: buildRedisConn(false) });
     // suprime spam de erros de conexão antes de declararmos indisponível
     queue.on('error', (e) => {
       if (queueAvailable) console.warn(`  queue error: ${e.message}`);
     });
     await queue.getJobCounts();
     worker = new Worker(QUEUE_NAME, processLead, {
-      connection: redisConn,
+      connection: buildRedisConn(true), // ⚠️ worker exige maxRetriesPerRequest=null
       concurrency: 1, // 1 cadastro por vez (evita problemas com Playwright singleton)
       limiter: { max: 6, duration: 60_000 }, // máximo 6 cadastros/min
     });
@@ -139,7 +139,8 @@ async function initQueue() {
     worker.on('failed', (job, err) => console.error(`  worker fail job=${job?.id}: ${err.message}`));
     worker.on('completed', (job) => console.log(`  worker done job=${job.id}`));
     queueAvailable = true;
-    console.log(`✅ BullMQ conectado (${redisConn.host}:${redisConn.port}) fila="${QUEUE_NAME}"`);
+    const conn = buildRedisConn();
+    console.log(`✅ BullMQ conectado (${conn.host}:${conn.port}) fila="${QUEUE_NAME}"`);
   } catch (e) {
     console.warn(`⚠️ Redis indisponível: ${e.message} — funcionando em modo síncrono`);
     // limpa connections que ficaram tentando reconectar em loop
