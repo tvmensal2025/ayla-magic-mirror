@@ -2570,6 +2570,7 @@ export type Database = {
           conversational_flow_enabled: boolean | null
           cpf: string | null
           created_at: string
+          ctwa_clid: string | null
           custom_step_retries: number
           custom_step_retries_step: string | null
           customer_origin: string
@@ -2626,6 +2627,7 @@ export type Database = {
           last_rule_id: string | null
           last_step_advanced_at: string | null
           lead_source: Json | null
+          lead_source_detail: Json | null
           link_assinatura: string | null
           link_facial: string | null
           media_consumo: number | null
@@ -2732,6 +2734,7 @@ export type Database = {
           conversational_flow_enabled?: boolean | null
           cpf?: string | null
           created_at?: string
+          ctwa_clid?: string | null
           custom_step_retries?: number
           custom_step_retries_step?: string | null
           customer_origin?: string
@@ -2788,6 +2791,7 @@ export type Database = {
           last_rule_id?: string | null
           last_step_advanced_at?: string | null
           lead_source?: Json | null
+          lead_source_detail?: Json | null
           link_assinatura?: string | null
           link_facial?: string | null
           media_consumo?: number | null
@@ -2894,6 +2898,7 @@ export type Database = {
           conversational_flow_enabled?: boolean | null
           cpf?: string | null
           created_at?: string
+          ctwa_clid?: string | null
           custom_step_retries?: number
           custom_step_retries_step?: string | null
           customer_origin?: string
@@ -2950,6 +2955,7 @@ export type Database = {
           last_rule_id?: string | null
           last_step_advanced_at?: string | null
           lead_source?: Json | null
+          lead_source_detail?: Json | null
           link_assinatura?: string | null
           link_facial?: string | null
           media_consumo?: number | null
@@ -3507,6 +3513,33 @@ export type Database = {
           region?: string | null
           region_id?: number | null
           uf?: string
+        }
+        Relationships: []
+      }
+      flow_d_health_runs: {
+        Row: {
+          duration_ms: number | null
+          errors: Json | null
+          id: string
+          leads_scanned: number | null
+          leads_unstuck: number | null
+          ran_at: string
+        }
+        Insert: {
+          duration_ms?: number | null
+          errors?: Json | null
+          id?: string
+          leads_scanned?: number | null
+          leads_unstuck?: number | null
+          ran_at?: string
+        }
+        Update: {
+          duration_ms?: number | null
+          errors?: Json | null
+          id?: string
+          leads_scanned?: number | null
+          leads_unstuck?: number | null
+          ran_at?: string
         }
         Relationships: []
       }
@@ -4207,6 +4240,79 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      production_health_snapshot: {
+        Row: {
+          active_variants: string[] | null
+          capi_ok: boolean | null
+          captured_at: string
+          consultant_id: string
+          errors: Json | null
+          flows_missing: string[] | null
+          flows_ok: boolean | null
+          id: string
+          instance_last_seen: string | null
+          instance_status: string | null
+          last_lead_at: string | null
+          leads_24h: number | null
+          notification_phone_ok: boolean | null
+          pixel_ok: boolean | null
+        }
+        Insert: {
+          active_variants?: string[] | null
+          capi_ok?: boolean | null
+          captured_at?: string
+          consultant_id: string
+          errors?: Json | null
+          flows_missing?: string[] | null
+          flows_ok?: boolean | null
+          id?: string
+          instance_last_seen?: string | null
+          instance_status?: string | null
+          last_lead_at?: string | null
+          leads_24h?: number | null
+          notification_phone_ok?: boolean | null
+          pixel_ok?: boolean | null
+        }
+        Update: {
+          active_variants?: string[] | null
+          capi_ok?: boolean | null
+          captured_at?: string
+          consultant_id?: string
+          errors?: Json | null
+          flows_missing?: string[] | null
+          flows_ok?: boolean | null
+          id?: string
+          instance_last_seen?: string | null
+          instance_status?: string | null
+          last_lead_at?: string | null
+          leads_24h?: number | null
+          notification_phone_ok?: boolean | null
+          pixel_ok?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "production_health_snapshot_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "production_health_snapshot_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "consultants_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "production_health_snapshot_consultant_id_fkey"
+            columns: ["consultant_id"]
+            isOneToOne: false
+            referencedRelation: "v_flow_engine_health"
+            referencedColumns: ["consultant_id"]
+          },
+        ]
       }
       referral_partners: {
         Row: {
