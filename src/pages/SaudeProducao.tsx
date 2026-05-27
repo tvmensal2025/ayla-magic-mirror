@@ -26,7 +26,7 @@ type Snapshot = {
   leads_24h: number;
 };
 
-type Consultant = { id: string; name: string; slug: string };
+type Consultant = { id: string; name: string };
 
 type FunnelRow = { variant: string; lead: number; conta: number; ocr: number; pitch: number; club: number; aprovado: number };
 
@@ -70,8 +70,8 @@ export default function SaudeProducao() {
       }
       setSnapshots(Array.from(latestByConsultant.values()));
 
-      const { data: cs } = await supabase.from("consultants").select("id, name, slug");
-      setConsultants((cs || []) as Consultant[]);
+      const { data: cs } = await supabase.from("consultants").select("id, name");
+      setConsultants(((cs || []) as any[]) as Consultant[]);
 
       const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data: cust24 } = await supabase
@@ -228,7 +228,7 @@ export default function SaudeProducao() {
                   return (
                     <tr key={s.id} className="border-t border-border/30">
                       <td className="p-2 font-medium">{c?.name || s.consultant_id.slice(0, 8)}</td>
-                      <td className="text-center p-2">{s.instance_status === "connected" ? <CheckCircle2 className="h-4 w-4 text-green-500 inline" /> : <XCircle className="h-4 w-4 text-destructive inline" title={s.instance_status} />}</td>
+                      <td className="text-center p-2">{s.instance_status === "connected" ? <CheckCircle2 className="h-4 w-4 text-green-500 inline" /> : <span title={s.instance_status}><XCircle className="h-4 w-4 text-destructive inline" /></span>}</td>
                       <td className="text-center p-2">{s.pixel_ok ? "✅" : "—"}</td>
                       <td className="text-center p-2">{s.capi_ok ? "✅" : "—"}</td>
                       <td className="text-center p-2">{s.flows_ok ? "✅" : <span className="text-amber-500 text-xs">faltam {s.flows_missing.join(",")}</span>}</td>
