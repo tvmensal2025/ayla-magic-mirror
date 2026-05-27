@@ -251,13 +251,13 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
           </div>
         </div>
 
-        {/* Documentos: coluna direita em md+, linha abaixo no mobile */}
-        <div className={embedded ? "md:border-l md:border-border/60 md:overflow-y-auto border-t md:border-t-0" : "contents"}>
+        {/* Documentos: coluna lateral em embedded, linha abaixo em desktop */}
+        <div className={embedded ? "md:border-l md:border-border/60 md:overflow-y-auto border-t md:border-t-0" : "shrink-0 border-t border-border/60"}>
           <CaptureDocumentTiles
             customerId={customerId}
             customer={customer}
             onUploaded={async (key, url) => { await updateField(key as any, url); }}
-            compact={embedded}
+            compact={!embedded}
           />
         </div>
       </div>
