@@ -544,7 +544,7 @@ async function sendStepMedia(
     // O teto duro de 12s evita estourar o limite de 60s da Edge Function
     // mesmo com 5+ mídias na sequência.
     const configuredDelay = Number(m.delay_before_ms || 0);
-    if (!isMockMode()) {
+    if (!isMockMode() && !isFlowInstantMode()) {
       if (configuredDelay > 0) {
         const wait = Math.min(configuredDelay, 12_000);
         await new Promise((r) => setTimeout(r, wait));
