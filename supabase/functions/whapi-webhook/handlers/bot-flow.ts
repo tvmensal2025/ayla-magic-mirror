@@ -1266,7 +1266,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
         const delayMs = Number(m.delay_before_ms || 0);
         // 🧪 mock: pula delay configurado pelo consultor (simulador é apenas validação)
-        if (delayMs > 0 && !isMockMode()) await new Promise((r) => setTimeout(r, Math.min(delayMs, 10_000)));
+        if (delayMs > 0 && !isMockMode() && !isFlowInstantMode()) await new Promise((r) => setTimeout(r, Math.min(delayMs, 10_000)));
 
         try {
           const ok = await sendMedia(remoteJid, m.url, "", kind, Number(m.duration_sec || 0) || undefined);
