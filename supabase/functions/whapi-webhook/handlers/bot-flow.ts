@@ -2813,7 +2813,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 }
                 if (!nxt) break;
                 console.log(`[chain-skip] from=${current.position} to=${nxt.position}`);
-                if (!isMockMode()) await new Promise((r) => setTimeout(r, 1500));
+                if (!isMockMode() && !isFlowInstantMode()) await new Promise((r) => setTimeout(r, 1500));
                 current = nxt;
               }
               const ntype = String(current.step_type || "message");
