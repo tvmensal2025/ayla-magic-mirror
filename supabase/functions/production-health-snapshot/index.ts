@@ -25,7 +25,8 @@ Deno.serve(async (req) => {
   try {
     const { data: consultants } = await supabase
       .from("consultants")
-      .select("id, name, slug, active_variants, facebook_pixel_id, notification_phone");
+      .select("id, name, active_variants, facebook_pixel_id, notification_phone")
+      .eq("approved", true);
 
     if (!consultants?.length) {
       return new Response(JSON.stringify({ ok: true, written: 0 }), {
@@ -40,7 +41,7 @@ Deno.serve(async (req) => {
         // Instância
         const { data: inst } = await supabase
           .from("whatsapp_instances")
-          .select("connection_status, last_seen, updated_at")
+          .select("status, last_health_check_at, updated_at, connected_phone")
           .eq("consultant_id", c.id)
           .order("updated_at", { ascending: false })
           .limit(1)
@@ -61,10 +62,10 @@ Deno.serve(async (req) => {
         // CAPI: tem facebook_connections válido?
         const { data: fbConn } = await supabase
           .from("facebook_connections")
-          .select("access_token, token_expires_at")
+          .select("access_token_encrypted, token_expires_at, status")
           .eq("consultant_id", c.id)
           .maybeSingle();
-        const capiOk = !!(fbConn?.access_token && (!fbConn.token_expires_at || new Date(fbConn.token_expires_at) > new Date()));
+        const capiOk = !!(fbConn?.access_token_encrypted && fbConn.status === 'active' && (!fbConn.token_expires_at || new Date(fbConn.token_expires_at) > new Date()));
 
         // Leads
         const { count: leads24 } = await supabase
@@ -84,8 +85,8 @@ Deno.serve(async (req) => {
         const snapshot = {
           consultant_id: c.id,
           captured_at: new Date().toISOString(),
-          instance_status: inst?.connection_status || "unknown",
-          instance_last_seen: inst?.last_seen || inst?.updated_at || null,
+          instance_status: inst?.status || "unknown",
+          instance_last_seen: inst?.last_health_check_at || inst?.updated_at || null,
           pixel_ok: !!c.facebook_pixel_id,
           capi_ok: capiOk,
           flows_ok: missing.length === 0,
