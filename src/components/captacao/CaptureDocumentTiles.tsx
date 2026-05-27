@@ -55,8 +55,8 @@ export function CaptureDocumentTiles({ customerId, customer, onUploaded, compact
   };
 
   return (
-    <section className={compact ? "px-1.5 pt-1 pb-1.5" : "px-3 pb-4 pt-2"}>
-      <h4 className={`font-bold uppercase tracking-wider text-muted-foreground ${compact ? "text-[8px] mb-0.5" : "text-[11px] mb-2"}`}>
+    <section className={compact ? "px-1.5 pt-1 pb-1.5" : "px-2 pb-2 pt-1.5"}>
+      <h4 className={`font-bold uppercase tracking-wider text-muted-foreground ${compact ? "text-[8px] mb-0.5" : "text-[9px] mb-1"}`}>
         Documentos
       </h4>
       <div className="grid grid-cols-3 gap-1">
@@ -66,7 +66,7 @@ export function CaptureDocumentTiles({ customerId, customer, onUploaded, compact
           return (
             <div
               key={s.key}
-              className={`rounded-md border flex flex-col gap-0.5 transition-all ${compact ? "p-0.5" : "p-2 gap-1.5"} ${
+              className={`rounded-md border flex flex-col gap-0.5 transition-all p-1 ${
                 url ? "border-primary/40 bg-primary/5" : "border-dashed border-border bg-card/50"
               }`}
             >
@@ -87,19 +87,19 @@ export function CaptureDocumentTiles({ customerId, customer, onUploaded, compact
                 disabled={isBusy}
                 onClick={() => inputs.current[s.key]?.click()}
                 className={`relative w-full rounded-md overflow-hidden bg-secondary/40 border border-border/50 flex items-center justify-center active:scale-95 transition ${
-                  compact ? "h-10" : "aspect-square"
+                  compact ? "h-10" : "h-14"
                 }`}
               >
                 {isBusy ? (
-                  <Loader2 className={`${compact ? "w-3 h-3" : "w-5 h-5"} animate-spin text-primary`} />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
                 ) : url ? (
                   url.toLowerCase().endsWith(".pdf") ? (
-                    <FileImage className={compact ? "w-3.5 h-3.5 text-primary" : "w-7 h-7 text-primary"} />
+                    <FileImage className="w-4 h-4 text-primary" />
                   ) : (
                     <img src={url} alt={s.label} className="w-full h-full object-cover" />
                   )
                 ) : (
-                  <Camera className={compact ? "w-3.5 h-3.5 text-muted-foreground/60" : "w-6 h-6 text-muted-foreground/60"} />
+                  <Camera className="w-4 h-4 text-muted-foreground/60" />
                 )}
                 {url && !isBusy && (
                   <span className="absolute bottom-0.5 right-0.5 bg-background/80 backdrop-blur rounded-full p-0.5">
@@ -107,7 +107,7 @@ export function CaptureDocumentTiles({ customerId, customer, onUploaded, compact
                   </span>
                 )}
               </button>
-              <p className={`font-semibold text-center leading-tight truncate ${compact ? "text-[7px]" : "text-[10px]"}`}>{s.label}</p>
+              <p className={`font-semibold text-center leading-tight truncate ${compact ? "text-[7px]" : "text-[9px]"}`}>{s.label}</p>
             </div>
           );
         })}
