@@ -1239,7 +1239,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             });
             sent = true;
             // 🧪 mock: zero pausa entre textos (simulador roda turnos em ~1s)
-            if (!isLast && !isMockMode()) await new Promise((r) => setTimeout(r, 800));
+            if (!isLast && !isMockMode() && !isFlowInstantMode()) await new Promise((r) => setTimeout(r, 800));
           } catch (e) {
             console.warn(`[dispatch:${stepKey}] envio de texto falhou:`, (e as any)?.message);
           }
