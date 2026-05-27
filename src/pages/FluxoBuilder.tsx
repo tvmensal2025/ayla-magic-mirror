@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,65 @@ import {
   Step, Variant, ALL_VARIANTS, VARIANT_LABEL,
   parseTransitions, parseCaptures, parseFallback,
 } from "@/components/admin/flow-builder/flowTypes";
+import ViewToggle, { type ViewMode } from "@/components/admin/flow-builder/ViewToggle";
+import { useViewportWidth } from "@/hooks/useViewportWidth";
+
+// task 10.2 — lazy-load do canvas para que o bundle do Modo_Diagrama (e suas
+// dependências `@xyflow/react`, `dagre`, `html-to-image`) só seja baixado
+// quando o Consultor de fato alterna para "Diagrama". Mantém o tempo de
+// carregamento inicial do Modo_Lista inalterado.
+const FlowDiagram = React.lazy(
+  () => import("@/components/admin/flow-builder/FlowDiagram"),
+);
+
+/**
+ * Lê o valor inicial de `viewMode` do `localStorage` aplicando os fallbacks
+ * exigidos por R1.5 e R1.7:
+ *
+ *   - Valor "lista" ou "diagrama" → respeita.
+ *   - Ausente, vazio ou inválido → fallback "lista" (R1.5).
+ *   - Falha de leitura do `localStorage` (modo privado, sem permissão,
+ *     etc.) → fallback silencioso "lista" (R1.7).
+ *
+ * O componente `<ViewToggle>` apenas dispara `onChange`; cabe ao
+ * `FluxoBuilder` persistir antes do fim da transição (R1.4).
+ */
+function readInitialViewMode(): ViewMode {
+  if (typeof window === "undefined") return "lista";
+  try {
+    const v = window.localStorage.getItem("flow-view-mode");
+    return v === "diagrama" ? "diagrama" : "lista";
+  } catch {
+    // Falha silenciosa (R1.7) — `try` cobre QuotaExceededError, modo
+    // privado e ambientes onde `localStorage` é bloqueado pelo browser.
+    return "lista";
+  }
+}
+
+/**
+ * Normaliza uma string para uso como slug URL-safe seguindo o glossário
+ * da feature `flow-diagram-view`:
+ *
+ *   1. Aplica normalização Unicode NFD para separar combining marks
+ *      (acentos viram caracteres independentes).
+ *   2. Remove os combining marks (`\u0300-\u036f`).
+ *   3. Converte para minúsculas.
+ *   4. Substitui qualquer caractere fora de `[a-z0-9]` por `-`.
+ *   5. Colapsa hífens consecutivos e remove os das extremidades.
+ *
+ * Retorna string vazia quando a entrada resulta em zero caracteres
+ * úteis — o caller (`consultantSlug`) usa esse sinal para cair no
+ * próximo fallback (8 primeiros chars do id).
+ */
+function slugifyName(name: string | null | undefined): string {
+  if (!name) return "";
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 /**
  * Novo editor de fluxos — layout híbrido:
@@ -56,67 +115,130 @@ export default function FluxoBuilder() {
   const [simulatorOpen, setSimulatorOpen] = useState(false);
   const [createFromTemplateOpen, setCreateFromTemplateOpen] = useState(false);
 
+  // task 10.2 — `viewMode` controla a alternância Lista ↔ Diagrama (R1.1).
+  // Valor inicial vem do `localStorage` (chave `flow-view-mode`) com
+  // fallbacks de R1.5 e R1.7 aplicados em `readInitialViewMode()`.
+  const [viewMode, setViewModeState] = useState<ViewMode>(readInitialViewMode);
+
+  // task 12.1 — modo somente leitura do `Modo_Diagrama` derivado da viewport
+  // atual (R15.2). `isNarrow` (<768px) força `readOnly={true}` no
+  // `<FlowDiagram>`; `isMedium` (768-1023px) sinaliza ao `<ViewToggle>` para
+  // exibir o tooltip "Melhor visualização em desktop" (R15.1). Quando a
+  // largura cresce/encolhe entre faixas, `useViewportWidth` re-renderiza e o
+  // `<FlowDiagram>` reflete o novo `readOnly` sem reload (R15.4).
+  const { isNarrow, isMedium } = useViewportWidth();
+  const diagramReadOnly = isNarrow;
+
+  // R1.4 — persiste em `localStorage` antes do fim da transição. A
+  // gravação acontece no mesmo turno do `setState` (sincronamente),
+  // assegurando que um reload imediato após o toggle abra no modo certo
+  // (R1.5). Falha de gravação é silenciosa (R1.7).
+  const setViewMode = useCallback((next: ViewMode) => {
+    setViewModeState(next);
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("flow-view-mode", next);
+      }
+    } catch {
+      // R1.7 — fallback silencioso. A preferência permanece em memória
+      // para a sessão atual e a alternância visual ocorre normalmente.
+    }
+  }, []);
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const reload = useCallback(async (uid: string, variant: Variant = "A") => {
     setLoading(true);
-    const [{ data: cons }, { data: flows }, { data: allFlows }] = await Promise.all([
-      supabase.from("consultants").select("conversational_flow_enabled, name").eq("id", uid).maybeSingle(),
-      (supabase as any).from("bot_flows").select("id").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
-      supabase.from("bot_flows").select("variant").eq("consultant_id", uid).eq("is_active", true),
-    ]);
-    
-    setConsultantName((cons as any)?.name ?? "");
-    const ex = new Set<Variant>(["A"]);
-    for (const r of ((allFlows as any[]) || [])) {
-      if (ALL_VARIANTS.includes(r.variant)) ex.add(r.variant);
-    }
-    setExistingVariants(ALL_VARIANTS.filter((v) => ex.has(v)));
-
-    let fid = flows?.[0]?.id ?? null;
-    if (!fid && variant === "A") {
-      const { data } = await supabase.rpc("seed_default_camila_flow", { _consultant_id: uid });
-      fid = (data as string) ?? null;
-    }
-    setFlowId(fid);
-
-    if (fid) {
-      const { data: rows } = await supabase
-        .from("bot_flow_steps").select("*").eq("flow_id", fid).order("position");
-      const parsed = (rows ?? []).map((r: any) => ({
-        ...r,
-        icon: r.icon ?? "msg",
-        title: r.title ?? "Sem título",
-        transitions: parseTransitions(r.transitions),
-        captures: parseCaptures(r.captures),
-        fallback: parseFallback(r.fallback, r.transitions),
-        auto_detect_doc_type: r.auto_detect_doc_type !== false,
-      })) as Step[];
-      setSteps(parsed);
-      if (parsed.length && !selectedId) setSelectedId(parsed[0].id);
-    } else {
-      setSteps([]);
-      setSelectedId(null);
-    }
-
-    // Contagem de mídias por slot
-    const { data: medias } = await supabase
-      .from("ai_media_library")
-      .select("kind, slot_key, active, consultant_id, is_public")
-      .or(`consultant_id.eq.${uid},is_public.eq.true`)
-      .eq("active", true);
-    const counts: Record<string, { audio: number; image: number; video: number }> = {};
-    for (const m of (medias ?? []) as any[]) {
-      const k = m.slot_key as string | null;
-      if (!k) continue;
-      if (!counts[k]) counts[k] = { audio: 0, image: 0, video: 0 };
-      if (m.kind === "audio" || m.kind === "image" || m.kind === "video") {
-        counts[k][m.kind as "audio" | "image" | "video"]++;
+    // task 10.4 — em falha de reload de variante, preservamos o estado
+    // anterior + `toast.error` (R11.3). Tomamos snapshot dos arrays atuais
+    // ANTES de qualquer escrita e revertemos em caso de exceção.
+    const prevSteps = steps;
+    const prevConsultantName = consultantName;
+    const prevExistingVariants = existingVariants;
+    const prevFlowId = flowId;
+    const prevMediaCounts = mediaCounts;
+    try {
+      const [{ data: cons }, { data: flows }, { data: allFlows }] = await Promise.all([
+        supabase.from("consultants").select("conversational_flow_enabled, name").eq("id", uid).maybeSingle(),
+        (supabase as any).from("bot_flows").select("id").eq("consultant_id", uid).eq("is_active", true).eq("variant", variant).order("created_at").limit(1),
+        supabase.from("bot_flows").select("variant").eq("consultant_id", uid).eq("is_active", true),
+      ]);
+      
+      setConsultantName((cons as any)?.name ?? "");
+      const ex = new Set<Variant>(["A"]);
+      for (const r of ((allFlows as any[]) || [])) {
+        if (ALL_VARIANTS.includes(r.variant)) ex.add(r.variant);
       }
+      setExistingVariants(ALL_VARIANTS.filter((v) => ex.has(v)));
+
+      let fid = flows?.[0]?.id ?? null;
+      if (!fid && variant === "A") {
+        const { data } = await supabase.rpc("seed_default_camila_flow", { _consultant_id: uid });
+        fid = (data as string) ?? null;
+      }
+      setFlowId(fid);
+
+      if (fid) {
+        // task 10.4 — `select *` já traz a coluna `layout` adicionada pela
+        // migration `20260601000000_add_layout_to_bot_flow_steps.sql`.
+        // Mapeamos para `layout: r.layout ?? null` para garantir tipagem
+        // correta (`StepLayout | null`) em `Step.layout`.
+        const { data: rows, error: rowsError } = await supabase
+          .from("bot_flow_steps").select("*").eq("flow_id", fid).order("position");
+        if (rowsError) throw rowsError;
+        const parsed = (rows ?? []).map((r: any) => ({
+          ...r,
+          icon: r.icon ?? "msg",
+          title: r.title ?? "Sem título",
+          transitions: parseTransitions(r.transitions),
+          captures: parseCaptures(r.captures),
+          fallback: parseFallback(r.fallback, r.transitions),
+          auto_detect_doc_type: r.auto_detect_doc_type !== false,
+          // task 10.4 — coordenadas manuais do Modo_Diagrama. `null` indica
+          // "não posicionado manualmente"; o `useDiagramLayout` aplica
+          // dagre como fallback. Engine de runtime ignora.
+          layout: r.layout ?? null,
+        })) as Step[];
+        setSteps(parsed);
+        if (parsed.length && !selectedId) setSelectedId(parsed[0].id);
+      } else {
+        setSteps([]);
+        setSelectedId(null);
+      }
+
+      // Contagem de mídias por slot
+      const { data: medias } = await supabase
+        .from("ai_media_library")
+        .select("kind, slot_key, active, consultant_id, is_public")
+        .or(`consultant_id.eq.${uid},is_public.eq.true`)
+        .eq("active", true);
+      const counts: Record<string, { audio: number; image: number; video: number }> = {};
+      for (const m of (medias ?? []) as any[]) {
+        const k = m.slot_key as string | null;
+        if (!k) continue;
+        if (!counts[k]) counts[k] = { audio: 0, image: 0, video: 0 };
+        if (m.kind === "audio" || m.kind === "image" || m.kind === "video") {
+          counts[k][m.kind as "audio" | "image" | "video"]++;
+        }
+      }
+      setMediaCounts(counts);
+    } catch (err) {
+      // R11.3 — em falha de reload de variante, preserva estado anterior
+      // e exibe `toast.error` identificando a operação. Restauramos todos
+      // os arrays/IDs ao que estavam antes para evitar estado parcial
+      // (alguns campos atualizados, outros não) que confundiria o
+      // Modo_Diagrama e o Modo_Lista.
+      console.error("[FluxoBuilder] reload failed", err);
+      setSteps(prevSteps);
+      setConsultantName(prevConsultantName);
+      setExistingVariants(prevExistingVariants);
+      setFlowId(prevFlowId);
+      setMediaCounts(prevMediaCounts);
+      toast.error("Não foi possível carregar a variante. Tente novamente.");
+    } finally {
+      setLoading(false);
     }
-    setMediaCounts(counts);
-    setLoading(false);
-  }, [selectedId]);
+  }, [selectedId, steps, consultantName, existingVariants, flowId, mediaCounts]);
 
   useEffect(() => {
     let alive = true;
@@ -147,6 +269,27 @@ export default function FluxoBuilder() {
     () => steps.reduce((m, s) => Math.max(m, s.position), 0),
     [steps],
   );
+
+  // task 10.3 — `consultantSlug` segue a ordem do glossário:
+  //   (1) `consultants.slug` quando preenchido — não consultado aqui
+  //       porque a tabela `consultants` no schema atual não expõe o campo
+  //       `slug` (ver `src/integrations/supabase/types.ts`); fica como
+  //       extensão futura quando a coluna for adicionada.
+  //   (2) `consultants.name` aplicado a normalização Unicode NFD
+  //       removendo acentos, minúsculas, qualquer caractere fora de
+  //       `[a-z0-9]` substituído por `-`, hífens consecutivos colapsados
+  //       e hífens nas extremidades removidos.
+  //   (3) os 8 primeiros caracteres do `consultants.id` (UUID) quando
+  //       (2) resulta em string vazia.
+  //
+  // O slug é consumido por `useDiagramExport` (task 9.3) para nomear os
+  // arquivos exportados (PNG/SVG) e nada mais — não afeta o engine.
+  const consultantSlug = useMemo(() => {
+    const fromName = slugifyName(consultantName);
+    if (fromName) return fromName;
+    if (userId) return userId.slice(0, 8);
+    return "consultor";
+  }, [consultantName, userId]);
 
   async function autoFixAll() {
     if (!validation.autoFixablePatches.length) return;
@@ -186,28 +329,52 @@ export default function FluxoBuilder() {
     );
   }
 
-  async function addStep() {
-    if (!flowId) return;
+  async function addStep(
+    initialPosition?: { x: number; y: number },
+  ): Promise<Step | null> {
+    if (!flowId) return null;
     const maxPos = steps.reduce((m, s) => Math.max(m, s.position), 0);
     const newKey = `passo_${Date.now().toString(36)}`;
-    const { data, error } = await supabase.from("bot_flow_steps").insert({
+    // task 10.3 / 10.4 — quando o caller informa `initialPosition` (canvas),
+    // inicializamos `layout = initialPosition` no insert para que o
+    // `useDiagramLayout` use a coordenada manual em vez de cair no dagre
+    // (R10.11). Quando ausente (chamada vinda do Modo_Lista), preservamos o
+    // comportamento histórico de não persistir layout — o canvas rodará
+    // dagre na próxima abertura.
+    const insertPayload: Record<string, unknown> = {
       flow_id: flowId, position: maxPos + 1, step_type: "message",
       step_key: newKey, title: "Novo passo", summary: "", icon: "msg",
       message_text: "", slot_key: newKey, transitions: [], captures: [],
       fallback: { mode: "repeat" }, is_active: true,
-    }).select().maybeSingle();
-    if (error || !data) { toast.error(error?.message ?? "Erro"); return; }
+    };
+    if (initialPosition) {
+      insertPayload.layout = {
+        x: initialPosition.x,
+        y: initialPosition.y,
+      };
+    }
+    const { data, error } = await supabase
+      .from("bot_flow_steps")
+      .insert(insertPayload as any)
+      .select()
+      .maybeSingle();
+    if (error || !data) {
+      toast.error(error?.message ?? "Erro");
+      return null;
+    }
     const newStep: Step = {
       ...(data as any),
       icon: (data as any).icon ?? "msg",
       transitions: parseTransitions((data as any).transitions),
       captures: parseCaptures((data as any).captures),
       fallback: parseFallback((data as any).fallback, (data as any).transitions),
+      layout: (data as any).layout ?? null,
     };
     setSteps((prev) => [...prev, newStep]);
     setSelectedId(newStep.id);
     setInspectorId(newStep.id);
     toast.success("Passo adicionado");
+    return newStep;
   }
 
   async function duplicateStep(id: string) {
@@ -296,6 +463,17 @@ export default function FluxoBuilder() {
                 Auto-corrigir
               </Button>
             )}
+            {/*
+              task 10.2 — Toggle Lista/Diagrama no header (R1.1). A
+              persistência em `localStorage` é responsabilidade do
+              `setViewMode` (R1.4); o `<ViewToggle>` apenas dispara o
+              `onChange`.
+            */}
+            <ViewToggle
+              value={viewMode}
+              onChange={setViewMode}
+              diagramHint={isMedium}
+            />
             <Button variant="outline" size="sm" onClick={() => navigate("/admin/conhecimento")}>
               <BookOpen className="mr-1 h-3 w-3" />
               Conhecimento
@@ -339,10 +517,23 @@ export default function FluxoBuilder() {
         )}
       </header>
 
-      {/* Layout 2 colunas */}
+      {/*
+        task 10.2 — Render condicional Lista vs Diagrama (R1.2, R1.3, R1.5).
+        Estratégia: a `<section>` do Modo_Lista permanece **montada** mesmo
+        quando `viewMode === "diagrama"` (escondida via Tailwind `hidden`),
+        para preservar a posição de rolagem da lista ao voltar para o
+        Modo_Lista (R1.3). O Modo_Diagrama, em contraste, é totalmente
+        montado/desmontado por toggle — `useViewportPersistence` (task 9.4)
+        é responsável por restaurar zoom/pan via `localStorage`.
+        `selectedId` e `inspectorId` (R1.6) vivem no `FluxoBuilder` e são
+        naturalmente preservados.
+      */}
       <main className="mx-auto grid max-w-7xl gap-4 px-4 py-6 lg:grid-cols-[1fr_400px]">
-        {/* Coluna esquerda — passos */}
-        <section className="space-y-3">
+        {/* Coluna esquerda — Modo_Lista (mantida montada) */}
+        <section
+          className={viewMode === "diagrama" ? "hidden" : "space-y-3"}
+          aria-hidden={viewMode === "diagrama"}
+        >
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium text-muted-foreground">
               Editando variante <span className="font-semibold text-foreground">{editingVariant}</span> — {VARIANT_LABEL[editingVariant].replace(/^[A-E]\s*/, "")} · {steps.length} {steps.length === 1 ? "passo" : "passos"}
@@ -385,11 +576,66 @@ export default function FluxoBuilder() {
             </DndContext>
           )}
 
-          <Button variant="outline" className="w-full" onClick={addStep}>
+          <Button variant="outline" className="w-full" onClick={() => { void addStep(); }}>
             <Plus className="mr-1 h-4 w-4" />
             Adicionar passo
           </Button>
         </section>
+
+        {/* Coluna esquerda — Modo_Diagrama (lazy-loaded, R1.2/R1.5) */}
+        {viewMode === "diagrama" && userId && (
+          <section
+            // Altura calculada para preencher a viewport descontando o header
+            // sticky (~160px) e padding inferior. O canvas precisa de altura
+            // explícita porque `<ReactFlow>` dimensiona-se via 100% do
+            // contêiner.
+            className="h-[calc(100vh-200px)] min-h-[500px] overflow-hidden rounded-xl border bg-background"
+            aria-label="Editor de fluxo em diagrama"
+          >
+            <Suspense
+              fallback={
+                <div
+                  className="grid h-full w-full place-items-center"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" aria-hidden="true" />
+                    <span className="text-xs">Carregando diagrama…</span>
+                  </div>
+                </div>
+              }
+            >
+              <FlowDiagram
+                steps={steps}
+                selectedId={selectedId}
+                consultantId={userId}
+                consultantName={consultantName}
+                consultantSlug={consultantSlug}
+                flowId={flowId}
+                editingVariant={editingVariant}
+                mediaCounts={mediaCounts}
+                validation={validation}
+                // task 12.1 — modo somente leitura quando viewport <768px
+                // (R15.2). A faixa intermediária (768-1023px) mantém o canvas
+                // editável; o `ViewToggle` mostra o tooltip "Melhor
+                // visualização em desktop" (R15.1) via `diagramHint`.
+                readOnly={diagramReadOnly}
+                onSelectStep={setSelectedId}
+                onOpenInspector={(id) => {
+                  setSelectedId(id);
+                  setInspectorId(id);
+                }}
+                onPatchStep={patchStep}
+                onAddStep={addStep}
+                onDuplicateStep={duplicateStep}
+                onDeleteStep={deleteStep}
+                onAutoFixAll={autoFixAll}
+                onCreateFromTemplate={() => setCreateFromTemplateOpen(true)}
+              />
+            </Suspense>
+          </section>
+        )}
 
         {/* Coluna direita — preview WhatsApp + preferências de IA */}
         <aside className="hidden space-y-3 lg:block">

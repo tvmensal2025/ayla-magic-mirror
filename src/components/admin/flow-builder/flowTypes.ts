@@ -11,8 +11,60 @@ export type Transition = {
   trigger_intent: string;
   trigger_phrases: string[];
   goto_step_id: string | null;
+  // Mantemos "ai" como valor legado tolerado pela tipagem para preservar
+  // compatibilidade com fluxos antigos persistidos em banco. O runtime atual
+  // (evolution/whapi handlers) reconhece apenas {"cadastro","humano","repeat"};
+  // o renderer do Modo_Diagrama trata "ai" como destino inválido (Aresta_Erro).
   goto_special: "cadastro" | "humano" | "repeat" | "ai" | null;
 };
+
+/**
+ * Conjunto fechado de valores de `goto_special` reconhecidos pelo runtime de
+ * conversational (evolution-webhook e whapi-webhook). Usado pelo Modo_Diagrama
+ * (`useDiagramData`) para decidir entre Aresta_Solida (destino para
+ * No_Terminal) e Aresta_Erro ("goto_special inválido").
+ *
+ * Importante: o tipo `Transition.goto_special` ainda lista `"ai"` por
+ * compatibilidade com dados legados; este conjunto é a fonte de verdade
+ * para validação em runtime de mapping.
+ */
+export const VALID_GOTO_SPECIAL = ["cadastro", "humano", "repeat"] as const;
+export type GotoSpecial = (typeof VALID_GOTO_SPECIAL)[number];
+
+/**
+ * Conjunto de `trigger_intent` que o runtime trata como Trigger_Determinístico
+ * (sem invocar IA). Qualquer valor fora deste conjunto e fora de string vazia
+ * é considerado Trigger_Semantico e renderizado como Aresta_IA no diagrama.
+ *
+ * Mantém paridade com o comportamento de `flow-router.ts` e dos handlers
+ * conversational nos webhooks.
+ */
+export const DETERMINISTIC_INTENTS: ReadonlySet<string> = new Set([
+  "default",
+  "palavra_chave",
+  "media_received",
+]);
+
+/**
+ * Retorna `true` quando o `trigger_intent` é determinístico no runtime.
+ *
+ * - `null`/`undefined`/string vazia → `true` (caso "casa por trigger_phrases
+ *   literal", sem classificação semântica).
+ * - Valores em `DETERMINISTIC_INTENTS` → `true`.
+ * - Qualquer outro valor → `false` (Trigger_Semantico, resolvido por IA).
+ */
+export function isDeterministicIntent(
+  intent: string | null | undefined,
+): boolean {
+  if (!intent) return true;
+  return DETERMINISTIC_INTENTS.has(intent);
+}
+
+/**
+ * Coordenada de layout persistida em `bot_flow_steps.layout` (jsonb). Cosmética
+ * para o Modo_Diagrama — o engine de runtime ignora completamente esta coluna.
+ */
+export type StepLayout = { x: number; y: number };
 
 export type CaptureField =
   | "name"
@@ -56,6 +108,13 @@ export type Step = {
   fallback: Fallback;
   is_active: boolean;
   auto_detect_doc_type?: boolean;
+  /**
+   * Coordenadas manuais do passo no Modo_Diagrama. `null`/`undefined` indica
+   * que o passo nunca foi posicionado manualmente — o `useDiagramLayout`
+   * aplica auto-layout (dagre) para esses casos. Coluna jsonb adicionada por
+   * migration; engine de runtime ignora.
+   */
+  layout?: StepLayout | null;
 };
 
 export const STEP_TYPE_OPTIONS: { value: string; label: string; emoji: string; hint: string }[] = [

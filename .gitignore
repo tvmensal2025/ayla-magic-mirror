@@ -34,3 +34,13 @@ dist-ssr
 
 # Local document fixtures (private / personal data)
 .tmp/test-docs/
+
+# Local ephemeral scripts and analysis artifacts (.tmp/)
+# Mantemos `.tmp/pg-snapshot-validate/` versionado por ser validador da
+# migration `add_layout_to_bot_flow_steps` (referenciado em
+# .kiro/specs/flow-diagram-view/migration-15-3-validation.md).
+.tmp/*
+!.tmp/pg-snapshot-validate/
+
+# Lovable workspace metadata (gerado automaticamente)
+.lovable/

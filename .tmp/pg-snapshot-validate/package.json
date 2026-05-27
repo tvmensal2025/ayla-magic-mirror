@@ -1,0 +1,15 @@
+{
+  "name": "pg-snapshot-validate",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.4.6"
+  }
+}
