@@ -234,8 +234,11 @@ export function CaptureStepsGrid({ consultantId, customerId, variant = "A", sent
                   {s.title || s.step_key || "Passo"}
                 </p>
                 {inlinePreview && (
-                  <p className="hidden xl:block mt-0.5 text-[10px] leading-snug text-muted-foreground line-clamp-1 italic break-words">
-                    “{inlinePreview}”
+                  <p
+                    className="mt-0.5 text-[9px] leading-snug text-muted-foreground/70 line-clamp-1 italic break-words"
+                    title={inlinePreview}
+                  >
+                    {inlinePreview}
                   </p>
                 )}
                 <div className="mt-auto pt-1 flex items-center gap-0.5">
