@@ -130,8 +130,10 @@ export async function dispatch(
     try {
       switch (action.kind) {
         case "send_text": {
+          // Modo instantâneo zera presence + sleep. Mantém só o envio.
+          const instant = isFlowInstantMode();
           // Renova presence "digitando…" antes do envio (humanização).
-          if (action.humanDelayMs > 0 && adapter.capabilities.supportsTypingPresence) {
+          if (!instant && action.humanDelayMs > 0 && adapter.capabilities.supportsTypingPresence) {
             try {
               await adapter.sendPresence(ctx.remoteJid, "composing", action.humanDelayMs);
             } catch (_) { /* presence é cosmética */ }
