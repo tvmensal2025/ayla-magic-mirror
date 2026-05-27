@@ -85,8 +85,8 @@ Deno.serve(async (req) => {
         const snapshot = {
           consultant_id: c.id,
           captured_at: new Date().toISOString(),
-          instance_status: inst?.connection_status || "unknown",
-          instance_last_seen: inst?.last_seen || inst?.updated_at || null,
+          instance_status: inst?.status || "unknown",
+          instance_last_seen: inst?.last_health_check_at || inst?.updated_at || null,
           pixel_ok: !!c.facebook_pixel_id,
           capi_ok: capiOk,
           flows_ok: missing.length === 0,
