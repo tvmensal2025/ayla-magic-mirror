@@ -56,6 +56,104 @@ function authRequired(req, res, next) {
   next();
 }
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Monta o link de validação de código (mesmo link da facial/contrato).
+ * Padrão canônico do sistema iGreen:
+ *   https://digital.igreenenergy.com.br/validacao-codigo/{idcliente}?id={consultor}&sendcontract=true
+ *
+ * É o mesmo URL usado pra:
+ *   - Cliente digitar o código OTP (recebido via WhatsApp pelo backend iGreen)
+ *   - Validação facial (Idwall)
+ *   - Assinatura do contrato
+ */
+function buildValidationLink(idcliente, idconsultor) {
+  return `https://digital.igreenenergy.com.br/validacao-codigo/${idcliente}?id=${idconsultor}&sendcontract=true`;
+}
+
+/**
+ * Envia uma mensagem WhatsApp pro cliente com o link da validação.
+ * Tenta Evolution API (instância do consultor) primeiro, depois Whapi como fallback.
+ * Best-effort: erros são logados mas não quebram o cadastro.
+ */
+async function sendValidationLinkToCustomer(customerId, link) {
+  if (!supabase || !customerId) return { skipped: 'no_supabase_or_customer_id' };
+
+  // Carrega settings + customer + instance
+  const [{ data: settingsRows }, { data: customer }] = await Promise.all([
+    supabase.from('settings').select('*'),
+    supabase
+      .from('customers')
+      .select('id, name, phone_whatsapp, consultant_id')
+      .eq('id', customerId)
+      .maybeSingle(),
+  ]);
+  if (!customer?.phone_whatsapp) return { skipped: 'no_phone' };
+
+  const settings = {};
+  settingsRows?.forEach(s => { settings[s.key] = s.value; });
+
+  const phone = String(customer.phone_whatsapp).replace(/\D/g, '');
+  const normalized = phone.startsWith('55') ? phone : `55${phone}`;
+  const firstName = String(customer.name || '').trim().split(/\s+/)[0] || 'tudo bem';
+
+  const text =
+    `Oi ${firstName}! 🎉\n\n` +
+    `📲 Você receberá em instantes uma mensagem da iGreen aqui no WhatsApp ` +
+    `com um *código de verificação*.\n\n` +
+    `Quando chegar, é só clicar no link abaixo e digitar o código:\n` +
+    `${link}\n\n` +
+    `No mesmo link você também faz a *validação facial* e a *assinatura do contrato*. ` +
+    `Tudo em um lugar só! ✅`;
+
+  // 1. Evolution API (instância do consultor)
+  let instanceName = null;
+  if (customer.consultant_id) {
+    const { data: inst } = await supabase
+      .from('whatsapp_instances')
+      .select('instance_name')
+      .eq('consultant_id', customer.consultant_id)
+      .limit(1)
+      .maybeSingle();
+    instanceName = inst?.instance_name || null;
+  }
+  const evoUrl = (settings.evolution_api_url || process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
+  const evoKey = settings.evolution_api_key || process.env.EVOLUTION_API_KEY || '';
+  if (evoUrl && evoKey && instanceName) {
+    try {
+      const r = await fetch(`${evoUrl}/message/sendText/${instanceName}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: evoKey },
+        body: JSON.stringify({ number: normalized, text }),
+      });
+      if (r.ok) return { sent: 'evolution', instance: instanceName };
+      console.warn(`  ⚠ evolution sendText ${r.status}`);
+    } catch (e) {
+      console.warn(`  ⚠ evolution send failed: ${e.message}`);
+    }
+  }
+
+  // 2. Whapi fallback
+  const whapiToken = settings.whapi_token || process.env.WHAPI_TOKEN || '';
+  const whapiUrl = (settings.whapi_api_url || process.env.WHAPI_API_URL || 'https://gate.whapi.cloud').replace(/\/$/, '');
+  if (whapiToken) {
+    try {
+      const r = await fetch(`${whapiUrl}/messages/text`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${whapiToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: `${normalized}@s.whatsapp.net`, body: text, typing_time: 0 }),
+      });
+      if (r.ok) return { sent: 'whapi' };
+      console.warn(`  ⚠ whapi sendText ${r.status}`);
+    } catch (e) {
+      console.warn(`  ⚠ whapi send failed: ${e.message}`);
+    }
+  }
+
+  return { skipped: 'no_channel_configured' };
+}
+
 // ─── Job processor ──────────────────────────────────────────────────────────
 async function processLead(job) {
   const { customer_id, dados } = job.data;
@@ -66,28 +164,61 @@ async function processLead(job) {
     const result = await c.cadastrarCliente(dados);
     console.log(`✓ [job ${job.id}] customer=${customer_id} → idcliente=${result.idcliente}`);
 
-    // Persistir no banco (best-effort)
+    // Link único de validação de código + facial + assinatura
+    const validationLink = buildValidationLink(result.idcliente, dados.idconsultor);
+    console.log(`  🔗 link: ${validationLink}`);
+
+    // Persistir no banco (best-effort) — popula tanto colunas portal2_* quanto
+    // campos canônicos (link_facial / link_assinatura) que o resto do sistema usa.
     if (supabase && customer_id) {
-      await supabase.from('customers').update({
+      const updates = {
         portal2_idcliente: result.idcliente,
         portal2_idsolcontratovalidacao: result.idsolcontratovalidacao,
         portal2_status: 'created',
         portal2_created_at: new Date().toISOString(),
-      }).eq('id', customer_id).then(
+        portal2_contract_link: validationLink,
+        // Campos canônicos do sistema (já usados pelo CRM, painel, e mensagens
+        // automáticas existentes). Manter em sync evita ter código duplicado
+        // procurando o link por tipo de portal.
+        link_facial: validationLink,
+        link_assinatura: validationLink,
+        igreen_link: validationLink,
+        igreen_code: String(result.idcliente),
+        status: 'awaiting_otp',
+        conversation_step: 'aguardando_otp',
+        portal_submitted_at: new Date().toISOString(),
+      };
+      await supabase.from('customers').update(updates).eq('id', customer_id).then(
         () => {},
         (e) => console.warn(`  ⚠ supabase update falhou: ${e.message}`),
       );
     }
 
-    // Disparar geração de OTP automaticamente
+    // Disparar geração de OTP (a iGreen manda WhatsApp pro cliente com o código)
+    let otpGenerated = false;
     try {
       await c.generateVerificationCode(result.idcliente);
-      console.log(`  ✓ OTP enviado pra customer=${customer_id}`);
+      otpGenerated = true;
+      console.log(`  ✓ OTP requisitado pra customer=${customer_id} (cliente recebe via WhatsApp da iGreen)`);
+      if (supabase && customer_id) {
+        await supabase.from('customers').update({
+          portal2_status: 'otp_sent',
+          portal2_otp_sent_at: new Date().toISOString(),
+        }).eq('id', customer_id).then(() => {}, () => {});
+      }
     } catch (e) {
       console.warn(`  ⚠ falha ao gerar OTP: ${e.message}`);
     }
 
-    return { success: true, ...result };
+    // Mandar o link pro cliente via WhatsApp (mesmo link de OTP/facial/assinatura)
+    try {
+      const sendResult = await sendValidationLinkToCustomer(customer_id, validationLink);
+      console.log(`  📲 link WhatsApp: ${JSON.stringify(sendResult)}`);
+    } catch (e) {
+      console.warn(`  ⚠ envio do link falhou: ${e.message}`);
+    }
+
+    return { success: true, validationLink, otpGenerated, ...result };
   } catch (e) {
     console.error(`✗ [job ${job.id}] customer=${customer_id} erro: ${e.message}`);
     if (supabase && customer_id) {
@@ -250,13 +381,28 @@ async function fetchDadosFromSupabase(customerId) {
 }
 
 app.post('/confirm-otp', authRequired, async (req, res) => {
-  const { idconsultor, idcliente, code } = req.body || {};
+  const { idconsultor, idcliente, code, customer_id } = req.body || {};
   if (!idconsultor || !idcliente || !code) {
     return res.status(400).json({ ok: false, error: 'idconsultor, idcliente, code obrigatórios' });
   }
   try {
     const c = new Portal2Client({ idconsultor });
     const result = await c.validateVerificationCode({ idcliente, code });
+
+    // Best-effort: atualiza estado no banco
+    if (supabase && customer_id) {
+      const validationLink = buildValidationLink(idcliente, idconsultor);
+      await supabase.from('customers').update({
+        portal2_status: 'otp_validated',
+        portal2_otp_validated_at: new Date().toISOString(),
+        portal2_contract_link: validationLink,
+        link_assinatura: validationLink,
+        otp_code: String(code).slice(0, 12),
+        otp_validated_at: new Date().toISOString(),
+        status: 'validating_otp',
+        conversation_step: 'aguardando_facial',
+      }).eq('id', customer_id).then(() => {}, () => {});
+    }
     return res.json({ ok: true, result });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
