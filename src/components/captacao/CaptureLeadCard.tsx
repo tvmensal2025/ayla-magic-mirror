@@ -168,9 +168,9 @@ export function CaptureLeadCard({ customerId, onSubmitted, embedded = false, sen
         />
       )}
 
-      {/* Embedded: 2 colunas (ficha | docs) em md+, stacked compacto no mobile */}
-      <div className={embedded ? "flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-0 overflow-hidden" : "contents"}>
-        <div className={`overflow-y-auto ${embedded ? "p-1.5" : "p-2.5"} space-y-1.5`}>
+      {/* Layout: campos em coluna única + documentos abaixo, ambos em scroll vertical */}
+      <div className={embedded ? "flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-0 overflow-hidden" : "flex-1 min-h-0 flex flex-col overflow-hidden"}>
+        <div className={`overflow-y-auto ${embedded ? "p-1.5" : "p-2"} space-y-1.5`}>
           <CaptureDataConfirmCard kind="bill" customer={customer} />
           <CaptureDataConfirmCard kind="doc" customer={customer} />
           {/*
