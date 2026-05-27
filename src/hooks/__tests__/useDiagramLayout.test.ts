@@ -23,7 +23,7 @@ import type { Step, GotoSpecial } from "@/components/admin/flow-builder/flowType
 // Mock do supabase. O hook usa `supabase.from("...").update({...} as never).eq(...)`.
 const updateMock = vi.fn(() => Promise.resolve({ error: null }));
 const eqMock = vi.fn((..._args: unknown[]) => updateMock());
-const fromMock = vi.fn(() => ({ update: () => ({ eq: eqMock }) }));
+const fromMock = vi.fn((..._args: unknown[]) => ({ update: () => ({ eq: eqMock }) }));
 
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
