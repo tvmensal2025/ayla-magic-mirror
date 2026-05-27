@@ -1,112 +1,139 @@
-# Auditoria da Plataforma — Estado Real (27/mai)
+# Plano: Go-Live Hardening — CTWA + QR + Variantes A/B/D
 
-Rodei os scanners (`supabase--linter` + `security--get_scan_results`) agora. **Nada do que estava pendente foi corrigido no banco.** Pior: o scanner detectou novas falhas críticas que não estavam na lista anterior.
+## Contexto confirmado
 
-## Resumo numérico
-
-- 397 migrations, 104 edge functions, 11 arquivos de teste (cobertura ainda baixíssima).
-- **119 issues** no linter Supabase.
-- **9 findings** no scanner Lovable (3 ERROR, 6 WARN).
-- Build/TS verdes ✅.
+- **Variantes ativas em produção:** A (áudio), B (texto), D (botões/auto). C fica desligada até ter vídeo.
+- **Entrada de leads:** Facebook/Instagram Ads (CTWA) + QR code físico. Excel é só sync de clientes iGreen, não cria lead.
+- **Objetivo:** auditar os 7 pontos críticos do fluxo, fechar gaps, e criar um dashboard de monitoramento pros primeiros dias.
 
 ---
 
-## 🔴 CRÍTICO — vazamento de dados (corrigir antes de qualquer go-live)
+## Fase 1 — Round-robin A/B/D (remover C da rotação)
 
-1. `**consultants.igreen_portal_password` exposto em plaintext para anônimos** (ERROR)
-  - Policy `Public read approved consultants minimal` faz `SELECT *` para `anon` + `authenticated` quando `approved IS TRUE`.
-  - Qualquer visitante anônimo lê senha, e-mail, telefone de todos os consultores aprovados.
-  - **Fix:** substituir por view security-definer ou policy com lista de colunas (`id, name, photo_url, cadastro_url, slug`).
-2. **Bucket `whatsapp-media` público** (ERROR)
-  - Documentos, RG, conta de luz, selfies dos clientes acessíveis por URL.
-  - **Fix:** bucket → privado; SELECT só pelo dono ou service_role; signed URLs no app.
-3. **Bucket `video igreen` permite INSERT/UPDATE/DELETE para `anon**` (ERROR)
-  - Qualquer um na internet sobrescreve ou apaga os vídeos da LP.
-  - **Fix:** remover policies `public/anon` de mutação; manter só `service_role` + admin autenticado por path.
-4. `**whatsapp_instances` — `anon` lista todos os números conectados** (ERROR)
-  - Policy `Anon read connected phone only` vaza WhatsApp de todos os consultores ativos.
-  - **Fix:** dropar a policy anon; manter só leitura do dono.
-5. **Realtime sem RLS em `realtime.messages**` (ERROR)
-  - Qualquer autenticado se inscreve em qualquer canal e recebe eventos de `capture_field_suggestions` de outros consultores (nome do cliente + campos inferidos).
-  - **Fix:** RLS em `realtime.messages` filtrando por topic = `consultant:{auth.uid()}`.
+**Onde mexer:** lógica de atribuição de `flow_variant` no `whapi-webhook` e em `lead-attribution`.
+
+- Trocar round-robin atual (A/B/C ou A/B/C/D) por **A → B → D → A …** baseado em `count(customers) % 3` por consultor.
+- Garantir que o router (`bot_flows` lookup com filtro `variant`) caia em A como fallback se a variante sorteada não tiver fluxo ativo pro consultor.
+- Atualizar `dev-fire-all-steps` e `ai-generate-step-text` pra aceitar D (já aceita) e remover sugestões de C nos seletores do `/admin/fluxos`.
+- Atualizar `ManualStepDialog` e `StepMediaPanel` pra esconder C quando o consultor não tem `bot_flows` com `variant='C'`.
 
 ---
 
-## 🟠 ALTO
+## Fase 2 — Hardening dos 7 pontos críticos
 
-6. `**app_settings` expõe `super_admin_phone` e `super_admin_instance_name**` para qualquer autenticado.
-  - **Fix:** policy por allowlist de `key` (mesmo padrão da tabela `settings`).
-7. **Bucket `consultant-photos**` — UPDATE/DELETE sem checagem de owner. Qualquer autenticado sobrescreve foto de qualquer consultor.
-  - **Fix:** policy com `(storage.foldername(name))[1] = auth.uid()::text` (padrão já usado em `ai-agent-media`).
-8. `**message_templates**` — autenticados leem templates de outros consultores (qualquer `origin_template_id IS NULL`).
-  - **Fix:** restringir a `consultant_id IS NULL` (globais reais) OU `consultant_id = auth.uid()`.
-9. **Bucket `simulator-uploads` público** — contas de luz e documentos acessíveis sem auth.
-  - **Fix:** SELECT autenticado + path do owner; ou signed URLs.
+### 2.1 Atribuição de campanha Facebook (CTWA)
 
----
+- Auditar `facebook_campaigns`: toda campanha ativa precisa ter `initial_message` preenchido com a frase exata do anúncio.
+- Expandir `ADS_REGEX` em `_shared/lead-attribution.ts` e `_shared/captation/lead-source.ts` com as frases reais que o time roda hoje (pedir lista pro time de tráfego).
+- Adicionar fallback: se vier `ctwa_clid` no payload do Whapi → marcar `lead_source='facebook_ad'` mesmo sem match de regex.
 
-## 🟡 IMPORTANTES (linter Supabase)
+### 2.2 Pixel + CAPI por consultor
 
-- **10 tabelas com RLS habilitado e ZERO policy** → bloqueia até `service_role` em queries via PostgREST. (Fase 1 que ficou esperando aprovação nunca foi aplicada.)
-  - `ai_cooldown_state`, `customer_processing_lock`, `gemini_quota_bucket`, `inbound_media_failures`, `inbound_media_retry`, `outbound_message_log`, `pending_outbound_media`, `webhook_message_dedup`, `webhook_rate_limit`, `customer_flow_state`.
-- **~30 funções SECURITY DEFINER executáveis por `anon`/`authenticated**` (clone_bot_flow_as, seed_flow_d, credit/debit/refund_consultant_wallet, fb_emit_capi, consume_gemini_token, etc.) — risco de escalada de privilégio direto.
-- **Função `Function Search Path Mutable**` — pelo menos 1 função sem `SET search_path`.
-- **2 policies `WITH CHECK (true)**` (UPDATE/DELETE/INSERT permissivas demais).
-- **Leaked Password Protection** desligado no Supabase Auth.
+- Validar que cada consultor com ads ativos tem:
+  - `consultants.facebook_pixel_id` preenchido
+  - `facebook_connections` com `access_token` válido (não expirado)
+- Adicionar widget no `/admin` mostrando status do Pixel + última chamada CAPI bem-sucedida.
 
----
+### 2.3 Instância WhatsApp connected
 
-## 🔵 PERFORMANCE / QUALIDADE (não bloqueante)
+- Cron novo `instance-health-cron` (a cada 10 min) verifica todas as instâncias `is_active=true`:
+  - Se `connection_status != 'connected'` por > 15 min → notificar `consultants.notification_phone` + Super Admin.
+- Badge no `/admin` em vermelho pulsante quando a instância do consultor logado está desconectada.
 
-- Cobertura de testes ridícula (11 arquivos para 104 edge functions + 397 migrations). Sem teste de wallet, RLS, OCR, takeover.
-- Índices duplicados e FKs sem cobertura ainda não tratados.
-- `auth.uid()` direto em policies hot (sem `(select auth.uid())`).
+### 2.4 Variante D — bot_flows obrigatório
 
----
+- Migration de validação: trigger em `consultants` que bloqueia `is_active=true` se não existir `bot_flows` com `variant in ('A','B','D')` e `is_active=true` pra cada uma.
+- Seed script: pra cada consultor sem fluxo D, clonar o fluxo A e marcar `variant='D'` + adicionar nós de botão padrão (sim/não na captura de conta).
 
-## Plano de execução proposto (4 fases, todas via `supabase--migration` + aprovação sua)
+### 2.5 Cron `flow-d-health-cron`
 
-### Fase A — Vazamentos de dado (BLOQUEANTE — ~1 migration)
+- Confirmar agendamento no `pg_cron` (rodar a cada 30 min).
+- Adicionar métrica: nº de leads destravados por execução → grava em nova tabela `flow_d_health_runs`.
 
-- Reescrever policy `Public read approved consultants minimal` para colunas seguras.
-- Tornar `whatsapp-media` e `simulator-uploads` privados + nova policy por owner.
-- Remover policies `anon/public` de mutação em `video igreen`.
-- Dropar policy `Anon read connected phone only` em `whatsapp_instances`.
-- Restringir `app_settings` por allowlist de keys.
-- Corrigir owner-check em `consultant-photos`.
-- Restringir `message_templates` library leak.
-- RLS em `realtime.messages` por topic do consultor.
+### 2.6 QR code rastreável
 
-### Fase B — RLS interno + REVOKE de funções (Fase 1 antiga, finalmente aplicada)
+- Cada material físico do consultor deve apontar pra `/c/:slug?src=qr&utm_campaign={local}` (ex: `?src=qr&utm_campaign=feira-sp-jan`).
+- LP já passa `utm_*` pro WhatsApp via wa.me `text=` → garantir que `lead-attribution.ts` lê `utm_campaign` da primeira mensagem e grava em `customers.lead_source_detail`.
 
-- GRANT/REVOKE + policy `service_role_full_access` nas 10 tabelas internas.
-- `REVOKE EXECUTE` em ~30 funções DEFINER sensíveis (manter só `service_role`).
-- `SET search_path` na função que falta.
-- Trocar `USING (true)` por condições corretas nas 2 policies permissivas.
+### 2.7 LP `/c/:slug` com `?src=ads`
 
-### Fase C — Hardening Auth
-
-- Ativar **Leaked Password Protection** no painel Supabase (sua ação manual, fora de migration).
-- Confirmar protected routes do `/admin` no front (já existe `is_super_admin`, validar).
-
-### Fase D — Performance + Testes (não bloqueia produção)
-
-- Remover índices duplicados (9), criar índices em 15 FKs.
-- Wrap `auth.uid()` → `(select auth.uid())` nas policies quentes.
-- Suíte de regressão de RLS + wallet (crédito/débito/refund/idempotência Stripe).
+- Já funciona. Adicionar teste E2E (Deno test) que valida: GET `/c/:slug?src=ads` retorna HTML com Pixel injetado + WhatsApp button com `ctwa_clid` placeholder.
 
 ---
 
-## Verificação após cada fase
+## Fase 3 — Dashboards de monitoramento (`/admin/saude-producao`)
 
-- Re-rodar `supabase--linter` + `security--get_scan_results`.
-- Smoke-test fluxo principal: LP → lead WhatsApp → bot → OCR → cadastro portal → wallet topup.
-- Conferir `/admin` e `/admin/saude-bot` continuam carregando.
+Nova página acessível só pro Super Admin com 4 painéis em tempo real (refresh 30s):
+
+1. **Funil últimas 24h por variante**
+  - Tabela: A / B / D × etapas (lead_recebido → conta_enviada → ocr_ok → pitch → club → aprovado).
+  - Conversão % por etapa.
+2. **Origem do lead**
+  - Pizza: Facebook Ad / Instagram Ad / QR code / Orgânico / WhatsApp direto.
+  - Top 5 campanhas (`facebook_campaigns.name`) por leads recebidos hoje.
+3. **Saúde técnica**
+  - Instâncias `connected` vs `disconnected` por consultor.
+  - Última execução de cada cron (`flow-d-health-cron`, `pos-venda-cron`, `ocr-fallback`, `instance-health-cron`).
+  - Erros de CAPI nas últimas 6h.
+4. **Leads travados (alerta)**
+  - Leads sem resposta do bot > 2h em qualquer `capture_*`.
+  - Leads em D com `custom_step_retries > 2`.
+  - Botão "Devolver pro humano" inline.
 
 ---
 
-## Pergunta para você antes de eu codar
+## Fase 4 — Smoke test guiado de go-live
 
-Quer que eu rode **as 4 fases em sequência (com aprovação a cada migration)**, ou só a **Fase A (vazamentos)** primeiro e depois decidimos?
+Checklist na própria UI do `/admin/saude-producao`:
 
- **"tudo"**
+1. ✅ Pixel ID configurado
+2. ✅ CAPI token válido
+3. ✅ Instância WhatsApp connected
+4. ✅ Fluxos A, B, D ativos
+5. ✅ Crons agendados
+6. ✅ `facebook_campaigns.initial_message` populado (≥ 1 campanha)
+7. ✅ Notification phone configurado
+8. ✅ Teste manual: enviar mensagem do número do consultor → confirmar que recebe saudação em < 30s
+
+Só libera "🚀 Modo Produção ON" quando todos os 8 estiverem verdes.
+
+---
+
+## Detalhes técnicos
+
+**Tabelas novas:**
+
+- `flow_d_health_runs (id, ran_at, leads_unstuck, errors)`
+- `production_health_snapshot (consultant_id, captured_at, instance_status, pixel_ok, capi_ok, flows_ok, last_lead_at)` — populada por cron a cada 5 min, base dos dashboards.
+
+**Edge functions novas/alteradas:**
+
+- `instance-health-cron` (nova)
+- `production-health-snapshot` (nova, roda a cada 5 min)
+- `whapi-webhook` (round-robin A/B/D + leitura de `utm_campaign`)
+- `lead-attribution` (`ctwa_clid` fallback + regex expandida)
+
+**RLS:**
+
+- `flow_d_health_runs` e `production_health_snapshot`: select apenas via `is_super_admin(auth.uid())`, insert/update apenas `service_role`.
+
+**Migrations:**
+
+- Trigger em `consultants.is_active` bloqueando ativação sem fluxos A/B/D.
+- Seed de Fluxo D pra consultores existentes.
+
+**Dependências externas:**
+
+- Lista das frases reais dos anúncios atuais (precisamos pedir pro time de tráfego antes de mexer no regex).
+
+---
+
+## Ordem de execução sugerida
+
+1. Round-robin A/B/D + seed Fluxo D (Fase 1 + 2.4) OU APENAS D ( DEACORDO COM A VARIAVEL SELECIONADA ) 
+2. Crons + snapshot table (Fase 2.5 + infra do dashboard)
+3. Atribuição CTWA + UTM QR (Fase 2.1 + 2.6)
+4. Dashboard `/admin/saude-producao` (Fase 3)
+5. Checklist de go-live + smoke test guiado (Fase 4)
+
+Estimativa: cada fase 1 sessão. Total ~5 sessões pra estar 100% pronto pra abrir produção com confiança.
