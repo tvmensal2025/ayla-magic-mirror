@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
     // Resolve customer + phone
     const { data: customer } = await supabase
       .from("customers")
-      .select("id, name, name_source, phone_whatsapp, cpf, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at, electricity_bill_photo_url, document_front_url, document_back_url, last_inbound_media_url, last_inbound_media_kind, last_inbound_media_at, bill_data_confirmed_at, doc_data_confirmed_at, bill_holder_name, doc_holder_name, name_mismatch_flag, name_mismatch_acknowledged_at")
+      .select("id, name, name_source, phone_whatsapp, cpf, consultant_id, electricity_bill_value, flow_variant, conversation_step, last_custom_prompt_at, electricity_bill_photo_url, document_front_url, document_back_url, last_inbound_media_url, last_inbound_media_kind, last_inbound_media_at, bill_data_confirmed_at, doc_data_confirmed_at, bill_holder_name, doc_holder_name, name_mismatch_flag, name_mismatch_acknowledged_at, rg, data_nascimento, address_street, address_number, address_complement, address_neighborhood, address_city, address_state, cep, distribuidora, numero_instalacao")
       .eq("id", body.customerId)
       .maybeSingle();
     if (!customer) return json({ ok: false, blocked: true, code: "customer_not_found", error: "customer_not_found", message: "Lead não encontrado (pode ter sido removido). Recarregue a lista." });
@@ -134,6 +134,167 @@ Deno.serve(async (req) => {
       });
     }
     const remoteJid = `${phoneDigits}@s.whatsapp.net`;
+
+    // ═══════════════════════════════════════════════════════════════════
+    // SHORTCUT: confirmação de OCR (conta/documento)
+    // ═══════════════════════════════════════════════════════════════════
+    // Quando consultor (OcrReviewCard / CaptureDataConfirmCard) ou cron
+    // (ocr-review-timeout) pede stepKey="confirmando_dados_conta" ou
+    // "confirmando_dados_doc", esses NÃO são steps configurados no flow
+    // builder — são passos do pipeline LEGADO de cadastro.
+    //
+    // ANTES: caía no resolve normal de bot_flow_steps → step_not_found
+    // → o consultor caía no fallback feio do CaptureDataConfirmCard que
+    // mandava texto puro via whapi-proxy/send_text (sem botões).
+    //
+    // AGORA: monta o template oficial e envia com botões interativos
+    // via createWhapiSender (mesma cara do sandbox e do post-OCR).
+    // Idempotente: NÃO reenvia se já houver outbound idêntico nos últimos 25s.
+    if (body.stepKey === "confirmando_dados_conta" || body.stepKey === "confirmando_dados_doc") {
+      const isBill = body.stepKey === "confirmando_dados_conta";
+      const stepKey = body.stepKey;
+
+      // Anti-duplicação: pula se já houve outbound desse step nos últimos 25s.
+      try {
+        const sinceIso = new Date(Date.now() - 25_000).toISOString();
+        const { data: recent } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("customer_id", customer.id)
+          .eq("message_direction", "outbound")
+          .eq("conversation_step", stepKey)
+          .gte("created_at", sinceIso)
+          .limit(1);
+        if (Array.isArray(recent) && recent.length > 0 && !body.force) {
+          return json({
+            ok: true, sent: [], skipped: "recent_prompt",
+            message: "Mensagem de confirmação já foi enviada há poucos segundos.",
+          });
+        }
+      } catch (_) { /* best-effort */ }
+
+      // Resolve sender (super_admin Whapi vs Evolution do consultor).
+      const { data: settingsRows } = await supabase.from("settings").select("key, value");
+      const settings: Record<string, any> = {};
+      for (const r of (settingsRows as any[]) || []) {
+        try { settings[r.key] = typeof r.value === "string" ? JSON.parse(r.value) : r.value; }
+        catch { settings[r.key] = r.value; }
+      }
+      const { data: superAdminRow } = await supabase
+        .from("consultants").select("id").eq("id", body.consultantId).maybeSingle();
+      const isSuperAdminFlow = !!(settings.super_admin_consultant_id && String(settings.super_admin_consultant_id) === String((superAdminRow as any)?.id));
+
+      let confirmSender: any;
+      if (isSuperAdminFlow) {
+        const whapiToken = settings.whapi_token || Deno.env.get("WHAPI_TOKEN") || "";
+        if (!whapiToken) {
+          return json({ code: "whapi_token_missing", error: "whapi_token_missing", message: "Token do WhatsApp (Whapi) não configurado." }, 500);
+        }
+        confirmSender = createWhapiSender(whapiToken);
+      } else {
+        const { data: instRow } = await supabase
+          .from("evolution_instances").select("instance_name, evolution_api_url, evolution_api_key, status")
+          .eq("consultant_id", body.consultantId).eq("status", "connected")
+          .order("updated_at", { ascending: false }).limit(1).maybeSingle();
+        if (!instRow) {
+          return json({ code: "no_instance", error: "no_instance", message: "Nenhuma instância WhatsApp conectada." }, 400);
+        }
+        const evolutionUrl = (instRow as any).evolution_api_url || settings.evolution_api_url || Deno.env.get("EVOLUTION_API_URL") || "";
+        const evolutionKey = (instRow as any).evolution_api_key || settings.evolution_api_key || Deno.env.get("EVOLUTION_API_KEY") || "";
+        const { createEvolutionSender } = await import("../_shared/evolution-api.ts");
+        confirmSender = createEvolutionSender(evolutionUrl, evolutionKey, (instRow as any).instance_name);
+      }
+
+      // Monta o template (mesmo formato do bot-flow.ts buildConfirmacaoConta / Doc).
+      const fmtBRL = (n: number) =>
+        Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      let confirmMsg: string;
+      let buttons: Array<{ id: string; title: string }>;
+      if (isBill) {
+        const v = Number((customer as any).electricity_bill_value || 0);
+        const m = v * 0.20, a = m * 12;
+        confirmMsg =
+          "📋 *Dados da conta:*\n\n" +
+          `👤 *Nome:* ${(customer as any).bill_holder_name || (customer as any).name || "❌"}\n` +
+          `📍 *Endereço:* ${(customer as any).address_street || "❌"} ${(customer as any).address_number || ""}\n` +
+          `🏘️ *Bairro:* ${(customer as any).address_neighborhood || "❌"}\n` +
+          `🏙️ *Cidade:* ${(customer as any).address_city || "❌"} - ${(customer as any).address_state || ""}\n` +
+          `📮 *CEP:* ${(customer as any).cep || "❌"}\n` +
+          `⚡ *Distribuidora:* ${(customer as any).distribuidora || "❌"}\n` +
+          `🔢 *Nº Instalação:* ${(customer as any).numero_instalacao || "❌"}\n` +
+          `💰 *Valor:* R$ ${fmtBRL(v)}\n` +
+          `💚 *Economia estimada:* até R$ ${fmtBRL(m)}/mês • até R$ ${fmtBRL(a)}/ano (até 20%)\n\n` +
+          "Está tudo correto?";
+        buttons = [
+          { id: "sim_conta", title: "✅ SIM" },
+          { id: "nao_conta", title: "❌ NÃO" },
+          { id: "editar_conta", title: "✏️ EDITAR" },
+        ];
+      } else {
+        confirmMsg =
+          `📋 *Confirme seus dados pessoais:*\n\n` +
+          `👤 Nome: *${(customer as any).doc_holder_name || (customer as any).name || "—"}*\n` +
+          `🆔 CPF: *${(customer as any).cpf || "—"}*\n` +
+          `🪪 RG: *${(customer as any).rg || "—"}*\n` +
+          `🎂 Nascimento: *${(customer as any).data_nascimento || "—"}*\n\n` +
+          "Está tudo correto?";
+        buttons = [
+          { id: "sim_doc", title: "✅ SIM" },
+          { id: "nao_doc", title: "❌ NÃO" },
+          { id: "editar_doc", title: "✏️ EDITAR" },
+        ];
+      }
+
+      let buttonsSent = false;
+      try {
+        const ok = await confirmSender.sendButtons(remoteJid, confirmMsg, buttons);
+        buttonsSent = ok !== false;
+      } catch (e: any) {
+        console.warn(`[manual-step-send/confirm-shortcut] sendButtons falhou:`, e?.message);
+      }
+      if (!buttonsSent) {
+        // Fallback: texto numerado.
+        const fallback = `${confirmMsg}\n\n${buttons.map((b, i) => `${i + 1}️⃣ ${b.title.replace(/^[✅❌✏️]\s*/, "")}`).join("\n")}\n\n_Digite ${buttons.map((_, i) => i + 1).join(", ")} ou *${buttons[0].title.replace(/^[✅❌✏️]\s*/, "")}* / *${buttons[1].title.replace(/^[✅❌✏️]\s*/, "")}* / *${buttons[2].title.replace(/^[✅❌✏️]\s*/, "")}*:_`;
+        try {
+          await confirmSender.sendText(remoteJid, fallback);
+        } catch (e: any) {
+          console.error(`[manual-step-send/confirm-shortcut] sendText fallback falhou:`, e?.message);
+          return json({ ok: false, blocked: true, code: "send_failed", error: "send_failed", message: "Falha ao enviar mensagem de confirmação." });
+        }
+      }
+
+      // Persiste no histórico.
+      await supabase.from("conversations").insert({
+        customer_id: customer.id,
+        message_direction: "outbound",
+        message_text: confirmMsg,
+        message_type: "text",
+        conversation_step: stepKey,
+      });
+
+      // Atualiza estado do customer.
+      const flagField = isBill ? "bill_data_confirmation_by" : "doc_data_confirmation_by";
+      await supabase.from("customers").update({
+        conversation_step: stepKey,
+        [flagField]: "awaiting_client",
+        ocr_review_pending: null,
+        ocr_review_decided_at: new Date().toISOString(),
+        ocr_review_decided_by: "awaiting_client",
+        ...buildUnpausePatch(customer),
+        custom_step_retries: 0,
+        custom_step_retries_step: null,
+        last_custom_prompt_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      } as any).eq("id", customer.id);
+
+      return json({
+        ok: true,
+        shortcut: "ocr_confirm",
+        kind: isBill ? "bill" : "doc",
+        sent: [{ kind: "text", buttons: buttonsSent }],
+        next_step: stepKey,
+      });
+    }
 
     // Override de variante: se o consultor escolheu A/B/C nos chips, persiste no
     // customer pra não misturar variantes na mesma conversa.

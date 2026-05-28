@@ -100,32 +100,38 @@ export function CaptureDataConfirmCard({ kind, customer, onConfirmed }: Props) {
   const askClient = async () => {
     setBusy("client");
     try {
-      const lines = fields
-        .map((f) => {
-          const v = customer?.[f.key];
-          if (v === null || v === undefined || String(v).trim() === "") return null;
-          return `• *${f.label}:* ${String(v).trim()}`;
-        })
-        .filter(Boolean)
-        .join("\n");
-      const msg = kind === "bill"
-        ? `Olá! Pra concluir seu cadastro, *confere se esses dados da sua CONTA de energia estão corretos*:\n\n${lines}\n\nResponda *SIM* se estiver tudo certo, ou me diga o que precisa corrigir 😉`
-        : `Antes de finalizar, *confere os dados do seu documento*:\n\n${lines}\n\nResponda *SIM* se estiver correto, ou me diga o que precisa ajustar.`;
-      let phone = String(customer.phone_whatsapp || "").replace(/\D/g, "");
-      if (!phone) throw new Error("Lead sem telefone");
-      if (!phone.startsWith("55")) phone = "55" + phone;
-      const to = `${phone}@s.whatsapp.net`;
-
-      const { data, error } = await supabase.functions.invoke("whapi-proxy", {
-        body: { action: "send_text", consultantId: customer.consultant_id, payload: { to, text: msg } },
-      });
-      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message || "Falha");
+      // ✅ UNIFICADO (2026-05-28): usa o MESMO pipeline do OcrReviewCard.askClient
+      // — invoca `manual-step-send` para o step legacy `confirmando_dados_conta` /
+      // `confirmando_dados_doc`, que renderiza o template bonito com botões
+      // interativos `✅ SIM` / `❌ NÃO` / `✏️ EDITAR`.
+      //
+      // ANTES: enviava texto puro via whapi-proxy/send_text com instrução
+      // "Responda SIM" — o cliente recebia mensagem feia sem botões.
+      //
+      // Importante: NÃO zera ocr_review_pending ainda, deixa esse trabalho
+      // pra `manual-step-send`. Isso evita race com o OcrReviewBanner que
+      // checa ocr_review_pending no momento de abrir o modal.
+      const stepKey = kind === "bill" ? "confirmando_dados_conta" : "confirmando_dados_doc";
       await supabase.from("customers").update({
         [kind === "bill" ? "bill_data_confirmation_by" : "doc_data_confirmation_by"]: "awaiting_client",
         ocr_review_pending: null,
         ocr_review_decided_at: new Date().toISOString(),
         ocr_review_decided_by: "awaiting_client",
+        // Volta o step pro pipeline legado mandar a confirmação ao cliente.
+        conversation_step: stepKey,
       } as any).eq("id", customer.id);
+
+      const { data, error } = await supabase.functions.invoke("manual-step-send", {
+        body: {
+          consultantId: customer.consultant_id,
+          customerId: customer.id,
+          stepKey,
+          part: "all",
+          continueFlow: false,
+          skipNameGuard: true,
+        },
+      });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message || "Falha ao enviar");
       toast({ title: "📩 Enviado ao cliente", description: "Aguardando confirmação no WhatsApp", duration: 2200 });
     } catch (e: any) {
       toast({ title: "Erro", description: e?.message || String(e), variant: "destructive" });

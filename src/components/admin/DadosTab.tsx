@@ -3,6 +3,8 @@ import { Camera, Settings, Globe, KeyRound, Save, Eye, EyeOff } from "lucide-rea
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 interface DadosTabProps {
   form: {
@@ -29,6 +31,32 @@ interface DadosTabProps {
 
 export function DadosTab({ form, photoPreview, saving, onFormChange, onPhotoChange, onSave, userId }: DadosTabProps) {
   const [showPortalPassword, setShowPortalPassword] = useState(false);
+  const { toast } = useToast();
+
+  // Auto-save do portal_kind quando o consultor clica no radio.
+  // Sem isso, o consultor escolhia "Autoconexão" mas se não clicasse "Salvar"
+  // depois, o banco continuava em "digital" e o cadastro ia pro Portal 1 errado.
+  const persistPortalKind = async (kind: "digital" | "autoconexao", cadastro_url: string) => {
+    if (!userId) return;
+    try {
+      const { error } = await supabase
+        .from("consultants")
+        .update({ portal_kind: kind, cadastro_url })
+        .eq("id", userId);
+      if (error) throw error;
+      toast({
+        title: kind === "autoconexao" ? "✓ Portal Autoconexão ativo" : "✓ Portal Conta de Energia ativo",
+        description: "Mudança aplicada — novos cadastros vão pelo portal escolhido.",
+        duration: 1800,
+      });
+    } catch (e: any) {
+      toast({
+        title: "Erro ao salvar portal",
+        description: e?.message || String(e),
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <form onSubmit={onSave} className="space-y-6">
@@ -149,10 +177,12 @@ export function DadosTab({ form, photoPreview, saving, onFormChange, onPhotoChan
                   checked={form.portal_kind !== "autoconexao"}
                   onChange={() => {
                     const id = form.igreen_id;
+                    const url = id ? `https://digital.igreenenergy.com.br/?id=${id}&sendcontract=true` : "";
                     onFormChange({
                       portal_kind: "digital",
-                      cadastro_url: id ? `https://digital.igreenenergy.com.br/?id=${id}&sendcontract=true` : "",
+                      cadastro_url: url,
                     });
+                    void persistPortalKind("digital", url);
                   }}
                   className="accent-primary"
                 />
@@ -176,10 +206,12 @@ export function DadosTab({ form, photoPreview, saving, onFormChange, onPhotoChan
                   checked={form.portal_kind === "autoconexao"}
                   onChange={() => {
                     const id = form.igreen_id;
+                    const url = id ? `https://green.igreenenergy.com.br/autoconexao/?id=${id}` : "";
                     onFormChange({
                       portal_kind: "autoconexao",
-                      cadastro_url: id ? `https://green.igreenenergy.com.br/autoconexao/?id=${id}` : "",
+                      cadastro_url: url,
                     });
+                    void persistPortalKind("autoconexao", url);
                   }}
                   className="accent-primary"
                 />
