@@ -245,32 +245,56 @@ Deno.serve(async (req) => {
         }
         synced++;
 
-        // Reconcilia customers_acquired (clientes aprovados atribuídos ao Meta Ads)
-        // por dia, baseado no CRM real — não no que a Meta reporta. Isso garante que
-        // o "Viraram cliente" do dashboard reflita os fechamentos reais.
+        // Reconcilia leads + customers_acquired POR CAMPANHA baseado no CRM real,
+        // usando customers.source_campaign_id (preenchido por lead-attribution).
+        // Antes o filtro era só lead_source='meta_ads' → todas as campanhas
+        // recebiam o total (resultado: customers_acquired sempre 0 ou inflado).
         try {
           const sinceIso = new Date(Date.now() - 7 * 86400_000).toISOString();
+          // Leads atribuídos a esta campanha (qualquer estágio)
+          const { data: attributedLeads } = await admin
+            .from("customers")
+            .select("created_at")
+            .eq("source_campaign_id", c.id)
+            .gte("created_at", sinceIso);
+          const leadsByDate: Record<string, number> = {};
+          for (const l of (attributedLeads || []) as any[]) {
+            const dt = String(l.created_at).slice(0, 10);
+            leadsByDate[dt] = (leadsByDate[dt] || 0) + 1;
+          }
+          // Clientes aprovados desta campanha
           const { data: deals } = await admin
             .from("crm_deals")
-            .select("created_at, customers!inner(lead_source, consultant_id)")
-            .eq("consultant_id", c.consultant_id)
+            .select("created_at, customers!inner(source_campaign_id)")
             .eq("stage", "aprovado")
-            .eq("customers.lead_source", "meta_ads")
+            .eq("customers.source_campaign_id", c.id)
             .gte("created_at", sinceIso);
-          if (deals?.length) {
-            const byDate: Record<string, number> = {};
-            for (const d of deals as any[]) {
-              const dt = String(d.created_at).slice(0, 10);
-              byDate[dt] = (byDate[dt] || 0) + 1;
-            }
-            for (const [dt, count] of Object.entries(byDate)) {
-              await admin.from("facebook_metrics_daily")
-                .update({ customers_acquired: count, updated_at: new Date().toISOString() })
-                .eq("campaign_id", c.id)
-                .eq("date", dt);
-            }
+          const customersByDate: Record<string, number> = {};
+          for (const d of (deals || []) as any[]) {
+            const dt = String(d.created_at).slice(0, 10);
+            customersByDate[dt] = (customersByDate[dt] || 0) + 1;
           }
-        } catch (re) { console.error("[fb-sync] customers_acquired reconcile failed", c.id, (re as Error).message); }
+          const allDates = new Set([...Object.keys(leadsByDate), ...Object.keys(customersByDate)]);
+          for (const dt of allDates) {
+            const attrLeads = leadsByDate[dt] || 0;
+            const acquired = customersByDate[dt] || 0;
+            // Pega o que a Meta reporta e usa o MAIOR (atribuição CRM costuma ser mais confiável
+            // pra CTWA, mas se Meta reporta mais leads diretos, mantemos)
+            const { data: existing } = await admin
+              .from("facebook_metrics_daily")
+              .select("leads")
+              .eq("campaign_id", c.id).eq("date", dt).maybeSingle();
+            const metaLeads = Number((existing as any)?.leads || 0);
+            await admin.from("facebook_metrics_daily")
+              .update({
+                leads: Math.max(metaLeads, attrLeads),
+                customers_acquired: acquired,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("campaign_id", c.id)
+              .eq("date", dt);
+          }
+        } catch (re) { console.error("[fb-sync] attribution reconcile failed", c.id, (re as Error).message); }
 
         // Persiste leads_count agregado (necessário pro CBO→ABO disparar)
         // Conta leads + conversas iniciadas como "sinal de lead" — ABO precisa de >=20.
