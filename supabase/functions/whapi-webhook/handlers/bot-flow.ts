@@ -1218,19 +1218,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const configuredOrder = uiOrder || stepOrder || ["audio", "image", "video", "text", "document"];
       items.sort(makeKindComparator((it: Item) => it.kind, configuredOrder));
 
-      // 🔧 FIX (2026-05-28): se o step tem botões interativos (_buttons),
-      // FORÇA o item de texto a ser o ÚLTIMO da lista, mesmo que a ordem
-      // configurada coloque mídia depois. Sem isso o `dispatchStepFromFlow`
-      // enviava: texto puro → mídias → "Escolha uma opção" duplicado com
-      // botões. Resultado: 2 mensagens de texto ao cliente para o mesmo step.
-      // Com este fix: mídia(s) → texto+botões juntos, em uma só mensagem.
-      if (_buttons.length > 0) {
-        const textIdx = items.findIndex((it) => it.kind === "text");
-        if (textIdx !== -1 && textIdx !== items.length - 1) {
-          const [textItem] = items.splice(textIdx, 1);
-          items.push(textItem);
-        }
-      }
+      // 🔧 FIX (2026-05-28 v2): NÃO mexer mais na ordem por causa de _buttons.
+      // O consultor configura a sequência (ex.: text→audio→video→image) e a gente
+      // tem que respeitar 100%. Se o texto não cair no último item, os botões
+      // são enviados como mensagem curta separada ("👇") logo depois da última
+      // mídia, no fallback abaixo. Anti-duplicação: se o último item já é texto,
+      // ele leva os botões anexados (use case mais comum de step só com texto).
 
       let sent = false;
       let videoFailed = false;
