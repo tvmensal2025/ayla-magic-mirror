@@ -46,6 +46,11 @@ export const CADASTRO_STEPS: ReadonlySet<string> = new Set([
   "ask_bill_value",
   "ask_doc_frente_manual",
   "ask_doc_verso_manual",
+  // CTA pós-simulação (gate entre "confirmar conta" e "pedir documento").
+  // Sem isso o router troca pro engine flow e o state-machine legado dispara
+  // ENTER_CADASTRO (pede conta de novo) em vez de cair no handler
+  // ask_quero_cadastrar do bot-flow.ts que despacha capture_documento.
+  "ask_quero_cadastrar",
   "ask_finalizar",
   "finalizando",
   "portal_submitting",
