@@ -1305,12 +1305,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       }
 
       // Garantia: se o step tem _buttons mas o texto não foi o último item
-      // (ex.: ordem text→audio→video deixa o vídeo por último), enviamos os
-      // botões em uma mensagem separada para que o lead possa escolher.
-      // 🔧 (2026-05-28): com o reorder acima (texto sempre último quando há
-      // botões), este fallback raramente é necessário. Mantido como
-      // segurança caso step só tenha mídia + botões. Mensagem foi mudada
-      // para evitar confusão visual com o "Escolha uma opção" da UI.
+      // (porque a ordem configurada coloca mídia depois do texto, ex.:
+      // text→audio→video→image), os botões NÃO foram anexados ao texto.
+      // Mandamos eles agora como mensagem curta separada para não duplicar
+      // o conteúdo já enviado.
       if (sent && _buttons.length > 0 && !buttonsSent) {
         try {
           const renderedButtons = _buttons.map((b) => ({
@@ -1319,21 +1317,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }));
           // 🧪 mock: pula pausa antes dos botões
           if (!isMockMode() && !isFlowInstantMode()) await new Promise((r) => setTimeout(r, 600));
-          // Se há texto no step, reusa ele com botões (resposta robusta).
-          // Caso contrário, usa só "."  (whatsapp obriga texto não-vazio).
-          const fallbackText = baseText && baseText.trim().length > 0
-            ? baseText
-            : ".";
-          await sendButtons(remoteJid, fallbackText, renderedButtons);
-          if (fallbackText !== "." && !items.find((it) => it.kind === "text")) {
-            await supabase.from("conversations").insert({
-              customer_id: customer.id,
-              message_direction: "outbound",
-              message_text: fallbackText,
-              message_type: "text",
-              conversation_step: stepKey,
-            });
-          }
+          // Sempre usa prompt curto — o texto principal do step já foi enviado
+          // anteriormente na sequência. Repetir o texto causaria duplicação.
+          const promptText = "👇 *Escolha uma opção:*";
+          await sendButtons(remoteJid, promptText, renderedButtons);
           buttonsSent = true;
         } catch (e) {
           console.warn(`[dispatch:${stepKey}] envio dos botões (fallback) falhou:`, (e as any)?.message);
