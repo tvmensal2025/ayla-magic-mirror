@@ -1550,6 +1550,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   .from("ai_media_library")
                   .select("url, kind, duration_sec")
                   .eq("id", m.media_id)
+                  .eq("active", true)
                   .maybeSingle();
                 if (mediaRow?.url) {
                   url = mediaRow.url;
