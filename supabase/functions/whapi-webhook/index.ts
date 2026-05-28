@@ -758,7 +758,7 @@ Deno.serve(async (req) => {
     // silentMode = arquivo recebido com IA manual MAS fora de qualquer passo
     // ativo de captura. Roda OCR/upload em background sem outbound. Dentro de
     // passo ativo, o bot envia tudo normalmente para guiar o cliente.
-    const silentMode = globalAiDisabled === true && isFile && !inActiveCapture;
+    const silentMode = globalAiDisabled === true && isFile && !inActiveCapture && !forceBotForLead;
     if (silentMode) {
       console.log(`🤫 [silent-capture] IA manual + arquivo fora de passo ativo → OCR/upload sem outbound customer=${customer.id}`);
     } else if (globalAiDisabled === true && inActiveCapture) {
