@@ -1074,19 +1074,22 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             .map((r) => `${r.message_direction === "inbound" ? "Lead" : "Bot"}: ${String(r.message_text || "").slice(0, 240)}`)
             .join("\n");
 
-          const { answerFaqWithAI } = await import("../../_shared/ai-faq-answerer.ts");
+          // Usa o cérebro orquestrador (Triagem Flash → GPT-5.5 → Gemini 3.1 Pro RAG)
+          // em vez de chamar answerFaqWithAI direto. Garante persona, resumo
+          // persistente, roteamento (clarify/escalate/continue) e logging
+          // unificado de IA neste passo também.
+          const { runOrchestrator } = await import("../../_shared/ai-orchestrator.ts");
           const firstName = String((customer as any).name || "").trim().split(/\s+/)[0] || "";
-          const ai = await answerFaqWithAI({
+          const orch = await runOrchestrator({
             supabase,
-            question: question || "O lead chegou no passo de esclarecer dúvidas. Convide-o gentilmente a fazer a pergunta dele e tranquilize-o de que vamos esclarecer tudo.",
-            leadName: firstName,
-            currentStepLabel: stepKey,
+            customer,
             consultantId: customer.consultant_id,
-            recentHistory,
-            model: "google/gemini-3.1-pro-preview",
+            message: question || "",
+            step: stepKey,
+            history: recentHistory,
           });
 
-          let answerText = (ai.text || "").trim();
+          let answerText = (orch.reply || "").trim();
           if (!answerText) {
             answerText = firstName
               ? `${firstName}, pode mandar sua dúvida que eu te explico tudo agora 😊`
@@ -1102,7 +1105,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             conversation_step: stepKey,
           });
 
-          if (ai.shouldHandoff) {
+          if (orch.shouldHandoff) {
             try {
               await supabase
                 .from("customers")
@@ -1113,7 +1116,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             } catch (_e) { /* best-effort */ }
           }
 
-          console.log(`[dispatch:${stepKey}] AI answer enviada (conf=${ai.confidence.toFixed(2)} handoff=${ai.shouldHandoff})`);
+          console.log(`[dispatch:${stepKey}] orchestrator reply (route=${orch.route} conf=${orch.confidence.toFixed(2)} handoff=${orch.shouldHandoff} chain=${orch.modelChain.join("→")})`);
           return true;
         } catch (e) {
           console.warn(`[dispatch:${stepKey}] AI answer falhou — enviando fallback texto puro (sem mídia):`, (e as Error).message);
@@ -1546,7 +1549,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       let kind = it.kind === "audio" ? "audio" : it.kind === "video" ? "video" : it.kind === "image" ? "image" : "document";
       let durationSec: number | null = null;
       if (m.media_id) {
-        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind, duration_sec").eq("id", m.media_id).maybeSingle();
+        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind, duration_sec, active").eq("id", m.media_id).eq("active", true).maybeSingle();
         if (mediaRow?.url) {
           url = mediaRow.url;
           if (mediaRow.kind) kind = mediaRow.kind;
@@ -1688,6 +1691,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                   .from("ai_media_library")
                   .select("url, kind, duration_sec")
                   .eq("id", m.media_id)
+                  .eq("active", true)
                   .maybeSingle();
                 if (mediaRow?.url) {
                   url = mediaRow.url;
