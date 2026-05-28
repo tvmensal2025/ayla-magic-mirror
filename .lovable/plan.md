@@ -1,49 +1,145 @@
-# Diagnóstico — lead BRUNO (5511971254913)
+## Diagnóstico direto
 
-Analisei os 20+ últimos eventos da `conversations` desse cliente (fluxo `D`, consultor Rodrigo) e cruzei com o código de `whapi-webhook/handlers/bot-flow.ts` e a config do passo no banco. Três bugs reais, todos reproduzíveis nos logs:
+O fluxo está bagunçando porque o sistema ainda mistura três comportamentos:
 
-## Bug 1 — Ordem de mídia do "Como funciona" não é respeitada
+1. **Motor do fluxo configurado no /admin/fluxos**
+   - deveria seguir `bot_flow_steps` por `position`, `transitions` e `goto_step_id`.
 
-**Configurado em `consultants.flow_step_media_order["d_como_funciona"]`:** `[text, audio, image, video]`
-**Realmente enviado** (timestamps `14:37:24 → 14:37:58 → 14:38:00`): `audio → video → text` (image nem aparece).
+2. **Motor legado de cadastro**
+   - ainda entra em alguns momentos e volta para textos antigos como “me manda a conta de luz”.
 
-Causa em `bot-flow.ts` linhas 1221-1233: o "FIX 2026-05-28" força o item `text` para a ÚLTIMA posição sempre que o passo tem `_buttons`, ignorando a ordem do consultor. Como `d_como_funciona` tem 3 botões, o `text` vai pro fim.
-(O image desaparece porque o passo provavelmente não tem mídia de imagem cadastrada — não é bug, mas vamos validar.)
+3. **IA/classificador/Gemini**
+   - ainda roda antes de algumas decisões determinísticas e pode interpretar “quero cadastrar”, “simular”, “dúvida” fora da regra configurada.
 
-## Bug 2 — CTA duplicado depois da simulação
+O log confirma isso: ao clicar **“📸 Quero simular”** dentro do passo `d_como_funciona`, o webhook entrou no motor conversacional com o step UUID `c87d76f8...`, classificou a entrada e acabou mandando o texto legado de pedir conta. Ou seja: ele não está tratando o botão como transição determinística pura do passo 3 para o passo 2.
 
-Logs `14:39:17` (resultado da simulação com seus próprios botões "Cadastrar agora / Tenho dúvidas / Falar com Rafael") + `14:39:19` (CTA extra "Pra continuar seu cadastro… ✅ Quero me cadastrar"). Repetiu no segundo ciclo às `14:44:08`.
-
-Causa: a flag `__last_chain_had_buttons` (linhas 3551-3563) só é setada no branch CHAIN amplo (`else if` da linha 3504). Mas o passo `d_pedir_conta` tem `success_goto_step_id → d_resultado`, então o código entra no branch **success-goto** (linhas 3468-3503) que NUNCA seta a flag → o bloco de linha 3607 vê `false` → manda o CTA duplicado.
-
-## Bug 3 — Clicar "✅ Quero me cadastrar" volta a pedir a conta de luz
-
-Logs `14:44:17` (inbound "✅ Quero me cadastrar") → `14:44:23` (outbound *"Perfeito! Pra eu já garantir seu desconto, me manda uma foto ou PDF da sua última conta de luz 📸"*). Esse texto **não existe no fluxo D**; está apenas na migration legacy `20260515013320` (step `checkin_pos_video`). E o `customers.conversation_step` ficou em `aguardando_conta` — ou seja, em vez de entrar no handler `ask_quero_cadastrar` e despachar `d_pedir_documento`, o router caiu no fluxo legacy padrão.
-
-Hipótese (a confirmar lendo o caminho de entrada do webhook): no momento em que o lead clica no botão, o `conversation_step` persistido foi sobrescrito por outro turno (re-OCR / persistência intermediária da chain) e voltou para algo que o router não mapeia como `ask_quero_cadastrar`, então cai no fallback de "aguardando conta de luz" do motor legacy.
+Também identifiquei outro ponto crítico: no motor conversacional, quando o passo tem botões, o texto é segurado para ser enviado no final. Por isso, mesmo com ordem configurada `text → audio → image → video`, ele manda mídia antes e só depois manda o texto com botões. A correção anterior mexeu em `bot-flow.ts`, mas esse teste passou pelo arquivo `handlers/conversational/index.ts`, então a ordem continuou errada.
 
 ---
 
-# Plano
+## Objetivo da correção
 
-## 1. Respeitar 100% a ordem de mídia mesmo com botões
-Arquivo: `supabase/functions/whapi-webhook/handlers/bot-flow.ts` e o gêmeo em `evolution-webhook/handlers/bot-flow.ts`.
+Transformar o Fluxo D em uma execução determinística:
 
-- Remover o reorder forçado (linhas 1227-1233).
-- Em vez disso: deixar a ordem configurada intacta. Anexar os botões ao **último item** real (texto OU mídia). Se o último item for mídia, enviar os botões como uma mensagem curta logo depois (1 só "👇" + buttons), preservando a ordem do consultor. Isso já é o que faz o bloco de garantia 1321-1340 — manter ele como único responsável.
-- Validar com SQL que o passo realmente tem (ou não) `image_url`/`video_url` cadastrados para a config `[text, audio, image, video]` fazer sentido.
+```text
+Passo atual
+  ↓
+Se clicou botão: casar pelo ID do botão ou título configurado
+  ↓
+Ir exatamente para goto_step_id configurado
+  ↓
+Enviar exatamente o conteúdo do passo na ordem salva:
+text → audio → video → image, ou qualquer ordem definida no admin
+  ↓
+Parar quando o passo exigir captura/resposta
+  ↓
+Nunca chamar IA nem texto legado para decidir caminho principal
+```
 
-## 2. Cobrir success_goto na detecção `__last_chain_had_buttons`
-Mesmos arquivos. No branch `_hasExplicitSuccessGoto` (linhas 3468-3503), depois do `dispatchStepFromFlow(nextCustom.step_key)`, ler `nextCustom.captures` (ou re-selecionar com `captures` no select da linha 3489) e setar `(updates as any).__last_chain_had_buttons = true` quando houver `_buttons` populados. Assim o bloco 3607 pula o CTA duplicado tanto no caminho CHAIN quanto no success-goto.
+---
 
-## 3. Garantir que o clique do CTA cai em `ask_quero_cadastrar`
-- Reler o início do `runConversationalFlow` para entender por que `conversation_step=ask_quero_cadastrar` não é honrado quando o botão `btn_quero_cadastrar` chega.
-- Suspeitas a investigar nessa ordem: (a) persistência do `conversation_step=ask_quero_cadastrar` no insert do CTA (linhas 3615-3623) — confirmar que `updates` é realmente aplicado ao customer no mesmo turno; (b) router de botões tratando `button.title` ("✅ Quero me cadastrar") em vez do `id` (`btn_quero_cadastrar`) e caindo num resolver legacy; (c) o cron `flow-d-health` ou outro background sobrescrevendo o step (vimos `flow_d_stuck` no log do `flow-d-health-cron` justo nesse consultor às 15:00).
-- Aplicar a correção no caminho identificado. Como blindagem, no handler `ask_quero_cadastrar` (linhas 4780-4828), aceitar também o título literal e qualquer `step` ≠ ask_quero_cadastrar mas com `last_custom_prompt_step='ask_quero_cadastrar'` recente (< 30 min) para roteamento defensivo.
+## Plano de implementação
 
-## 4. Validação
-- Limpar lead (`Zerar` 11971254913), refazer fluxo "Como funciona" → confirmar ordem text→audio→video (image só se houver mídia configurada).
-- Mandar conta de luz → confirmar OCR → verificar que chega APENAS `d_resultado` com seus 3 botões (sem CTA extra).
-- Clicar em "Cadastrar agora" → bot deve enviar `d_pedir_documento` (RG/CNH), nunca pedir a conta de novo.
+### 1. Criar uma regra “strict flow” para fluxo custom ativo
 
-Sem migrations. Sem mudança de UI. Só edge functions (`whapi-webhook` + `evolution-webhook`).
+Nos webhooks:
+
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
+- `supabase/functions/evolution-webhook/handlers/conversational/index.ts`
+
+Vou fazer com que, quando existir `bot_flow` ativo para o consultor/variante do lead:
+
+- botão clicado é roteado primeiro por `transitions` do passo atual;
+- `goto_step_id` vence qualquer IA/classificador;
+- `goto_special` só executa se estiver configurado na transição;
+- IA só entra quando o próprio passo tiver fallback/ação de dúvida/IA configurado;
+- `quer_cadastrar` global não poderá mais mandar para `aguardando_conta` se o passo atual tem uma transição configurada para cadastro/documento.
+
+### 2. Corrigir definitivamente a ordem de mídia no motor conversacional
+
+Hoje o motor conversacional segura texto com botões para o final. Vou ajustar para:
+
+- montar uma sequência única com `text`, `audio`, `video`, `image`, `document`;
+- se `text` vier primeiro e o passo tiver botões, enviar esse texto já como mensagem interativa naquela posição;
+- continuar enviando as mídias depois, se a ordem configurada mandar;
+- se `text` vier no final, enviar botões no final;
+- não forçar texto para o fim por causa de botão.
+
+Exemplo esperado para `d_como_funciona` com ordem `text → audio → image → video`:
+
+```text
+1. Texto “Vou te explicar...” com os 3 botões
+2. Áudio
+3. Imagem, se existir
+4. Vídeo, se existir
+```
+
+Se não existir imagem cadastrada, simplesmente pula imagem e mantém a ordem dos itens existentes.
+
+### 3. Remover fallback legado de “cadastrar = pedir conta” dentro de fluxo custom
+
+No motor conversacional existe este comportamento perigoso:
+
+```text
+intent quer_cadastrar → pedir conta de luz
+```
+
+Isso não pode valer dentro do Fluxo D, porque depois da simulação o correto é:
+
+```text
+Cadastrar agora → d_pedir_documento
+```
+
+Vou mudar para:
+
+- se o passo atual tem transição para `cadastrar`, usar a transição;
+- se o fluxo tem `capture_documento`, cadastro vai para documento;
+- só pedir conta quando a transição configurada apontar para `capture_conta`.
+
+### 4. Unificar a lógica entre Whapi e Evolution
+
+As mesmas correções serão aplicadas nos dois webhooks para não ficar um canal certo e outro errado:
+
+- `whapi-webhook/handlers/conversational/index.ts`
+- `evolution-webhook/handlers/conversational/index.ts`
+- se necessário, mover helpers comuns para `_shared` para evitar divergência.
+
+### 5. Validar com os dados reais do Rafael/Rodrigo
+
+Vou validar especificamente com o lead e fluxo que aparecem nos logs:
+
+- consultor `0c2711ad-4836-41e6-afba-edd94f698ae3`
+- lead `5511971254913`
+- variant `D`
+
+Cenários de validação:
+
+1. **Oi → welcome**
+   - envia o passo 1 configurado.
+
+2. **Clicar “Como funciona”**
+   - vai para `d_como_funciona`.
+   - respeita exatamente a ordem de mídia salva.
+
+3. **Clicar “Quero simular” dentro de Como funciona**
+   - vai para `d_pedir_conta`.
+   - não chama Gemini.
+   - não manda texto legado fora do passo configurado.
+
+4. **Enviar conta → confirmar OCR**
+   - envia `d_resultado`.
+   - não duplica CTA se `d_resultado` já tem botões.
+
+5. **Clicar “Cadastrar agora”**
+   - vai para `d_pedir_documento`.
+   - nunca volta a pedir conta de luz.
+
+---
+
+## Arquivos que serão alterados
+
+- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
+- `supabase/functions/evolution-webhook/handlers/conversational/index.ts`
+- possivelmente `supabase/functions/_shared/flow-router.ts` ou novo helper compartilhado, apenas se for necessário para evitar duplicação.
+
+Não vou alterar banco, UI ou copy do fluxo. A correção é no motor de execução.
