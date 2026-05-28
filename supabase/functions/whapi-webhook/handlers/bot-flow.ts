@@ -1676,7 +1676,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               .order("position");
 
             const orderedMedia = (medias as any[]) || [];
-            const _openOrder = await getStepMediaOrder(supabase, customer.consultant_id, step);
+            const _openOrder = await getStepMediaOrder(supabase, customer.consultant_id, [step]);
             if (_openOrder) orderedMedia.sort(makeKindComparator((m: any) => m.media_kind, _openOrder));
             let sentSomething = false;
 
