@@ -1,52 +1,49 @@
-# Bugs no passo "Como funciona" e no pós-simulação
+# Diagnóstico — lead BRUNO (5511971254913)
 
-Análise direto no DB e código do `whapi-webhook`. Identifiquei 2 causas raiz independentes.
+Analisei os 20+ últimos eventos da `conversations` desse cliente (fluxo `D`, consultor Rodrigo) e cruzei com o código de `whapi-webhook/handlers/bot-flow.ts` e a config do passo no banco. Três bugs reais, todos reproduzíveis nos logs:
 
-## Bug 1 — Ordem TEXT/AUDIO/VIDEO/IMAGE configurada na UI é ignorada
+## Bug 1 — Ordem de mídia do "Como funciona" não é respeitada
 
-**Causa raiz (mismatch chave de leitura ≠ chave de escrita):**
+**Configurado em `consultants.flow_step_media_order["d_como_funciona"]`:** `[text, audio, image, video]`
+**Realmente enviado** (timestamps `14:37:24 → 14:37:58 → 14:38:00`): `audio → video → text` (image nem aparece).
 
-- A UI `/admin/fluxos` (`StepMediaPanel.tsx` linhas 184–187) grava em `consultants.flow_step_media_order` **usando `step_key`** como chave do JSONB. Ex.: `{ "d_como_funciona": ["text","audio","video","image"] }`.
-- A edge `whapi-webhook/handlers/bot-flow.ts` (linha 1212) lê **usando `slot_key`**: `getStepMediaOrder(supabase, consultant_id, slotKey)` — onde `slotKey = "como_funciona"` (sem o `d_`).
-- Resultado: a chave `"como_funciona"` nunca existe no JSON, `getStepMediaOrder` retorna `null`, e o dispatcher cai no default `["audio","image","video","text","document"]`. Por isso o áudio vem antes do texto, ignorando a preferência salva.
+Causa em `bot-flow.ts` linhas 1221-1233: o "FIX 2026-05-28" força o item `text` para a ÚLTIMA posição sempre que o passo tem `_buttons`, ignorando a ordem do consultor. Como `d_como_funciona` tem 3 botões, o `text` vai pro fim.
+(O image desaparece porque o passo provavelmente não tem mídia de imagem cadastrada — não é bug, mas vamos validar.)
 
-Mesmo bug em `evolution-webhook/handlers/bot-flow.ts` (espelho).
+## Bug 2 — CTA duplicado depois da simulação
 
-**Fix:**
-1. Em `dispatchStepFromFlow` (whapi + evolution), tentar `getStepMediaOrder(consultant_id, stepKey)` **primeiro**; só cair em `slotKey` como fallback de compatibilidade. Mantém retroatividade com qualquer ordem antiga que tenha sido salva por slot_key, e passa a respeitar o que a UI grava hoje (por step_key).
-2. Aplicar o mesmo lookup nos outros 2 pontos que usam `getStepMediaOrder` (linhas ~1528 e ~1677 do whapi e os equivalentes do evolution).
+Logs `14:39:17` (resultado da simulação com seus próprios botões "Cadastrar agora / Tenho dúvidas / Falar com Rafael") + `14:39:19` (CTA extra "Pra continuar seu cadastro… ✅ Quero me cadastrar"). Repetiu no segundo ciclo às `14:44:08`.
 
-Sem migração de DB — `flow_step_media_order` já é um JSONB livre.
+Causa: a flag `__last_chain_had_buttons` (linhas 3551-3563) só é setada no branch CHAIN amplo (`else if` da linha 3504). Mas o passo `d_pedir_conta` tem `success_goto_step_id → d_resultado`, então o código entra no branch **success-goto** (linhas 3468-3503) que NUNCA seta a flag → o bloco de linha 3607 vê `false` → manda o CTA duplicado.
 
-## Bug 2 — Pós-simulação envia mensagem duplicada de CTA
+## Bug 3 — Clicar "✅ Quero me cadastrar" volta a pedir a conta de luz
 
-**Logs/código (`bot-flow.ts` ~3580–3653):** após `d_resultado` ser despachado pelo CHAIN amplo, o bloco `if (nextCustom.step_type === "capture_documento")` envia **mais uma** `sendOptions` com o botão `btn_quero_cadastrar`. Como o próprio `d_resultado` já tem botões (`cadastrar`, `dúvida`) configurados nos `_buttons` do step (a UI mostra "3 botões / 3 regras"), o cliente recebe:
+Logs `14:44:17` (inbound "✅ Quero me cadastrar") → `14:44:23` (outbound *"Perfeito! Pra eu já garantir seu desconto, me manda uma foto ou PDF da sua última conta de luz 📸"*). Esse texto **não existe no fluxo D**; está apenas na migration legacy `20260515013320` (step `checkin_pos_video`). E o `customers.conversation_step` ficou em `aguardando_conta` — ou seja, em vez de entrar no handler `ask_quero_cadastrar` e despachar `d_pedir_documento`, o router caiu no fluxo legacy padrão.
 
-```
-1) Texto da simulação + botões [📸 Quero simular] [🤔 Tenho dúvida]   ← do d_resultado
-2) "Pra continuar seu cadastro..." + botão [✅ Quero me cadastrar]    ← do post-confirm-conta (DUPLICADO)
-```
+Hipótese (a confirmar lendo o caminho de entrada do webhook): no momento em que o lead clica no botão, o `conversation_step` persistido foi sobrescrito por outro turno (re-OCR / persistência intermediária da chain) e voltou para algo que o router não mapeia como `ask_quero_cadastrar`, então cai no fallback de "aguardando conta de luz" do motor legacy.
 
-E em caso de re-entrada (lead manda outro texto), o `ask_quero_cadastrar` re-emite o mesmo CTA, agravando a sensação de "repetindo / não evoluiu".
+---
 
-**Fix:**
-1. Em `post-confirm-conta`, **detectar se o último step `message` da CHAIN (`d_resultado`) já tem `_buttons` configurados** (consultando `captures` do step). Se já tem CTA próprio:
-   - **NÃO enviar** o `sendOptions` adicional com `btn_quero_cadastrar`.
-   - Apenas setar `updates.conversation_step = "ask_quero_cadastrar"` para o handler já existente continuar tratando os cliques.
-2. Garantir que o handler `ask_quero_cadastrar` (linha ~4758) **também aceite os ids dos botões do próprio `d_resultado`** (`cadastrar`, `quero_simular`, `duvida`, etc.) como gatilhos válidos, em vez de só `btn_quero_cadastrar`. Hoje ele já cobre vários sinônimos — só preciso adicionar os ids reais que o consultor configurou.
-3. Espelhar em `evolution-webhook`.
+# Plano
 
-## Arquivos a alterar
+## 1. Respeitar 100% a ordem de mídia mesmo com botões
+Arquivo: `supabase/functions/whapi-webhook/handlers/bot-flow.ts` e o gêmeo em `evolution-webhook/handlers/bot-flow.ts`.
 
-- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
-- `supabase/functions/evolution-webhook/handlers/bot-flow.ts`
+- Remover o reorder forçado (linhas 1227-1233).
+- Em vez disso: deixar a ordem configurada intacta. Anexar os botões ao **último item** real (texto OU mídia). Se o último item for mídia, enviar os botões como uma mensagem curta logo depois (1 só "👇" + buttons), preservando a ordem do consultor. Isso já é o que faz o bloco de garantia 1321-1340 — manter ele como único responsável.
+- Validar com SQL que o passo realmente tem (ou não) `image_url`/`video_url` cadastrados para a config `[text, audio, image, video]` fazer sentido.
 
-Nenhuma mudança em UI nem migração — a UI continua salvando por `step_key`; a edge passa a respeitar isso.
+## 2. Cobrir success_goto na detecção `__last_chain_had_buttons`
+Mesmos arquivos. No branch `_hasExplicitSuccessGoto` (linhas 3468-3503), depois do `dispatchStepFromFlow(nextCustom.step_key)`, ler `nextCustom.captures` (ou re-selecionar com `captures` no select da linha 3489) e setar `(updates as any).__last_chain_had_buttons = true` quando houver `_buttons` populados. Assim o bloco 3607 pula o CTA duplicado tanto no caminho CHAIN quanto no success-goto.
 
-## Validação
+## 3. Garantir que o clique do CTA cai em `ask_quero_cadastrar`
+- Reler o início do `runConversationalFlow` para entender por que `conversation_step=ask_quero_cadastrar` não é honrado quando o botão `btn_quero_cadastrar` chega.
+- Suspeitas a investigar nessa ordem: (a) persistência do `conversation_step=ask_quero_cadastrar` no insert do CTA (linhas 3615-3623) — confirmar que `updates` é realmente aplicado ao customer no mesmo turno; (b) router de botões tratando `button.title` ("✅ Quero me cadastrar") em vez do `id` (`btn_quero_cadastrar`) e caindo num resolver legacy; (c) o cron `flow-d-health` ou outro background sobrescrevendo o step (vimos `flow_d_stuck` no log do `flow-d-health-cron` justo nesse consultor às 15:00).
+- Aplicar a correção no caminho identificado. Como blindagem, no handler `ask_quero_cadastrar` (linhas 4780-4828), aceitar também o título literal e qualquer `step` ≠ ask_quero_cadastrar mas com `last_custom_prompt_step='ask_quero_cadastrar'` recente (< 30 min) para roteamento defensivo.
 
-1. No `/admin/fluxos`, no passo "Como funciona", ordenar `text → audio → video → image` e salvar.
-2. Mandar "Zerar" no lead 11971254913 e clicar em "Como funciona" no welcome.
-3. Esperado: bot manda **texto** primeiro, depois áudio, depois vídeo, depois imagem (na ordem exata configurada).
-4. Após confirmar a conta, esperar `d_resultado`: deve chegar **APENAS UMA** mensagem com a simulação + os botões do próprio step (cadastrar / dúvida / falar com Rafael, se o consultor configurar o terceiro). Sem CTA duplicado de "Quero me cadastrar".
-5. Clicar em "cadastrar" → bot pede o documento (capture_documento). Clicar em "dúvida" → cai no `d_duvidas` (IA).
+## 4. Validação
+- Limpar lead (`Zerar` 11971254913), refazer fluxo "Como funciona" → confirmar ordem text→audio→video (image só se houver mídia configurada).
+- Mandar conta de luz → confirmar OCR → verificar que chega APENAS `d_resultado` com seus 3 botões (sem CTA extra).
+- Clicar em "Cadastrar agora" → bot deve enviar `d_pedir_documento` (RG/CNH), nunca pedir a conta de novo.
+
+Sem migrations. Sem mudança de UI. Só edge functions (`whapi-webhook` + `evolution-webhook`).
