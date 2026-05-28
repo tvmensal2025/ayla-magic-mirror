@@ -47,7 +47,7 @@ interface Props {
   onDecided?: () => void;
 }
 
-const TIMEOUT_MS = 5 * 60 * 1000; // 5 min
+const TIMEOUT_MS = 60 * 1000; // 1 min — após isso, cron libera para o cliente
 
 export function OcrReviewCard({ customer, kind, onDecided }: Props) {
   const { toast } = useToast();

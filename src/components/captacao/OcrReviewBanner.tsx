@@ -1,19 +1,21 @@
-// Banner sticky que aparece no topo do Admin quando há leads aguardando o
-// consultor revisar OCR (conta ou documento). Clicar abre um modal com o
-// OcrReviewCard pra cada lead pendente.
+// Modal BLOCKING fullscreen que abre sozinho quando há OCR aguardando
+// decisão do consultor (modo manual). Sobrepõe TUDO e o consultor é
+// obrigado a clicar "Eu confirmo" ou "Pedir ao cliente" antes de fazer
+// qualquer outra coisa.
 //
-// O bot só pausa a confirmação quando detecta consultor online. Se o
-// consultor demorar mais de 5min, o backend cron solta o lead pro fluxo
-// automático (manda pro cliente confirmar).
+// Regra de negócio (2026-05-28):
+// - Modo automático (capture_mode='auto'): nunca aparece — bot manda
+//   confirmação direto pro cliente sem passar pelo painel.
+// - Modo manual (capture_mode='manual'): só dispara quando o consultor
+//   está enviando 1-a-1. Modal trava a tela até decidir.
+// - Timer de 60s visível: se consultor não decidir, cron libera
+//   automaticamente para "pedir ao cliente" — lead nunca fica esperando.
 
-import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { useEffect } from "react";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useOcrReviewQueue } from "@/hooks/useOcrReviewQueue";
 import { useCaptureSession } from "@/hooks/useCaptureSession";
 import { OcrReviewCard } from "./OcrReviewCard";
-import { Eye, AlertCircle, Bell } from "lucide-react";
 
 interface Props {
   consultantId: string | null;
@@ -21,73 +23,65 @@ interface Props {
 
 export function OcrReviewBanner({ consultantId }: Props) {
   const { items, refresh } = useOcrReviewQueue(consultantId);
-  const [openId, setOpenId] = useState<string | null>(null);
+
+  // Beep sonoro quando entra um novo OCR — chama atenção do consultor
+  // mesmo em outra aba.
+  useEffect(() => {
+    if (items.length === 0) return;
+    try {
+      const audio = new Audio(
+        "data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQBvT19f"
+      );
+      audio.volume = 0.3;
+      void audio.play().catch(() => {});
+    } catch {}
+  }, [items.length]);
 
   if (!consultantId || items.length === 0) return null;
 
+  // Pega o lead mais antigo — modal trava aqui até o consultor decidir.
   const oldest = items[0];
 
   return (
-    <>
-      <div className="sticky top-0 z-40 mx-3 mb-3 rounded-xl border-2 border-amber-400/70 bg-gradient-to-r from-amber-500/15 via-amber-400/10 to-transparent backdrop-blur-md shadow-lg shadow-amber-500/20 animate-in slide-in-from-top-2">
-        <button
-          type="button"
-          className="w-full flex items-center gap-3 px-4 py-2.5 text-left"
-          onClick={() => setOpenId(oldest.customer_id)}
-        >
-          <div className="relative shrink-0">
-            <div className="w-9 h-9 rounded-lg bg-amber-400/30 border-2 border-amber-400/60 flex items-center justify-center animate-pulse">
-              <Bell className="w-4 h-4 text-amber-500" />
-            </div>
-            {items.length > 1 && (
-              <Badge className="absolute -top-1 -right-1 h-5 min-w-5 px-1 bg-rose-500 text-white border-card border-2 text-[10px]">
-                {items.length}
-              </Badge>
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-foreground flex items-center gap-1.5">
-              <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-              {oldest.kind === "bill" ? "Conta de luz" : "Documento"} pronto pra revisar
-              {items.length > 1 && (
-                <span className="text-[10px] font-normal text-muted-foreground">
-                  +{items.length - 1} aguardando
-                </span>
-              )}
-            </p>
-            <p className="text-[11px] text-muted-foreground truncate">
-              <strong>{oldest.customer_name || oldest.phone_whatsapp || "Lead"}</strong> mandou a foto. Clique pra confirmar ou pedir ao cliente confirmar.
-            </p>
-          </div>
-          <Button size="sm" className="shrink-0 gap-1 bg-amber-500 hover:bg-amber-600 text-amber-950 font-bold">
-            <Eye className="w-3.5 h-3.5" /> Revisar
-          </Button>
-        </button>
-      </div>
-
-      <Dialog open={!!openId} onOpenChange={(o) => { if (!o) { setOpenId(null); void refresh(); } }}>
-        <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
-          <DialogHeader className="px-4 py-3 border-b border-border">
-            <DialogTitle className="text-base">Revisar dados do OCR</DialogTitle>
-          </DialogHeader>
-          {openId && <OcrReviewCardWrapper customerId={openId} onDecided={() => { setOpenId(null); void refresh(); }} />}
-        </DialogContent>
-      </Dialog>
-    </>
+    <Dialog open onOpenChange={() => { /* não-fechável: consultor PRECISA decidir */ }}>
+      <DialogContent
+        className="max-w-4xl p-0 gap-0 overflow-hidden"
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <OcrReviewCardWrapper
+          customerId={oldest.customer_id}
+          onDecided={() => { void refresh(); }}
+          queueLength={items.length}
+        />
+      </DialogContent>
+    </Dialog>
   );
 }
 
-function OcrReviewCardWrapper({ customerId, onDecided }: { customerId: string; onDecided: () => void }) {
+function OcrReviewCardWrapper({
+  customerId, onDecided, queueLength,
+}: {
+  customerId: string;
+  onDecided: () => void;
+  queueLength: number;
+}) {
   const { customer } = useCaptureSession(customerId);
-  if (!customer) return <div className="p-6 text-center text-sm text-muted-foreground">Carregando…</div>;
+  if (!customer) return <div className="p-12 text-center text-sm text-muted-foreground">Carregando dados do OCR…</div>;
   const kind = (customer as any).ocr_review_pending as "bill" | "doc" | null;
-  if (!kind) return (
-    <div className="p-6 text-center text-sm text-muted-foreground">
-      Esse lead já foi tratado. Atualize a página.
-    </div>
-  );
+  if (!kind) {
+    // Já foi tratado por outro caminho — fecha modal automaticamente.
+    setTimeout(onDecided, 200);
+    return <div className="p-8 text-center text-sm text-muted-foreground">Atualizando…</div>;
+  }
   return (
-    <div className="p-3">
+    <div className="p-2">
+      {queueLength > 1 && (
+        <div className="mb-2 px-3 py-1 rounded bg-amber-500/15 border border-amber-400/40 text-amber-700 dark:text-amber-300 text-xs font-bold text-center">
+          ⚠️ {queueLength} leads aguardando revisão. Decida este para liberar o próximo.
+        </div>
+      )}
       <OcrReviewCard customer={customer} kind={kind} onDecided={onDecided} />
     </div>
   );

@@ -1215,6 +1215,20 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const configuredOrder = uiOrder || stepOrder || ["audio", "image", "video", "text", "document"];
       items.sort(makeKindComparator((it: Item) => it.kind, configuredOrder));
 
+      // 🔧 FIX (2026-05-28): se o step tem botões interativos (_buttons),
+      // FORÇA o item de texto a ser o ÚLTIMO da lista, mesmo que a ordem
+      // configurada coloque mídia depois. Sem isso o `dispatchStepFromFlow`
+      // enviava: texto puro → mídias → "Escolha uma opção" duplicado com
+      // botões. Resultado: 2 mensagens de texto ao cliente para o mesmo step.
+      // Com este fix: mídia(s) → texto+botões juntos, em uma só mensagem.
+      if (_buttons.length > 0) {
+        const textIdx = items.findIndex((it) => it.kind === "text");
+        if (textIdx !== -1 && textIdx !== items.length - 1) {
+          const [textItem] = items.splice(textIdx, 1);
+          items.push(textItem);
+        }
+      }
+
       let sent = false;
       let videoFailed = false;
       let hadVideo = false;
@@ -3247,14 +3261,33 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             break;
           }
 
-          // Sempre pausa pro card de revisão no painel. O cron
-          // `ocr-review-timeout` (5 min) libera automaticamente se o
-          // consultor não decidir — não dependemos mais de presença.
-          console.log(`[ocr-bill/whapi] 📥 marcando review pendente (customer=${customer.id})`);
-          updates.ocr_review_pending = "bill";
-          updates.ocr_review_started_at = new Date().toISOString();
-          updates.ocr_review_decided_at = null;
-          updates.ocr_review_decided_by = null;
+          // 📌 REGRA DE NEGÓCIO (2026-05-28):
+          // - capture_mode='auto' (IA ligada, leads automáticos): vai DIRETO
+          //   pro cliente confirmar com botões — sem passar pelo consultor.
+          // - capture_mode='manual' (consultor disparou 1-a-1): pausa para
+          //   modal blocking no painel. Cron de 60s libera automaticamente.
+          const captureMode = String((customer as any)?.capture_mode || "auto").toLowerCase();
+
+          if (captureMode === "manual") {
+            // Modo manual → mostrar para o consultor primeiro.
+            console.log(`[ocr-bill/whapi] 🔒 [manual] marcando review pendente — consultor decide (customer=${customer.id})`);
+            updates.ocr_review_pending = "bill";
+            updates.ocr_review_started_at = new Date().toISOString();
+            updates.ocr_review_decided_at = null;
+            updates.ocr_review_decided_by = null;
+            reply = "";
+            break;
+          }
+
+          // Modo automático → manda direto pro cliente confirmar (com botões).
+          console.log(`[ocr-bill/whapi] 🤖 [auto] enviando confirmação direto pro cliente (customer=${customer.id})`);
+          const merged = { ...customer, ...updates };
+          await sendOptions(remoteJid, buildConfirmacaoConta(merged), [
+            { id: "sim_conta", title: "✅ SIM" },
+            { id: "nao_conta", title: "❌ NÃO" },
+            { id: "editar_conta", title: "✏️ EDITAR" },
+          ]);
+          updates.bill_data_confirmation_by = "awaiting_client";
           reply = "";
           break;
 
@@ -3912,13 +3945,29 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             break;
           }
 
-          // Sempre pausa pro card de revisão no painel. Cron de 5 min
-          // libera automaticamente se o consultor não decidir.
-          console.log(`[ocr-doc/whapi] 📥 marcando review pendente (customer=${customer.id})`);
-          updates.ocr_review_pending = "doc";
-          updates.ocr_review_started_at = new Date().toISOString();
-          updates.ocr_review_decided_at = null;
-          updates.ocr_review_decided_by = null;
+          // 📌 REGRA DE NEGÓCIO (2026-05-28): mesmo de capture_conta.
+          // Modo automático → manda direto pro cliente. Modo manual → pausa
+          // para modal blocking do consultor (cron libera em 60s).
+          const captureModeDoc = String((customer as any)?.capture_mode || "auto").toLowerCase();
+
+          if (captureModeDoc === "manual") {
+            console.log(`[ocr-doc/whapi] 🔒 [manual] marcando review pendente — consultor decide (customer=${customer.id})`);
+            updates.ocr_review_pending = "doc";
+            updates.ocr_review_started_at = new Date().toISOString();
+            updates.ocr_review_decided_at = null;
+            updates.ocr_review_decided_by = null;
+            reply = "";
+            break;
+          }
+
+          console.log(`[ocr-doc/whapi] 🤖 [auto] enviando confirmação direto pro cliente (customer=${customer.id})`);
+          const mergedDoc = { ...customer, ...updates };
+          await sendOptions(remoteJid, buildConfirmacaoDoc(mergedDoc), [
+            { id: "sim_doc", title: "✅ SIM" },
+            { id: "nao_doc", title: "❌ NÃO" },
+            { id: "editar_doc", title: "✏️ EDITAR" },
+          ]);
+          updates.doc_data_confirmation_by = "awaiting_client";
           reply = "";
           break;
 

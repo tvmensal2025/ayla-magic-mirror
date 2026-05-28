@@ -1,8 +1,17 @@
-// Cron: libera leads que estão pendurados em ocr_review_pending por mais
-// de 5 minutos. Chama o pipeline de confirmação ao cliente (caminho normal).
+// Cron: libera leads que ficaram pendurados em ocr_review_pending por mais
+// de 60 segundos no MODO MANUAL (consultor não decidiu).
 //
-// Roda a cada 1 minuto. Se o consultor não decidir no painel, o lead segue
-// pelo fluxo automático: bot manda dados pro cliente confirmar via WhatsApp.
+// Regra de negócio (2026-05-28):
+// - Modo automático (capture_mode='auto'): OCR é processado e a confirmação
+//   vai DIRETO pro cliente sem passar pelo consultor — ocr_review_pending
+//   sequer é setado. Esse cron NÃO afeta esses leads.
+// - Modo manual (capture_mode='manual'): consultor disparou o fluxo 1-a-1.
+//   Bot pausa, mostra modal blocking pro consultor com timer de 60s.
+//   Se consultor não decidir nesse prazo, este cron libera para o fluxo
+//   "pedir cliente confirmar via WhatsApp" (mesmo destino do botão "Pedir
+//   ao cliente" do modal).
+//
+// Roda a cada 1 minuto.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
@@ -20,12 +29,13 @@ Deno.serve(async (req) => {
 
     const cutoff = new Date(Date.now() - TIMEOUT_MS).toISOString();
 
-    // Pega todos os leads que passaram do prazo de review.
+    // Só pega leads em MODO MANUAL — modo automático já foi direto pro cliente.
     const { data: stale, error } = await supabase
       .from("customers")
-      .select("id, consultant_id, ocr_review_pending, ocr_review_started_at, name")
+      .select("id, consultant_id, ocr_review_pending, ocr_review_started_at, name, capture_mode")
       .not("ocr_review_pending", "is", null)
       .lt("ocr_review_started_at", cutoff)
+      .eq("capture_mode", "manual")
       .limit(100);
 
     if (error) {
@@ -69,7 +79,7 @@ Deno.serve(async (req) => {
         }
 
         released++;
-        console.log(`[ocr-review-timeout] released customer=${c.id} kind=${kind} (consultor não decidiu em 5min)`);
+        console.log(`[ocr-review-timeout] released customer=${c.id} kind=${kind} (consultor não decidiu em 60s — modo manual)`);
       } catch (e) {
         console.error(`[ocr-review-timeout] failed to release customer=${c.id}`, e);
       }
