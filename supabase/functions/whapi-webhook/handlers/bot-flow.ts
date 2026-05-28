@@ -2565,7 +2565,21 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           const _isCaptureType = stype === "capture_conta"
             || stype === "capture_documento" || stype === "capture_doc"
             || stype === "capture_email" || stype === "confirm_phone";
-          if (isButton && _isCaptureType) {
+          // 🛡️ Não re-emitir prompt quando o botão clicado JÁ É a resposta
+          // ao passo (sim_phone/editar_phone/sim_conta/etc). Caso contrário
+          // duplicamos o prompt e o lead recebe a mesma pergunta 2x.
+          const _btnLower = String(buttonId ?? "").toLowerCase();
+          const _isAnswerToCapture =
+            (stype === "confirm_phone" && /^(sim_phone|editar_phone|nao_phone|1|2)$/.test(_btnLower))
+            || (stype === "capture_conta" && /^(sim_conta|nao_conta|editar_conta)$/.test(_btnLower))
+            || (stype === "capture_documento" && /^(sim_doc|nao_doc|editar_doc)$/.test(_btnLower))
+            || (stype === "capture_doc" && /^(sim_doc|nao_doc|editar_doc)$/.test(_btnLower))
+            || (stype === "capture_email" && /^(sim_email|editar_email|nao_email)$/.test(_btnLower));
+          // Também respeita anti-dup de 10 min: se já emitimos prompt custom
+          // recentemente, não re-emite.
+          const _lastPromptIso = String((customer as any)?.last_custom_prompt_at || "");
+          const _recentPrompt = _lastPromptIso ? (Date.now() - new Date(_lastPromptIso).getTime() < 10 * 60 * 1000) : false;
+          if (isButton && _isCaptureType && !_isAnswerToCapture && !_recentPrompt) {
             try {
               const { data: stepFull } = await supabase
                 .from("bot_flow_steps")
