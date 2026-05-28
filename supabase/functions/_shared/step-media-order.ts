@@ -7,8 +7,16 @@ const DEFAULT_ORDER = ["audio", "image", "video", "text", "document"] as const;
 export type MediaKind = string | null | undefined;
 
 // deno-lint-ignore no-explicit-any
-export async function getStepMediaOrder(supabase: any, consultantId: string, stepKey: string | null | undefined): Promise<string[] | null> {
-  if (!consultantId || !stepKey) return null;
+export async function getStepMediaOrder(
+  supabase: any,
+  consultantId: string,
+  stepKey: string | null | undefined | Array<string | null | undefined>,
+): Promise<string[] | null> {
+  if (!consultantId) return null;
+  const candidates = (Array.isArray(stepKey) ? stepKey : [stepKey])
+    .map((k) => (k == null ? "" : String(k)))
+    .filter((k) => k.length > 0);
+  if (candidates.length === 0) return null;
   try {
     const { data } = await supabase
       .from("consultants")
@@ -17,9 +25,13 @@ export async function getStepMediaOrder(supabase: any, consultantId: string, ste
       .maybeSingle();
     const map = (data as any)?.flow_step_media_order;
     if (!map || typeof map !== "object") return null;
-    const order = map[stepKey];
-    if (!Array.isArray(order) || order.length === 0) return null;
-    return order.map((k) => String(k).toLowerCase());
+    for (const key of candidates) {
+      const order = map[key];
+      if (Array.isArray(order) && order.length > 0) {
+        return order.map((k) => String(k).toLowerCase());
+      }
+    }
+    return null;
   } catch {
     return null;
   }
