@@ -4190,7 +4190,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     // ─── 11. CONFIRMAR FINALIZAR ────────
     case "ask_quero_cadastrar": {
       const resp = (isButton ? buttonId : messageText.toLowerCase().trim()) || "";
-      const triggers = ["btn_quero_cadastrar", "quero_cadastrar", "sim_cadastrar", "1", "sim", "s", "quero", "bora", "vamos", "vamo", "pode", "ok", "blz", "beleza"];
+      const triggers = ["btn_quero_cadastrar", "quero_cadastrar", "sim_cadastrar", "cadastrar", "btn_cadastrar", "quero_simular", "btn_simular", "simular", "btn_quero_simular", "1", "sim", "s", "quero", "bora", "vamos", "vamo", "pode", "ok", "blz", "beleza"];
       const wants = triggers.includes(resp) || /^(sim|quero|bora|vamos|pode|ok)\b/i.test(resp);
       if (wants) {
         try {
