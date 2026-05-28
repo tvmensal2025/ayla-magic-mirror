@@ -1408,7 +1408,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       let kind = it.kind === "audio" ? "audio" : it.kind === "video" ? "video" : it.kind === "image" ? "image" : "document";
       let durationSec: number | null = null;
       if (m.media_id) {
-        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind, duration_sec").eq("id", m.media_id).maybeSingle();
+        const { data: mediaRow } = await supabase.from("ai_media_library").select("url, kind, duration_sec").eq("id", m.media_id).eq("active", true).maybeSingle();
         if (mediaRow?.url) {
           url = mediaRow.url;
           if (mediaRow.kind) kind = mediaRow.kind;
