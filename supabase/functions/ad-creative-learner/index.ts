@@ -171,14 +171,29 @@ async function processConsultant(supabase: ReturnType<typeof adminClient>, consu
   const winners = rows.filter(r => r.score > 0).slice(0, 5);
   const losers = rows.filter(r => r.spend_cents > 500 && r.leads === 0).slice(-5);
 
-  // Upsert performance per ad
+  // Pré-busca copy real (vinda do facebook-sync-ad-creatives) para preservar headline/primary_text
+  const allAdIds = rows.map(r => r.fb_ad_id);
+  const realCopyMap: Record<string, { headline: string | null; primary_text: string | null; creative_format: string | null }> = {};
+  if (allAdIds.length) {
+    const { data: existing } = await supabase
+      .from("ad_creative_performance")
+      .select("fb_ad_id, headline, primary_text, creative_format")
+      .in("fb_ad_id", allAdIds);
+    for (const e of existing || []) {
+      realCopyMap[e.fb_ad_id] = { headline: e.headline, primary_text: e.primary_text, creative_format: e.creative_format };
+    }
+  }
+
+  // Upsert performance per ad — preserva copy real do Meta quando existir
   for (const r of rows) {
+    const real = realCopyMap[r.fb_ad_id];
     await supabase.from("ad_creative_performance").upsert({
       consultant_id: r.consultant_id,
       campaign_id: r.campaign_id,
       fb_ad_id: r.fb_ad_id,
-      headline: r.headline,
-      primary_text: r.primary_text,
+      headline: real?.headline ?? r.headline,
+      primary_text: real?.primary_text ?? r.primary_text,
+      creative_format: real?.creative_format ?? null,
       framework: r.framework,
       impressions: r.impressions,
       clicks: r.clicks,

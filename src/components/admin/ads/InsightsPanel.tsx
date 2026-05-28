@@ -51,9 +51,15 @@ export function InsightsPanel({ consultantId }: Props) {
   async function run() {
     setRunning(true);
     try {
+      // 1) Puxa copy real dos anúncios do Meta (headline/primary_text/formato)
+      const { error: syncErr } = await supabase.functions.invoke("facebook-sync-ad-creatives", {
+        body: { consultant_id: consultantId },
+      });
+      if (syncErr) console.warn("[insights] sync-creatives falhou:", syncErr);
+      // 2) Roda o aprendizado com a copy real já populada
       const { error } = await supabase.functions.invoke("ad-creative-learner", { body: {} });
       if (error) throw error;
-      toast({ title: "Análise concluída", description: "Insights atualizados." });
+      toast({ title: "Análise concluída", description: "Criativos sincronizados e insights atualizados." });
       await load();
     } catch (e) {
       toast({ title: "Erro", description: String(e), variant: "destructive" });
