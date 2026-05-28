@@ -78,10 +78,10 @@ async function processConsultant(supabase: ReturnType<typeof adminClient>, consu
   for (const camp of campaigns) {
     const adIds: string[] = Array.isArray(camp.fb_ad_ids) ? camp.fb_ad_ids as string[] : [];
     if (adIds.length === 0) continue;
-    // métricas agregadas da campanha (por enquanto não há per-ad granular salvo)
+    // métricas agregadas da campanha (fallback quando não tem per-ad)
     const { data: ms } = await supabase
       .from("facebook_metrics_daily")
-      .select("spend_cents, impressions, clicks, leads, complete_registrations")
+      .select("spend_cents, impressions, clicks, leads, messaging_conversations_started, complete_registrations")
       .eq("campaign_id", camp.id)
       .gte("date", since);
     const tot = (ms || []).reduce(
@@ -89,12 +89,13 @@ async function processConsultant(supabase: ReturnType<typeof adminClient>, consu
         spend_cents: acc.spend_cents + (m.spend_cents || 0),
         impressions: acc.impressions + (m.impressions || 0),
         clicks: acc.clicks + (m.clicks || 0),
-        leads: acc.leads + (m.leads || 0),
+        // CTWA: se Meta não devolve "lead", usa conversa iniciada como proxy
+        leads: acc.leads + Math.max(Number(m.leads || 0), Number(m.messaging_conversations_started || 0)),
         registrations: acc.registrations + (m.complete_registrations || 0),
       }),
       { spend_cents: 0, impressions: 0, clicks: 0, leads: 0, registrations: 0 }
     );
-    if (tot.impressions < 100) continue; // amostra muito pequena
+    if (tot.impressions < 100) continue;
 
     // pega copy do creative_pack
     let copyVariations: { text: string; framework: string }[] = [];
@@ -108,27 +109,23 @@ async function processConsultant(supabase: ReturnType<typeof adminClient>, consu
       copyVariations = Array.isArray(variants) ? variants : [];
     }
 
-    // Tenta buscar métricas granulares por fb_ad_id (quando disponíveis)
-    // Fallback: distribui proporcionalmente pelo CTR estimado de cada variação
+    // Métricas granulares por fb_ad_id na NOVA tabela (preenchida pelo facebook-sync-metrics level=ad)
     const perAdMetrics: Record<string, typeof tot> = {};
-    for (const adId of adIds) {
-      const { data: adMs } = await supabase
-        .from("facebook_metrics_daily")
-        .select("spend_cents, impressions, clicks, leads, complete_registrations")
-        .eq("fb_ad_id", adId)
-        .gte("date", since);
-      if (adMs && adMs.length > 0) {
-        perAdMetrics[adId] = (adMs).reduce(
-          (acc: typeof tot, m: any) => ({
-            spend_cents: acc.spend_cents + (m.spend_cents || 0),
-            impressions: acc.impressions + (m.impressions || 0),
-            clicks: acc.clicks + (m.clicks || 0),
-            leads: acc.leads + (m.leads || 0),
-            registrations: acc.registrations + (m.complete_registrations || 0),
-          }),
-          { spend_cents: 0, impressions: 0, clicks: 0, leads: 0, registrations: 0 }
-        );
-      }
+    const { data: adMsAll } = await supabase
+      .from("facebook_ad_metrics_daily")
+      .select("fb_ad_id, spend_cents, impressions, clicks, leads, messaging_conversations_started, complete_registrations")
+      .in("fb_ad_id", adIds)
+      .gte("date", since);
+    for (const row of adMsAll || []) {
+      const k = row.fb_ad_id;
+      const prev = perAdMetrics[k] || { spend_cents: 0, impressions: 0, clicks: 0, leads: 0, registrations: 0 };
+      perAdMetrics[k] = {
+        spend_cents: prev.spend_cents + (row.spend_cents || 0),
+        impressions: prev.impressions + (row.impressions || 0),
+        clicks: prev.clicks + (row.clicks || 0),
+        leads: prev.leads + Math.max(Number(row.leads || 0), Number(row.messaging_conversations_started || 0)),
+        registrations: prev.registrations + (row.complete_registrations || 0),
+      };
     }
 
     // Verifica se temos dados granulares para todos os ads
