@@ -173,10 +173,31 @@ Deno.serve(async (req) => {
     // arquivo pina @2; runtime idêntico mas TS vê duas shapes (mesmo padrão da linha
     // que cuida de checkAndMarkProcessed abaixo).
     if (await isConsultantAIDisabled(supabase as any, instanceData.consultant_id)) {
-      console.log(`🛑 [global-off-silent] IA do consultor ${instanceData.consultant_id} desligada — ignorando inbound`);
-      return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      // Antes de silenciar, checa override por lead (force_bot_phones ou
+      // customers.bot_force_enabled). Setado pelo botão Zerar e pelo toggle
+      // individual no chat. Phone vem do remoteJid do payload.
+      const rawJid: string = body?.data?.key?.remoteJid || "";
+      const phoneDigits = String(rawJid).split("@")[0].replace(/\D/g, "");
+      let forceForLead = false;
+      if (phoneDigits) {
+        const [{ data: pending }, { data: cust }] = await Promise.all([
+          supabase.from("force_bot_phones").select("phone_digits")
+            .eq("consultant_id", instanceData.consultant_id)
+            .eq("phone_digits", phoneDigits).maybeSingle(),
+          supabase.from("customers").select("bot_force_enabled")
+            .eq("consultant_id", instanceData.consultant_id)
+            .eq("phone_whatsapp", phoneDigits)
+            .eq("bot_force_enabled", true).maybeSingle(),
+        ]);
+        forceForLead = !!pending || !!cust;
+      }
+      if (!forceForLead) {
+        console.log(`🛑 [global-off-silent] IA do consultor ${instanceData.consultant_id} desligada — ignorando inbound`);
+        return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_silent" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      console.log(`✅ [force-bot-active] IA global off, mas lead ${phoneDigits} tem override → bot responde`);
     }
 
     // ─── 3) Parse + dedupe + filter ────────────────────────────────────
