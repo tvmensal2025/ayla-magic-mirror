@@ -3457,6 +3457,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           await dispatchStepFromFlow(nextCustom.step_key, _vars);
           if (!isMockMode()) await new Promise((r) => setTimeout(r, 1800));
 
+          // 🚦 Detecta se o passo success_goto (ex.: d_resultado) já tem botões
+          // interativos próprios. Se sim, NÃO duplicar o CTA "Quero me cadastrar"
+          // logo abaixo — o próprio passo já cumpre esse papel.
+          try {
+            const caps = Array.isArray((nextCustom as any).captures) ? (nextCustom as any).captures : [];
+            const btnCap = caps.find((c: any) => c?.field === "_buttons" && c?.enabled !== false);
+            const hasButtons = btnCap && Array.isArray(btnCap.value) && btnCap.value.length > 0;
+            if (hasButtons) (updates as any).__last_chain_had_buttons = true;
+          } catch (_) { /* best-effort */ }
+
           // 2. Avança nextCustom para o próximo capture/finalizar após este step.
           try {
             const { data: _flowRow3 } = await supabase
