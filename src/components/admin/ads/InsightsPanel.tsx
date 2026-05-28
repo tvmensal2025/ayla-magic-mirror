@@ -32,17 +32,38 @@ export function InsightsPanel({ consultantId }: Props) {
   const [insight, setInsight] = useState<Insight | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [freqAlert, setFreqAlert] = useState<{ avg: number; max: number; days: number } | null>(null);
 
   async function load() {
     setLoading(true);
-    const { data } = await supabase
-      .from("ad_creative_insights")
-      .select("winning_patterns, losing_patterns, best_image_traits, best_image_briefs, summary, sample_size, best_ctr_bps, best_cpa_cents, updated_at")
-      .eq("consultant_id", consultantId)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const [{ data }, { data: freqRows }] = await Promise.all([
+      supabase
+        .from("ad_creative_insights")
+        .select("winning_patterns, losing_patterns, best_image_traits, best_image_briefs, summary, sample_size, best_ctr_bps, best_cpa_cents, updated_at")
+        .eq("consultant_id", consultantId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("facebook_metrics_daily")
+        .select("frequency_x100, facebook_campaigns!inner(consultant_id)")
+        .eq("facebook_campaigns.consultant_id", consultantId)
+        .gte("date", since),
+    ]);
     setInsight(data as Insight | null);
+    if (freqRows && freqRows.length > 0) {
+      const freqs = freqRows.map((r: any) => (r.frequency_x100 || 0) / 100).filter(f => f > 0);
+      if (freqs.length > 0) {
+        const avg = freqs.reduce((a, b) => a + b, 0) / freqs.length;
+        const max = Math.max(...freqs);
+        setFreqAlert({ avg, max, days: freqs.length });
+      } else {
+        setFreqAlert(null);
+      }
+    } else {
+      setFreqAlert(null);
+    }
     setLoading(false);
   }
 
