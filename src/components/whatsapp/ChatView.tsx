@@ -460,6 +460,31 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
           </Button>
         )}
 
+        {customerId && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={toggleBot}
+            disabled={togglingBot}
+            title={botActive ? "Desligar bot só para este lead" : "Ligar bot para este lead"}
+            className={`h-8 min-w-[32px] text-[10px] gap-1 px-2 shrink-0 ${
+              botActive
+                ? "border-primary/40 text-primary hover:bg-primary/10"
+                : "border-muted text-muted-foreground hover:bg-muted/40"
+            }`}
+          >
+            {togglingBot ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : botActive ? (
+              <Bot className="h-3.5 w-3.5" />
+            ) : (
+              <BotOff className="h-3.5 w-3.5" />
+            )}
+            <span className="hidden lg:inline">IA {botActive ? "ON" : "OFF"}</span>
+          </Button>
+        )}
+
+
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
