@@ -3585,8 +3585,6 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               console.warn(`[post-confirm-conta] envio do CTA quero_cadastrar falhou:`, (e as Error).message);
             }
             updates.conversation_step = "ask_quero_cadastrar";
-            // Guarda o id do passo capture_documento para o handler dispatchar depois.
-            (updates as any).pending_capture_doc_step_id = nextCustom.id;
           } else {
             // Para finalizar_cadastro NÃO usamos dispatch: o texto precisa ir
             // acoplado ao botão interativo (sendOptions).
