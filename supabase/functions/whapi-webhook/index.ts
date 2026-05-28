@@ -946,6 +946,15 @@ Deno.serve(async (req) => {
       _v3Active = await _isV3(supabase as any, superAdminConsultantId);
     } catch (_) {/* swallow */}
     if (!_v3Active && (customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
+      // Fluxo D é 100% automático (welcome com botões → capture conta → OCR → ...).
+      // Nunca aplicar o short-circuit "manual_capture_text_saved_no_auto_flow"
+      // para leads em variant D — isso engasga a transição entre passos
+      // (ex.: cliente clica "📸 Quero simular" e o flow para porque
+      // capture_mode='manual' herdado do trigger customers_default_capture_mode).
+      const _flowVariant = String((customer as any)?.flow_variant || "").toUpperCase();
+      if (_flowVariant === "D") {
+        console.log(`[manual-capture-stop] BYPASS — customer=${customer.id} flow_variant=D (flow automático)`);
+      } else {
       try {
         const multi = extractMultiField(messageText);
         const patch = buildMultiFieldPatch(customer as any, multi);
@@ -962,6 +971,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, msg: "manual_capture_text_saved_no_auto_flow" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+      }
     }
 
 
@@ -1168,6 +1178,11 @@ Deno.serve(async (req) => {
     }
 
     if (!_v3Active && (customer as any).capture_mode === "manual" && hasAudio && messageText && !isFile) {
+      // Mesmo bypass do bloco de texto: variant D é flow automático.
+      const _flowVariantA = String((customer as any)?.flow_variant || "").toUpperCase();
+      if (_flowVariantA === "D") {
+        console.log(`[manual-capture-stop-audio] BYPASS — customer=${customer.id} flow_variant=D`);
+      } else {
       try {
         const multi = extractMultiField(messageText);
         const patch = buildMultiFieldPatch(customer as any, multi);
@@ -1181,6 +1196,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, msg: "manual_capture_audio_saved_no_auto_flow" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+      }
     }
 
     // ─── Run bot flow ──────────────────────────────────────────────────
