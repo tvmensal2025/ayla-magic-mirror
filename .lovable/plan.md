@@ -1,145 +1,71 @@
-## Diagnóstico direto
+# Por que tanto erro no fluxo do bot
 
-O fluxo está bagunçando porque o sistema ainda mistura três comportamentos:
+## TL;DR
 
-1. **Motor do fluxo configurado no /admin/fluxos**
-   - deveria seguir `bot_flow_steps` por `position`, `transitions` e `goto_step_id`.
-
-2. **Motor legado de cadastro**
-   - ainda entra em alguns momentos e volta para textos antigos como “me manda a conta de luz”.
-
-3. **IA/classificador/Gemini**
-   - ainda roda antes de algumas decisões determinísticas e pode interpretar “quero cadastrar”, “simular”, “dúvida” fora da regra configurada.
-
-O log confirma isso: ao clicar **“📸 Quero simular”** dentro do passo `d_como_funciona`, o webhook entrou no motor conversacional com o step UUID `c87d76f8...`, classificou a entrada e acabou mandando o texto legado de pedir conta. Ou seja: ele não está tratando o botão como transição determinística pura do passo 3 para o passo 2.
-
-Também identifiquei outro ponto crítico: no motor conversacional, quando o passo tem botões, o texto é segurado para ser enviado no final. Por isso, mesmo com ordem configurada `text → audio → image → video`, ele manda mídia antes e só depois manda o texto com botões. A correção anterior mexeu em `bot-flow.ts`, mas esse teste passou pelo arquivo `handlers/conversational/index.ts`, então a ordem continuou errada.
+Sim, **existem 3 motores rodando em paralelo** + um roteador que tenta decidir entre eles a cada turno. Isso é a causa raiz do "inventa", "duplica", "fora de ordem". **Não dá pra simplesmente apagar** porque 13 de 13 consultores ainda dependem de 2 desses motores. O caminho seguro é **aposentar 1 motor morto (V3) agora** e depois **fundir os outros 2 em um só** num próximo passo.
 
 ---
 
-## Objetivo da correção
+## 1) Os motores que existem hoje
 
-Transformar o Fluxo D em uma execução determinística:
+| # | Motor | Arquivo | Linhas | Em uso? |
+|---|---|---|---|---|
+| A | **Legacy cadastro** (bot-flow.ts) | `whapi-webhook/handlers/bot-flow.ts` | 5.264 | Sim — todo passo de OCR/conta/doc/CPF/portal |
+| B | **Conversational** (custom flow) | `whapi-webhook/handlers/conversational/index.ts` | 2.552 | Sim — `bot_flow_steps` do /admin/fluxos |
+| C | **Engine V3** (reescrita) | `_shared/flow-engine/v3-*.ts` | ~2.500 | **Não. 0 consultores com `flow_engine_v3='on'`** |
+| R | **Router** | `_shared/flow-router.ts` + `routeEngine` no webhook | 349 | Decide A vs B a cada mensagem |
 
-```text
-Passo atual
-  ↓
-Se clicou botão: casar pelo ID do botão ou título configurado
-  ↓
-Ir exatamente para goto_step_id configurado
-  ↓
-Enviar exatamente o conteúdo do passo na ordem salva:
-text → audio → video → image, ou qualquer ordem definida no admin
-  ↓
-Parar quando o passo exigir captura/resposta
-  ↓
-Nunca chamar IA nem texto legado para decidir caminho principal
-```
+E ainda há um **espelho quase idêntico** em `evolution-webhook/handlers/` (bot-flow.ts + conversational/index.ts duplicados — ~7.500 linhas espelhadas que sempre dessincronizam).
 
----
+## 2) Por que isso causa os erros que você está vendo
 
-## Plano de implementação
+1. **Router decide por turno**, não por conversa. A cada mensagem ele relê `conversation_step`, tenta inferir o motor pelo formato (`flow:`, UUID, `passo_`) e pode trocar de A↔B no meio do funil. Foi exatamente o bug do "Quero simular" virar "me manda a conta" (caiu no legacy).
+2. **CADASTRO_STEPS é uma lista hardcoded de 50+ steps** que força volta pro motor A. Qualquer step novo que você criar no /admin que esbarre em cadastro precisa ser adicionado nessa lista à mão. Se esquecer → bug.
+3. **Ordem de mídia (texto/áudio/vídeo/imagem) tem 3 implementações diferentes**: uma em `bot-flow.ts`, uma em `conversational/index.ts` (whapi), e outra em `conversational/index.ts` (evolution). Cada fix precisa ser feito 3x — e historicamente sempre escapou um.
+4. **Webhooks duplicados** (whapi + evolution): toda regra de negócio existe 2x. Dessincroniza constantemente.
+5. **V3 nunca foi ativado** mas o código continua importado (`isEngineV3Enabled`, `runEngineV3WebhookEntry`) em vários pontos, gera ruído de leitura e risco de alguém ativar por engano.
+6. **Gemini/IA livre** pode sobrescrever transitions em alguns ramos do conversational — fonte clássica do "inventou resposta".
 
-### 1. Criar uma regra “strict flow” para fluxo custom ativo
+## 3) O que dá pra apagar SEM quebrar (seguro hoje)
 
-Nos webhooks:
+- **Toda a pasta `_shared/flow-engine/v3-*.ts`** (v3-runner, v3-dispatcher, v3-loader, v3-types, v3-webhook-entry) → ~2.500 linhas mortas.
+- **`flow-engine-v3-rollout-cron`** (edge function de promoção V3) e o `flow-engine-rollout-cron` se também só promovem V3.
+- **Painel "Rollout V3" no SuperAdmin** + colunas `consultants.use_engine_v3` e `consultants.flow_engine_v3` (após confirmar via query que estão zeradas).
+- **Imports condicionais de V3** em `whapi-webhook/index.ts` e `evolution-webhook/index.ts` (linhas 952, 1270, 1466).
 
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
-- `supabase/functions/evolution-webhook/handlers/conversational/index.ts`
+Impacto: **zero em runtime** (ninguém usa). Tira ~3.000 linhas de confusão e elimina o caminho "alguém ativa V3 sem querer".
 
-Vou fazer com que, quando existir `bot_flow` ativo para o consultor/variante do lead:
+## 4) O que NÃO dá pra apagar sem migração
 
-- botão clicado é roteado primeiro por `transitions` do passo atual;
-- `goto_step_id` vence qualquer IA/classificador;
-- `goto_special` só executa se estiver configurado na transição;
-- IA só entra quando o próprio passo tiver fallback/ação de dúvida/IA configurado;
-- `quer_cadastrar` global não poderá mais mandar para `aguardando_conta` se o passo atual tem uma transição configurada para cadastro/documento.
+- **`bot-flow.ts` (motor A)**: contém todo o pipeline OCR → confirma conta → doc → CPF → portal → OTP → facial. Apagar = perder cadastro. Caminho correto: **portar esses passos pro motor B como steps custom** (já existe `ask_quero_cadastrar`, `aguardando_conta` etc. parcialmente) e só então remover.
+- **`conversational/index.ts` (motor B)**: é o que roda os fluxos do /admin/fluxos. Esse é o que **deveria ficar como único motor** no futuro.
+- **Espelho `evolution-webhook/`**: enquanto Evolution API existir como canal alternativo, precisa ficar. Mas pode virar um arquivo fino que importa de `_shared/` (eliminar duplicação real).
 
-### 2. Corrigir definitivamente a ordem de mídia no motor conversacional
+## 5) Plano em 3 fases (recomendado)
 
-Hoje o motor conversacional segura texto com botões para o final. Vou ajustar para:
+**Fase 1 — limpar morto (esta semana, baixo risco):**
+- Deletar `flow-engine/v3-*.ts`, crons V3, painel Rollout V3, colunas de flag V3.
+- Remover imports condicionais V3 dos dois webhooks.
+- Resultado: -3.000 linhas, 0 mudança de comportamento.
 
-- montar uma sequência única com `text`, `audio`, `video`, `image`, `document`;
-- se `text` vier primeiro e o passo tiver botões, enviar esse texto já como mensagem interativa naquela posição;
-- continuar enviando as mídias depois, se a ordem configurada mandar;
-- se `text` vier no final, enviar botões no final;
-- não forçar texto para o fim por causa de botão.
+**Fase 2 — unificar webhooks (médio risco):**
+- Extrair `conversational/index.ts` e `bot-flow.ts` pra `_shared/` (uma cópia só).
+- `whapi-webhook` e `evolution-webhook` viram entrypoints finos (parse payload → chama shared).
+- Resultado: fixes valem pros 2 canais ao mesmo tempo.
 
-Exemplo esperado para `d_como_funciona` com ordem `text → audio → image → video`:
+**Fase 3 — fundir A em B (maior risco, faseado por consultor):**
+- Recriar os steps de cadastro (OCR, doc, CPF, portal) como `bot_flow_steps` reais ou como "step types" especiais dentro do motor B.
+- Remover `CADASTRO_STEPS` + `routeEngine`. Motor único, determinístico, sem troca.
+- Migrar 1 consultor por vez, com kill-switch de rollback.
 
-```text
-1. Texto “Vou te explicar...” com os 3 botões
-2. Áudio
-3. Imagem, se existir
-4. Vídeo, se existir
-```
+## 6) Resposta direta às suas perguntas
 
-Se não existir imagem cadastrada, simplesmente pula imagem e mantém a ordem dos itens existentes.
+- **"Tem muitos motores antigos?"** → 3 motores + 2 espelhos. Sim, demais.
+- **"Duplicação?"** → ~7.500 linhas duplicadas entre whapi e evolution. Sim.
+- **"Confusão?"** → o router troca de motor a cada turno, daí "inventa". Sim.
+- **"Seria melhor apagar?"** → V3 sim (hoje). Os outros 2, só depois de migrar.
+- **"Não iria quebrar?"** → Fase 1 não quebra nada (V3 está em 0 consultores). Fase 2/3 quebram se feitos de uma vez — precisa ser faseado.
 
-### 3. Remover fallback legado de “cadastrar = pedir conta” dentro de fluxo custom
+## Próximo passo sugerido
 
-No motor conversacional existe este comportamento perigoso:
-
-```text
-intent quer_cadastrar → pedir conta de luz
-```
-
-Isso não pode valer dentro do Fluxo D, porque depois da simulação o correto é:
-
-```text
-Cadastrar agora → d_pedir_documento
-```
-
-Vou mudar para:
-
-- se o passo atual tem transição para `cadastrar`, usar a transição;
-- se o fluxo tem `capture_documento`, cadastro vai para documento;
-- só pedir conta quando a transição configurada apontar para `capture_conta`.
-
-### 4. Unificar a lógica entre Whapi e Evolution
-
-As mesmas correções serão aplicadas nos dois webhooks para não ficar um canal certo e outro errado:
-
-- `whapi-webhook/handlers/conversational/index.ts`
-- `evolution-webhook/handlers/conversational/index.ts`
-- se necessário, mover helpers comuns para `_shared` para evitar divergência.
-
-### 5. Validar com os dados reais do Rafael/Rodrigo
-
-Vou validar especificamente com o lead e fluxo que aparecem nos logs:
-
-- consultor `0c2711ad-4836-41e6-afba-edd94f698ae3`
-- lead `5511971254913`
-- variant `D`
-
-Cenários de validação:
-
-1. **Oi → welcome**
-   - envia o passo 1 configurado.
-
-2. **Clicar “Como funciona”**
-   - vai para `d_como_funciona`.
-   - respeita exatamente a ordem de mídia salva.
-
-3. **Clicar “Quero simular” dentro de Como funciona**
-   - vai para `d_pedir_conta`.
-   - não chama Gemini.
-   - não manda texto legado fora do passo configurado.
-
-4. **Enviar conta → confirmar OCR**
-   - envia `d_resultado`.
-   - não duplica CTA se `d_resultado` já tem botões.
-
-5. **Clicar “Cadastrar agora”**
-   - vai para `d_pedir_documento`.
-   - nunca volta a pedir conta de luz.
-
----
-
-## Arquivos que serão alterados
-
-- `supabase/functions/whapi-webhook/handlers/conversational/index.ts`
-- `supabase/functions/evolution-webhook/handlers/conversational/index.ts`
-- possivelmente `supabase/functions/_shared/flow-router.ts` ou novo helper compartilhado, apenas se for necessário para evitar duplicação.
-
-Não vou alterar banco, UI ou copy do fluxo. A correção é no motor de execução.
+Aprovar **Fase 1** (apagar V3 morto). Em 1 sessão eu removo os arquivos, os imports, os crons e as colunas, e você reduz a superfície de bug em ~30% sem qualquer impacto pro cliente final.
