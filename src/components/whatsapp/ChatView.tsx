@@ -53,6 +53,10 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
   const [sendingToCrm, setSendingToCrm] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
+  const [botPaused, setBotPaused] = useState<boolean>(false);
+  const [botForceEnabled, setBotForceEnabled] = useState<boolean>(false);
+  const [globalAiEnabled, setGlobalAiEnabled] = useState<boolean>(true);
+  const [togglingBot, setTogglingBot] = useState(false);
   const isMobile = useIsMobile();
 
   // Restaura largura do painel lateral de Captação salva pelo consultor.
