@@ -1,71 +1,112 @@
-# Por que tanto erro no fluxo do bot
+# Captação > Parceiros — redesign com header do licenciado e ranking gamificado
 
-## TL;DR
+## Objetivo
 
-Sim, **existem 3 motores rodando em paralelo** + um roteador que tenta decidir entre eles a cada turno. Isso é a causa raiz do "inventa", "duplica", "fora de ordem". **Não dá pra simplesmente apagar** porque 13 de 13 consultores ainda dependem de 2 desses motores. O caminho seguro é **aposentar 1 motor morto (V3) agora** e depois **fundir os outros 2 em um só** num próximo passo.
+Deixar a aba **Parceiros** mais clara, com o licenciado em destaque no topo (dados que já chegam automáticos do consultor logado) e um ranking elaborado que cria competição entre os parceiros. Tudo com a pasta `parceiros/` organizada em subpastas por papel.
 
----
+## O que muda na tela
 
-## 1) Os motores que existem hoje
+1. **Topo — Cartão do Licenciado (novo)**
+   - Avatar (foto do consultor) + nome + CLI/igreen_id + telefone
+   - Badge "Você" para deixar claro que é o dono da página
+   - Botões: copiar link público da LP + abrir QR code do próprio licenciado
+   - 3 KPIs mini do mês: leads totais, conversão %, cashback estimado
+   - Fonte dos dados: vem das props que `Admin.tsx` já passa (`consultantName`, `consultantPhone`, `consultantIgreenId`) + foto/igreen_id via `useConsultant` se necessário. Sincronização do api-voffice já mantém esses campos atualizados — nenhum input manual.
 
-| # | Motor | Arquivo | Linhas | Em uso? |
-|---|---|---|---|---|
-| A | **Legacy cadastro** (bot-flow.ts) | `whapi-webhook/handlers/bot-flow.ts` | 5.264 | Sim — todo passo de OCR/conta/doc/CPF/portal |
-| B | **Conversational** (custom flow) | `whapi-webhook/handlers/conversational/index.ts` | 2.552 | Sim — `bot_flow_steps` do /admin/fluxos |
-| C | **Engine V3** (reescrita) | `_shared/flow-engine/v3-*.ts` | ~2.500 | **Não. 0 consultores com `flow_engine_v3='on'`** |
-| R | **Router** | `_shared/flow-router.ts` + `routeEngine` no webhook | 349 | Decide A vs B a cada mensagem |
+2. **Faixa de KPIs gerais** (mantém `PartnerKpiRow`, só com refino visual)
 
-E ainda há um **espelho quase idêntico** em `evolution-webhook/handlers/` (bot-flow.ts + conversational/index.ts duplicados — ~7.500 linhas espelhadas que sempre dessincronizam).
+3. **Pódio Top 3 do mês (novo)** — substitui o início da tabela
+   - 1º, 2º e 3º lugares em cards grandes com medalha (ouro/prata/bronze)
+   - Mostra: leads no mês, variação vs mês anterior, badge especial ("🔥 Em alta", "🆕 Novato", "👑 Campeão")
+   - Animação leve de entrada (framer-motion) — só pulse sutil no 1º lugar
 
-## 2) Por que isso causa os erros que você está vendo
+4. **Tabela de ranking elaborada** (refatora `PartnerRankingTable`)
+   - Coluna nova "Posição" com #1, #2, #3 destacados
+   - Coluna "Streak" (dias seguidos com lead) — gamificação
+   - Coluna "Badges" com selos (Campeão do mês, Em alta, Novato, Consistente)
+   - Barra de progresso na coluna "Leads" comparando com o líder
+   - Filtros: período (7/30/90 dias), apenas ativos, busca (já existe)
+   - Mantém ações (QR, editar, excluir)
 
-1. **Router decide por turno**, não por conversa. A cada mensagem ele relê `conversation_step`, tenta inferir o motor pelo formato (`flow:`, UUID, `passo_`) e pode trocar de A↔B no meio do funil. Foi exatamente o bug do "Quero simular" virar "me manda a conta" (caiu no legacy).
-2. **CADASTRO_STEPS é uma lista hardcoded de 50+ steps** que força volta pro motor A. Qualquer step novo que você criar no /admin que esbarre em cadastro precisa ser adicionado nessa lista à mão. Se esquecer → bug.
-3. **Ordem de mídia (texto/áudio/vídeo/imagem) tem 3 implementações diferentes**: uma em `bot-flow.ts`, uma em `conversational/index.ts` (whapi), e outra em `conversational/index.ts` (evolution). Cada fix precisa ser feito 3x — e historicamente sempre escapou um.
-4. **Webhooks duplicados** (whapi + evolution): toda regra de negócio existe 2x. Dessincroniza constantemente.
-5. **V3 nunca foi ativado** mas o código continua importado (`isEngineV3Enabled`, `runEngineV3WebhookEntry`) em vários pontos, gera ruído de leitura e risco de alguém ativar por engano.
-6. **Gemini/IA livre** pode sobrescrever transitions em alguns ramos do conversational — fonte clássica do "inventou resposta".
+5. **Gráficos** (mantém os 4 existentes — `LeadsBarChart`, `TrendChart`, `FunnelChart`, `OriginDonut`) em grid 2x2 mais compacto
 
-## 3) O que dá pra apagar SEM quebrar (seguro hoje)
+## Organização da pasta (refactor sem mudar comportamento)
 
-- **Toda a pasta `_shared/flow-engine/v3-*.ts`** (v3-runner, v3-dispatcher, v3-loader, v3-types, v3-webhook-entry) → ~2.500 linhas mortas.
-- **`flow-engine-v3-rollout-cron`** (edge function de promoção V3) e o `flow-engine-rollout-cron` se também só promovem V3.
-- **Painel "Rollout V3" no SuperAdmin** + colunas `consultants.use_engine_v3` e `consultants.flow_engine_v3` (após confirmar via query que estão zeradas).
-- **Imports condicionais de V3** em `whapi-webhook/index.ts` e `evolution-webhook/index.ts` (linhas 952, 1270, 1466).
+Antes:
+```text
+parceiros/
+  ParceirosTab.tsx
+  PartnerDashboard.tsx
+  PartnerForm.tsx
+  PartnerFunnelChart.tsx
+  PartnerKpiRow.tsx
+  PartnerLeadsBarChart.tsx
+  PartnerList.tsx          (não usado mais — remover)
+  PartnerMetrics.tsx       (não usado mais — remover)
+  PartnerOriginDonut.tsx
+  PartnerQrCode.tsx
+  PartnerRankingTable.tsx
+  PartnerTrendChart.tsx
+  hooks/
+```
 
-Impacto: **zero em runtime** (ninguém usa). Tira ~3.000 linhas de confusão e elimina o caminho "alguém ativa V3 sem querer".
+Depois:
+```text
+parceiros/
+  ParceirosTab.tsx                  (entrypoint, fino)
+  PartnerDashboard.tsx              (orquestra as seções)
+  header/
+    LicenseeHeader.tsx              (NOVO — topo do licenciado)
+    LicenseeKpis.tsx                (NOVO — 3 mini KPIs do dono)
+  ranking/
+    PodiumTop3.tsx                  (NOVO — pódio 1º/2º/3º)
+    RankingTable.tsx                (renomeado de PartnerRankingTable)
+    RankingBadges.tsx               (NOVO — lógica de selos)
+    useRankingRows.ts               (NOVO — derivação dos rows)
+  charts/
+    KpiRow.tsx
+    LeadsBarChart.tsx
+    TrendChart.tsx
+    FunnelChart.tsx
+    OriginDonut.tsx
+  forms/
+    PartnerForm.tsx
+    PartnerQrCode.tsx
+  hooks/
+    useReferralPartners.ts
+    usePartnerAnalytics.ts
+    useLicenseeStats.ts             (NOVO — KPIs agregados do dono)
+```
 
-## 4) O que NÃO dá pra apagar sem migração
+Arquivos **removidos** (já não referenciados): `PartnerList.tsx`, `PartnerMetrics.tsx`.
 
-- **`bot-flow.ts` (motor A)**: contém todo o pipeline OCR → confirma conta → doc → CPF → portal → OTP → facial. Apagar = perder cadastro. Caminho correto: **portar esses passos pro motor B como steps custom** (já existe `ask_quero_cadastrar`, `aguardando_conta` etc. parcialmente) e só então remover.
-- **`conversational/index.ts` (motor B)**: é o que roda os fluxos do /admin/fluxos. Esse é o que **deveria ficar como único motor** no futuro.
-- **Espelho `evolution-webhook/`**: enquanto Evolution API existir como canal alternativo, precisa ficar. Mas pode virar um arquivo fino que importa de `_shared/` (eliminar duplicação real).
+## Lógica de badges (RankingBadges.tsx)
 
-## 5) Plano em 3 fases (recomendado)
+Pura, derivada dos dados que já vêm de `get_referral_partner_analytics`:
 
-**Fase 1 — limpar morto (esta semana, baixo risco):**
-- Deletar `flow-engine/v3-*.ts`, crons V3, painel Rollout V3, colunas de flag V3.
-- Remover imports condicionais V3 dos dois webhooks.
-- Resultado: -3.000 linhas, 0 mudança de comportamento.
+- 👑 **Campeão do mês** — 1º colocado em `leads_30d`
+- 🔥 **Em alta** — `trend >= +30%` vs mês anterior
+- 🆕 **Novato** — `created_at` nos últimos 30 dias e já tem ≥1 lead
+- 🎯 **Alta conversão** — `aprovados/leads_total >= 40%` com mínimo 5 leads
+- ⚡ **Sequência** — `streak >= 3` dias seguidos (derivado de `daily_series`)
 
-**Fase 2 — unificar webhooks (médio risco):**
-- Extrair `conversational/index.ts` e `bot-flow.ts` pra `_shared/` (uma cópia só).
-- `whapi-webhook` e `evolution-webhook` viram entrypoints finos (parse payload → chama shared).
-- Resultado: fixes valem pros 2 canais ao mesmo tempo.
+Tudo calculado no cliente, sem migration nova.
 
-**Fase 3 — fundir A em B (maior risco, faseado por consultor):**
-- Recriar os steps de cadastro (OCR, doc, CPF, portal) como `bot_flow_steps` reais ou como "step types" especiais dentro do motor B.
-- Remover `CADASTRO_STEPS` + `routeEngine`. Motor único, determinístico, sem troca.
-- Migrar 1 consultor por vez, com kill-switch de rollback.
+## Detalhes técnicos
 
-## 6) Resposta direta às suas perguntas
+- **Zero backend novo**. Reusa `get_referral_partner_analytics` que já retorna `daily_series`, `leads_30d`, `leads_prev_30d`, `aprovados`, etc.
+- **Streak** é derivado contando dias consecutivos com `count>0` no final de `daily_series`.
+- **Cashback estimado** do licenciado: `aprovados_totais * valor_medio_lead`. Se ainda não houver coluna de valor médio, mostra apenas "leads aprovados".
+- **Imports atualizados** em `Admin.tsx` e em `ParceirosTab.tsx` para os novos caminhos.
+- **Sem mudança de schema**, sem mudança de RLS, sem nova edge function.
 
-- **"Tem muitos motores antigos?"** → 3 motores + 2 espelhos. Sim, demais.
-- **"Duplicação?"** → ~7.500 linhas duplicadas entre whapi e evolution. Sim.
-- **"Confusão?"** → o router troca de motor a cada turno, daí "inventa". Sim.
-- **"Seria melhor apagar?"** → V3 sim (hoje). Os outros 2, só depois de migrar.
-- **"Não iria quebrar?"** → Fase 1 não quebra nada (V3 está em 0 consultores). Fase 2/3 quebram se feitos de uma vez — precisa ser faseado.
+## Fora de escopo
 
-## Próximo passo sugerido
+- Mexer no `referral_partners` table (schema fica intacto)
+- Adicionar valor monetário de cashback (sem coluna no banco hoje)
+- Notificações/email de ranking (pode vir depois)
+- Telas de licenciada / SuperAdmin (só Admin do consultor)
 
-Aprovar **Fase 1** (apagar V3 morto). Em 1 sessão eu removo os arquivos, os imports, os crons e as colunas, e você reduz a superfície de bug em ~30% sem qualquer impacto pro cliente final.
+## Próximo passo
+
+Aprovar este plano. Na execução vou: (1) criar as subpastas e mover os arquivos com imports atualizados, (2) criar `LicenseeHeader`, `LicenseeKpis`, `PodiumTop3`, `RankingBadges`, `useRankingRows`, `useLicenseeStats`, (3) reescrever `PartnerDashboard` para a nova composição, (4) deletar `PartnerList.tsx` e `PartnerMetrics.tsx`.
