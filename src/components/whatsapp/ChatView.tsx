@@ -100,16 +100,77 @@ export function ChatView({ instanceName, chat, templates, consultantId, initialM
     const r = await resetLeadConversation({ consultantId, remoteJid: chat.remoteJid });
     setResetting(false);
     if (r.ok) {
-      // Refresh chat panel + customer card + CRM card after wipe
       await refetch();
       toast({
         title: "Conversa zerada",
-        description: "Histórico oculto no painel e dados do lead resetados. O bot vai começar do zero.",
+        description: globalAiEnabled
+          ? "Histórico oculto no painel e dados do lead resetados. O bot vai começar do zero."
+          : "Lead zerado. O bot vai responder só para este número (IA global continua desligada).",
       });
     } else {
       toast({ title: "Erro ao zerar", description: (r as { error: string }).error, variant: "destructive" });
     }
-  }, [chat, consultantId, refetch, toast]);
+  }, [chat, consultantId, refetch, toast, globalAiEnabled]);
+
+  // Carrega estado do bot (paused, force_enabled) + flag global do consultor.
+  useEffect(() => {
+    if (!customerId) return;
+    let cancelled = false;
+    (async () => {
+      const [{ data: cust }, { data: cfg }] = await Promise.all([
+        supabase.from("customers")
+          .select("bot_paused, bot_force_enabled")
+          .eq("id", customerId).maybeSingle(),
+        supabase.from("ai_agent_config")
+          .select("enabled")
+          .eq("consultant_id", consultantId).maybeSingle(),
+      ]);
+      if (cancelled) return;
+      setBotPaused(!!(cust as any)?.bot_paused);
+      setBotForceEnabled(!!(cust as any)?.bot_force_enabled);
+      setGlobalAiEnabled((cfg as any)?.enabled !== false);
+    })();
+    return () => { cancelled = true; };
+  }, [customerId, consultantId]);
+
+  // Resultado efetivo: bot responde quando NÃO está pausado E (global ligado OU force ligado).
+  const botActive = !botPaused && (globalAiEnabled || botForceEnabled);
+
+  const toggleBot = useCallback(async () => {
+    if (!customerId || togglingBot) return;
+    setTogglingBot(true);
+    try {
+      if (botActive) {
+        // Desligar: pausa esse lead. Não toca no force.
+        const { error } = await supabase.from("customers")
+          .update({ bot_paused: true })
+          .eq("id", customerId);
+        if (error) throw error;
+        setBotPaused(true);
+        toast({ title: "🤖 Bot desligado neste lead", description: "A IA não vai responder mais este número." });
+      } else {
+        // Ligar: tira pause. Se global está off, força para este lead.
+        const patch: Record<string, unknown> = { bot_paused: false, assigned_human_id: null };
+        if (!globalAiEnabled) patch.bot_force_enabled = true;
+        const { error } = await supabase.from("customers")
+          .update(patch)
+          .eq("id", customerId);
+        if (error) throw error;
+        setBotPaused(false);
+        if (!globalAiEnabled) setBotForceEnabled(true);
+        toast({
+          title: "🤖 Bot ligado neste lead",
+          description: globalAiEnabled
+            ? "A IA volta a responder este número."
+            : "Bot ativo só para este número (IA global continua desligada).",
+        });
+      }
+    } catch (e) {
+      toast({ title: "Erro", description: (e as Error)?.message || "Falha ao alternar bot", variant: "destructive" });
+    } finally {
+      setTogglingBot(false);
+    }
+  }, [customerId, togglingBot, botActive, globalAiEnabled, toast]);
 
   // Fetch kanban stages
   useEffect(() => {
