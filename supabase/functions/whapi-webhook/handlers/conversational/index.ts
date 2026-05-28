@@ -1673,13 +1673,40 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       && configuredOrder.indexOf("text") >= 0
       && configuredOrder.every((k, i) => k !== "text" ? configuredOrder.indexOf("text") < i : true);
 
+    // 🎯 BOTÕES NA POSIÇÃO CONFIGURADA (fix 2026-05-28):
+    // Se o passo tem botões E a ordem coloca `text` antes das mídias
+    // (ex.: [text, audio, image, video]), enviamos texto+botões PRIMEIRO
+    // como mensagem interativa e depois as mídias na ordem restante.
+    // Sem isso, o motor segurava o texto pro final e ignorava a ordem.
+    let earlyButtonsSent = false;
+    if (asReply && wantButtons && textComesBeforeAllMedia) {
+      try {
+        if (textDelay > 0 && !isMockMode()) await new Promise((r) => setTimeout(r, textDelay));
+        await ctx.sender.sendButtons(ctx.remoteJid, text, stepButtons);
+        if (ctx.customer?.id) {
+          await ctx.supabase.from("conversations").insert({
+            customer_id: ctx.customer.id,
+            message_direction: "outbound",
+            message_text: text,
+            message_type: "text",
+            conversation_step: st.step_key,
+          });
+        }
+        earlyButtonsSent = true;
+        console.log(`[conversational] 🎯 early-buttons step=${st.step_key} (text+botões antes das mídias)`);
+      } catch (e) {
+        console.error(`[conversational] early sendButtons falhou step=${st.step_key} — segue fluxo padrão:`, (e as Error)?.message || e);
+      }
+    }
+
     // Texto entra inline (na posição certa) em qualquer caso, EXCETO quando:
-    // - é o reply final E não há ordem configurada (mantém comportamento legado: texto vira reply)
+    // - é o reply final E não há ordem configurada (mantém comportamento legado)
     // - é o reply final E a ordem termina em "text" (texto fica por último → vira reply)
     // - vamos enviar botões inline no fim (texto vira caption do sendButtons)
+    // - já mandamos texto+botões cedo (earlyButtonsSent)
     const orderEndsWithText = Array.isArray(configuredOrder) && configuredOrder.length > 0
       && configuredOrder[configuredOrder.length - 1] === "text";
-    const sendTextInline = !!text && !wantButtons && (!asReply || !orderEndsWithText && !!configuredOrder);
+    const sendTextInline = !!text && !earlyButtonsSent && !wantButtons && (!asReply || !orderEndsWithText && !!configuredOrder);
 
     let mediaResult: { mediaSent: boolean | null; textSentInline: boolean } =
       { mediaSent: false, textSentInline: false };
@@ -1693,8 +1720,14 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       mediaResult = { mediaSent: null, textSentInline: false };
     }
     const mediaSent = mediaResult.mediaSent;
-    const inlineMedia = mediaSent === true;
-    console.log(`[conversational] emitStep step=${st.step_key} asReply=${asReply} media=${mediaSent} hasText=${!!text} textInline=${mediaResult.textSentInline} order=${JSON.stringify(configuredOrder)}`);
+    const inlineMedia = mediaSent === true || earlyButtonsSent;
+    console.log(`[conversational] emitStep step=${st.step_key} asReply=${asReply} media=${mediaSent} hasText=${!!text} textInline=${mediaResult.textSentInline} earlyButtons=${earlyButtonsSent} order=${JSON.stringify(configuredOrder)}`);
+
+    // Se já mandamos texto+botões cedo, encerramos aqui (mídias já saíram em sequência).
+    if (earlyButtonsSent) {
+      return { replyText: "", inlineSent: true };
+    }
+
 
     if (!text) {
       if (mediaSent === null) {
