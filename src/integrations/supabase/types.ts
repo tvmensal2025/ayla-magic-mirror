@@ -3170,6 +3170,59 @@ export type Database = {
           },
         ]
       }
+      facebook_ad_metrics_daily: {
+        Row: {
+          campaign_id: string
+          clicks: number
+          complete_registrations: number
+          date: string
+          fb_ad_id: string
+          frequency_x100: number
+          impressions: number
+          leads: number
+          messaging_conversations_started: number
+          reach: number
+          spend_cents: number
+          updated_at: string
+        }
+        Insert: {
+          campaign_id: string
+          clicks?: number
+          complete_registrations?: number
+          date: string
+          fb_ad_id: string
+          frequency_x100?: number
+          impressions?: number
+          leads?: number
+          messaging_conversations_started?: number
+          reach?: number
+          spend_cents?: number
+          updated_at?: string
+        }
+        Update: {
+          campaign_id?: string
+          clicks?: number
+          complete_registrations?: number
+          date?: string
+          fb_ad_id?: string
+          frequency_x100?: number
+          impressions?: number
+          leads?: number
+          messaging_conversations_started?: number
+          reach?: number
+          spend_cents?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "facebook_ad_metrics_daily_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "facebook_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       facebook_campaigns: {
         Row: {
           age_max: number
