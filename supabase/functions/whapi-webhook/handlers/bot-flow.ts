@@ -3510,7 +3510,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             if (_flowRow2?.id) {
               const { data: _allSteps } = await supabase
                 .from("bot_flow_steps")
-                .select("id, position, step_key, step_type, is_active")
+                .select("id, position, step_key, step_type, is_active, captures")
                 .eq("flow_id", (_flowRow2 as any).id).eq("is_active", true)
                 .gt("position", _captureContaPos)
                 .order("position", { ascending: true });
@@ -3548,6 +3548,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 await dispatchStepFromFlow(m.step_key, _vars);
                 if (!isMockMode()) await new Promise((r) => setTimeout(r, 1800));
               }
+              // 🚦 Detecta se o ÚLTIMO passo `message` da CHAIN já tem botões
+              // interativos configurados (ex.: d_resultado com [cadastrar]
+              // [dúvida] [falar com Rafael]). Se sim, NÃO duplicar o CTA
+              // "Quero me cadastrar" mais abaixo — o próprio step já cumpre.
+              try {
+                const lastMsg = messagesOnly[messagesOnly.length - 1];
+                if (lastMsg) {
+                  const caps = Array.isArray((lastMsg as any).captures) ? (lastMsg as any).captures : [];
+                  const btnCap = caps.find((c: any) => c?.field === "_buttons" && c?.enabled !== false);
+                  const hasButtons = btnCap && Array.isArray(btnCap.value) && btnCap.value.length > 0;
+                  (updates as any).__last_chain_had_buttons = !!hasButtons;
+                }
+              } catch (_) { /* best-effort */ }
               if (_stopIdx >= 0) {
                 nextCustom = stepsAfter[_stopIdx];
               } else {
