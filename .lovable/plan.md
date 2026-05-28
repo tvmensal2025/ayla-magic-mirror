@@ -1,50 +1,71 @@
-## Problema
+# Correção de 3 bugs no fluxo D de captação
 
-O botão "Zerar conversa" funcionou (recriou o customer, disparou re-welcome), mas o bot ficou mudo porque `ai_agent_config.enabled=false` para o consultor. O webhook bloqueia tudo em `global-off-silent`, exceto leads em passo de captura ativo — e o reset zera `conversation_step` para `NULL`.
+Análise dos logs do lead `5511971254913` (customer `f3d7a37b-b6a0-4214-93ea-04bd2cf71c1b`). DB confirma: `name=JUDITE PEREIRA`, `bill_holder_name=JUDITE PEREIRA`, `doc_holder_name=PAULO ROBERTO FIGUEIREDO`, `name_mismatch_flag=true`.
 
-Confirmado no log do whapi-webhook (13:04, customer `ffe8d965...`): `🛑 [global-off-silent] IA manual — inbound texto/áudio salvo sem resposta`.
+## Bug 1 — Conta e documento NÃO podem ser pedidos juntos (processos separados)
 
-## Solução: bypass por lead
+**O que aconteceu (logs):**
+```
+13:35:23  inbound  ✅ SIM (confirmando_dados_conta)
+13:35:27  outbound d_resultado (simulação)
+13:35:31  outbound d_pedir_documento     ← pediu doc na mesma rajada
+```
 
-Adicionar uma flag no customer que força o bot a responder mesmo com a IA global desligada, ativada automaticamente pelo botão Zerar.  
-  
-E COLOCAR UM BOTAO DE IA LIGADA PARA LEAD UNICO LIGADA E DESLIGADA, ASSIM FICA ALGUNS NO INDIVIDUAL NAO APENAS GLOBAL, TODOS OS LEAD QUANDO ENTRAR NA MSG TEM UM BOTAO NO TOPO DE LIGAR E DESLIGAR IA QUE SERIA BOT AUTOMATICO
+**Regra correta (definida pelo usuário):**
+1. Cliente confirma conta → bot envia **APENAS a simulação** (d_resultado) + botão **"✅ Quero me cadastrar"**.
+2. Bot PARA e aguarda. Conta e doc são processos INDIVIDUAIS — nunca encadear.
+3. Só quando o cliente clicar "Quero me cadastrar" é que o bot pede o documento (capture_documento).
 
-&nbsp;
+**Implementação:**
+Em `supabase/functions/whapi-webhook/handlers/bot-flow.ts`, bloco `post-confirm-conta` (~3488–3617):
+- Quando o próximo passo for `capture_documento`/`capture_doc`, despachar os `message` intermediários (d_resultado) e **parar** — NÃO chamar `dispatchStepFromFlow` do `capture_documento`.
+- No lugar, enviar `sendOptions` com o texto da simulação ou um CTA final, com botão único `{ id: "btn_quero_cadastrar", title: "✅ Quero me cadastrar" }`.
+- Setar `conversation_step = "ask_quero_cadastrar"` (novo estado).
 
-### Mudanças
+Novo handler `case "ask_quero_cadastrar":` que ao receber clique do botão (ou texto afirmativo) finalmente despacha `capture_documento` e seta `conversation_step = "aguardando_doc_auto"`. Qualquer outra resposta cai em IA/dúvidas.
 
-1. **Migration** — adicionar coluna em `customers`:
-  - `force_bot_active boolean default false`
-  - Sem índice (uso pontual).
-2. `**reset_lead_conversation` (RPC)** — ao final do reset, setar `force_bot_active=true` no customer recriado/atualizado. Assim qualquer lead zerado volta a receber resposta do bot.
-3. `**supabase/functions/whapi-webhook/index.ts**` — no gate `global-off-silent` (linha ~737):
-  - Carregar `force_bot_active` no SELECT do customer.
-  - Tratar `force_bot_active === true` como bypass: pula o `return` silencioso e segue o fluxo normal.
-  - Log: `✅ [force-bot-active] lead zerado recentemente — bot responde mesmo com IA global off`.
-4. `**supabase/functions/evolution-webhook/index.ts**` — espelhar o mesmo bypass na checagem equivalente (linha ~176 e ~694) para manter paridade.
-5. **Toast no frontend (`resetConversation.ts` consumidor)** — quando reset tem sucesso e `ai_agent_config.enabled=false`, mostrar info: *"Lead zerado. Bot vai responder só para este número (IA global continua desligada)."* Não-bloqueante.
+Espelhar em `supabase/functions/evolution-webhook/handlers/bot-flow.ts`.
 
-### Quando a flag é limpa
+## Bug 2 — Card OCR do doc mostra nome da conta (JUDITE) em vez do RG/CNH (PAULO)
 
-`force_bot_active` volta a `false` automaticamente quando:
+**Causa:**
+`src/components/captacao/OcrReviewCard.tsx` define `DOC_FIELDS = [{ key: "name", ... }]`. Mas `customer.name` está travado em "JUDITE PEREIRA" desde o OCR da conta (`name_source=user_confirmed`). O nome real do documento foi corretamente extraído para `doc_holder_name = "PAULO ROBERTO FIGUEIREDO"`, mas o card lê `name`.
 
-- O lead é assumido por humano (`assigned_human_id` setado) — trigger ou no `customer-takeover` edge.
-- O lead converte (`conversation_step` entra em `finalizando`/`portal_submitting` com sucesso).
+**Correção:**
+- Em `OcrReviewCard.tsx`, trocar `DOC_FIELDS[0]` para `{ key: "doc_holder_name", label: "Nome (documento)" }`.
+- Ao editar inline e salvar, persistir em `doc_holder_name` (não em `name`).
+- Mesma correção em `CaptureDataConfirmCard.tsx` quando `kind === "doc"`.
+- O fluxo `confirmar_titularidade` já existe (mem://features/ocr-name-consistency) e dispara quando `name_mismatch_flag=true` — só precisa receber o nome correto na tela.
 
-Para a primeira entrega, basta limpar no `customer-takeover` (uma linha). Conversão pode ficar para depois — não causa problema.
+## Bug 3 — Telefone perguntado 2 vezes
 
-## Arquivos tocados
+**Logs:**
+```
+13:38:43  inbound  ✅ Sim, é meu (ask_phone_confirm)
+13:38:48  outbound "Confirma seu telefone de contato?..."  ← DUPLICADO
+[custom-step-resolver] button→capture: re-emitido step=d_confirmar_telefone
+```
 
-- `supabase/migrations/<novo>.sql` — coluna + atualização da função `reset_lead_conversation`.
-- `supabase/functions/whapi-webhook/index.ts` — select + bypass.
-- `supabase/functions/evolution-webhook/index.ts` — mesmo bypass.
-- `supabase/functions/customer-takeover/index.ts` — limpar flag ao assumir.
-- `src/services/resetConversation.ts` consumidores (Kanban/Chat) — toast informativo (vou identificar os call sites no build).
-- `mem/whatsapp/human-takeover-silence.md` — nota sobre a exceção `force_bot_active`.
+**Causa:**
+Lead clicou `sim_phone` no `ask_phone_confirm` (legacy). O legacy salvou o telefone e avançou. Em paralelo, o resolver **button→capture** (bot-flow.ts ~2560–2608) viu que o próximo passo custom é `confirm_phone` (`d_confirmar_telefone`) e RE-EMITIU o prompt. O legacy não setou `last_custom_prompt_at`, então o anti-dup não silenciou.
 
-## Não toca
+**Correção:**
+- No handler `ask_phone_confirm` (~4393–4461), ao confirmar SIM ou EDITAR, setar `updates.last_custom_prompt_at = new Date().toISOString()`.
+- No resolver button→capture (~2565–2603), pular o re-emit quando `legacyStep === "ask_phone_confirm" && stype === "confirm_phone"` (legacy já cumpriu o papel do custom).
 
-- `ai_agent_config.enabled` global continua off (sua decisão de produto).
-- Outros leads silenciosos continuam silenciosos.
-- Engine v3, A/B/C, OCR, re-welcome — sem alteração.
+## Arquivos afetados
+
+- `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
+- `supabase/functions/evolution-webhook/handlers/bot-flow.ts`
+- `src/components/captacao/OcrReviewCard.tsx`
+- `src/components/captacao/CaptureDataConfirmCard.tsx`
+
+Sem migração de DB — colunas `doc_holder_name`, `bill_holder_name`, `name_mismatch_flag`, `last_custom_prompt_at` já existem. Atualizo `mem://features/ocr-review-flow` documentando a separação conta↔doc.
+
+## Validação
+
+Replay com o número 11971254913 (botão "Zerar" + envio de conta + envio de RG diferente):
+1. Após SIM da conta → recebe SÓ a simulação + botão "Quero me cadastrar", SEM pedido de doc.
+2. Após clicar "Quero me cadastrar" → bot pede o documento.
+3. Card OCR do doc mostra "PAULO ROBERTO FIGUEIREDO".
+4. Após "Sim, é meu telefone" → bot vai direto para o e-mail, sem repetir a pergunta.
