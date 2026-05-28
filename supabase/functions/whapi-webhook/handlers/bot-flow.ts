@@ -3565,56 +3565,81 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
         if (nextCustom) {
           console.log(`[post-confirm-conta] next=${nextCustom.step_key} type=${nextCustom.step_type} reason=customflow`);
-          // Para finalizar_cadastro NÃO usamos dispatch: o texto precisa ir
-          // acoplado ao botão interativo (sendOptions) — caso contrário o
-          // cliente recebe só texto e não consegue tocar para concluir.
-          const ok = nextCustom.step_type === "finalizar_cadastro"
-            ? true
-            : await dispatchStepFromFlow(nextCustom.step_key, _vars);
+
+          // 🚦 SEPARAÇÃO conta ↔ documento (regra explícita do produto):
+          // Conta e documento são DOIS processos individuais. Após confirmar a
+          // conta, o bot envia APENAS a simulação (já despachada na chain de
+          // messages acima) e PARA. Só quando o cliente clicar "Quero me
+          // cadastrar" é que o capture_documento dispara. Nunca encadear.
           if (nextCustom.step_type === "capture_documento" || nextCustom.step_type === "capture_doc") {
-            if (!ok) {
-              console.warn(`[post-confirm-conta] dispatch vazio — usando fallback hardcoded de doc`);
-              await sendFallback(DOC_FALLBACK, "aguardando_doc_auto");
-            }
-            updates.conversation_step = "aguardando_doc_auto";
-          } else if (nextCustom.step_type === "finalizar_cadastro") {
-            // Sempre enviar com botão interativo "✅ Finalizar".
-            // O dispatchStepFromFlow envia o texto como plain text, sem botão,
-            // então substituímos por sendOptions usando o message_text do passo.
             try {
-              const rawText = (nextCustom.message_text || "").trim();
-              const firstName = String(customer.name || "").trim().split(/\s+/)[0] || "";
-              const finalText = renderTemplateVars(rawText || FINAL_FALLBACK_TEXT, {
-                name: customer.name || "",
-                representante: nomeRepresentante || "",
-              });
-              await sendOptions(remoteJid, finalText, [
-                { id: "btn_finalizar", title: "✅ Finalizar" },
+              const ctaText = "Pra continuar seu cadastro e garantir essa economia, é só tocar no botão abaixo 👇";
+              await sendOptions(remoteJid, ctaText, [
+                { id: "btn_quero_cadastrar", title: "✅ Quero me cadastrar" },
               ]);
               await supabase.from("conversations").insert({
                 customer_id: customer.id, message_direction: "outbound",
-                message_text: finalText, message_type: "text", conversation_step: "ask_finalizar",
+                message_text: ctaText, message_type: "text", conversation_step: "ask_quero_cadastrar",
               });
             } catch (e) {
-              console.warn(`[post-confirm-conta] envio do botão finalizar falhou:`, (e as Error).message);
-              await sendFinalizarButton();
+              console.warn(`[post-confirm-conta] envio do CTA quero_cadastrar falhou:`, (e as Error).message);
             }
-            updates.conversation_step = "ask_finalizar";
-          } else if (nextCustom.step_type === "capture_conta") {
-            updates.conversation_step = "aguardando_conta";
-          } else if (nextCustom.step_type === "capture_email") {
-            updates.conversation_step = "ask_email";
-          } else if (nextCustom.step_type === "confirm_phone") {
-            updates.conversation_step = "ask_phone_confirm";
+            updates.conversation_step = "ask_quero_cadastrar";
+            // Guarda o id do passo capture_documento para o handler dispatchar depois.
+            (updates as any).pending_capture_doc_step_id = nextCustom.id;
           } else {
-            // message → fica no UUID; o resolver pré-switch avança quando o lead responder.
-            updates.conversation_step = nextCustom.id;
+            // Para finalizar_cadastro NÃO usamos dispatch: o texto precisa ir
+            // acoplado ao botão interativo (sendOptions).
+            const ok = nextCustom.step_type === "finalizar_cadastro"
+              ? true
+              : await dispatchStepFromFlow(nextCustom.step_key, _vars);
+            if (nextCustom.step_type === "finalizar_cadastro") {
+              try {
+                const rawText = (nextCustom.message_text || "").trim();
+                const finalText = renderTemplateVars(rawText || FINAL_FALLBACK_TEXT, {
+                  name: customer.name || "",
+                  representante: nomeRepresentante || "",
+                });
+                await sendOptions(remoteJid, finalText, [
+                  { id: "btn_finalizar", title: "✅ Finalizar" },
+                ]);
+                await supabase.from("conversations").insert({
+                  customer_id: customer.id, message_direction: "outbound",
+                  message_text: finalText, message_type: "text", conversation_step: "ask_finalizar",
+                });
+              } catch (e) {
+                console.warn(`[post-confirm-conta] envio do botão finalizar falhou:`, (e as Error).message);
+                await sendFinalizarButton();
+              }
+              updates.conversation_step = "ask_finalizar";
+            } else if (nextCustom.step_type === "capture_conta") {
+              updates.conversation_step = "aguardando_conta";
+            } else if (nextCustom.step_type === "capture_email") {
+              updates.conversation_step = "ask_email";
+            } else if (nextCustom.step_type === "confirm_phone") {
+              updates.conversation_step = "ask_phone_confirm";
+            } else {
+              updates.conversation_step = nextCustom.id;
+            }
+            void ok;
           }
         } else {
-          console.warn(`[post-confirm-conta] nenhum próximo passo seguro — usando fallback de documento`);
-          await sendFallback(DOC_FALLBACK, "aguardando_doc_auto");
-          updates.conversation_step = "aguardando_doc_auto";
+          console.warn(`[post-confirm-conta] nenhum próximo passo seguro — parando após simulação (sem encadear doc)`);
+          // Mesmo sem next custom, NÃO pedir o documento automaticamente.
+          // Envia CTA para o cliente decidir.
+          try {
+            const ctaText = "Pra continuar seu cadastro e garantir essa economia, é só tocar no botão abaixo 👇";
+            await sendOptions(remoteJid, ctaText, [
+              { id: "btn_quero_cadastrar", title: "✅ Quero me cadastrar" },
+            ]);
+            await supabase.from("conversations").insert({
+              customer_id: customer.id, message_direction: "outbound",
+              message_text: ctaText, message_type: "text", conversation_step: "ask_quero_cadastrar",
+            });
+          } catch (_) { /* segue */ }
+          updates.conversation_step = "ask_quero_cadastrar";
         }
+
         (updates as any).__inline_sent = true;
         reply = "";
       } else if (resp === "nao_conta" || resp === "nao" || resp === "não" || resp === "n" || resp === "2" || resp === "errado" || resp === "❌") {
