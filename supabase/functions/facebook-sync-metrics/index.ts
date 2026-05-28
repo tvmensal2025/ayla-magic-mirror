@@ -245,6 +245,35 @@ Deno.serve(async (req) => {
         }
         synced++;
 
+        // Métricas POR ANÚNCIO (level=ad) — necessário para o ad-creative-learner identificar
+        // qual criativo individual converte mais. Sem isso, o learner divide tudo por igual.
+        try {
+          const urlAd = `${FB_GRAPH}/${c.fb_campaign_id}/insights?level=ad&fields=ad_id,impressions,reach,clicks,spend,actions,frequency&time_range={"since":"${since}","until":"${until}"}&time_increment=1&access_token=${token}`;
+          const adJson = await fbFetch(urlAd);
+          for (const row of adJson?.data || []) {
+            if (!row.ad_id) continue;
+            const leadsAd = sumActions(row.actions, LEAD_ACTIONS);
+            const convAd = sumActions(row.actions, CONV_ACTIONS);
+            const regsAd = (row.actions || []).find((a: any) => a.action_type === "complete_registration")?.value || 0;
+            await admin.from("facebook_ad_metrics_daily").upsert({
+              fb_ad_id: row.ad_id,
+              campaign_id: c.id,
+              date: row.date_start,
+              impressions: parseInt(row.impressions || "0"),
+              reach: parseInt(row.reach || "0"),
+              clicks: parseInt(row.clicks || "0"),
+              spend_cents: Math.round(parseFloat(row.spend || "0") * 100),
+              leads: Number(leadsAd),
+              messaging_conversations_started: Number(convAd),
+              complete_registrations: Number(regsAd),
+              frequency_x100: Math.round(parseFloat(row.frequency || "0") * 100),
+              updated_at: new Date().toISOString(),
+            }, { onConflict: "fb_ad_id,date" });
+          }
+        } catch (ae) {
+          console.warn("[fb-sync] ad-level insights falhou", c.fb_campaign_id, (ae as Error).message);
+        }
+
         // Reconcilia leads + customers_acquired POR CAMPANHA baseado no CRM real,
         // usando customers.source_campaign_id (preenchido por lead-attribution).
         // Antes o filtro era só lead_source='meta_ads' → todas as campanhas
