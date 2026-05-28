@@ -1,71 +1,52 @@
-# Correção de 3 bugs no fluxo D de captação
+# Bugs no passo "Como funciona" e no pós-simulação
 
-Análise dos logs do lead `5511971254913` (customer `f3d7a37b-b6a0-4214-93ea-04bd2cf71c1b`). DB confirma: `name=JUDITE PEREIRA`, `bill_holder_name=JUDITE PEREIRA`, `doc_holder_name=PAULO ROBERTO FIGUEIREDO`, `name_mismatch_flag=true`.
+Análise direto no DB e código do `whapi-webhook`. Identifiquei 2 causas raiz independentes.
 
-## Bug 1 — Conta e documento NÃO podem ser pedidos juntos (processos separados)
+## Bug 1 — Ordem TEXT/AUDIO/VIDEO/IMAGE configurada na UI é ignorada
 
-**O que aconteceu (logs):**
+**Causa raiz (mismatch chave de leitura ≠ chave de escrita):**
+
+- A UI `/admin/fluxos` (`StepMediaPanel.tsx` linhas 184–187) grava em `consultants.flow_step_media_order` **usando `step_key`** como chave do JSONB. Ex.: `{ "d_como_funciona": ["text","audio","video","image"] }`.
+- A edge `whapi-webhook/handlers/bot-flow.ts` (linha 1212) lê **usando `slot_key`**: `getStepMediaOrder(supabase, consultant_id, slotKey)` — onde `slotKey = "como_funciona"` (sem o `d_`).
+- Resultado: a chave `"como_funciona"` nunca existe no JSON, `getStepMediaOrder` retorna `null`, e o dispatcher cai no default `["audio","image","video","text","document"]`. Por isso o áudio vem antes do texto, ignorando a preferência salva.
+
+Mesmo bug em `evolution-webhook/handlers/bot-flow.ts` (espelho).
+
+**Fix:**
+1. Em `dispatchStepFromFlow` (whapi + evolution), tentar `getStepMediaOrder(consultant_id, stepKey)` **primeiro**; só cair em `slotKey` como fallback de compatibilidade. Mantém retroatividade com qualquer ordem antiga que tenha sido salva por slot_key, e passa a respeitar o que a UI grava hoje (por step_key).
+2. Aplicar o mesmo lookup nos outros 2 pontos que usam `getStepMediaOrder` (linhas ~1528 e ~1677 do whapi e os equivalentes do evolution).
+
+Sem migração de DB — `flow_step_media_order` já é um JSONB livre.
+
+## Bug 2 — Pós-simulação envia mensagem duplicada de CTA
+
+**Logs/código (`bot-flow.ts` ~3580–3653):** após `d_resultado` ser despachado pelo CHAIN amplo, o bloco `if (nextCustom.step_type === "capture_documento")` envia **mais uma** `sendOptions` com o botão `btn_quero_cadastrar`. Como o próprio `d_resultado` já tem botões (`cadastrar`, `dúvida`) configurados nos `_buttons` do step (a UI mostra "3 botões / 3 regras"), o cliente recebe:
+
 ```
-13:35:23  inbound  ✅ SIM (confirmando_dados_conta)
-13:35:27  outbound d_resultado (simulação)
-13:35:31  outbound d_pedir_documento     ← pediu doc na mesma rajada
-```
-
-**Regra correta (definida pelo usuário):**
-1. Cliente confirma conta → bot envia **APENAS a simulação** (d_resultado) + botão **"✅ Quero me cadastrar"**.
-2. Bot PARA e aguarda. Conta e doc são processos INDIVIDUAIS — nunca encadear.
-3. Só quando o cliente clicar "Quero me cadastrar" é que o bot pede o documento (capture_documento).
-
-**Implementação:**
-Em `supabase/functions/whapi-webhook/handlers/bot-flow.ts`, bloco `post-confirm-conta` (~3488–3617):
-- Quando o próximo passo for `capture_documento`/`capture_doc`, despachar os `message` intermediários (d_resultado) e **parar** — NÃO chamar `dispatchStepFromFlow` do `capture_documento`.
-- No lugar, enviar `sendOptions` com o texto da simulação ou um CTA final, com botão único `{ id: "btn_quero_cadastrar", title: "✅ Quero me cadastrar" }`.
-- Setar `conversation_step = "ask_quero_cadastrar"` (novo estado).
-
-Novo handler `case "ask_quero_cadastrar":` que ao receber clique do botão (ou texto afirmativo) finalmente despacha `capture_documento` e seta `conversation_step = "aguardando_doc_auto"`. Qualquer outra resposta cai em IA/dúvidas.
-
-Espelhar em `supabase/functions/evolution-webhook/handlers/bot-flow.ts`.
-
-## Bug 2 — Card OCR do doc mostra nome da conta (JUDITE) em vez do RG/CNH (PAULO)
-
-**Causa:**
-`src/components/captacao/OcrReviewCard.tsx` define `DOC_FIELDS = [{ key: "name", ... }]`. Mas `customer.name` está travado em "JUDITE PEREIRA" desde o OCR da conta (`name_source=user_confirmed`). O nome real do documento foi corretamente extraído para `doc_holder_name = "PAULO ROBERTO FIGUEIREDO"`, mas o card lê `name`.
-
-**Correção:**
-- Em `OcrReviewCard.tsx`, trocar `DOC_FIELDS[0]` para `{ key: "doc_holder_name", label: "Nome (documento)" }`.
-- Ao editar inline e salvar, persistir em `doc_holder_name` (não em `name`).
-- Mesma correção em `CaptureDataConfirmCard.tsx` quando `kind === "doc"`.
-- O fluxo `confirmar_titularidade` já existe (mem://features/ocr-name-consistency) e dispara quando `name_mismatch_flag=true` — só precisa receber o nome correto na tela.
-
-## Bug 3 — Telefone perguntado 2 vezes
-
-**Logs:**
-```
-13:38:43  inbound  ✅ Sim, é meu (ask_phone_confirm)
-13:38:48  outbound "Confirma seu telefone de contato?..."  ← DUPLICADO
-[custom-step-resolver] button→capture: re-emitido step=d_confirmar_telefone
+1) Texto da simulação + botões [📸 Quero simular] [🤔 Tenho dúvida]   ← do d_resultado
+2) "Pra continuar seu cadastro..." + botão [✅ Quero me cadastrar]    ← do post-confirm-conta (DUPLICADO)
 ```
 
-**Causa:**
-Lead clicou `sim_phone` no `ask_phone_confirm` (legacy). O legacy salvou o telefone e avançou. Em paralelo, o resolver **button→capture** (bot-flow.ts ~2560–2608) viu que o próximo passo custom é `confirm_phone` (`d_confirmar_telefone`) e RE-EMITIU o prompt. O legacy não setou `last_custom_prompt_at`, então o anti-dup não silenciou.
+E em caso de re-entrada (lead manda outro texto), o `ask_quero_cadastrar` re-emite o mesmo CTA, agravando a sensação de "repetindo / não evoluiu".
 
-**Correção:**
-- No handler `ask_phone_confirm` (~4393–4461), ao confirmar SIM ou EDITAR, setar `updates.last_custom_prompt_at = new Date().toISOString()`.
-- No resolver button→capture (~2565–2603), pular o re-emit quando `legacyStep === "ask_phone_confirm" && stype === "confirm_phone"` (legacy já cumpriu o papel do custom).
+**Fix:**
+1. Em `post-confirm-conta`, **detectar se o último step `message` da CHAIN (`d_resultado`) já tem `_buttons` configurados** (consultando `captures` do step). Se já tem CTA próprio:
+   - **NÃO enviar** o `sendOptions` adicional com `btn_quero_cadastrar`.
+   - Apenas setar `updates.conversation_step = "ask_quero_cadastrar"` para o handler já existente continuar tratando os cliques.
+2. Garantir que o handler `ask_quero_cadastrar` (linha ~4758) **também aceite os ids dos botões do próprio `d_resultado`** (`cadastrar`, `quero_simular`, `duvida`, etc.) como gatilhos válidos, em vez de só `btn_quero_cadastrar`. Hoje ele já cobre vários sinônimos — só preciso adicionar os ids reais que o consultor configurou.
+3. Espelhar em `evolution-webhook`.
 
-## Arquivos afetados
+## Arquivos a alterar
 
 - `supabase/functions/whapi-webhook/handlers/bot-flow.ts`
 - `supabase/functions/evolution-webhook/handlers/bot-flow.ts`
-- `src/components/captacao/OcrReviewCard.tsx`
-- `src/components/captacao/CaptureDataConfirmCard.tsx`
 
-Sem migração de DB — colunas `doc_holder_name`, `bill_holder_name`, `name_mismatch_flag`, `last_custom_prompt_at` já existem. Atualizo `mem://features/ocr-review-flow` documentando a separação conta↔doc.
+Nenhuma mudança em UI nem migração — a UI continua salvando por `step_key`; a edge passa a respeitar isso.
 
 ## Validação
 
-Replay com o número 11971254913 (botão "Zerar" + envio de conta + envio de RG diferente):
-1. Após SIM da conta → recebe SÓ a simulação + botão "Quero me cadastrar", SEM pedido de doc.
-2. Após clicar "Quero me cadastrar" → bot pede o documento.
-3. Card OCR do doc mostra "PAULO ROBERTO FIGUEIREDO".
-4. Após "Sim, é meu telefone" → bot vai direto para o e-mail, sem repetir a pergunta.
+1. No `/admin/fluxos`, no passo "Como funciona", ordenar `text → audio → video → image` e salvar.
+2. Mandar "Zerar" no lead 11971254913 e clicar em "Como funciona" no welcome.
+3. Esperado: bot manda **texto** primeiro, depois áudio, depois vídeo, depois imagem (na ordem exata configurada).
+4. Após confirmar a conta, esperar `d_resultado`: deve chegar **APENAS UMA** mensagem com a simulação + os botões do próprio step (cadastrar / dúvida / falar com Rafael, se o consultor configurar o terceiro). Sem CTA duplicado de "Quero me cadastrar".
+5. Clicar em "cadastrar" → bot pede o documento (capture_documento). Clicar em "dúvida" → cai no `d_duvidas` (IA).
