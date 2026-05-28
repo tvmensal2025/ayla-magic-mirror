@@ -162,19 +162,69 @@ export async function answerFaqWithAI(opts: {
     console.warn("[ai-faq-answerer] exact-match lookup failed (fallback to LLM):", (e as Error).message);
   }
 
-  // Busca knowledge base: seções do consultor + globais (max ~6KB de contexto pra ficar barato)
-  const { data: sections } = await opts.supabase
+  // Busca knowledge base: seções do consultor + globais
+  // Carrega título+ID de todas as seções ativas (até 60). Depois Flash
+  // rerank seleciona top-5 mais relevantes para a pergunta — só essas
+  // entram no prompt do Pro. Resolve "IA não vai em conhecimento" sem
+  // precisar de embeddings.
+  const { data: sectionsIdx } = await opts.supabase
     .from("ai_knowledge_sections")
-    .select("title, content")
+    .select("id, title, content")
     .eq("is_active", true)
     .or(`consultant_id.is.null${opts.consultantId ? `,consultant_id.eq.${opts.consultantId}` : ""}`)
     .order("position", { ascending: true })
-    .limit(20);
+    .limit(60);
 
-  const knowledge = ((sections as KnowledgeSection[]) || [])
-    .map((s) => `### ${s.title}\n${(s.content || "").slice(0, 800)}`)
+  const allSections = ((sectionsIdx as Array<{ id: string; title: string; content: string }>) || []);
+
+  // Rerank com Flash quando temos > 5 candidatos. Caso contrário usa todas.
+  let chosen = allSections;
+  if (allSections.length > 5) {
+    try {
+      const titlesList = allSections.map((s, i) => `${i}: ${s.title}`).join("\n");
+      const ctrlR = new AbortController();
+      const toR = setTimeout(() => ctrlR.abort(), 6000);
+      const rr = await aiChatCascade({
+        model: "google/gemini-3-flash-preview",
+        temperature: 0.0,
+        maxTokens: 120,
+        jsonSchema: {
+          name: "rerank",
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              indices: { type: "array", items: { type: "integer" }, maxItems: 5 },
+            },
+            required: ["indices"],
+          },
+        },
+        messages: [
+          { role: "system", content: "Você é um reranker. Recebe uma PERGUNTA e uma lista de TÍTULOS numerados. Retorne JSON {\"indices\":[...]} com até 5 índices dos títulos mais relevantes para responder a pergunta, em ordem de relevância." },
+          { role: "user", content: `PERGUNTA: "${q.slice(0, 400)}"\n\nTÍTULOS:\n${titlesList}` },
+        ],
+        signal: ctrlR.signal,
+      });
+      clearTimeout(toR);
+      const idxs: number[] = Array.isArray(rr.json?.indices) ? rr.json.indices.slice(0, 5) : [];
+      const picked = idxs.map((i) => allSections[i]).filter(Boolean);
+      if (picked.length > 0) chosen = picked;
+      void trackAIUsage({
+        supabase: opts.supabase,
+        consultantId: opts.consultantId,
+        model: rr.modelUsed,
+        phase: "triage",
+        usage: rr.usage,
+      });
+    } catch (e) {
+      console.warn("[ai-faq-answerer] rerank failed, using all sections:", (e as Error).message);
+    }
+  }
+
+  const knowledge = chosen
+    .map((s) => `### ${s.title}\n${(s.content || "").slice(0, 1200)}`)
     .join("\n\n")
-    .slice(0, 6000);
+    .slice(0, 8000);
 
   if (!knowledge) {
     // Sem base de conhecimento: melhor mandar pra humano
