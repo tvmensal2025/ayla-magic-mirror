@@ -1218,19 +1218,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       const configuredOrder = uiOrder || stepOrder || ["audio", "image", "video", "text", "document"];
       items.sort(makeKindComparator((it: Item) => it.kind, configuredOrder));
 
-      // 🔧 FIX (2026-05-28): se o step tem botões interativos (_buttons),
-      // FORÇA o item de texto a ser o ÚLTIMO da lista, mesmo que a ordem
-      // configurada coloque mídia depois. Sem isso o `dispatchStepFromFlow`
-      // enviava: texto puro → mídias → "Escolha uma opção" duplicado com
-      // botões. Resultado: 2 mensagens de texto ao cliente para o mesmo step.
-      // Com este fix: mídia(s) → texto+botões juntos, em uma só mensagem.
-      if (_buttons.length > 0) {
-        const textIdx = items.findIndex((it) => it.kind === "text");
-        if (textIdx !== -1 && textIdx !== items.length - 1) {
-          const [textItem] = items.splice(textIdx, 1);
-          items.push(textItem);
-        }
-      }
+      // 🔧 FIX (2026-05-28 v2): NÃO mexer mais na ordem por causa de _buttons.
+      // O consultor configura a sequência (ex.: text→audio→video→image) e a gente
+      // tem que respeitar 100%. Se o texto não cair no último item, os botões
+      // são enviados como mensagem curta separada ("👇") logo depois da última
+      // mídia, no fallback abaixo. Anti-duplicação: se o último item já é texto,
+      // ele leva os botões anexados (use case mais comum de step só com texto).
 
       let sent = false;
       let videoFailed = false;
@@ -1312,12 +1305,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       }
 
       // Garantia: se o step tem _buttons mas o texto não foi o último item
-      // (ex.: ordem text→audio→video deixa o vídeo por último), enviamos os
-      // botões em uma mensagem separada para que o lead possa escolher.
-      // 🔧 (2026-05-28): com o reorder acima (texto sempre último quando há
-      // botões), este fallback raramente é necessário. Mantido como
-      // segurança caso step só tenha mídia + botões. Mensagem foi mudada
-      // para evitar confusão visual com o "Escolha uma opção" da UI.
+      // (porque a ordem configurada coloca mídia depois do texto, ex.:
+      // text→audio→video→image), os botões NÃO foram anexados ao texto.
+      // Mandamos eles agora como mensagem curta separada para não duplicar
+      // o conteúdo já enviado.
       if (sent && _buttons.length > 0 && !buttonsSent) {
         try {
           const renderedButtons = _buttons.map((b) => ({
@@ -1326,21 +1317,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           }));
           // 🧪 mock: pula pausa antes dos botões
           if (!isMockMode() && !isFlowInstantMode()) await new Promise((r) => setTimeout(r, 600));
-          // Se há texto no step, reusa ele com botões (resposta robusta).
-          // Caso contrário, usa só "."  (whatsapp obriga texto não-vazio).
-          const fallbackText = baseText && baseText.trim().length > 0
-            ? baseText
-            : ".";
-          await sendButtons(remoteJid, fallbackText, renderedButtons);
-          if (fallbackText !== "." && !items.find((it) => it.kind === "text")) {
-            await supabase.from("conversations").insert({
-              customer_id: customer.id,
-              message_direction: "outbound",
-              message_text: fallbackText,
-              message_type: "text",
-              conversation_step: stepKey,
-            });
-          }
+          // Sempre usa prompt curto — o texto principal do step já foi enviado
+          // anteriormente na sequência. Repetir o texto causaria duplicação.
+          const promptText = "👇 *Escolha uma opção:*";
+          await sendButtons(remoteJid, promptText, renderedButtons);
           buttonsSent = true;
         } catch (e) {
           console.warn(`[dispatch:${stepKey}] envio dos botões (fallback) falhou:`, (e as any)?.message);
@@ -3477,6 +3457,16 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           await dispatchStepFromFlow(nextCustom.step_key, _vars);
           if (!isMockMode()) await new Promise((r) => setTimeout(r, 1800));
 
+          // 🚦 Detecta se o passo success_goto (ex.: d_resultado) já tem botões
+          // interativos próprios. Se sim, NÃO duplicar o CTA "Quero me cadastrar"
+          // logo abaixo — o próprio passo já cumpre esse papel.
+          try {
+            const caps = Array.isArray((nextCustom as any).captures) ? (nextCustom as any).captures : [];
+            const btnCap = caps.find((c: any) => c?.field === "_buttons" && c?.enabled !== false);
+            const hasButtons = btnCap && Array.isArray(btnCap.value) && btnCap.value.length > 0;
+            if (hasButtons) (updates as any).__last_chain_had_buttons = true;
+          } catch (_) { /* best-effort */ }
+
           // 2. Avança nextCustom para o próximo capture/finalizar após este step.
           try {
             const { data: _flowRow3 } = await supabase
@@ -4786,7 +4776,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         "quero_simular", "btn_simular", "simular", "btn_quero_simular",
         "1", "sim", "s", "quero", "bora", "vamos", "vamo", "vamos la", "pode", "pode ser", "ok", "blz", "beleza",
       ];
-      const wants = triggers.includes(resp) || /^(sim|quero|bora|vamos|pode|ok|cadastr|simular)\b/i.test(resp);
+      // Normaliza: remove emojis/símbolos do início ("✅ Quero me cadastrar" → "quero me cadastrar")
+      const respNorm = resp.replace(/^[^a-z0-9]+/i, "").trim();
+      const wants = triggers.includes(resp) || triggers.includes(respNorm) || /^(sim|quero|bora|vamos|pode|ok|cadastr|simular)\b/i.test(respNorm);
       if (wants) {
         // Procura o passo capture_documento do fluxo ativo e dispara.
         try {
