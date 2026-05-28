@@ -61,6 +61,7 @@ import {
 } from "@/components/admin/flow-builder/flowTypes";
 import type { FlowDiagramNode as FlowDiagramNodeType } from "@/hooks/useDiagramData";
 import { WarningBadge } from "@/components/admin/flow-builder/diagram/WarningBadge";
+import { getStepTypeColor } from "@/components/admin/flow-builder/diagram/stepTypeColors";
 
 // ---------------------------------------------------------------------------
 // Constantes de truncamento e atenuação
@@ -157,6 +158,7 @@ function FlowDiagramNodeImpl({ data, selected }: NodeProps<FlowDiagramNodeType>)
   const buttons = getButtons(step);
   const stepTypeLabel = resolveStepTypeLabel(step);
   const stepTypeEmoji = resolveStepTypeEmoji(step);
+  const typeColor = getStepTypeColor(step.step_type);
 
   // Título: truncado a 60 chars, com fallback "sem título" (R2.3).
   const titleRaw = step.title?.trim() ?? "";
@@ -200,7 +202,8 @@ function FlowDiagramNodeImpl({ data, selected }: NodeProps<FlowDiagramNodeType>)
       style={{ opacity: effectiveOpacity }}
       className={cn(
         // Base: largura mínima generosa para acomodar título + preview + badges.
-        "relative w-[280px] rounded-xl border bg-card p-3 text-left shadow-sm",
+        // `overflow-hidden` recorta a barra colorida lateral (`stripe`).
+        "relative w-[280px] overflow-hidden rounded-xl border bg-card pl-4 pr-3 py-3 text-left shadow-sm",
         "transition-all duration-150",
         // Foco visível com contraste suficiente (R14.1) — anel primário 2px
         // com offset, alinhado ao restante do design system.
@@ -208,13 +211,22 @@ function FlowDiagramNodeImpl({ data, selected }: NodeProps<FlowDiagramNodeType>)
         // Borda destacada quando selecionado (paridade com `StepCard`).
         selected
           ? "border-primary ring-2 ring-primary/20"
-          : "border-border hover:border-primary/40",
+          : "border-border hover:border-primary/40 hover:shadow-md",
         // Realce de match na busca (R19) — anel âmbar mais forte e
         // box-shadow para destacar contra o fundo, visível em ambos os temas.
         searchState === "match" &&
           "ring-2 ring-amber-500 shadow-[0_0_0_4px_hsl(38_92%_50%_/_0.15)]",
       )}
     >
+      {/* Barra colorida lateral por step_type — reforço visual rápido do tipo. */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "absolute left-0 top-0 bottom-0 w-1.5",
+          typeColor.stripe,
+          !step.is_active && "opacity-40",
+        )}
+      />
       {/* Handle de entrada (target) — sempre presente, à esquerda. */}
       <Handle
         type="target"
@@ -233,7 +245,13 @@ function FlowDiagramNodeImpl({ data, selected }: NodeProps<FlowDiagramNodeType>)
           <span className="font-mono text-xs text-muted-foreground">
             #{step.position}
           </span>
-          <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-base">
+          <div
+            className={cn(
+              "grid h-7 w-7 place-items-center rounded-lg text-base ring-1 ring-inset ring-border/40",
+              typeColor.accentBg,
+              typeColor.accentText,
+            )}
+          >
             <span aria-hidden="true">{stepTypeEmoji}</span>
           </div>
         </div>
@@ -530,7 +548,7 @@ function FlowDiagramNodeImpl({ data, selected }: NodeProps<FlowDiagramNodeType>)
         // Posiciona logo abaixo do cabeçalho para coexistir com handles de botão
         // sem se sobrepor visualmente.
         style={{ top: DEFAULT_HANDLE_TOP }}
-        className="!h-2.5 !w-2.5 !border !border-primary !bg-background"
+        className="!h-3 !w-3 !border-2 !border-primary !bg-background hover:!bg-primary"
       />
     </div>
   );

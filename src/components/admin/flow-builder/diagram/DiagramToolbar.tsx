@@ -31,6 +31,8 @@ import {
   Download,
   LayoutGrid,
   Loader2,
+  Maximize2,
+  Minimize2,
   RefreshCw,
   Search,
 } from "lucide-react";
@@ -108,6 +110,11 @@ export interface DiagramToolbarProps {
    */
   readOnly?: boolean;
 
+  /** Estado atual do modo Tela Cheia. */
+  fullscreen: boolean;
+  /** Alterna a tela cheia (responsabilidade do consumidor). */
+  onFullscreenToggle: () => void;
+
   /** Classes opcionais para customização do container externo. */
   className?: string;
 }
@@ -123,6 +130,8 @@ const ARIA = {
   export: "Exportar diagrama",
   exportPng: "Exportar diagrama como PNG",
   exportSvg: "Exportar diagrama como SVG",
+  fullscreenEnter: "Expandir diagrama para tela cheia",
+  fullscreenExit: "Sair da tela cheia",
 } as const;
 
 export function DiagramToolbar({
@@ -143,6 +152,8 @@ export function DiagramToolbar({
   canExport,
   exporting,
   readOnly = false,
+  fullscreen,
+  onFullscreenToggle,
   className,
 }: DiagramToolbarProps) {
   const localInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -318,6 +329,34 @@ export function DiagramToolbar({
             </Button>
           </TooltipTrigger>
           <TooltipContent>Centralizar diagrama</TooltipContent>
+        </Tooltip>
+
+        {/* Tela cheia — alterna entre `fixed inset-0 z-50` e o container normal. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onFullscreenToggle}
+              aria-label={fullscreen ? ARIA.fullscreenExit : ARIA.fullscreenEnter}
+              aria-pressed={fullscreen}
+            >
+              {fullscreen ? (
+                <Minimize2 className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <Maximize2 className="h-4 w-4" aria-hidden="true" />
+              )}
+              <span className="hidden md:inline">
+                {fullscreen ? "Sair da tela cheia" : "Tela cheia"}
+              </span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {fullscreen
+              ? "Voltar ao tamanho normal (Esc)"
+              : "Expandir para tela cheia (F)"}
+          </TooltipContent>
         </Tooltip>
 
         {/* Reorganizar automaticamente (R10.9) — desabilitado em modo somente leitura (R15.2). */}

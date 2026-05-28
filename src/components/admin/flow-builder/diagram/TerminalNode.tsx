@@ -34,17 +34,45 @@ import type { TerminalDiagramNode } from "@/hooks/useDiagramData";
 function TerminalNodeImpl({ data, selected }: NodeProps<TerminalDiagramNode>) {
   const { label, icon, kind } = data;
 
+  // Paleta visual por tipo de terminal — antes todos eram cinza neutro,
+  // o que dificultava distinguir "Humano" de "Cadastro" rapidamente.
+  // Cores escolhidas para contraste em modo claro e escuro.
+  const KIND_COLORS: Record<string, { container: string; iconText: string; label: string }> = {
+    cadastro: {
+      container:
+        "border-emerald-500/50 bg-emerald-500/10 dark:border-emerald-400/40 dark:bg-emerald-950/40",
+      iconText: "text-emerald-700 dark:text-emerald-400",
+      label: "text-emerald-900 dark:text-emerald-200",
+    },
+    humano: {
+      container:
+        "border-sky-500/50 bg-sky-500/10 dark:border-sky-400/40 dark:bg-sky-950/40",
+      iconText: "text-sky-700 dark:text-sky-300",
+      label: "text-sky-900 dark:text-sky-200",
+    },
+    repeat: {
+      container:
+        "border-amber-500/50 bg-amber-500/10 dark:border-amber-400/40 dark:bg-amber-950/40",
+      iconText: "text-amber-700 dark:text-amber-400",
+      label: "text-amber-900 dark:text-amber-200",
+    },
+  };
+  const palette = KIND_COLORS[kind] ?? {
+    container: "border-border bg-muted/60",
+    iconText: "text-muted-foreground",
+    label: "text-foreground",
+  };
+
   return (
     <div
       role="img"
       aria-label={`Destino especial: ${label}`}
       data-terminal-kind={kind}
       className={cn(
-        // Casca minimalista — cinza claro com borda, distinto do FlowDiagramNode.
         "relative flex min-w-[140px] flex-col items-center justify-center gap-1.5",
-        "rounded-lg border border-dashed border-border bg-muted/60 px-4 py-3",
-        "text-muted-foreground shadow-sm",
+        "rounded-lg border-2 border-dashed px-4 py-3 shadow-sm",
         "transition-[box-shadow,opacity] duration-150",
+        palette.container,
         // Realce sutil quando selecionado, sem sugerir editabilidade.
         selected && "ring-2 ring-primary/40 ring-offset-1 ring-offset-background",
       )}
@@ -59,10 +87,10 @@ function TerminalNodeImpl({ data, selected }: NodeProps<TerminalDiagramNode>) {
       />
 
       {/* Ícone grande + label — visual minimal. */}
-      <span aria-hidden="true" className="text-2xl leading-none">
+      <span aria-hidden="true" className={cn("text-2xl leading-none", palette.iconText)}>
         {icon}
       </span>
-      <span className="text-xs font-medium uppercase tracking-wide text-foreground">
+      <span className={cn("text-xs font-semibold uppercase tracking-wide", palette.label)}>
         {label}
       </span>
     </div>

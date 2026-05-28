@@ -59,29 +59,40 @@ type CategoryStyle = {
 };
 
 /**
- * Larguras seguem o requisito R8.9: `solid` ≥ 2× `ai-purple`.
- * Mantemos `solid` em 3 e `ai-purple` em 1.5 (razão exata 2:1).
+ * Paleta visual das arestas. Reformulada para contrastar mais entre si
+ * (o `solid` original usava `--primary`, igual à borda de seleção, o que
+ * fazia toda a tela "ficar verde"). Larguras seguem o requisito R8.9:
+ * `solid` ≥ 2× `ai-purple`. Mantemos `solid` em 3 e `ai-purple` em 1.5
+ * (razão exata 2:1).
  */
 const CATEGORY_STYLES: Record<EdgeCategory, CategoryStyle> = {
+  // Arestas determinísticas (regras com gatilho explícito) — azul vibrante,
+  // a cor "de fluxo" universalmente reconhecida. Se diferencia do verde
+  // primary (que é reservado para seleção/ações). Espessura mantida em 3
+  // para satisfazer R8.9 (solid ≥ 2× ai-purple = 1.5).
   solid: {
-    stroke: "hsl(var(--primary))",
+    stroke: "hsl(217 91% 55%)",
     strokeWidth: 3,
   },
+  // Arestas de fallback (rota alternativa) — âmbar tracejado.
   "dashed-amber": {
     stroke: "hsl(38 92% 50%)",
-    strokeDasharray: "6 4",
-    strokeWidth: 1.5,
+    strokeDasharray: "8 4",
+    strokeWidth: 2,
   },
+  // Sequência por posição (visual auxiliar) — cinza médio bem discreto.
   "dotted-gray": {
-    stroke: "hsl(var(--muted-foreground))",
-    strokeDasharray: "2 4",
-    strokeWidth: 1,
+    stroke: "hsl(220 8% 60%)",
+    strokeDasharray: "2 5",
+    strokeWidth: 1.25,
   },
+  // IA — roxo, mais saturado para reforçar "rota não-determinística".
   "ai-purple": {
     stroke: "hsl(270 80% 60%)",
-    strokeDasharray: "3 3",
+    strokeDasharray: "4 3",
     strokeWidth: 1.5,
   },
+  // Erro / regra órfã — vermelho do tema.
   "error-red": {
     stroke: "hsl(var(--destructive))",
     strokeWidth: 2,

@@ -398,6 +398,11 @@ function FlowDiagramInner(props: FlowDiagramProps) {
   // mora lá (única fonte do listener — evita duplicação com a toolbar).
   const [dottedEdgesVisible, setDottedEdgesVisible] = useState(true);
   const [metricsEnabled, setMetricsEnabled] = useState(false);
+  // task ad-hoc — modo Tela Cheia. Tornamos o wrapper do canvas `fixed
+  // inset-0 z-50` para preencher a viewport sem depender de
+  // `requestFullscreen()` (mais confiável em iframes/embeds e mantém o
+  // header da app acessível via toggle "Sair da tela cheia").
+  const [fullscreen, setFullscreen] = useState(false);
 
   // Estado vazio: nem o canvas é instanciado. Evita o `fitView` rodar com 0
   // nós (que faria o React Flow logar warning) e dá a mesma UX do Modo_Lista.
@@ -427,6 +432,8 @@ function FlowDiagramInner(props: FlowDiagramProps) {
         onDottedEdgesToggle={setDottedEdgesVisible}
         metricsEnabled={metricsEnabled}
         onMetricsToggle={setMetricsEnabled}
+        fullscreen={fullscreen}
+        onFullscreenToggle={() => setFullscreen((v) => !v)}
         onSelectStep={onSelectStep}
         onOpenInspector={onOpenInspector}
         onPatchStep={onPatchStep}
@@ -462,6 +469,8 @@ interface FlowDiagramCanvasProps {
   onDottedEdgesToggle: (v: boolean) => void;
   metricsEnabled: boolean;
   onMetricsToggle: (v: boolean) => void;
+  fullscreen: boolean;
+  onFullscreenToggle: () => void;
 
   // Callbacks de edição (forwardados do `FlowDiagramProps`).
   onSelectStep: (id: string | null) => void;
@@ -490,6 +499,8 @@ function FlowDiagramCanvas({
   onDottedEdgesToggle,
   metricsEnabled,
   onMetricsToggle,
+  fullscreen,
+  onFullscreenToggle,
   onSelectStep,
   onOpenInspector,
   onPatchStep,
@@ -1469,10 +1480,37 @@ function FlowDiagramCanvas({
           closeContextMenu();
           handled = true;
         }
+        // Se nada de UI flutuante estava aberto e estamos em tela cheia,
+        // Esc sai da tela cheia (paridade com a API nativa do navegador).
+        if (!handled && fullscreen) {
+          onFullscreenToggle();
+          handled = true;
+        }
         if (handled) {
           event.preventDefault();
           event.stopPropagation();
         }
+        return;
+      }
+
+      // Atalho `F` (sem Ctrl/Meta/Alt) alterna a Tela Cheia. Ignorado quando
+      // o foco está em um campo editável para não interferir com digitação.
+      if (
+        (event.key === "f" || event.key === "F") &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !event.shiftKey
+      ) {
+        const target = event.target as HTMLElement | null;
+        const isEditable =
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          (target?.isContentEditable ?? false);
+        if (isEditable) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onFullscreenToggle();
         return;
       }
     },
@@ -1482,7 +1520,9 @@ function FlowDiagramCanvas({
       contextMenu,
       findNearestInDirection,
       focusStepNode,
+      fullscreen,
       getFocusedStepId,
+      onFullscreenToggle,
       onOpenInspector,
       onSelectStep,
       transitionPopover,
@@ -1855,7 +1895,14 @@ function FlowDiagramCanvas({
   return (
     <div
       ref={wrapperRef}
-      className="relative h-full w-full"
+      className={cn(
+        "relative h-full w-full",
+        // Tela cheia: cobre toda a viewport, sobrepondo header/sidebar.
+        // `bg-background` evita transparência sobre o app por trás.
+        fullscreen &&
+          "fixed inset-0 z-50 h-screen w-screen bg-background",
+      )}
+      data-fullscreen={fullscreen ? "true" : "false"}
       // R14.4 — wrapper focalizável para receber eventos de teclado quando
       // nenhum nó individual está com foco (evita perdermos a primeira
       // pressão de seta após clicar no canvas vazio).
@@ -1942,6 +1989,8 @@ function FlowDiagramCanvas({
             canExport={true}
             exporting={exportApi.exporting}
             readOnly={readOnly}
+            fullscreen={fullscreen}
+            onFullscreenToggle={onFullscreenToggle}
           />
         </Panel>
 
