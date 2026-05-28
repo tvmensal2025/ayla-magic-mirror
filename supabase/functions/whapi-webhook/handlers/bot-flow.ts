@@ -3601,17 +3601,24 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           // messages acima) e PARA. Só quando o cliente clicar "Quero me
           // cadastrar" é que o capture_documento dispara. Nunca encadear.
           if (nextCustom.step_type === "capture_documento" || nextCustom.step_type === "capture_doc") {
-            try {
-              const ctaText = "Pra continuar seu cadastro e garantir essa economia, é só tocar no botão abaixo 👇";
-              await sendOptions(remoteJid, ctaText, [
-                { id: "btn_quero_cadastrar", title: "✅ Quero me cadastrar" },
-              ]);
-              await supabase.from("conversations").insert({
-                customer_id: customer.id, message_direction: "outbound",
-                message_text: ctaText, message_type: "text", conversation_step: "ask_quero_cadastrar",
-              });
-            } catch (e) {
-              console.warn(`[post-confirm-conta] envio do CTA quero_cadastrar falhou:`, (e as Error).message);
+            // Se o último passo `message` da CHAIN (ex.: d_resultado) já tem
+            // botões interativos próprios (cadastrar/dúvida/falar humano),
+            // NÃO duplicar com outro CTA — o step do consultor já cumpre o papel.
+            if ((updates as any).__last_chain_had_buttons) {
+              console.log("[post-confirm-conta] skip CTA quero_cadastrar — último step da chain já tem botões próprios");
+            } else {
+              try {
+                const ctaText = "Pra continuar seu cadastro e garantir essa economia, é só tocar no botão abaixo 👇";
+                await sendOptions(remoteJid, ctaText, [
+                  { id: "btn_quero_cadastrar", title: "✅ Quero me cadastrar" },
+                ]);
+                await supabase.from("conversations").insert({
+                  customer_id: customer.id, message_direction: "outbound",
+                  message_text: ctaText, message_type: "text", conversation_step: "ask_quero_cadastrar",
+                });
+              } catch (e) {
+                console.warn(`[post-confirm-conta] envio do CTA quero_cadastrar falhou:`, (e as Error).message);
+              }
             }
             updates.conversation_step = "ask_quero_cadastrar";
           } else {
