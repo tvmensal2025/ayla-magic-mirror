@@ -2553,6 +2553,7 @@ export type Database = {
           bill_message_id: string | null
           bill_owner_relationship: string | null
           bill_requested_at: string | null
+          bot_force_enabled: boolean
           bot_paused: boolean
           bot_paused_at: string | null
           bot_paused_reason: string | null
@@ -2721,6 +2722,7 @@ export type Database = {
           bill_message_id?: string | null
           bill_owner_relationship?: string | null
           bill_requested_at?: string | null
+          bot_force_enabled?: boolean
           bot_paused?: boolean
           bot_paused_at?: string | null
           bot_paused_reason?: string | null
@@ -2889,6 +2891,7 @@ export type Database = {
           bill_message_id?: string | null
           bill_owner_relationship?: string | null
           bill_requested_at?: string | null
+          bot_force_enabled?: boolean
           bot_paused?: boolean
           bot_paused_at?: string | null
           bot_paused_reason?: string | null
@@ -3672,6 +3675,24 @@ export type Database = {
             referencedColumns: ["consultant_id"]
           },
         ]
+      }
+      force_bot_phones: {
+        Row: {
+          consultant_id: string
+          created_at: string
+          phone_digits: string
+        }
+        Insert: {
+          consultant_id: string
+          created_at?: string
+          phone_digits: string
+        }
+        Update: {
+          consultant_id?: string
+          created_at?: string
+          phone_digits?: string
+        }
+        Relationships: []
       }
       gemini_quota_bucket: {
         Row: {
