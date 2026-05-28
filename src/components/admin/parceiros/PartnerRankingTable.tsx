@@ -24,10 +24,10 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
-import type { ReferralPartner } from "../hooks/useReferralPartners";
-import type { PartnerAnalytics } from "../hooks/usePartnerAnalytics";
-import { useRankingRows } from "./useRankingRows";
-import { RankingBadges } from "./RankingBadges";
+import type { ReferralPartner } from "./hooks/useReferralPartners";
+import type { PartnerAnalytics } from "./hooks/usePartnerAnalytics";
+import { useRankingRows } from "./ranking/useRankingRows";
+import { RankingBadges } from "./ranking/RankingBadges";
 
 interface Props {
   partners: ReferralPartner[];
