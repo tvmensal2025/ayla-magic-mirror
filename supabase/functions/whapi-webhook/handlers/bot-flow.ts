@@ -3388,6 +3388,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         // e o próximo capture/finalizar (ex.: d_resultado com a simulação) ANTES
         // de pedir o documento. Atualiza nextCustom para apontar para esse
         // próximo passo de captura/finalização.
+        //
+        // 🛡️ HANDOFF SEGURO (2026-05-28): persistimos conversation_step
+        // ANTES de cada dispatch do CHAIN. Se o lead interromper a rajada
+        // com uma pergunta ("tenho dúvidas"), o próximo webhook vê o step
+        // do passo intermediário e o motor conversational processa o input
+        // (chama d_duvidas / IA) em vez de reentrar em confirmando_dados_conta.
         if (nextCustom && nextCustom.step_type === "message" && _captureContaPos > 0) {
           try {
             const { data: _flowRow2 } = await supabase
@@ -3397,7 +3403,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             if (_flowRow2?.id) {
               const { data: _allSteps } = await supabase
                 .from("bot_flow_steps")
-                .select("position, step_key, step_type, is_active")
+                .select("id, position, step_key, step_type, is_active")
                 .eq("flow_id", (_flowRow2 as any).id).eq("is_active", true)
                 .gt("position", _captureContaPos)
                 .order("position", { ascending: true });
@@ -3412,6 +3418,25 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 : stepsAfter;
               const messagesOnly = messagesBetween.filter((s) => s.step_type === "message");
               for (const m of messagesOnly) {
+                console.log(`[post-confirm-conta] persistindo step ${m.step_key} ANTES de dispatchar`);
+                // 🛡️ HANDOFF: persiste step do passo CORRENTE antes de
+                // disparar mídia. Se o lead mandar texto durante a rajada,
+                // o próximo webhook entra em runConversationalFlow com o
+                // UUID deste passo (não em confirmando_dados_conta), e o
+                // motor flow D consegue chamar d_duvidas / IA / transições.
+                try {
+                  await supabase.from("customers")
+                    .update({
+                      conversation_step: (m as any).id,
+                      updated_at: new Date().toISOString(),
+                    })
+                    .eq("id", customer.id);
+                  // Reflete no objeto em memória para que outras decisões
+                  // posteriores neste mesmo turno enxerguem o step novo.
+                  (customer as any).conversation_step = (m as any).id;
+                } catch (persistErr) {
+                  console.warn(`[post-confirm-conta] persistir step ${m.step_key} falhou: ${(persistErr as Error)?.message}`);
+                }
                 console.log(`[post-confirm-conta] despachando msg intermediária ${m.step_key}`);
                 await dispatchStepFromFlow(m.step_key, _vars);
                 if (!isMockMode()) await new Promise((r) => setTimeout(r, 1800));

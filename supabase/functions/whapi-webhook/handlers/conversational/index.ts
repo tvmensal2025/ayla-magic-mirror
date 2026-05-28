@@ -994,6 +994,41 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     // - Se está vazio → tenta mídia; se também vazio/falhou, cascateia pelo
     //   fallback.goto_step_id até achar um step com conteúdo real OU um
     //   step que precise esperar resposta (wait_for=reply).
+    //
+    // 🛡️ ANTI-WELCOME-DUPLICADO (2026-05-28): se já mandamos uma outbound
+    // de qualquer passo deste flow nos últimos 30min, NÃO reentra com o
+    // welcome inteiro. O lead já recebeu o conteúdo; deve ter sido só
+    // demora pra responder. Em vez disso, deixa o motor processar o input
+    // contra o passo atual (ou cair no QA/IA se for pergunta livre).
+    try {
+      if (ctx.customer?.id && firstActive?.step_key) {
+        const sinceIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+        const { data: recentOut } = await ctx.supabase
+          .from("conversations")
+          .select("conversation_step, created_at")
+          .eq("customer_id", ctx.customer.id)
+          .eq("message_direction", "outbound")
+          .gte("created_at", sinceIso)
+          .order("created_at", { ascending: false })
+          .limit(5);
+        const recentSteps = new Set(((recentOut as any[]) || [])
+          .map(r => String((r as any).conversation_step || ""))
+          .filter(Boolean));
+        if (recentSteps.has(firstActive.step_key)) {
+          console.log(`[conversational] 🛡️ anti-welcome-duplicado: outbound do firstActive=${firstActive.step_key} já enviada nos últimos 30min — pulando restart e tratando msg como input do passo atual`);
+          // Aponta currentStep para firstActive em memória (sem persistir)
+          // pra que o restante do motor processe o input contra ele
+          // (transitions, captures, fallback ai_answer).
+          currentStep = firstActive;
+          stepKey = firstActive.id;
+          _setTurnStepQuestion(firstActive.message_text || "", _turnVars);
+        }
+      }
+    } catch (e) {
+      console.warn(`[conversational] anti-welcome-duplicado check falhou: ${(e as Error)?.message}`);
+    }
+  }
+  if (!currentStep) {
     console.log(`[conversational] unknown step="${stepKey}" → restart at firstActive=${firstActive?.id} (steps=${dbSteps.length})`);
     const vars = {
       nome: ctx.customer.name,
