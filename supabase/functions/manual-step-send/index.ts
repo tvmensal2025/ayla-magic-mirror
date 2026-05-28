@@ -18,47 +18,17 @@ function inferNameSource(name: string | null | undefined, currentSource: string 
 }
 
 /**
- * Reasons de pausa que o envio manual NÃO deve tirar **automaticamente**.
+ * Constrói o patch de update do customer para envio manual.
  *
- * Caso de uso (super admin): o consultor pausa o bot para todos os leads
- * (`manual_global_pause`) durante a fase de teste do Fluxo D, mas precisa
- * usar o botão de envio manual em conversas individuais. Antes deste fix,
- * o `manual-step-send` zerava `bot_paused` no fim, fazendo o bot voltar
- * a responder sozinho na próxima inbound do cliente — quebrando a
- * intenção de "todos os leads ficam com humano".
+ * Regra: QUALQUER ação manual do consultor sobre um lead específico
+ * (mandar áudio, iniciar fluxo, encadear passos) DESPAUSA aquele lead.
+ * O consultor está deliberadamente engajando aquele cliente — quer que
+ * o bot rode dali pra frente.
  *
- * Exceção: quando `continueFlow=true` (consultor escolheu explicitamente
- * "Iniciar fluxo" / encadear passos), a pausa É tirada — o consultor
- * está testando o bot rodar sozinho naquele lead específico.
- *
- * Pausas ainda removidas pelo manual-step-send: pausas automáticas
- * (`lead_nao_responde`, `low_confidence_handoff`, `engine_v3_error`,
- * `*_retry_exhausted` etc.) — nesses casos o consultor está intervindo
- * deliberadamente, faz sentido devolver o controle ao bot.
+ * Pausa global (`manual_global_pause`) continua valendo para leads que
+ * ninguém tocou — eles seguem calados até o consultor tomar ação.
  */
-const PRESERVED_PAUSE_REASONS = new Set([
-  "manual_global_pause",
-  "humano_assumiu_backfill",
-]);
-
-/**
- * Constrói o patch de update do customer respeitando pausas que NÃO
- * devem ser tiradas por envio manual sem `continueFlow`. Quando a pausa
- * é preservada, as colunas de pausa são omitidas do patch para não
- * sobrescrever os valores atuais.
- *
- * @param customer linha de customers com bot_paused/bot_paused_reason
- * @param continueFlow se true, a pausa É tirada mesmo em PRESERVED_PAUSE_REASONS
- *                     (consultor pediu "Iniciar fluxo" / encadear)
- */
-function buildUnpausePatch(customer: any, continueFlow = false): Record<string, any> {
-  const reason = String(customer?.bot_paused_reason || "");
-  const isPreservedReason = customer?.bot_paused === true && PRESERVED_PAUSE_REASONS.has(reason);
-  // Pausa preservada apenas em envio individual; continueFlow=true é uma
-  // ação deliberada de "rodar o flow nesse lead" e tira a pausa global.
-  if (isPreservedReason && !continueFlow) {
-    return {};
-  }
+function buildUnpausePatch(_customer: any): Record<string, any> {
   return {
     bot_paused: false,
     bot_paused_reason: null,
@@ -723,7 +693,7 @@ Deno.serve(async (req) => {
       if (body.continueFlow && body.part === "all") {
         await supabase.from("customers").update({
           conversation_step: (step as any).step_key || (step as any).id,
-          ...buildUnpausePatch(customer, true),
+          ...buildUnpausePatch(customer),
           custom_step_retries: 0,
           custom_step_retries_step: null,
           updated_at: new Date().toISOString(),
@@ -909,10 +879,9 @@ Deno.serve(async (req) => {
 
 async function buildContinuationPatch(supabase: any, sender: any, remoteJid: string, consultantId: string, customer: any, step: any, vars: Record<string, string>, variant: string = "A") {
   const patch: any = {
-    // continueFlow=true: o consultor está pedindo o flow rodar nesse lead.
-    // Tira pausa global (manual_global_pause) propositalmente — sem isso o
-    // próximo turno do bot ficaria mudo no gate `bot_paused` do webhook.
-    ...buildUnpausePatch(customer, true),
+    // Ação manual deliberada do consultor → despausa este lead.
+    // Pausa global (`manual_global_pause`) continua nos demais.
+    ...buildUnpausePatch(customer),
     custom_step_retries: 0,
     custom_step_retries_step: null,
     updated_at: new Date().toISOString(),
