@@ -3,6 +3,9 @@ project_id = "zlzasfhcxcznaprrragl"
 [functions.evolution-webhook]
 verify_jwt = false
 
+[functions.whapi-webhook]
+verify_jwt = false
+
 [functions.facebook-oauth-start]
 verify_jwt = true
 
@@ -89,6 +92,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.outbound-media-flush-cron]
+verify_jwt = false
+
+[functions.ctwa-status]
 verify_jwt = false
 
 [functions.flow-d-stuck-watchdog]

@@ -68,7 +68,8 @@ jobs:
             supabase/functions/_shared/human-pace_test.ts \
             supabase/functions/_shared/text-hash_test.ts \
             supabase/functions/_shared/grounding_test.ts \
-            supabase/functions/_shared/bot/dedupe_test.ts
+            supabase/functions/_shared/bot/dedupe_test.ts \
+            supabase/functions/_shared/__tests__/config-toml-webhook-guard_test.ts
 
   engine-purity-check:
     name: Engine purity lint (v3-runner.ts)
