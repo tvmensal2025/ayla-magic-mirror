@@ -4776,7 +4776,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         "quero_simular", "btn_simular", "simular", "btn_quero_simular",
         "1", "sim", "s", "quero", "bora", "vamos", "vamo", "vamos la", "pode", "pode ser", "ok", "blz", "beleza",
       ];
-      const wants = triggers.includes(resp) || /^(sim|quero|bora|vamos|pode|ok|cadastr|simular)\b/i.test(resp);
+      // Normaliza: remove emojis/símbolos do início ("✅ Quero me cadastrar" → "quero me cadastrar")
+      const respNorm = resp.replace(/^[^a-z0-9]+/i, "").trim();
+      const wants = triggers.includes(resp) || triggers.includes(respNorm) || /^(sim|quero|bora|vamos|pode|ok|cadastr|simular)\b/i.test(respNorm);
       if (wants) {
         // Procura o passo capture_documento do fluxo ativo e dispara.
         try {
