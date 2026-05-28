@@ -942,16 +942,8 @@ Deno.serve(async (req) => {
     // O consultor controla o próximo tile. Texto livre do lead não deve rodar
     // o motor conversacional nem avançar automaticamente para o próximo passo.
     //
-    // EXCEÇÃO: quando engine v3 está ativo para o consultor, o v3 toma
-    // posse do turno e o helper `runEngineV3WebhookEntry` zera o
-    // `capture_mode` para "auto" antes de chamar o engine. Por isso
-    // aqui pulamos o short-circuit quando a flag está ON — o ramo v3
-    // mais adiante neste mesmo handler vai responder.
-    let _v3Active = false;
-    try {
-      const { isEngineV3Enabled: _isV3 } = await import("../_shared/flow-engine/router.ts");
-      _v3Active = await _isV3(supabase as any, superAdminConsultantId);
-    } catch (_) {/* swallow */}
+    // Engine V3 aposentado (Fase 1 da limpeza de motores) — sempre inativo.
+    const _v3Active = false;
     if (!_v3Active && (customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
       // Fluxo D é 100% automático (welcome com botões → capture conta → OCR → ...).
       // Nunca aplicar o short-circuit "manual_capture_text_saved_no_auto_flow"
@@ -1262,51 +1254,8 @@ Deno.serve(async (req) => {
     let updates: Record<string, any> = {};
     let engineUsed: "sys" | "flow" = "sys";
     try {
-      // ─── Engine v3 gate (FIRST — before any legacy routing) ──────────
-      // When v3 is enabled for the consultant, it takes FULL ownership of
-      // the turn. No legacy routing, no auto-cure, no "FONTE ÚNICA DE
-      // VERDADE" block. The v3 entry helper handles everything: load
-      // context, run engine, dispatch outbounds, persist state.
-      const { isEngineV3Enabled } = await import("../_shared/flow-engine/router.ts");
-      if (await isEngineV3Enabled(supabase as any, superAdminConsultantId)) {
-        const { runEngineV3WebhookEntry } = await import("../_shared/flow-engine/v3-webhook-entry.ts");
-        const { getAdapter } = await import("../_shared/channels/index.ts");
-        const v3Adapter = getAdapter({
-          kind: "whapi",
-          input: { apiToken: whapiToken },
-        });
-        const v3Outcome = await runEngineV3WebhookEntry({
-          supabase: supabase as any,
-          adapter: v3Adapter,
-          customerId: customer.id,
-          consultantId: superAdminConsultantId,
-          jid: remoteJid,
-          inbound: {
-            messageText,
-            buttonId,
-            isFile,
-            isButton,
-            hasImage,
-            hasAudio,
-            hasDocument,
-            messageId,
-          },
-          testRunId: testMode ? testRunId : null,
-          testTurn: testMode ? Number(testTurn || 1) : null,
-        });
-        jsonLog(v3Outcome.ok ? "info" : "warn", "engine_v3_handled", {
-          customer_id: customer.id,
-          consultant_id: superAdminConsultantId,
-          ok: v3Outcome.ok,
-          sent: v3Outcome.sent,
-          failed: v3Outcome.failed,
-          error: v3Outcome.error,
-        });
-        return new Response(
-          JSON.stringify({ ok: true, mode: "engine_v3", v3: v3Outcome }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
+      // Engine V3 aposentado (Fase 1 da limpeza de motores) — gate removido.
+
 
       const customerOverride = (customer as any).conversational_flow_enabled;
       const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
@@ -1459,28 +1408,9 @@ Deno.serve(async (req) => {
           }
         : sender;
 
-      // ─── Engine v3 — hook compartilhado (Semana 1 do rollout v3) ──
-      // Mesma chamada do evolution-webhook. Fail-open: nunca bloqueia o
-      // caminho legado, apenas observa e loga para validação dark→canary→on.
-      try {
-        const { runEngineV3IfEnabled } = await import("../_shared/flow-engine/webhook-hook.ts");
-        await runEngineV3IfEnabled({
-          supabase,
-          customerId: customer.id,
-          consultantId: superAdminConsultantId,
-          legacyStep: stepBefore,
-          inboundKind: isButton ? "button_click" : (hasImage || hasDocument || hasAudio ? "media" : "text"),
-          inboundText: messageText ?? null,
-          inboundButtonId: buttonId ?? null,
-          inboundMediaKind: hasAudio ? "audio" : hasImage ? "image" : hasDocument ? "document" : null,
-          inboundMessageId: messageId ?? null,
-        });
-      } catch (e: any) {
-        console.warn("[engine-v3-hook] erro não-bloqueante:", e?.message);
-      }
+      // Engine V3 aposentado (Fase 1 da limpeza de motores) — hook removido.
 
-      // ─── Engine v3 gate (Task 29 — flow-engine-v3-rewrite) ──────────
-      // When `consultants.use_engine_v3 = true`, the v3 engine takes
+
       const runEngine = async () => engine === "flow"
         ? await runConversationalFlow({
             supabase, sender: engineSender, customer, consultorId, nomeRepresentante,
