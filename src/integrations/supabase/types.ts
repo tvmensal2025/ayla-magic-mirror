@@ -2689,7 +2689,10 @@ export type Database = {
           rg: string | null
           sales_phase: string | null
           senha_pdf: string | null
+          source_ad_id: string | null
           source_campaign_id: string | null
+          source_ctwa_clid: string | null
+          source_referral: Json | null
           status: string
           status_financeiro: string | null
           summary_updated_at: string | null
@@ -2854,7 +2857,10 @@ export type Database = {
           rg?: string | null
           sales_phase?: string | null
           senha_pdf?: string | null
+          source_ad_id?: string | null
           source_campaign_id?: string | null
+          source_ctwa_clid?: string | null
+          source_referral?: Json | null
           status?: string
           status_financeiro?: string | null
           summary_updated_at?: string | null
@@ -3019,7 +3025,10 @@ export type Database = {
           rg?: string | null
           sales_phase?: string | null
           senha_pdf?: string | null
+          source_ad_id?: string | null
           source_campaign_id?: string | null
+          source_ctwa_clid?: string | null
+          source_referral?: Json | null
           status?: string
           status_financeiro?: string | null
           summary_updated_at?: string | null
