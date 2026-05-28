@@ -17,6 +17,47 @@ function inferNameSource(name: string | null | undefined, currentSource: string 
   return value ? "whatsapp_profile" : "unknown";
 }
 
+/**
+ * Reasons de pausa que o envio manual NUNCA pode tirar.
+ *
+ * Caso de uso (super admin): o consultor pausa o bot para todos os leads
+ * (`manual_global_pause`) durante a fase de teste do Fluxo D, mas precisa
+ * usar o botão de envio manual em conversas individuais. Antes deste fix,
+ * o `manual-step-send` zerava `bot_paused` no fim, fazendo o bot voltar
+ * a responder sozinho na próxima inbound do cliente — quebrando a
+ * intenção de "todos os leads ficam com humano".
+ *
+ * Pausas ainda removidas pelo manual-step-send: pausas automáticas
+ * (`lead_nao_responde`, `low_confidence_handoff`, `engine_v3_error`,
+ * `*_retry_exhausted` etc.) — nesses casos o consultor está intervindo
+ * deliberadamente, faz sentido devolver o controle ao bot.
+ */
+const PRESERVED_PAUSE_REASONS = new Set([
+  "manual_global_pause",
+  "humano_assumiu_backfill",
+]);
+
+/**
+ * Constrói o patch de update do customer respeitando pausas que NÃO
+ * devem ser tiradas por envio manual. Quando a pausa é preservada,
+ * `bot_paused`/`bot_paused_reason`/`bot_paused_at`/`assigned_human_id`
+ * são omitidos do patch para não sobrescrever os valores atuais.
+ */
+function buildUnpausePatch(customer: any): Record<string, any> {
+  const reason = String(customer?.bot_paused_reason || "");
+  const preserve = customer?.bot_paused === true && PRESERVED_PAUSE_REASONS.has(reason);
+  if (preserve) {
+    return {}; // pausa preservada
+  }
+  return {
+    bot_paused: false,
+    bot_paused_reason: null,
+    bot_paused_at: null,
+    bot_paused_until: null,
+    assigned_human_id: null,
+  };
+}
+
 interface Body {
   consultantId: string;
   customerId: string;
@@ -606,11 +647,7 @@ Deno.serve(async (req) => {
         });
         await supabase.from("customers").update({
           conversation_step: legacy,
-          bot_paused: false,
-          bot_paused_reason: null,
-          bot_paused_at: null,
-          bot_paused_until: null,
-          assigned_human_id: null,
+          ...buildUnpausePatch(customer),
           custom_step_retries: 0,
           custom_step_retries_step: null,
           last_custom_prompt_at: new Date().toISOString(),
@@ -654,11 +691,7 @@ Deno.serve(async (req) => {
         });
         await supabase.from("customers").update({
           conversation_step: legacyStep,
-          bot_paused: false,
-          bot_paused_reason: null,
-          bot_paused_at: null,
-          bot_paused_until: null,
-          assigned_human_id: null,
+          ...buildUnpausePatch(customer),
           custom_step_retries: 0,
           custom_step_retries_step: null,
           last_custom_prompt_at: new Date().toISOString(),
@@ -680,11 +713,7 @@ Deno.serve(async (req) => {
       if (body.continueFlow && body.part === "all") {
         await supabase.from("customers").update({
           conversation_step: (step as any).step_key || (step as any).id,
-          bot_paused: false,
-          bot_paused_reason: null,
-          bot_paused_at: null,
-          bot_paused_until: null,
-          assigned_human_id: null,
+          ...buildUnpausePatch(customer),
           custom_step_retries: 0,
           custom_step_retries_step: null,
           updated_at: new Date().toISOString(),
@@ -870,10 +899,7 @@ Deno.serve(async (req) => {
 
 async function buildContinuationPatch(supabase: any, sender: any, remoteJid: string, consultantId: string, customer: any, step: any, vars: Record<string, string>, variant: string = "A") {
   const patch: any = {
-    bot_paused: false,
-    bot_paused_reason: null,
-    bot_paused_at: null,
-    assigned_human_id: null,
+    ...buildUnpausePatch(customer),
     custom_step_retries: 0,
     custom_step_retries_step: null,
     updated_at: new Date().toISOString(),
