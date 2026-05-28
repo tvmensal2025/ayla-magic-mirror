@@ -214,7 +214,6 @@ Deno.serve(async (req) => {
       let buttons: Array<{ id: string; title: string }>;
       if (isBill) {
         const v = Number((customer as any).electricity_bill_value || 0);
-        const m = v * 0.20, a = m * 12;
         confirmMsg =
           "📋 *Dados da conta:*\n\n" +
           `👤 *Nome:* ${(customer as any).bill_holder_name || (customer as any).name || "❌"}\n` +
@@ -224,8 +223,7 @@ Deno.serve(async (req) => {
           `📮 *CEP:* ${(customer as any).cep || "❌"}\n` +
           `⚡ *Distribuidora:* ${(customer as any).distribuidora || "❌"}\n` +
           `🔢 *Nº Instalação:* ${(customer as any).numero_instalacao || "❌"}\n` +
-          `💰 *Valor:* R$ ${fmtBRL(v)}\n` +
-          `💚 *Economia estimada:* até R$ ${fmtBRL(m)}/mês • até R$ ${fmtBRL(a)}/ano (até 20%)\n\n` +
+          `💰 *Valor:* R$ ${fmtBRL(v)}\n\n` +
           "Está tudo correto?";
         buttons = [
           { id: "sim_conta", title: "✅ SIM" },
@@ -983,22 +981,28 @@ Deno.serve(async (req) => {
 
     // Garantia: se o step tem _buttons mas a última mídia não foi texto,
     // envia os botões em uma mensagem separada (caso a ordem termine em vídeo/imagem).
+    // 🔧 (2026-05-28): em vez de "Escolha uma opção" (visualmente parece outra
+    // mensagem do bot), reusa o texto do step se existir, ou "." mínimo.
     if (sentLog.length > 0 && _buttons.length > 0 && !buttonsSentManual) {
       try {
         const renderedButtons = _buttons.map((b) => ({
           id: b.id,
           title: applyVarsBtn(b.title).slice(0, 20),
         }));
-        const prompt = "👇 Escolha uma opção:";
         await new Promise((r) => setTimeout(r, 600));
-        await sender.sendButtons(remoteJid, prompt, renderedButtons);
-        await supabase.from("conversations").insert({
-          customer_id: customer.id,
-          message_direction: "outbound",
-          message_text: prompt,
-          message_type: "text",
-          conversation_step: (step as any).step_key || null,
-        });
+        const stepText = renderedText && renderedText.trim().length > 0
+          ? renderedText
+          : ".";
+        await sender.sendButtons(remoteJid, stepText, renderedButtons);
+        if (stepText !== "." && !sentLog.some((s: any) => s.kind === "text")) {
+          await supabase.from("conversations").insert({
+            customer_id: customer.id,
+            message_direction: "outbound",
+            message_text: stepText,
+            message_type: "text",
+            conversation_step: (step as any).step_key || null,
+          });
+        }
         sentLog.push({ kind: "buttons", standalone: true });
       } catch (e) {
         console.warn("[manual-step-send] envio dos botões (fallback) falhou:", (e as Error).message);

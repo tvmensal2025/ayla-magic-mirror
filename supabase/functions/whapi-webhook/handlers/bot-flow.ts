@@ -472,22 +472,20 @@ function _formatBRL(n: number): string {
 }
 function buildConfirmacaoConta(merged: any): string {
   const v = Number(merged.electricity_bill_value || 0);
-  const m = v * 0.20, a = m * 12;
   return "📋 *Dados da conta:*\n\n" +
-    `👤 *Nome:* ${merged.name || "❌"}\n` +
+    `👤 *Nome:* ${merged.bill_holder_name || merged.name || "❌"}\n` +
     `📍 *Endereço:* ${merged.address_street || "❌"} ${merged.address_number || ""}\n` +
     `🏘️ *Bairro:* ${merged.address_neighborhood || "❌"}\n` +
     `🏙️ *Cidade:* ${merged.address_city || "❌"} - ${merged.address_state || ""}\n` +
     `📮 *CEP:* ${merged.cep || "❌"}\n` +
     `⚡ *Distribuidora:* ${merged.distribuidora || "❌"}\n` +
     `🔢 *Nº Instalação:* ${merged.numero_instalacao || "❌"}\n` +
-    `💰 *Valor:* R$ ${_formatBRL(v)}\n` +
-    `💚 *Economia estimada:* até R$ ${_formatBRL(m)}/mês • até R$ ${_formatBRL(a)}/ano (até 20%)\n\n` +
+    `💰 *Valor:* R$ ${_formatBRL(v)}\n\n` +
     "Está tudo correto?";
 }
 function buildConfirmacaoDoc(merged: any): string {
   return `📋 *Confirme seus dados pessoais:*\n\n` +
-    `👤 Nome: *${merged.name || "—"}*\n` +
+    `👤 Nome: *${merged.doc_holder_name || merged.name || "—"}*\n` +
     `🆔 CPF: *${merged.cpf || "—"}*\n` +
     `🪪 RG: *${merged.rg || "—"}*\n` +
     `🎂 Nascimento: *${merged.data_nascimento || "—"}*\n\n` +
@@ -1311,23 +1309,33 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       // Garantia: se o step tem _buttons mas o texto não foi o último item
       // (ex.: ordem text→audio→video deixa o vídeo por último), enviamos os
       // botões em uma mensagem separada para que o lead possa escolher.
+      // 🔧 (2026-05-28): com o reorder acima (texto sempre último quando há
+      // botões), este fallback raramente é necessário. Mantido como
+      // segurança caso step só tenha mídia + botões. Mensagem foi mudada
+      // para evitar confusão visual com o "Escolha uma opção" da UI.
       if (sent && _buttons.length > 0 && !buttonsSent) {
         try {
           const renderedButtons = _buttons.map((b) => ({
             id: b.id,
             title: applyVars(b.title).slice(0, 20),
           }));
-          const prompt = "👇 Escolha uma opção:";
           // 🧪 mock: pula pausa antes dos botões
           if (!isMockMode() && !isFlowInstantMode()) await new Promise((r) => setTimeout(r, 600));
-          await sendButtons(remoteJid, prompt, renderedButtons);
-          await supabase.from("conversations").insert({
-            customer_id: customer.id,
-            message_direction: "outbound",
-            message_text: prompt,
-            message_type: "text",
-            conversation_step: stepKey,
-          });
+          // Se há texto no step, reusa ele com botões (resposta robusta).
+          // Caso contrário, usa só "."  (whatsapp obriga texto não-vazio).
+          const fallbackText = baseText && baseText.trim().length > 0
+            ? baseText
+            : ".";
+          await sendButtons(remoteJid, fallbackText, renderedButtons);
+          if (fallbackText !== "." && !items.find((it) => it.kind === "text")) {
+            await supabase.from("conversations").insert({
+              customer_id: customer.id,
+              message_direction: "outbound",
+              message_text: fallbackText,
+              message_type: "text",
+              conversation_step: stepKey,
+            });
+          }
           buttonsSent = true;
         } catch (e) {
           console.warn(`[dispatch:${stepKey}] envio dos botões (fallback) falhou:`, (e as any)?.message);
@@ -4492,11 +4500,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       updates.email = txt.toLowerCase();
       const merged = { ...customer, ...updates };
       const next = await autoResolveCepIfNeeded(merged, updates);
-      updates.conversation_step = next;
-      if (next === "ask_email") {
-        reply = "❌ E-mail não aceito. Me manda *outro e-mail seu* (qualquer provedor):";
+      // 🚀 Atalho (2026-05-28): se email foi o último dado e o sistema iria
+      // perguntar "Deseja finalizar?", pula esse passo e finaliza direto.
+      // Evita 1 mensagem + 1 botão desnecessário no final.
+      if (next === "ask_finalizar") {
+        updates.conversation_step = "finalizando";
+        reply = "✅ Tudo certo! Processando seu cadastro no portal iGreen...";
       } else {
-        reply = getReplyForStep(next, merged);
+        updates.conversation_step = next;
+        if (next === "ask_email") {
+          reply = "❌ E-mail não aceito. Me manda *outro e-mail seu* (qualquer provedor):";
+        } else {
+          reply = getReplyForStep(next, merged);
+        }
       }
       break;
     }

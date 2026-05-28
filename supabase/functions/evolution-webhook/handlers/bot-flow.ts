@@ -487,22 +487,20 @@ function _formatBRL(n: number): string {
 }
 function buildConfirmacaoConta(merged: any): string {
   const v = Number(merged.electricity_bill_value || 0);
-  const m = v * 0.20, a = m * 12;
   return "📋 *Dados da conta:*\n\n" +
-    `👤 *Nome:* ${merged.name || "❌"}\n` +
+    `👤 *Nome:* ${merged.bill_holder_name || merged.name || "❌"}\n` +
     `📍 *Endereço:* ${merged.address_street || "❌"} ${merged.address_number || ""}\n` +
     `🏘️ *Bairro:* ${merged.address_neighborhood || "❌"}\n` +
     `🏙️ *Cidade:* ${merged.address_city || "❌"} - ${merged.address_state || ""}\n` +
     `📮 *CEP:* ${merged.cep || "❌"}\n` +
     `⚡ *Distribuidora:* ${merged.distribuidora || "❌"}\n` +
     `🔢 *Nº Instalação:* ${merged.numero_instalacao || "❌"}\n` +
-    `💰 *Valor:* R$ ${_formatBRL(v)}\n` +
-    `💚 *Economia estimada:* até R$ ${_formatBRL(m)}/mês • até R$ ${_formatBRL(a)}/ano (até 20%)\n\n` +
+    `💰 *Valor:* R$ ${_formatBRL(v)}\n\n` +
     "Está tudo correto?";
 }
 function buildConfirmacaoDoc(merged: any): string {
   return `📋 *Confirme seus dados pessoais:*\n\n` +
-    `👤 Nome: *${merged.name || "—"}*\n` +
+    `👤 Nome: *${merged.doc_holder_name || merged.name || "—"}*\n` +
     `🆔 CPF: *${merged.cpf || "—"}*\n` +
     `🪪 RG: *${merged.rg || "—"}*\n` +
     `🎂 Nascimento: *${merged.data_nascimento || "—"}*\n\n` +
