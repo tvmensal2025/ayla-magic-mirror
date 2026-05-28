@@ -5302,6 +5302,16 @@ export type Database = {
         }
         Relationships: []
       }
+      v_bot_engine_health: {
+        Row: {
+          channel: string | null
+          consultant_id: string | null
+          kind: string | null
+          mode: string | null
+          occurrences: number | null
+        }
+        Relationships: []
+      }
       v_flow_engine_health: {
         Row: {
           consultant_id: string | null
