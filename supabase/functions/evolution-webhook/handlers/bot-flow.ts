@@ -1102,7 +1102,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       // Precedência: UI (consultants.flow_step_media_order[slotKey]) → bot_flow_steps.media_order → default.
       // A UI do /admin/fluxos grava em consultants.flow_step_media_order, então ela vence
       // o default semeado em bot_flow_steps.media_order.
-      const uiOrder = await getStepMediaOrder(supabase, customer.consultant_id, slotKey);
+      const uiOrder = await getStepMediaOrder(supabase, customer.consultant_id, [(stepRow as any).step_key || stepKey, slotKey]);
       const stepOrder = Array.isArray((stepRow as any).media_order) && (stepRow as any).media_order.length > 0
         ? (stepRow as any).media_order.map((k: any) => String(k).toLowerCase())
         : null;
@@ -1384,7 +1384,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }));
     if (responseText) items.push({ kind: "text", text: responseText });
 
-    const _qaOrder = (await getStepMediaOrder(supabase, customer.consultant_id, step)) || ["text", "audio", "image", "video", "document"];
+    const _qaOrder = (await getStepMediaOrder(supabase, customer.consultant_id, [step])) || ["text", "audio", "image", "video", "document"];
     items.sort(makeKindComparator((it: QaItem) => it.kind, _qaOrder));
 
     for (let mi = 0; mi < items.length; mi++) {
@@ -1533,7 +1533,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               .order("position");
 
             const orderedMedia = (medias as any[]) || [];
-            const _openOrder = await getStepMediaOrder(supabase, customer.consultant_id, step);
+            const _openOrder = await getStepMediaOrder(supabase, customer.consultant_id, [step]);
             if (_openOrder) orderedMedia.sort(makeKindComparator((m: any) => m.media_kind, _openOrder));
             let sentSomething = false;
 
@@ -4190,7 +4190,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     // ─── 11. CONFIRMAR FINALIZAR ────────
     case "ask_quero_cadastrar": {
       const resp = (isButton ? buttonId : messageText.toLowerCase().trim()) || "";
-      const triggers = ["btn_quero_cadastrar", "quero_cadastrar", "sim_cadastrar", "1", "sim", "s", "quero", "bora", "vamos", "vamo", "pode", "ok", "blz", "beleza"];
+      const triggers = ["btn_quero_cadastrar", "quero_cadastrar", "sim_cadastrar", "cadastrar", "btn_cadastrar", "quero_simular", "btn_simular", "simular", "btn_quero_simular", "1", "sim", "s", "quero", "bora", "vamos", "vamo", "pode", "ok", "blz", "beleza"];
       const wants = triggers.includes(resp) || /^(sim|quero|bora|vamos|pode|ok)\b/i.test(resp);
       if (wants) {
         try {

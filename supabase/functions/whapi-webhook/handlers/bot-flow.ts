@@ -1209,7 +1209,9 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       // Precedência: UI (consultants.flow_step_media_order[slotKey]) → bot_flow_steps.media_order → default.
       // A UI do /admin/fluxos grava em consultants.flow_step_media_order, então ela vence
       // o default semeado em bot_flow_steps.media_order.
-      const uiOrder = await getStepMediaOrder(supabase, customer.consultant_id, slotKey);
+      // Tenta primeiro por step_key (como a UI /admin/fluxos salva) e cai
+      // em slot_key como compatibilidade retroativa.
+      const uiOrder = await getStepMediaOrder(supabase, customer.consultant_id, [stepKey, slotKey]);
       const stepOrder = Array.isArray((stepRow as any).media_order) && (stepRow as any).media_order.length > 0
         ? (stepRow as any).media_order.map((k: any) => String(k).toLowerCase())
         : null;
@@ -1525,7 +1527,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }));
     if (responseText) items.push({ kind: "text", text: responseText });
 
-    const _qaOrder = (await getStepMediaOrder(supabase, customer.consultant_id, step)) || ["text", "audio", "image", "video", "document"];
+    const _qaOrder = (await getStepMediaOrder(supabase, customer.consultant_id, [step])) || ["text", "audio", "image", "video", "document"];
     items.sort(makeKindComparator((it: QaItem) => it.kind, _qaOrder));
 
     for (let mi = 0; mi < items.length; mi++) {
@@ -1674,7 +1676,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
               .order("position");
 
             const orderedMedia = (medias as any[]) || [];
-            const _openOrder = await getStepMediaOrder(supabase, customer.consultant_id, step);
+            const _openOrder = await getStepMediaOrder(supabase, customer.consultant_id, [step]);
             if (_openOrder) orderedMedia.sort(makeKindComparator((m: any) => m.media_kind, _openOrder));
             let sentSomething = false;
 
@@ -3508,7 +3510,7 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             if (_flowRow2?.id) {
               const { data: _allSteps } = await supabase
                 .from("bot_flow_steps")
-                .select("id, position, step_key, step_type, is_active")
+                .select("id, position, step_key, step_type, is_active, captures")
                 .eq("flow_id", (_flowRow2 as any).id).eq("is_active", true)
                 .gt("position", _captureContaPos)
                 .order("position", { ascending: true });
@@ -3546,6 +3548,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 await dispatchStepFromFlow(m.step_key, _vars);
                 if (!isMockMode()) await new Promise((r) => setTimeout(r, 1800));
               }
+              // 🚦 Detecta se o ÚLTIMO passo `message` da CHAIN já tem botões
+              // interativos configurados (ex.: d_resultado com [cadastrar]
+              // [dúvida] [falar com Rafael]). Se sim, NÃO duplicar o CTA
+              // "Quero me cadastrar" mais abaixo — o próprio step já cumpre.
+              try {
+                const lastMsg = messagesOnly[messagesOnly.length - 1];
+                if (lastMsg) {
+                  const caps = Array.isArray((lastMsg as any).captures) ? (lastMsg as any).captures : [];
+                  const btnCap = caps.find((c: any) => c?.field === "_buttons" && c?.enabled !== false);
+                  const hasButtons = btnCap && Array.isArray(btnCap.value) && btnCap.value.length > 0;
+                  (updates as any).__last_chain_had_buttons = !!hasButtons;
+                }
+              } catch (_) { /* best-effort */ }
               if (_stopIdx >= 0) {
                 nextCustom = stepsAfter[_stopIdx];
               } else {
@@ -3586,17 +3601,24 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
           // messages acima) e PARA. Só quando o cliente clicar "Quero me
           // cadastrar" é que o capture_documento dispara. Nunca encadear.
           if (nextCustom.step_type === "capture_documento" || nextCustom.step_type === "capture_doc") {
-            try {
-              const ctaText = "Pra continuar seu cadastro e garantir essa economia, é só tocar no botão abaixo 👇";
-              await sendOptions(remoteJid, ctaText, [
-                { id: "btn_quero_cadastrar", title: "✅ Quero me cadastrar" },
-              ]);
-              await supabase.from("conversations").insert({
-                customer_id: customer.id, message_direction: "outbound",
-                message_text: ctaText, message_type: "text", conversation_step: "ask_quero_cadastrar",
-              });
-            } catch (e) {
-              console.warn(`[post-confirm-conta] envio do CTA quero_cadastrar falhou:`, (e as Error).message);
+            // Se o último passo `message` da CHAIN (ex.: d_resultado) já tem
+            // botões interativos próprios (cadastrar/dúvida/falar humano),
+            // NÃO duplicar com outro CTA — o step do consultor já cumpre o papel.
+            if ((updates as any).__last_chain_had_buttons) {
+              console.log("[post-confirm-conta] skip CTA quero_cadastrar — último step da chain já tem botões próprios");
+            } else {
+              try {
+                const ctaText = "Pra continuar seu cadastro e garantir essa economia, é só tocar no botão abaixo 👇";
+                await sendOptions(remoteJid, ctaText, [
+                  { id: "btn_quero_cadastrar", title: "✅ Quero me cadastrar" },
+                ]);
+                await supabase.from("conversations").insert({
+                  customer_id: customer.id, message_direction: "outbound",
+                  message_text: ctaText, message_type: "text", conversation_step: "ask_quero_cadastrar",
+                });
+              } catch (e) {
+                console.warn(`[post-confirm-conta] envio do CTA quero_cadastrar falhou:`, (e as Error).message);
+              }
             }
             updates.conversation_step = "ask_quero_cadastrar";
           } else {
@@ -4759,8 +4781,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       // 🚦 Gate entre simulação (após confirmar conta) e captura do documento.
       // Só dispara capture_documento quando o cliente confirmar explicitamente.
       const resp = (isButton ? buttonId : messageText.toLowerCase().trim()) || "";
-      const triggers = ["btn_quero_cadastrar", "quero_cadastrar", "sim_cadastrar", "1", "sim", "s", "quero", "bora", "vamos", "vamo", "vamos la", "pode", "pode ser", "ok", "blz", "beleza"];
-      const wants = triggers.includes(resp) || /^(sim|quero|bora|vamos|pode|ok)\b/i.test(resp);
+      const triggers = [
+        "btn_quero_cadastrar", "quero_cadastrar", "sim_cadastrar", "cadastrar", "btn_cadastrar",
+        "quero_simular", "btn_simular", "simular", "btn_quero_simular",
+        "1", "sim", "s", "quero", "bora", "vamos", "vamo", "vamos la", "pode", "pode ser", "ok", "blz", "beleza",
+      ];
+      const wants = triggers.includes(resp) || /^(sim|quero|bora|vamos|pode|ok|cadastr|simular)\b/i.test(resp);
       if (wants) {
         // Procura o passo capture_documento do fluxo ativo e dispara.
         try {
