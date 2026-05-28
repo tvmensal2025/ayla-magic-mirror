@@ -128,6 +128,22 @@ export function InsightsPanel({ consultantId }: Props) {
               <p className="text-sm text-foreground font-medium">💡 {insight.summary}</p>
             </div>
           )}
+          {freqAlert && freqAlert.max >= 3 && (
+            <div className={`p-3 rounded-lg border flex gap-2 items-start ${freqAlert.max >= 4 ? "bg-destructive/10 border-destructive/40" : "bg-amber-500/10 border-amber-500/40"}`}>
+              <AlertTriangle className={`w-4 h-4 mt-0.5 ${freqAlert.max >= 4 ? "text-destructive" : "text-amber-500"}`} />
+              <div className="text-xs">
+                <p className="font-semibold text-foreground">
+                  {freqAlert.max >= 4 ? "Audiência saturada" : "Frequência alta"} — pico de {freqAlert.max.toFixed(1)}x, média {freqAlert.avg.toFixed(1)}x (7 dias)
+                </p>
+                <p className="text-muted-foreground mt-0.5">
+                  {freqAlert.max >= 4
+                    ? "Mesma pessoa vendo 4+ vezes. Troque criativo ou amplie público para evitar fadiga e queda de CTR."
+                    : "Comece a planejar criativo novo — se passar de 4x, o CPL sobe."}
+                </p>
+              </div>
+            </div>
+          )}
+
 
           <div className="grid md:grid-cols-2 gap-3">
             <div>
