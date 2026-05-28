@@ -1194,26 +1194,8 @@ Deno.serve(async (req) => {
     let updates: Record<string, any> = {};
     let engineUsed: "sys" | "flow" = "sys";
 
-    // ─── 7.6) Engine v3 — hook compartilhado (Semana 1 do rollout v3) ──
-    // Helper único em `_shared/flow-engine/webhook-hook.ts` evita drift
-    // entre whapi-webhook (produção) e evolution-webhook (espelho).
-    // Fail-open: erro no v3 nunca bloqueia o caminho legado.
-    try {
-      const { runEngineV3IfEnabled } = await import("../_shared/flow-engine/webhook-hook.ts");
-      await runEngineV3IfEnabled({
-        supabase,
-        customerId: customer.id,
-        consultantId: instanceData.consultant_id,
-        legacyStep: stepBefore,
-        inboundKind: isButton ? "button_click" : (hasImage || hasDocument || hasAudio ? "media" : "text"),
-        inboundText: messageText ?? null,
-        inboundButtonId: buttonId ?? null,
-        inboundMediaKind: hasAudio ? "audio" : hasImage ? "image" : hasDocument ? "document" : null,
-        inboundMessageId: messageId ?? null,
-      });
-    } catch (e: any) {
-      console.warn("[engine-v3-hook] erro não-bloqueante:", e?.message);
-    }
+    // Engine V3 aposentado (Fase 1 da limpeza de motores) — hook removido.
+
 
     try {
       const customerOverride = (customer as any).conversational_flow_enabled;
