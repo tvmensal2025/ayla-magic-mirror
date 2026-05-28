@@ -12,12 +12,14 @@ interface ParceirosTabProps {
   consultantPhone: string;
   consultantName?: string;
   consultantIgreenId?: string;
+  consultantSlug?: string;
 }
 
 export function ParceirosTab({
   consultantPhone,
   consultantName = "",
   consultantIgreenId = "",
+  consultantSlug = "",
 }: ParceirosTabProps) {
   const [formOpen, setFormOpen] = useState(false);
   const [editingPartner, setEditingPartner] = useState<ReferralPartner | null>(
@@ -85,6 +87,10 @@ export function ParceirosTab({
         onEdit={handleEdit}
         onDelete={handleDelete}
         onQrCode={setQrPartner}
+        consultantName={consultantName}
+        consultantPhone={consultantPhone}
+        consultantIgreenId={consultantIgreenId}
+        consultantSlug={consultantSlug}
       />
 
       <PartnerForm
