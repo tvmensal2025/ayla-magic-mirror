@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Brain, RefreshCw, TrendingUp, TrendingDown, Lightbulb } from "lucide-react";
+import { Brain, RefreshCw, TrendingUp, TrendingDown, Lightbulb, AlertTriangle } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
