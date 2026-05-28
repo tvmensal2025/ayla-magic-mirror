@@ -546,7 +546,7 @@ const SuperAdmin = () => {
         {activeTab === "financeiro" && <PlatformPnLCard />}
         {activeTab === "saude_rede" && <NetworkHealthPanel />}
         {activeTab === "ia_aprendendo" && <AILearningHealthPanel />}
-        {activeTab === "rollout" && <RolloutPanel />}
+        {/* aba rollout removida — Engine V3 aposentado */}
         </Suspense>
       </main>
     </div>
