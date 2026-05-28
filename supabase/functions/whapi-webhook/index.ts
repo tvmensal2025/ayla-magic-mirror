@@ -942,16 +942,8 @@ Deno.serve(async (req) => {
     // O consultor controla o próximo tile. Texto livre do lead não deve rodar
     // o motor conversacional nem avançar automaticamente para o próximo passo.
     //
-    // EXCEÇÃO: quando engine v3 está ativo para o consultor, o v3 toma
-    // posse do turno e o helper `runEngineV3WebhookEntry` zera o
-    // `capture_mode` para "auto" antes de chamar o engine. Por isso
-    // aqui pulamos o short-circuit quando a flag está ON — o ramo v3
-    // mais adiante neste mesmo handler vai responder.
-    let _v3Active = false;
-    try {
-      const { isEngineV3Enabled: _isV3 } = await import("../_shared/flow-engine/router.ts");
-      _v3Active = await _isV3(supabase as any, superAdminConsultantId);
-    } catch (_) {/* swallow */}
+    // Engine V3 aposentado (Fase 1 da limpeza de motores) — sempre inativo.
+    const _v3Active = false;
     if (!_v3Active && (customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
       // Fluxo D é 100% automático (welcome com botões → capture conta → OCR → ...).
       // Nunca aplicar o short-circuit "manual_capture_text_saved_no_auto_flow"
