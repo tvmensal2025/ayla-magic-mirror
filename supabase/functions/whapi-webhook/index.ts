@@ -733,8 +733,12 @@ Deno.serve(async (req) => {
     const isCustomFlowStep = UUID_RX_LOCAL.test(currentStep) || currentStep.startsWith("passo_");
     const isCaptureModeManual = (customer as any)?.capture_mode === "manual";
     const inActiveCapture = ACTIVE_CAPTURE_STEPS.has(currentStep) || (isCaptureModeManual && isCustomFlowStep);
+    // Override por lead: customer.bot_force_enabled=true ignora IA global off.
+    // Setado pelo botão "Zerar" (via trigger apply_force_bot_on_customer_insert
+    // + tabela force_bot_phones) e pelo toggle individual no chat.
+    const forceBotForLead = (customer as any)?.bot_force_enabled === true;
 
-    if (globalAiDisabled === true && !isFile && !inActiveCapture) {
+    if (globalAiDisabled === true && !isFile && !inActiveCapture && !forceBotForLead) {
       await supabase.from("conversations").insert({
         customer_id: customer.id,
         message_direction: "inbound",
@@ -746,6 +750,9 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, msg: "global_ai_disabled_inbound_saved" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+    if (globalAiDisabled === true && forceBotForLead) {
+      console.log(`✅ [force-bot-active] IA global off, mas customer=${customer.id} tem bot_force_enabled=true → bot responde`);
     }
 
     // silentMode = arquivo recebido com IA manual MAS fora de qualquer passo
