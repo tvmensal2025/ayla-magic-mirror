@@ -91,7 +91,8 @@ Deno.serve(async (req) => {
 
     const authHeader = req.headers.get("Authorization") || "";
     const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-    const isCron = authHeader === `Bearer ${serviceRole}`;
+    // Cron pode chamar via Bearer service_role OU sem Authorization (apikey-anon validado pelo gateway).
+    const isCron = authHeader === `Bearer ${serviceRole}` || (!authHeader && req.headers.get("apikey"));
     if (!isCron) {
       const auth = await authConsultant(req);
       if (!auth) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
