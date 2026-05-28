@@ -495,9 +495,15 @@ function buildConfirmacaoDoc(merged: any): string {
 }
 
 export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
+  // ⚠️ Quiet hours NÃO se aplica em webhook reativo (cliente mandou msg agora
+  // e espera resposta). Silêncio noturno só vale para crons proativos.
+  // Removido em 2026-05-28 após inbound noturno deixar leads sem resposta.
   if (isQuietHourBRT() && !shouldBypassQuietHours()) {
-    logQuietSkip("bot-flow", { customer_id: ctx.customer?.id, phone: ctx.phone });
-    return { reply: null, updates: {} } as BotResult;
+    logQuietSkip("bot-flow_reactive_bypass", {
+      customer_id: ctx.customer?.id,
+      phone: ctx.phone,
+      note: "quiet hours não bloqueia resposta a inbound",
+    });
   }
   const {
     supabase,

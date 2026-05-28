@@ -744,9 +744,16 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     };
   }
 
+  // ⚠️ Quiet hours NÃO se aplica em webhook reativo: o lead mandou
+  // mensagem agora e espera resposta. Silêncio noturno só vale para
+  // crons proativos (ai-followup-cron, bot-followup-checker, etc.).
+  // Removido em 2026-05-28 após customer travar no welcome quando inbound
+  // chegou às 22:32 BRT (dentro da janela 21:30-08:00).
   if (isQuietHourBRT() && !shouldBypassQuietHours()) {
-    logQuietSkip("conversational", { customer_id: ctx.customer?.id });
-    return { reply: "", updates: {} } as BotResult;
+    logQuietSkip("conversational_reactive_bypass", {
+      customer_id: ctx.customer?.id,
+      note: "quiet hours não bloqueia resposta a inbound",
+    });
   }
   let stepKey = (ctx.customer.conversation_step || "welcome") as string;
   _currentTurnCustomerId = (ctx.customer?.id as string) || null;
