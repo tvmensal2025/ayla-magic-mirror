@@ -4781,8 +4781,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
       // 🚦 Gate entre simulação (após confirmar conta) e captura do documento.
       // Só dispara capture_documento quando o cliente confirmar explicitamente.
       const resp = (isButton ? buttonId : messageText.toLowerCase().trim()) || "";
-      const triggers = ["btn_quero_cadastrar", "quero_cadastrar", "sim_cadastrar", "1", "sim", "s", "quero", "bora", "vamos", "vamo", "vamos la", "pode", "pode ser", "ok", "blz", "beleza"];
-      const wants = triggers.includes(resp) || /^(sim|quero|bora|vamos|pode|ok)\b/i.test(resp);
+      const triggers = [
+        "btn_quero_cadastrar", "quero_cadastrar", "sim_cadastrar", "cadastrar", "btn_cadastrar",
+        "quero_simular", "btn_simular", "simular", "btn_quero_simular",
+        "1", "sim", "s", "quero", "bora", "vamos", "vamo", "vamos la", "pode", "pode ser", "ok", "blz", "beleza",
+      ];
+      const wants = triggers.includes(resp) || /^(sim|quero|bora|vamos|pode|ok|cadastr|simular)\b/i.test(resp);
       if (wants) {
         // Procura o passo capture_documento do fluxo ativo e dispara.
         try {
