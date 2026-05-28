@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Brain, RefreshCw, TrendingUp, TrendingDown, Lightbulb } from "lucide-react";
+import { Brain, RefreshCw, TrendingUp, TrendingDown, Lightbulb, AlertTriangle } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -32,17 +32,38 @@ export function InsightsPanel({ consultantId }: Props) {
   const [insight, setInsight] = useState<Insight | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [freqAlert, setFreqAlert] = useState<{ avg: number; max: number; days: number } | null>(null);
 
   async function load() {
     setLoading(true);
-    const { data } = await supabase
-      .from("ad_creative_insights")
-      .select("winning_patterns, losing_patterns, best_image_traits, best_image_briefs, summary, sample_size, best_ctr_bps, best_cpa_cents, updated_at")
-      .eq("consultant_id", consultantId)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const [{ data }, { data: freqRows }] = await Promise.all([
+      supabase
+        .from("ad_creative_insights")
+        .select("winning_patterns, losing_patterns, best_image_traits, best_image_briefs, summary, sample_size, best_ctr_bps, best_cpa_cents, updated_at")
+        .eq("consultant_id", consultantId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("facebook_metrics_daily")
+        .select("frequency_x100, facebook_campaigns!inner(consultant_id)")
+        .eq("facebook_campaigns.consultant_id", consultantId)
+        .gte("date", since),
+    ]);
     setInsight(data as Insight | null);
+    if (freqRows && freqRows.length > 0) {
+      const freqs = freqRows.map((r: any) => (r.frequency_x100 || 0) / 100).filter(f => f > 0);
+      if (freqs.length > 0) {
+        const avg = freqs.reduce((a, b) => a + b, 0) / freqs.length;
+        const max = Math.max(...freqs);
+        setFreqAlert({ avg, max, days: freqs.length });
+      } else {
+        setFreqAlert(null);
+      }
+    } else {
+      setFreqAlert(null);
+    }
     setLoading(false);
   }
 
@@ -107,6 +128,22 @@ export function InsightsPanel({ consultantId }: Props) {
               <p className="text-sm text-foreground font-medium">💡 {insight.summary}</p>
             </div>
           )}
+          {freqAlert && freqAlert.max >= 3 && (
+            <div className={`p-3 rounded-lg border flex gap-2 items-start ${freqAlert.max >= 4 ? "bg-destructive/10 border-destructive/40" : "bg-amber-500/10 border-amber-500/40"}`}>
+              <AlertTriangle className={`w-4 h-4 mt-0.5 ${freqAlert.max >= 4 ? "text-destructive" : "text-amber-500"}`} />
+              <div className="text-xs">
+                <p className="font-semibold text-foreground">
+                  {freqAlert.max >= 4 ? "Audiência saturada" : "Frequência alta"} — pico de {freqAlert.max.toFixed(1)}x, média {freqAlert.avg.toFixed(1)}x (7 dias)
+                </p>
+                <p className="text-muted-foreground mt-0.5">
+                  {freqAlert.max >= 4
+                    ? "Mesma pessoa vendo 4+ vezes. Troque criativo ou amplie público para evitar fadiga e queda de CTR."
+                    : "Comece a planejar criativo novo — se passar de 4x, o CPL sobe."}
+                </p>
+              </div>
+            </div>
+          )}
+
 
           <div className="grid md:grid-cols-2 gap-3">
             <div>
