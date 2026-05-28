@@ -1,18 +1,5 @@
-import { useState } from "react";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  ArrowDown,
-  ArrowUp,
-  BadgeCheck,
-  Check,
-  Copy,
-  ExternalLink,
-  Phone,
-  Users,
-} from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import { ArrowDown, ArrowUp, Crown, Sparkles, TrendingUp, Users } from "lucide-react";
 import type { LicenseeStats } from "../hooks/useLicenseeStats";
 
 interface Props {
@@ -23,100 +10,48 @@ interface Props {
   stats: LicenseeStats;
 }
 
-function formatPhoneDisplay(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
-  const noCountry = digits.startsWith("55") ? digits.slice(2) : digits;
-  if (noCountry.length === 11) {
-    return `+55 (${noCountry.slice(0, 2)}) ${noCountry.slice(2, 7)}-${noCountry.slice(7)}`;
-  }
-  if (noCountry.length === 10) {
-    return `+55 (${noCountry.slice(0, 2)}) ${noCountry.slice(2, 6)}-${noCountry.slice(6)}`;
-  }
-  return phone || "";
-}
-
-export function LicenseeHeader({ name, phone, igreenId, slug, stats }: Props) {
-  const { toast } = useToast();
-  const [copied, setCopied] = useState(false);
-
-  const lpUrl =
-    slug && slug !== "sua-licenca"
-      ? `https://igreen.cloud/${slug}`
-      : "";
-
-  const initials = (name || "?")
-    .split(" ")
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-
-  const handleCopy = async () => {
-    if (!lpUrl) {
-      toast({
-        title: "Defina seu slug de licença em Dados",
-        variant: "destructive",
-      });
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(lpUrl);
-      setCopied(true);
-      toast({ title: "Link da sua LP copiado!" });
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast({ title: "Não foi possível copiar", variant: "destructive" });
-    }
-  };
-
+export function LicenseeHeader({ stats }: Props) {
   const trendPositive = stats.trend >= 0;
 
   return (
-    <Card className="relative overflow-hidden">
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/10 via-primary/[0.03] to-transparent" />
-      <div className="relative p-4 sm:p-5 flex flex-col lg:flex-row gap-5 lg:items-center lg:justify-between">
-        {/* Identidade */}
-        <div className="flex items-center gap-4 min-w-0">
-          <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-2xl bg-primary/15 text-primary flex items-center justify-center text-lg font-bold ring-1 ring-primary/30">
-            {initials}
+    <Card className="relative overflow-hidden border-primary/20">
+      {/* Gradient background */}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/20 via-primary/5 to-transparent" />
+      <div
+        className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-primary/20 blur-3xl"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute -bottom-32 -left-16 h-72 w-72 rounded-full bg-primary/10 blur-3xl"
+        aria-hidden
+      />
+
+      <div className="relative p-5 sm:p-6">
+        {/* Header */}
+        <div className="flex items-center gap-2 mb-5">
+          <div className="h-9 w-9 rounded-xl bg-primary/15 text-primary flex items-center justify-center ring-1 ring-primary/30">
+            <Crown className="h-4 w-4" />
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-lg sm:text-xl font-heading font-bold tracking-tight truncate">
-                {name || "Licenciado"}
-              </h2>
-              <Badge className="gap-1 bg-primary/15 text-primary border-primary/30 hover:bg-primary/20">
-                <BadgeCheck className="h-3 w-3" /> Você
-              </Badge>
-            </div>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5 flex-wrap">
-              {igreenId && (
-                <span className="font-mono">ID iGreen {igreenId}</span>
-              )}
-              {phone && (
-                <span className="inline-flex items-center gap-1">
-                  <Phone className="h-3 w-3" />
-                  {formatPhoneDisplay(phone)}
-                </span>
-              )}
-            </div>
-            {lpUrl && (
-              <p className="text-[11px] text-muted-foreground font-mono mt-1 truncate">
-                {lpUrl}
-              </p>
-            )}
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-primary/80 font-semibold">
+              Painel do Licenciado
+            </p>
+            <h2 className="text-base sm:text-lg font-heading font-bold tracking-tight leading-tight">
+              Sua performance em tempo real
+            </h2>
           </div>
         </div>
 
-        {/* KPIs do licenciado */}
-        <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:min-w-[420px]">
-          <Kpi
+        {/* KPIs */}
+        <div className="grid grid-cols-3 gap-3">
+          <StatCard
+            icon={<Sparkles className="h-4 w-4" />}
             label="Leads (30d)"
             value={stats.leads30d}
             trend={
               <span
-                className={`inline-flex items-center gap-0.5 text-[10px] font-medium ${
-                  trendPositive ? "text-emerald-500" : "text-destructive"
+                className={`inline-flex items-center gap-0.5 text-[11px] font-semibold ${
+                  trendPositive ? "text-emerald-400" : "text-destructive"
                 }`}
               >
                 {trendPositive ? (
@@ -127,65 +62,58 @@ export function LicenseeHeader({ name, phone, igreenId, slug, stats }: Props) {
                 {Math.abs(stats.trend)}%
               </span>
             }
+            accent="from-primary/25 to-primary/5"
           />
-          <Kpi label="Conversão" value={`${stats.conversion}%`} />
-          <Kpi
+          <StatCard
+            icon={<TrendingUp className="h-4 w-4" />}
+            label="Conversão"
+            value={`${stats.conversion}%`}
+            accent="from-emerald-500/25 to-emerald-500/5"
+          />
+          <StatCard
+            icon={<Users className="h-4 w-4" />}
             label="Parceiros"
             value={stats.activePartners}
-            icon={<Users className="h-3 w-3" />}
+            accent="from-amber-500/25 to-amber-500/5"
           />
-        </div>
-
-        {/* Ações */}
-        <div className="flex gap-2 lg:flex-col lg:gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={handleCopy}
-            disabled={!lpUrl}
-          >
-            {copied ? (
-              <Check className="h-3.5 w-3.5" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
-            )}
-            Copiar LP
-          </Button>
-          {lpUrl && (
-            <Button asChild size="sm" className="gap-1.5">
-              <a href={lpUrl} target="_blank" rel="noreferrer noopener">
-                <ExternalLink className="h-3.5 w-3.5" /> Abrir
-              </a>
-            </Button>
-          )}
         </div>
       </div>
     </Card>
   );
 }
 
-function Kpi({
+function StatCard({
+  icon,
   label,
   value,
   trend,
-  icon,
+  accent,
 }: {
+  icon: React.ReactNode;
   label: string;
   value: string | number;
   trend?: React.ReactNode;
-  icon?: React.ReactNode;
+  accent: string;
 }) {
   return (
-    <div className="rounded-lg border border-border/60 bg-background/40 backdrop-blur px-3 py-2">
-      <div className="flex items-center justify-between gap-1">
-        <p className="text-[10px] uppercase tracking-wide text-muted-foreground inline-flex items-center gap-1">
-          {icon}
+    <div className="group relative overflow-hidden rounded-xl border border-border/60 bg-card/40 backdrop-blur-sm p-3 sm:p-4 transition-all hover:border-primary/40 hover:bg-card/60">
+      <div
+        className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${accent} opacity-60 group-hover:opacity-100 transition-opacity`}
+      />
+      <div className="relative">
+        <div className="flex items-center justify-between mb-2">
+          <div className="h-7 w-7 rounded-lg bg-background/60 text-foreground/80 flex items-center justify-center ring-1 ring-border/60">
+            {icon}
+          </div>
+          {trend}
+        </div>
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
           {label}
         </p>
-        {trend}
+        <p className="text-xl sm:text-2xl font-bold tabular-nums leading-tight mt-0.5">
+          {value}
+        </p>
       </div>
-      <p className="text-lg font-bold tabular-nums leading-tight">{value}</p>
     </div>
   );
 }
