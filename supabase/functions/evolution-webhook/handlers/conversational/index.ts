@@ -1345,25 +1345,12 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     });
   }
 
-  // Global overrides: cadastro / humano keywords win in any step
-  if (cls.intent === "quer_cadastrar") {
-    return _finalize(stepKey, {
-      reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_conta", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
-    });
-  }
-  if (cls.intent === "quer_humano") {
-    return _finalize(stepKey, {
-      reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
-    });
-  }
-
-  // Build candidate intent list: classifier intent + regex-derived intents + capture intents
+  // 🔒 DETERMINÍSTICO PRIMEIRO: tenta casar o input contra as transitions
+  // configuradas no passo atual ANTES de qualquer override global do
+  // classificador. Sem isso, um clique como "📸 Quero simular" no
+  // d_como_funciona era reclassificado como `quer_cadastrar` e caía no
+  // template legacy "me manda a conta de luz", ignorando a transição
+  // configurada → d_pedir_conta.
   const candidateIntents = [cls.intent, ...detectRegexIntents(ctx.messageText || ""), ...captureIntents];
   const transition = matchTransitionShared({
     transitions: currentStep.transitions ?? [],
@@ -1372,6 +1359,29 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     buttons: stepButtons,
     intents: candidateIntents,
   });
+
+  // Global overrides: cadastro / humano só vencem se NÃO houver transição
+  // configurada para esse input no passo atual.
+  if (!transition && cls.intent === "quer_cadastrar") {
+    const docStep = dbSteps.find((s) => s.is_active && s.step_type === "capture_documento");
+    if (docStep) {
+      return _finalize(stepKey, await goToStep(docStep, restoreDetourUpdates));
+    }
+    return _finalize(stepKey, {
+      reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
+        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
+      }),
+      updates: { conversation_step: "aguardando_conta", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
+    });
+  }
+  if (!transition && cls.intent === "quer_humano") {
+    return _finalize(stepKey, {
+      reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", {
+        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
+      }),
+      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
+    });
+  }
 
   const vars = {
     nome: captureUpdates.name || ctx.customer.name,

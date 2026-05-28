@@ -1521,25 +1521,13 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
 
 
 
-  // Global overrides: cadastro / humano keywords win in any step
-  if (cls.intent === "quer_cadastrar") {
-    return _finalize(stepKey, {
-      reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_conta", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
-    });
-  }
-  if (cls.intent === "quer_humano") {
-    return _finalize(stepKey, {
-      reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
-    });
-  }
-
-  // Build candidate intent list: classifier intent + regex-derived intents + capture intents
+  // 🔒 DETERMINÍSTICO PRIMEIRO: tenta casar o input contra as transitions
+  // configuradas no passo atual ANTES de qualquer override global do
+  // classificador. Sem isso, um clique como "📸 Quero simular" no
+  // d_como_funciona era reclassificado como `quer_cadastrar` e caía no
+  // template legacy "me manda a conta de luz", ignorando a transição
+  // configurada → d_pedir_conta. Regra de ouro: o consultor configurou →
+  // o fluxo segue. IA é só fallback.
   const candidateIntents = [cls.intent, ...detectRegexIntents(ctx.messageText || ""), ...captureIntents];
   const transition = matchTransitionShared({
     transitions: currentStep.transitions ?? [],
@@ -1548,6 +1536,32 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     buttons: extractStepButtons(currentStep),
     intents: candidateIntents,
   });
+
+  // Global overrides: cadastro / humano só vencem se NÃO houver transição
+  // configurada para esse input no passo atual.
+  if (!transition && cls.intent === "quer_cadastrar") {
+    // Se o fluxo do consultor tem passo de documento, vai pra ele (não pede
+    // conta de novo). Só se não houver documento configurado é que usa o
+    // template legacy de "manda a conta".
+    const docStep = dbSteps.find((s) => s.is_active && s.step_type === "capture_documento");
+    if (docStep) {
+      return _finalize(stepKey, await goToStep(docStep, restoreDetourUpdates));
+    }
+    return _finalize(stepKey, {
+      reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
+        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
+      }),
+      updates: { conversation_step: "aguardando_conta", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
+    });
+  }
+  if (!transition && cls.intent === "quer_humano") {
+    return _finalize(stepKey, {
+      reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", {
+        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
+      }),
+      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
+    });
+  }
 
   const vars = {
     nome: captureUpdates.name || ctx.customer.name,
@@ -1659,13 +1673,40 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       && configuredOrder.indexOf("text") >= 0
       && configuredOrder.every((k, i) => k !== "text" ? configuredOrder.indexOf("text") < i : true);
 
+    // 🎯 BOTÕES NA POSIÇÃO CONFIGURADA (fix 2026-05-28):
+    // Se o passo tem botões E a ordem coloca `text` antes das mídias
+    // (ex.: [text, audio, image, video]), enviamos texto+botões PRIMEIRO
+    // como mensagem interativa e depois as mídias na ordem restante.
+    // Sem isso, o motor segurava o texto pro final e ignorava a ordem.
+    let earlyButtonsSent = false;
+    if (asReply && wantButtons && textComesBeforeAllMedia) {
+      try {
+        if (textDelay > 0 && !isMockMode()) await new Promise((r) => setTimeout(r, textDelay));
+        await ctx.sender.sendButtons(ctx.remoteJid, text, stepButtons);
+        if (ctx.customer?.id) {
+          await ctx.supabase.from("conversations").insert({
+            customer_id: ctx.customer.id,
+            message_direction: "outbound",
+            message_text: text,
+            message_type: "text",
+            conversation_step: st.step_key,
+          });
+        }
+        earlyButtonsSent = true;
+        console.log(`[conversational] 🎯 early-buttons step=${st.step_key} (text+botões antes das mídias)`);
+      } catch (e) {
+        console.error(`[conversational] early sendButtons falhou step=${st.step_key} — segue fluxo padrão:`, (e as Error)?.message || e);
+      }
+    }
+
     // Texto entra inline (na posição certa) em qualquer caso, EXCETO quando:
-    // - é o reply final E não há ordem configurada (mantém comportamento legado: texto vira reply)
+    // - é o reply final E não há ordem configurada (mantém comportamento legado)
     // - é o reply final E a ordem termina em "text" (texto fica por último → vira reply)
     // - vamos enviar botões inline no fim (texto vira caption do sendButtons)
+    // - já mandamos texto+botões cedo (earlyButtonsSent)
     const orderEndsWithText = Array.isArray(configuredOrder) && configuredOrder.length > 0
       && configuredOrder[configuredOrder.length - 1] === "text";
-    const sendTextInline = !!text && !wantButtons && (!asReply || !orderEndsWithText && !!configuredOrder);
+    const sendTextInline = !!text && !earlyButtonsSent && !wantButtons && (!asReply || !orderEndsWithText && !!configuredOrder);
 
     let mediaResult: { mediaSent: boolean | null; textSentInline: boolean } =
       { mediaSent: false, textSentInline: false };
@@ -1679,8 +1720,14 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
       mediaResult = { mediaSent: null, textSentInline: false };
     }
     const mediaSent = mediaResult.mediaSent;
-    const inlineMedia = mediaSent === true;
-    console.log(`[conversational] emitStep step=${st.step_key} asReply=${asReply} media=${mediaSent} hasText=${!!text} textInline=${mediaResult.textSentInline} order=${JSON.stringify(configuredOrder)}`);
+    const inlineMedia = mediaSent === true || earlyButtonsSent;
+    console.log(`[conversational] emitStep step=${st.step_key} asReply=${asReply} media=${mediaSent} hasText=${!!text} textInline=${mediaResult.textSentInline} earlyButtons=${earlyButtonsSent} order=${JSON.stringify(configuredOrder)}`);
+
+    // Se já mandamos texto+botões cedo, encerramos aqui (mídias já saíram em sequência).
+    if (earlyButtonsSent) {
+      return { replyText: "", inlineSent: true };
+    }
+
 
     if (!text) {
       if (mediaSent === null) {
