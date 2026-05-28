@@ -26,12 +26,13 @@ const BILL_FIELDS: FieldDef[] = [
   { key: "address_state", label: "UF" },
 ];
 const DOC_FIELDS: FieldDef[] = [
-  { key: "name", label: "Nome" },
+  { key: "doc_holder_name", label: "Nome (documento)" },
   { key: "cpf", label: "CPF" },
   { key: "rg", label: "RG" },
   { key: "data_nascimento", label: "Nascimento" },
   { key: "nome_mae", label: "Mãe" },
 ];
+
 
 function hasAny(customer: any, fields: FieldDef[]) {
   return fields.some((f) => {
