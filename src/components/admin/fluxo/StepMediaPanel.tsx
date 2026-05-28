@@ -84,6 +84,13 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
   const [libraryItems, setLibraryItems] = useState<Media[]>([]);
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
+  // 🔧 Draft local de remoções (2026-05-28): cliques no lixo só MARCAM
+  // como pendente. O bot continua usando a mídia até o consultor clicar
+  // em "Salvar alterações". Evita exclusões acidentais que mudam o fluxo
+  // em produção sem aviso.
+  const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
+  const [savingDraft, setSavingDraft] = useState(false);
+  const hasPendingChanges = pendingDeletes.size > 0;
 
   async function openLibrary(kind: Kind) {
     setPickerKind(kind);
@@ -303,26 +310,68 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
       toast.error("Mídias são compartilhadas entre A/B/C. Remova pela aba A. Na B, áudios já são ignorados automaticamente.");
       return;
     }
-    const sharedNote = variant === "A"
-      ? "Esta mídia será removida de todas as variantes do fluxo (A, B e C). Você poderá enviar uma nova depois."
-      : "Esta mídia será removida deste passo. Você poderá enviar uma nova depois.";
+    // 🔧 Draft local: NÃO apaga do banco aqui. Só marca como pendente.
+    // O consultor precisa clicar em "Salvar alterações" para confirmar.
+    if (pendingDeletes.has(m.id)) {
+      // Toggle off — desmarca a remoção pendente.
+      setPendingDeletes(prev => {
+        const next = new Set(prev);
+        next.delete(m.id);
+        return next;
+      });
+      toast.info(`Remoção de "${m.label}" cancelada`);
+      return;
+    }
+    setPendingDeletes(prev => new Set(prev).add(m.id));
+    toast.info(`"${m.label}" marcada para remoção. Clique em *Salvar alterações* para confirmar.`);
+  }
+
+  // Aplica todas as remoções pendentes no banco quando o consultor clica
+  // em "Salvar alterações". Antes desse momento, o bot continua usando
+  // as mídias normalmente em produção.
+  async function saveAllChanges() {
+    if (!hasPendingChanges) {
+      toast.info("Nenhuma alteração pendente.");
+      return;
+    }
     const ok = await confirm({
-      title: `Remover "${m.label}"?`,
-      description: sharedNote,
-      confirmText: "Remover mídia",
+      title: `Salvar ${pendingDeletes.size} remoção(ões)?`,
+      description: "Estas mídias serão removidas do passo permanentemente. Você poderá adicionar novas depois.",
+      confirmText: "Salvar alterações",
       tone: "danger",
     });
     if (!ok) return;
-    const { error } = await supabase.from("ai_media_library").update({ active: false }).eq("id", m.id);
-    if (error) {
-      toast.error(error.message);
-      return;
+    setSavingDraft(true);
+    try {
+      const ids = Array.from(pendingDeletes);
+      const toRemove = items.filter(x => ids.includes(x.id));
+      // 1. Marcar inactive em batch.
+      const { error } = await supabase
+        .from("ai_media_library")
+        .update({ active: false })
+        .in("id", ids);
+      if (error) throw error;
+      // 2. Remover do storage (best-effort).
+      for (const m of toRemove) {
+        if (m.storage_path) {
+          await supabase.storage.from("ai-agent-media").remove([m.storage_path]).catch(() => {});
+        }
+      }
+      // 3. Atualizar UI.
+      setItems(prev => prev.filter(x => !ids.includes(x.id)));
+      setPendingDeletes(new Set());
+      toast.success(`${ids.length} mídia(s) removida(s) com sucesso`);
+    } catch (e: any) {
+      toast.error("Erro ao salvar: " + (e?.message || String(e)));
+    } finally {
+      setSavingDraft(false);
     }
-    if (m.storage_path) {
-      await supabase.storage.from("ai-agent-media").remove([m.storage_path]);
-    }
-    setItems(prev => prev.filter(x => x.id !== m.id));
-    toast.success("Mídia removida");
+  }
+
+  function discardChanges() {
+    if (!hasPendingChanges) return;
+    setPendingDeletes(new Set());
+    toast.info("Alterações descartadas. O fluxo continua igual.");
   }
 
 
@@ -356,9 +405,22 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
   function renderMediaItem(m: Media) {
     const Icon = KIND_ICON[m.kind];
     const delaySec = ((m.delay_before_ms ?? 1500) / 1000).toFixed(1);
+    const isPendingDelete = pendingDeletes.has(m.id);
     return (
-      <div key={m.id} className="rounded-md border border-border/60 bg-muted/20 p-2 flex flex-col gap-2">
-        <div className="flex items-start justify-between gap-2">
+      <div
+        key={m.id}
+        className={`rounded-md border p-2 flex flex-col gap-2 transition-all ${
+          isPendingDelete
+            ? "border-rose-400/60 bg-rose-500/10 opacity-60 line-through"
+            : "border-border/60 bg-muted/20"
+        }`}
+      >
+        {isPendingDelete && (
+          <div className="text-[10px] font-bold uppercase tracking-wider text-rose-500 no-underline">
+            ⚠️ Marcada para remoção — clique em Salvar alterações para confirmar
+          </div>
+        )}
+        <div className="flex items-start justify-between gap-2 no-underline">
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
             <div className="min-w-0">
@@ -388,12 +450,22 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
+              className="h-7 w-7 no-underline"
               onClick={() => removeMedia(m)}
               disabled={variant === "B" || variant === "C"}
-              title={(variant === "B" || variant === "C") ? "Mídias são compartilhadas. Remova pela aba A." : "Remover mídia"}
+              title={
+                (variant === "B" || variant === "C")
+                  ? "Mídias são compartilhadas. Remova pela aba A."
+                  : pendingDeletes.has(m.id)
+                    ? "Desfazer remoção"
+                    : "Marcar para remover (precisa salvar)"
+              }
             >
-              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+              {pendingDeletes.has(m.id) ? (
+                <ArrowUp className="h-3.5 w-3.5 rotate-180 text-emerald-600" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+              )}
             </Button>
 
           </div>
@@ -501,6 +573,31 @@ export default function StepMediaPanel({ consultantId, stepKey, slotKeys, initia
     <div className="mt-3 pt-3 border-t border-border/60 space-y-4">
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-semibold">Mídias deste passo</h4>
+        {hasPendingChanges && (
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="border-amber-400/60 text-amber-700 dark:text-amber-300 text-[10px]">
+              {pendingDeletes.size} alteração(ões) pendente(s)
+            </Badge>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              onClick={discardChanges}
+              disabled={savingDraft}
+            >
+              Descartar
+            </Button>
+            <Button
+              size="sm"
+              className="h-7 text-xs gap-1 bg-emerald-500 hover:bg-emerald-600 text-white"
+              onClick={saveAllChanges}
+              disabled={savingDraft}
+            >
+              {savingDraft ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+              Salvar alterações
+            </Button>
+          </div>
+        )}
       </div>
 
       {(["audio", "image", "video"] as Kind[]).map(renderKindBlock)}

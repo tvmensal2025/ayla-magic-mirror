@@ -3387,6 +3387,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
         // prioridade absoluta — força avanço para o passo `message` configurado
         // (ex: d_resultado) antes de cair na busca por position.
         let nextCustom: any = null;
+        // Flag: quando true, despacha SOMENTE este step e pula o CHAIN amplo.
+        let _hasExplicitSuccessGoto = false;
         try {
           const { data: _flowRowSuccess } = await supabase
             .from("bot_flows").select("id")
@@ -3405,7 +3407,8 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
                 .eq("id", _successId).eq("is_active", true).maybeSingle();
               if (_target) {
                 nextCustom = _target;
-                console.log(`[post-confirm-conta] success_goto_step_id=${_successId} → ${(_target as any).step_key}`);
+                _hasExplicitSuccessGoto = true;
+                console.log(`[post-confirm-conta] success_goto_step_id=${_successId} → ${(_target as any).step_key} (CHAIN amplo será pulado)`);
               }
             }
           }
@@ -3425,17 +3428,60 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
             stepTypeIn: ["capture_documento", "capture_doc", "finalizar_cadastro"],
           });
         }
-        // CHAIN: despacha todos os passos `message` ativos entre o capture_conta
-        // e o próximo capture/finalizar (ex.: d_resultado com a simulação) ANTES
-        // de pedir o documento. Atualiza nextCustom para apontar para esse
-        // próximo passo de captura/finalização.
+        // CHAIN amplo: dispara TODOS os passos `message` ativos entre o
+        // capture_conta e o próximo capture/finalizar.
+        //
+        // ⚠️ PULAR quando success_goto_step_id está configurado: o consultor
+        // já especificou EXATAMENTE qual passo deve rodar após confirmar
+        // a conta (ex.: d_resultado). Sem esse pulo, o CHAIN despachava
+        // d_como_funciona + d_resultado mesmo que o consultor só quisesse
+        // d_resultado — duplicava mensagens.
+        //
+        // Quando há success_goto explícito, despacha SÓ esse passo aqui,
+        // e busca o próximo capture/finalizar para virar o nextCustom final.
         //
         // 🛡️ HANDOFF SEGURO (2026-05-28): persistimos conversation_step
         // ANTES de cada dispatch do CHAIN. Se o lead interromper a rajada
         // com uma pergunta ("tenho dúvidas"), o próximo webhook vê o step
         // do passo intermediário e o motor conversational processa o input
         // (chama d_duvidas / IA) em vez de reentrar em confirmando_dados_conta.
-        if (nextCustom && nextCustom.step_type === "message" && _captureContaPos > 0) {
+        if (_hasExplicitSuccessGoto && nextCustom && nextCustom.step_type === "message") {
+          // 1. Persiste step e despacha SÓ o success_goto.
+          try {
+            await supabase.from("customers")
+              .update({ conversation_step: (nextCustom as any).id, updated_at: new Date().toISOString() })
+              .eq("id", customer.id);
+            (customer as any).conversation_step = (nextCustom as any).id;
+          } catch (_) { /* best-effort */ }
+          console.log(`[post-confirm-conta] [success-goto] despachando ${nextCustom.step_key} (sem CHAIN amplo)`);
+          await dispatchStepFromFlow(nextCustom.step_key, _vars);
+          if (!isMockMode()) await new Promise((r) => setTimeout(r, 1800));
+
+          // 2. Avança nextCustom para o próximo capture/finalizar após este step.
+          try {
+            const { data: _flowRow3 } = await supabase
+              .from("bot_flows").select("id")
+              .eq("consultant_id", customer.consultant_id).eq("is_active", true)
+              .eq("variant", (customer as any)?.flow_variant || "A").maybeSingle();
+            if (_flowRow3?.id) {
+              const { data: _afterSuccess } = await supabase
+                .from("bot_flow_steps")
+                .select("id, position, step_key, step_type, is_active")
+                .eq("flow_id", (_flowRow3 as any).id).eq("is_active", true)
+                .gt("position", Number(nextCustom.position || 0))
+                .in("step_type", ["capture_documento", "capture_doc", "capture_email", "confirm_phone", "finalizar_cadastro"])
+                .order("position", { ascending: true })
+                .limit(1)
+                .maybeSingle();
+              if (_afterSuccess) {
+                nextCustom = _afterSuccess;
+                console.log(`[post-confirm-conta] próximo capture: ${(nextCustom as any).step_key}`);
+              } else {
+                nextCustom = null;
+              }
+            }
+          } catch (_) { /* fallback null */ }
+        } else if (nextCustom && nextCustom.step_type === "message" && _captureContaPos > 0) {
           try {
             const { data: _flowRow2 } = await supabase
               .from("bot_flows").select("id")
