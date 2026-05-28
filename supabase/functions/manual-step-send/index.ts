@@ -182,7 +182,9 @@ Deno.serve(async (req) => {
       }
       const { data: superAdminRow } = await supabase
         .from("consultants").select("id").eq("id", body.consultantId).maybeSingle();
-      const isSuperAdminFlow = !!(settings.super_admin_consultant_id && String(settings.super_admin_consultant_id) === String((superAdminRow as any)?.id));
+      // Settings key correta é `superadmin_consultant_id` (sem underscore extra)
+      // — match com whapi-webhook/index.ts:92 e o resto da codebase.
+      const isSuperAdminFlow = !!(settings.superadmin_consultant_id && String(settings.superadmin_consultant_id) === String((superAdminRow as any)?.id));
 
       let confirmSender: any;
       if (isSuperAdminFlow) {
