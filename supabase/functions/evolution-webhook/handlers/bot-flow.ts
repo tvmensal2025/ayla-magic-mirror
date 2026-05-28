@@ -4188,7 +4188,48 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     // ─── 11. CONFIRMAR FINALIZAR ────────
+    case "ask_quero_cadastrar": {
+      const resp = (isButton ? buttonId : messageText.toLowerCase().trim()) || "";
+      const triggers = ["btn_quero_cadastrar", "quero_cadastrar", "sim_cadastrar", "1", "sim", "s", "quero", "bora", "vamos", "vamo", "pode", "ok", "blz", "beleza"];
+      const wants = triggers.includes(resp) || /^(sim|quero|bora|vamos|pode|ok)\b/i.test(resp);
+      if (wants) {
+        try {
+          const { data: _flowRow } = await supabase
+            .from("bot_flows").select("id")
+            .eq("consultant_id", customer.consultant_id).eq("is_active", true)
+            .eq("variant", (customer as any)?.flow_variant || "A").maybeSingle();
+          if (_flowRow?.id) {
+            const { data: _docStep } = await supabase
+              .from("bot_flow_steps")
+              .select("step_key")
+              .eq("flow_id", (_flowRow as any).id).eq("is_active", true)
+              .in("step_type", ["capture_documento", "capture_doc"])
+              .order("position", { ascending: true })
+              .limit(1).maybeSingle();
+            if (_docStep?.step_key) {
+              await dispatchStepFromFlow(_docStep.step_key);
+            } else {
+              await sendText(remoteJid, "Show! Pra finalizar seu cadastro, me manda só uma foto da *frente do seu documento* 📄\n\nPode ser RG ou CNH, o que estiver mais à mão.");
+            }
+          }
+        } catch (e) {
+          console.warn("[ask_quero_cadastrar] erro:", (e as Error).message);
+        }
+        updates.conversation_step = "aguardando_doc_auto";
+        reply = "";
+      } else {
+        const ctaText = "Pra continuar seu cadastro e garantir essa economia, é só tocar no botão abaixo 👇";
+        const sent = await sendOptions(remoteJid, ctaText, [
+          { id: "btn_quero_cadastrar", title: "✅ Quero me cadastrar" },
+        ]);
+        if (!sent) reply = "Toque no botão *✅ Quero me cadastrar* acima — ou responda *SIM* para continuar.";
+        else reply = "";
+      }
+      break;
+    }
+
     case "ask_finalizar": {
+
       const resp = (isButton ? buttonId : messageText.toLowerCase().trim()) || "";
       // Aceita botão OU texto livre (cliente quase nunca clica no botão)
       const triggers = ["btn_finalizar", "1", "finalizar", "sim", "s", "ok", "concluir", "prosseguir", "vamos", "pode", "pode sim", "pronto"];
