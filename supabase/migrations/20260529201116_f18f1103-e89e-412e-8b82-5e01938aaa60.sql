@@ -1,0 +1,1 @@
+UPDATE public.consultants SET ai_profile='accuracy' WHERE ai_profile IS DISTINCT FROM 'accuracy';
