@@ -1,47 +1,53 @@
-# Plano de Correção — Fluxo D 100% Operacional
 
-## Validação dos bugs
+# Subir toda a IA para modelos premium
 
-✅ **Bug #1 confirmado** — TDZ em `goToStep`:
-- `evolution-webhook/handlers/conversational/index.ts`: usado na linha **1368**, declarado na linha **1582**
-- `whapi-webhook/handlers/conversational/index.ts`: usado na linha **1548**, declarado na linha **1829**
-- Quando `cls.intent === "quer_cadastrar"` cai sem `transition` e existe `capture_documento` no fluxo, dispara `ReferenceError: Cannot access 'goToStep' before initialization` → webhook devolve 500 e o lead trava.
+## Situação atual (mista)
 
-✅ **Bug #2 confirmado** — `flow-d-stuck-watchdog` cria handoff_alerts duplicados (18 duplicatas em 7 dias) porque não checa alerta `resolved_at IS NULL` existente.
+| Camada | Modelo hoje | Onde |
+|---|---|---|
+| Triagem (toda msg) | `google/gemini-3-flash-preview` | `_shared/ai-orchestrator.ts` |
+| Cérebro (decisão) | `openai/gpt-5.5` ✅ | `_shared/ai-orchestrator.ts` |
+| RAG / FAQ | `google/gemini-3.1-pro-preview` ✅ | `_shared/ai-orchestrator.ts` → `ai-faq-answerer.ts` |
+| Resumo de conversa | `google/gemini-2.5-flash` | `_shared/ai-summary.ts` |
+| Button intent (texto→botão) | `gemini-3.5-flash` (perfil `balanced`) | `_shared/ai-config.ts` |
+| Outros consultores | perfil `balanced` (Flash em quase tudo) | `consultants.ai_profile` |
 
-## Correções
+Apenas o consultor **Rafael Ferreira** está em `accuracy`. Os outros 12 estão em `balanced`.
 
-### 1. Mover `goToStep` para antes do primeiro uso (ambos os webhooks)
-Extrair o bloco `const goToStep = async (s, extra) => { ... }` (linhas 1582 / 1829) e colá-lo **antes** do bloco `🔒 DETERMINÍSTICO PRIMEIRO` (acima da linha 1349 / 1529). Remover a declaração antiga para não duplicar.
+## O que vai mudar
 
-Risco: nenhum — `goToStep` só depende de variáveis de escopo de função (`ctx`, `dbSteps`, `getTemplate`, `stepTypeToCadastro`) que já existem antes desse ponto. Validar passando todas as referências.
+**Objetivo: zero modelo Flash em decisão/resposta. Premium ponta-a-ponta.**
 
-### 2. Idempotência no `flow-d-stuck-watchdog`
-Antes do `insert` em `handoff_alerts`, fazer:
-```ts
-const { data: existing } = await supabase
-  .from("handoff_alerts")
-  .select("id")
-  .eq("customer_id", lead.id)
-  .eq("reason", reason)
-  .is("resolved_at", null)
-  .gte("created_at", new Date(Date.now() - 24*3600*1000).toISOString())
-  .maybeSingle();
-if (existing) { skipped_duplicate++; continue; }
-```
+1. **Triagem** → `openai/gpt-5-mini` (premium pequeno, raciocínio melhor que Flash, ainda barato/rápido). Fallback `gpt-5-nano`.
+2. **Cérebro** → `openai/gpt-5.5` (mantém). Fallback já é `gpt-5.4` → `gpt-5-mini`.
+3. **RAG FAQ** → `google/gemini-3.1-pro-preview` (mantém). Fallback `gemini-2.5-pro`.
+4. **Resumo** → `openai/gpt-5-mini` (sobe de Flash para premium pequeno; resumo persistente é crítico).
+5. **Button intent** → forçar `accuracy` no fallback LLM (`gpt-5-mini`), mesmo para consultores em `balanced`.
+6. **Forçar `accuracy` em todos os consultores** → migration `UPDATE consultants SET ai_profile='accuracy'`.
+7. **Bypass do "caminho barato" da triagem** → quando `needs_orchestrator=false` mas é `answer_faq`/`clarify`/`escalate`, hoje a triagem responde sozinha. Vamos forçar `needs_orchestrator=true` sempre que `route ∈ {answer_faq, escalate, clarify}` — garante que GPT-5.5 sempre formula a resposta final.
 
-Limpeza pontual das 18 duplicatas existentes via migration: `UPDATE handoff_alerts SET resolved_at = now(), resolved_reason = 'dedup_cleanup' WHERE id NOT IN (SELECT MIN(id) FROM handoff_alerts WHERE resolved_at IS NULL GROUP BY customer_id, reason) AND resolved_at IS NULL AND reason IN (...)`.
+## Arquivos a editar
 
-### 3. Validação
-- `supabase test_edge_functions` em `evolution-webhook` e `whapi-webhook` → deve passar (TS2448 some).
-- Deploy das 2 functions + 1 migration.
-- Rodar `flow-d-stuck-watchdog` manualmente 2× seguidos e confirmar `skipped_duplicate > 0` no segundo.
-- Disparar curl no `whapi-webhook` simulando intent `quer_cadastrar` em passo sem transição → 200 OK.
+- `supabase/functions/_shared/ai-orchestrator.ts`
+  - `TRIAGE_MODEL = "openai/gpt-5-mini"`
+  - Após `runTriage`, se `route` exigir resposta, forçar `needs_orchestrator=true`
+- `supabase/functions/_shared/ai-summary.ts`
+  - `SUMMARY_MODEL = "openai/gpt-5-mini"`
+- `supabase/functions/_shared/ai-gateway.ts`
+  - Adicionar cadeia de fallback para `openai/gpt-5-mini` → `gpt-5-nano`
+- `supabase/functions/_shared/ai-config.ts`
+  - Subir `button_intent` e `intent_classify` no perfil `balanced` para usar `gpt-5-mini`/`gemini-3.1-pro`
+- Migration SQL
+  - `UPDATE consultants SET ai_profile='accuracy';`
 
-## Fora do escopo (operacional, usuário executa)
-- Reconectar instância Whapi `igreen-0c2711ad4836` (offline há 14 dias).
-- Despausar bot global (`manual_global_pause` ativo desde 2026-05-28 em 103 leads).
-- Configurar `super_admin_phone` em `app_settings`.
+## Impacto
 
-## Resultado esperado
-Após as 2 correções de código + 3 ações operacionais, o Fluxo D roda sem `ReferenceError` e sem inflar a tabela `handoff_alerts`. Pronto para produção.
+- **Qualidade**: respostas mais precisas, menos "alucinação", menos handoff por baixa confiança.
+- **Latência**: +0.5-1.5s na triagem (gpt-5-mini vs Flash). Aceitável no WhatsApp.
+- **Custo**: estimo **3-5× o gasto de IA atual** (Flash → Mini/Pro premium em toda mensagem inbound). Monitorável em `ai_costs` no painel `/admin/saude-bot`.
+- **Rollback**: reverter os 3 arquivos + `UPDATE consultants SET ai_profile='balanced'`.
+
+## Fora de escopo
+
+- OCR de conta (`ocr_extract`) e transcrição de áudio — já usam Pro/multimodal adequados.
+- Reconectar Whapi e despausar leads (operacional, não relacionado a modelo de IA).

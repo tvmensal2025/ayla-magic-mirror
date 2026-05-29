@@ -78,6 +78,7 @@ const FALLBACK_CHAIN: Record<string, string[]> = {
   "openai/gpt-5.5":              ["openai/gpt-5.5", "openai/gpt-5.4", "openai/gpt-5-mini"],
   "openai/gpt-5.4":              ["openai/gpt-5.4", "openai/gpt-5", "openai/gpt-5-mini"],
   "openai/gpt-5":                ["openai/gpt-5", "openai/gpt-5-mini"],
+  "openai/gpt-5-mini":           ["openai/gpt-5-mini", "openai/gpt-5-nano"],
   "google/gemini-3.1-pro-preview":["google/gemini-3.1-pro-preview", "google/gemini-2.5-pro", "google/gemini-2.5-flash"],
   "google/gemini-2.5-pro":       ["google/gemini-2.5-pro", "google/gemini-2.5-flash"],
   "google/gemini-3-flash-preview":["google/gemini-3-flash-preview", "google/gemini-2.5-flash", "google/gemini-2.5-flash-lite"],
