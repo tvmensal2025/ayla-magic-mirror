@@ -1,53 +1,129 @@
+# Análise do fluxo do lead 5511971254913 (BRUNO MANOEL DOS SANTOS)
 
-# Subir toda a IA para modelos premium
+## O que realmente aconteceu (cronologia real do banco)
 
-## Situação atual (mista)
+```text
+20:27:50  Lead manda "Oi" → d_welcome
+20:28:00  "Quero simular" → pede conta de luz
+20:28:18  Foto da conta enviada
+20:28:36  Confirma dados da conta → d_resultado
+20:28:57  "Cadastrar agora"
+20:29:00  Pede documento (RG/CNH)
+20:29:26  Foto do documento enviada
+20:29:47  Confirma dados do doc
+20:29:55  Confirma titularidade (mesma pessoa)
+20:30:06  Confirma telefone
+20:30:11  Pede email
+20:30:25  Manda email do consultor (rejeitado)
+20:30:38  Sistema reclama "email do consultor não pode"
+20:31:10  Manda email correto
+20:31:18  → finalize-capture disparado
+          → status = portal_submitting
+          → tenta worker-portal-2 (autoconexao)
+          → health check FALHA
+          → status = worker_offline
+          → envia "⏳ Estamos com um pequeno atraso…"
+```
 
-| Camada | Modelo hoje | Onde |
-|---|---|---|
-| Triagem (toda msg) | `google/gemini-3-flash-preview` | `_shared/ai-orchestrator.ts` |
-| Cérebro (decisão) | `openai/gpt-5.5` ✅ | `_shared/ai-orchestrator.ts` |
-| RAG / FAQ | `google/gemini-3.1-pro-preview` ✅ | `_shared/ai-orchestrator.ts` → `ai-faq-answerer.ts` |
-| Resumo de conversa | `google/gemini-2.5-flash` | `_shared/ai-summary.ts` |
-| Button intent (texto→botão) | `gemini-3.5-flash` (perfil `balanced`) | `_shared/ai-config.ts` |
-| Outros consultores | perfil `balanced` (Flash em quase tudo) | `consultants.ai_profile` |
+## Estado atual no banco
 
-Apenas o consultor **Rafael Ferreira** está em `accuracy`. Os outros 12 estão em `balanced`.
+```text
+status              = worker_offline
+conversation_step   = portal_submitting
+otp_code            = NULL          ← nunca chegou
+link_assinatura     = NULL          ← nunca foi enviado
+igreen_code         = NULL
+error_message       = "Worker (autoconexao) offline no momento do envio — polling vai pegar"
+```
 
-## O que vai mudar
+Ou seja: **o portal nunca recebeu o lead, OTP nunca foi gerado e link de assinatura nunca foi enviado**. A percepção de que "recebeu OTP e mandou link" não bate com os dados — provavelmente é memória de outro lead/fluxo.
 
-**Objetivo: zero modelo Flash em decisão/resposta. Premium ponta-a-ponta.**
+## Causa raiz
 
-1. **Triagem** → `openai/gpt-5-mini` (premium pequeno, raciocínio melhor que Flash, ainda barato/rápido). Fallback `gpt-5-nano`.
-2. **Cérebro** → `openai/gpt-5.5` (mantém). Fallback já é `gpt-5.4` → `gpt-5-mini`.
-3. **RAG FAQ** → `google/gemini-3.1-pro-preview` (mantém). Fallback `gemini-2.5-pro`.
-4. **Resumo** → `openai/gpt-5-mini` (sobe de Flash para premium pequeno; resumo persistente é crítico).
-5. **Button intent** → forçar `accuracy` no fallback LLM (`gpt-5-mini`), mesmo para consultores em `balanced`.
-6. **Forçar `accuracy` em todos os consultores** → migration `UPDATE consultants SET ai_profile='accuracy'`.
-7. **Bypass do "caminho barato" da triagem** → quando `needs_orchestrator=false` mas é `answer_faq`/`clarify`/`escalate`, hoje a triagem responde sozinha. Vamos forçar `needs_orchestrator=true` sempre que `route ∈ {answer_faq, escalate, clarify}` — garante que GPT-5.5 sempre formula a resposta final.
+O consultor **Rafael Ferreira** (id `0c2711ad…`, igreen_id 124170) está com `portal_kind = autoconexao`, então o dispatcher roteia para o `worker-portal-2`.
 
-## Arquivos a editar
+A URL configurada em `settings.portal2_worker_url` é:
 
-- `supabase/functions/_shared/ai-orchestrator.ts`
-  - `TRIAGE_MODEL = "openai/gpt-5-mini"`
-  - Após `runTriage`, se `route` exigir resposta, forçar `needs_orchestrator=true`
-- `supabase/functions/_shared/ai-summary.ts`
-  - `SUMMARY_MODEL = "openai/gpt-5-mini"`
-- `supabase/functions/_shared/ai-gateway.ts`
-  - Adicionar cadeia de fallback para `openai/gpt-5-mini` → `gpt-5-nano`
-- `supabase/functions/_shared/ai-config.ts`
-  - Subir `button_intent` e `intent_classify` no perfil `balanced` para usar `gpt-5-mini`/`gemini-3.1-pro`
-- Migration SQL
-  - `UPDATE consultants SET ai_profile='accuracy';`
+```text
+http://igreen_portal-worker-2:3101
+```
 
-## Impacto
+Isso é o **hostname interno do Docker Compose da VPS**. Edge Functions do Supabase rodam no Deno Deploy (cloud), **não enxergam essa rede**. Resultado: o `fetch(${url}/health)` sempre falha com DNS/timeout → marca `worker_offline` → envia mensagem de "atraso" → fim.
 
-- **Qualidade**: respostas mais precisas, menos "alucinação", menos handoff por baixa confiança.
-- **Latência**: +0.5-1.5s na triagem (gpt-5-mini vs Flash). Aceitável no WhatsApp.
-- **Custo**: estimo **3-5× o gasto de IA atual** (Flash → Mini/Pro premium em toda mensagem inbound). Monitorável em `ai_costs` no painel `/admin/saude-bot`.
-- **Rollback**: reverter os 3 arquivos + `UPDATE consultants SET ai_profile='balanced'`.
+Comprovação no `_shared/portal-worker.ts`:
 
-## Fora de escopo
+```text
+http://igreen_portal-worker-2:3101  ← Docker DNS, inalcançável
+https://srv1580107.hstgr.cloud      ← Portal 1 (digital), público, funciona
+```
 
-- OCR de conta (`ocr_extract`) e transcrição de áudio — já usam Pro/multimodal adequados.
-- Reconectar Whapi e despausar leads (operacional, não relacionado a modelo de IA).
+Além disso, o comentário "polling vai pegar" no código é falso — **não existe nenhuma edge function/cron que faz polling de leads em `worker_offline**` para reenviar quando o worker voltar. O lead fica permanentemente parado.
+
+## Por que o cliente ficou em silêncio após o "atraso"
+
+1. Sem submit ao portal → sem OTP → fluxo trava em `portal_submitting`.
+2. `bot_paused_reason = 'humano_assumiu_audio'` faz o bot ignorar qualquer nova mensagem desse lead (regra `human-takeover-silence`).
+3. Não há retry automático.
+
+## Plano de correção
+
+### 1. Expor o worker-portal-2 publicamente
+
+Configurar em `settings.portal2_worker_url` a URL pública HTTPS do worker-2 (ex.: `https://portal2.srv1580107.hstgr.cloud` ou subdomínio equivalente, com Bearer secret já existente). Precisa do usuário confirmar/fornecer a URL pública — sem isso o Edge Function nunca chega lá.
+
+### 2. Reprocessar este lead manualmente
+
+Após a URL ser corrigida, rodar:
+
+```text
+UPDATE customers
+   SET status='ready_to_submit', error_message=NULL
+ WHERE id='482c0262-e5e0-4716-82f1-f3f4528b2e79';
+```
+
+e invocar `finalize-capture` de novo (botão "Tentar novamente" já existe no `PortalStatusTracker`).
+
+### 3. Criar cron de retry para `worker_offline`
+
+Nova edge function `portal-offline-retry` (agendada 1×/min) que:
+
+- busca `customers` com `status='worker_offline'` e `finalized_at` nos últimos 24 h;
+- chama `dispatchPortalWorker` novamente;
+- limita a N tentativas (campo novo `portal_retry_count`) e marca `automation_failed` se exceder.
+
+### 4. Health-check melhor no dispatch
+
+- Aumentar timeout do `/health` de 5 s para 10 s.
+- Logar o motivo exato da falha (DNS vs 5xx vs timeout) em `error_message` pra diagnóstico futuro.
+- Trocar a mensagem ao cliente para algo honesto ("Recebemos seus dados — em até 5 min mandamos o código") só quando `mode === "queued_offline"`.
+
+### 5. Validar pareamento consultor ↔ worker
+
+Adicionar checagem na criação/edição de consultor: se `portal_kind='autoconexao'` então `settings.portal2_worker_url` precisa estar setada e responder `/health`. Bloquear salvar caso contrário (admin UI).
+
+## Detalhes técnicos
+
+- Arquivos envolvidos: `supabase/functions/_shared/portal-worker.ts`, `supabase/functions/finalize-capture/index.ts`, `src/components/captacao/PortalStatusTracker.tsx`.
+- Nova função: `supabase/functions/portal-offline-retry/index.ts` + entrada em `supabase/config.toml` schedule.
+- Migration: adicionar coluna `portal_retry_count int default 0` em `customers`.
+
+## Pergunta pro usuário antes de implementar
+
+Você tem (ou consegue gerar) uma **URL pública HTTPS para o `worker-portal-2**` na VPS? Sem isso o passo 1 não anda e o resto vira paliativo.  
+  
+[https://igreen-portal-worker-2.d9v63q.easypanel.host/](https://igreen-portal-worker-2.d9v63q.easypanel.host/)   
+  
+
+
+```dotenv
+PORT=3101
+NODE_ENV=production
+HEADLESS=1
+
+WORKER_SECRET=b77ac5db653b3e500d8ce45ed4a1c40de31476dba616a51b016ddcf86c2cab36
+
+SUPABASE_URL=https://zlzasfhcxcznaprrragl.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpsemFzZmhjeGN6bmFwcnJyYWdsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTI3NDU3MCwiZXhwIjoyMDg2ODUwNTcwfQ.m82Darbn5pFX1ktXSZPSS_BPAIlA4xN9oj8nLdT1xng
+
+REDIS_URL=redis://default:2a84f63f8924fb99b904@igreen_evolution-api-redis:6379
+```
