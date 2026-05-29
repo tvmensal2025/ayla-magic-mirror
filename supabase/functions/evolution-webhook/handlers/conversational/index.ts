@@ -1360,28 +1360,10 @@ export async function runConversationalFlow(ctx: BotContext): Promise<BotResult>
     intents: candidateIntents,
   });
 
-  // Global overrides: cadastro / humano só vencem se NÃO houver transição
-  // configurada para esse input no passo atual.
-  if (!transition && cls.intent === "quer_cadastrar") {
-    const docStep = dbSteps.find((s) => s.is_active && s.step_type === "capture_documento");
-    if (docStep) {
-      return _finalize(stepKey, await goToStep(docStep, restoreDetourUpdates));
-    }
-    return _finalize(stepKey, {
-      reply: await getTemplate(ctx.supabase, "checkin_pos_video", "pedir_conta", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_conta", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
-    });
-  }
-  if (!transition && cls.intent === "quer_humano") {
-    return _finalize(stepKey, {
-      reply: await getTemplate(ctx.supabase, "aguardando_humano", "avisado", {
-        nome: ctx.customer.name, representante: ctx.nomeRepresentante,
-      }),
-      updates: { conversation_step: "aguardando_humano", __intent: cls.intent, __confidence: cls.confidence, ...captureUpdates, ...restoreDetourUpdates },
-    });
-  }
+  // (Global overrides quer_cadastrar/quer_humano foram movidos para depois das
+  // declarações de goToStep/emitStep/vars — caso contrário, chamar goToStep
+  // aqui dispara TDZ "Cannot access 'goToStep' before initialization".)
+
 
   const vars = {
     nome: captureUpdates.name || ctx.customer.name,
