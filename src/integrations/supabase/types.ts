@@ -2672,6 +2672,8 @@ export type Database = {
           phone_contact_confirmed: boolean
           phone_landline: string | null
           phone_whatsapp: string
+          portal_last_retry_at: string | null
+          portal_retry_count: number
           portal_submitted_at: string | null
           portal2_contract_link: string | null
           portal2_created_at: string | null
@@ -2841,6 +2843,8 @@ export type Database = {
           phone_contact_confirmed?: boolean
           phone_landline?: string | null
           phone_whatsapp: string
+          portal_last_retry_at?: string | null
+          portal_retry_count?: number
           portal_submitted_at?: string | null
           portal2_contract_link?: string | null
           portal2_created_at?: string | null
@@ -3010,6 +3014,8 @@ export type Database = {
           phone_contact_confirmed?: boolean
           phone_landline?: string | null
           phone_whatsapp?: string
+          portal_last_retry_at?: string | null
+          portal_retry_count?: number
           portal_submitted_at?: string | null
           portal2_contract_link?: string | null
           portal2_created_at?: string | null
