@@ -3,7 +3,8 @@
 import { aiChatCascade } from "./ai-gateway.ts";
 import { trackAIUsage } from "./ai-cost-tracker.ts";
 
-const SUMMARY_MODEL = "google/gemini-2.5-flash";
+// PREMIUM: resumo persistente usa GPT-5-mini (memória da conversa é crítica)
+const SUMMARY_MODEL = "openai/gpt-5-mini";
 const SUMMARY_EVERY = 6; // turnos do lead
 
 const SYSTEM = `Você resume conversas de WhatsApp entre um lead e o bot da iGreen Energy.

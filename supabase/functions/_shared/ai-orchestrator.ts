@@ -48,7 +48,8 @@ export interface OrchestratorOutput {
   latencyMs: number;
 }
 
-const TRIAGE_MODEL = "google/gemini-3-flash-preview";
+// PREMIUM: triagem usa GPT-5-mini (raciocínio melhor que Flash, ainda barato/rápido)
+const TRIAGE_MODEL = "openai/gpt-5-mini";
 const ORCH_MODEL   = "openai/gpt-5.5";
 
 const TRIAGE_SCHEMA = {
@@ -203,6 +204,12 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
 
   const triage = await runTriage(input);
   modelChain.push(`triage:${input.forceModel?.triage || TRIAGE_MODEL}`);
+
+  // PREMIUM: sempre que precisar responder o lead (answer_faq/escalate/clarify),
+  // força o cérebro GPT-5.5 a formular — não confia na triagem pra responder.
+  if (triage.route === "answer_faq" || triage.route === "escalate" || triage.route === "clarify") {
+    triage.needs_orchestrator = true;
+  }
 
   // Caminho barato
   if (!triage.needs_orchestrator) {

@@ -1,0 +1,29 @@
+{
+  "task": "27",
+  "phase": "Phase 4",
+  "title": "Gate Fase 4 — validar singleton app_settings",
+  "requirement": "8.2",
+  "ranAt": "2026-05-29T01:06:12Z",
+  "tool": "mcp_supabase_execute_sql",
+  "queries": [
+    {
+      "sql": "SELECT count(*) FROM public.app_settings;",
+      "result": [
+        { "count": 1 }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) AS total, max(id::text) AS sample_id FROM public.app_settings;",
+      "result": [
+        { "total": 1, "sample_id": "global" }
+      ]
+    }
+  ],
+  "acceptance": {
+    "criterion": "count = 1 (singleton com id='global')",
+    "rowCount": 1,
+    "singletonId": "global",
+    "passed": true
+  },
+  "notes": "Gate verde. app_settings continua singleton com id='global', confirmando o invariante exigido pelo Requisito 8.2. Liberado para prosseguir com a Task 28 (índice engine_logs_kind_at_idx) e demais tasks da Fase 4."
+}

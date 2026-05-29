@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "left": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+  "right": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+  "left_lines_total": 5265,
+  "right_lines_total": 4642,
+  "left_lines_normalized": 4401,
+  "right_lines_normalized": 3936,
+  "diff_lines_total": 957,
+  "regions": [
+    {
+      "label": "STEP:aguardando_humano",
+      "diff_lines": 199
+    },
+    {
+      "label": "STEP:confirmando_dados_conta",
+      "diff_lines": 159
+    },
+    {
+      "label": "STEP:coleta_doc",
+      "diff_lines": 150
+    },
+    {
+      "label": "STEP:aguardando_conta",
+      "diff_lines": 143
+    },
+    {
+      "label": "STEP:qualificacao",
+      "diff_lines": 102
+    },
+    {
+      "label": "STEP:aguardando_doc_verso",
+      "diff_lines": 96
+    },
+    {
+      "label": "STEP:ask_phone_confirm",
+      "diff_lines": 32
+    },
+    {
+      "label": "STEP:ask_cep",
+      "diff_lines": 26
+    },
+    {
+      "label": "PREAMBLE",
+      "diff_lines": 15
+    },
+    {
+      "label": "STEP:ask_quero_cadastrar",
+      "diff_lines": 15
+    },
+    {
+      "label": "STEP:ask_tipo_documento",
+      "diff_lines": 8
+    },
+    {
+      "label": "STEP:aguardando_otp",
+      "diff_lines": 7
+    },
+    {
+      "label": "STEP:complete",
+      "diff_lines": 7
+    },
+    {
+      "label": "STEP:portal_submitting",
+      "diff_lines": 6
+    },
+    {
+      "label": "STEP:aguardando_assinatura",
+      "diff_lines": 5
+    },
+    {
+      "label": "STEP:ask_email",
+      "diff_lines": 5
+    }
+  ]
+}

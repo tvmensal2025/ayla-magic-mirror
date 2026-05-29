@@ -32,7 +32,11 @@ function fmtValor(v: number | string | null | undefined): string {
 export function renderTemplate(tpl: string, vars: TemplateVars): string {
   // Sem nome conhecido: deixa vazio (template deve omitir vírgula/saudação sozinho)
   const nome = (vars.nome || "").split(" ")[0] || "";
-  const rep = vars.representante || "consultor";
+  // Fallback robusto: cobre null/undefined (||) E string vazia após trim.
+  // Sem o trim+fallback, `representante=""` (string vazia explícita no DB)
+  // passava do `||` e ia pro template, gerando "do *{{representante}}*"
+  // renderizado como "do  " (espaço duplo + asterisco órfão limpo abaixo).
+  const rep = (String(vars.representante || "").trim()) || "iGreen Energy";
   const valor = fmtValor(vars.valor_conta);
   const tel = vars.telefone || "";
   const cpf = vars.cpf || "";

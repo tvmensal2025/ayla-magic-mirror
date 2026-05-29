@@ -82,7 +82,13 @@ export function renderTemplateVars(text: string | null | undefined, vars: Render
   const cpfFmt = cpfRaw.length === 11
     ? cpfRaw.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4")
     : cpfRaw;
-  const rep = String(vars.representante || "").trim();
+  // Fallback duplo: cobre `null/undefined` (via ||) E string vazia depois do trim.
+  // Sem o segundo guard, consultor com `name=""` no DB rendia `representante=""`,
+  // e o template "Sou a *assistente virtual* do *{{representante}}*" virava
+  // "Sou a *assistente virtual* do  e vou..." (espaço duplo + asterisco órfão
+  // limpo abaixo). Bug confirmado em produção (cliente JOSINETE em 23/05).
+  let rep = String(vars.representante || "").trim();
+  if (!rep) rep = "iGreen Energy";
   const billNum = typeof vars.valor_conta === "number"
     ? vars.valor_conta
     : Number(vars.valor_conta);

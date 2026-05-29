@@ -159,23 +159,27 @@ export async function dispatchPortalWorker(supabase: any, customerId: string): P
   const { url, secret, kind } = resolved;
   console.log(`[portal-worker] roteando customer=${customerId} → kind=${kind} url=${url}`);
 
-  // Health check (5s)
+  // Health check (10s)
   let online = false;
+  let healthErr = "";
   try {
-    const h = await fetchWithTimeout(`${url}/health`, { timeout: 5_000 });
+    const h = await fetchWithTimeout(`${url}/health`, { timeout: 10_000 });
     online = h.ok;
-    console.log(`[portal-worker] health=${h.status} online=${online}`);
+    if (!online) healthErr = `HTTP ${h.status}`;
+    console.log(`[portal-worker] health=${h.status} online=${online} kind=${kind} url=${url}`);
   } catch (e: any) {
-    console.warn(`[portal-worker] health check falhou: ${e?.message}`);
+    healthErr = e?.name === "AbortError" ? "timeout" : (e?.message || String(e));
+    console.warn(`[portal-worker] health check falhou kind=${kind} url=${url}: ${healthErr}`);
   }
 
   if (!online) {
     await supabase.from("customers").update({
       status: "worker_offline",
-      error_message: `Worker (${kind}) offline no momento do envio — polling vai pegar`,
+      error_message: `Worker (${kind}) offline: ${healthErr || "sem resposta"} — retry automático em 1 min`,
     }).eq("id", customerId);
-    return { ok: false, mode: "queued_offline", error: "worker_offline", worker: kind };
+    return { ok: false, mode: "queued_offline", error: `worker_offline:${healthErr}`, worker: kind };
   }
+
 
   // Body depende do kind
   let body: string;

@@ -605,6 +605,12 @@ Deno.serve(async (req) => {
       const _full = String((_consultant as any)?.name || "").trim();
       _repName = _full.split(/\s+/)[0] || _full;
     } catch (_) { /* best-effort */ }
+    // Fallback final — nunca deixar `representante` vazio chegar ao cliente.
+    // Sem isso, o template "Sou a *assistente virtual* do *{{representante}}*"
+    // virava "Sou a *assistente virtual* do  e vou..." (espaço duplo + asterisco
+    // órfão removido pela limpeza do renderTemplateVars). Bug confirmado em
+    // produção: cliente JOSINETE recebeu essa mensagem em 23/05 via manual-step-send.
+    if (!_repName) _repName = "iGreen Energy";
     const renderedText = (step as any).message_text
       ? renderTemplateVars(String((step as any).message_text), {
           name: (customer as any).name || "",

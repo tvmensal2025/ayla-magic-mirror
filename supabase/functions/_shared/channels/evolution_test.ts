@@ -15,11 +15,14 @@ const ADAPTER = createEvolutionAdapter({
 Deno.test("evolution adapter: capabilities estáticas estão corretas", () => {
   const c = ADAPTER.capabilities;
   assertEquals(c.channel, "evolution");
-  assertEquals(c.supportsButtons, true);
-  assertEquals(c.maxButtons, 3);
-  assertEquals(c.supportsList, false);
+  assertEquals(c.supportsButtons, false);
+  assertEquals(c.maxButtons, 0);
+  assertEquals(c.supportsList, true);
   assertEquals(c.supportsAudio, true);
+  assertEquals(c.supportsVideo, true);
   assertEquals(c.supportsTypingPresence, true);
+  assertEquals(c.supportsReactions, false);
+  assertEquals(c.inboundIdField, "wa_id");
 });
 
 Deno.test("evolution parseInbound: texto puro", () => {

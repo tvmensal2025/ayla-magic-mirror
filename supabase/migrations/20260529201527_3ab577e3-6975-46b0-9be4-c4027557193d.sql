@@ -1,0 +1,1 @@
+UPDATE public.customers SET bot_paused = true, bot_paused_reason = COALESCE(bot_paused_reason, 'manual_all_to_human'), bot_paused_at = COALESCE(bot_paused_at, now()), bot_force_enabled = false WHERE bot_paused IS DISTINCT FROM true;
