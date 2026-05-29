@@ -13,7 +13,7 @@
  * Validates: Requirements 1.6, 9.1, 9.2, 9.3, 13.1, 13.2, 13.3, 13.4, 13.5.
  */
 
-import type { CaptureSpec, EngineHooks, InboundEvent } from "./v3-types.ts";
+import type { CaptureSpec, EngineHooks, InboundEvent } from "./types.ts";
 
 /**
  * Default hooks factory. Returns an EngineHooks instance whose async

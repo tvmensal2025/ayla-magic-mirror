@@ -28,12 +28,11 @@ import type {
   StructuredLog,
   TransitionSpec,
   VariantStrategy,
-} from "./v3-types.ts";
+} from "./types.ts";
 
-// TODO(Tasks 6/7/8/9): the following value imports resolve once the
-// variant strategy modules land. They live in Wave 2 alongside this
-// file. Until then, `pickVariant` will fail to typecheck — see the
-// per-task notes in `.kiro/specs/flow-engine-v3-rewrite/tasks.md`.
+// Variant strategies live alongside this file under `./variants/`. After
+// the bot-engine-channel-unification rename (Task 3), the canonical path
+// is `_shared/engine/variants/*` (was `_shared/flow-engine/variants/*`).
 import { variantA } from "./variants/a.ts";
 import { variantB } from "./variants/b.ts";
 import { variantC } from "./variants/c.ts";

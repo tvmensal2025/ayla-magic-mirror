@@ -29,7 +29,7 @@ import type {
   InboundEvent,
   OutboundMessage,
   StructuredLog,
-} from "./v3-types.ts";
+} from "./types.ts";
 import {
   capLimits,
   dedupeAdjacent,

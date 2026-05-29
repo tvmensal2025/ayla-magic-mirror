@@ -14,7 +14,7 @@
  * the violation loud.
  */
 
-import type { VariantStrategy } from "../v3-types.ts";
+import type { VariantStrategy } from "../types.ts";
 
 export const variantC: VariantStrategy = {
   buildStepOutbound() {

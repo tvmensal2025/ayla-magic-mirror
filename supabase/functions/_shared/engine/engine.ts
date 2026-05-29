@@ -24,7 +24,7 @@ import type {
   EngineStep,
   InboundEvent,
   OutboundChoice,
-} from "./types.ts";
+} from "../flow-engine/types.ts";
 
 // ─── Helpers determinísticos (puros) ────────────────────────────────────────
 

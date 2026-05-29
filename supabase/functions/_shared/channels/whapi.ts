@@ -5,12 +5,13 @@
 // Evolution: capabilities estáticas, parseInbound canonicaliza para
 // `ParsedMessage`, send* devolve `SendResult` rico.
 //
-// Capabilities deliberadas:
+// Capabilities deliberadas (bot-engine-channel-unification §Design 2):
 //   - `supportsButtons=true`, `maxButtons=3` — Whapi expõe `quick_reply`
 //     no endpoint `/messages/interactive` e funciona consistentemente.
 //   - `supportsList=true` — Whapi suporta List Messages (`list` action).
 //   - `supportsAudio=true`, `supportsVideo=true`.
-//   - `supportsTypingPresence=true`.
+//   - `supportsTypingPresence=true`, `supportsReactions=true`.
+//   - `inboundIdField="messageId"` — Whapi entrega `messages[0].id`.
 //
 // Detalhe: o sender legado já strip `ButtonsV3:` / `ListV3:` no parse
 // (linha 392 de whapi-api.ts), então `buttonId` chega limpo aqui.
@@ -27,7 +28,14 @@ import type {
 import { createWhapiSender, parseWhapiMessage } from "../whapi-api.ts";
 import { normalizePhone } from "../utils.ts";
 
-const CAPABILITIES: ChannelCapabilities = {
+/**
+ * Capabilities estáticas do canal Whapi. Exportado como named constant
+ * para consumo direto pelo motor (`_shared/engine/`), pelos PBT
+ * (`__tests__/arb.ts → arbCapabilities`) e por scripts de E2E
+ * (`bot-e2e-runner/v3-scenarios.ts`). Spec:
+ * `.kiro/specs/bot-engine-channel-unification/design.md` §2.
+ */
+export const WHAPI_CAPABILITIES: ChannelCapabilities = {
   channel: "whapi",
   supportsButtons: true,
   maxButtons: 3,
@@ -35,8 +43,8 @@ const CAPABILITIES: ChannelCapabilities = {
   supportsAudio: true,
   supportsVideo: true,
   supportsTypingPresence: true,
-  supportsReactions: false,
-  inboundIdField: "wa_id",
+  supportsReactions: true,
+  inboundIdField: "messageId",
 };
 
 export interface CreateWhapiAdapterInput {
@@ -56,7 +64,7 @@ export function createWhapiAdapter(input: CreateWhapiAdapterInput): ChannelAdapt
   }
 
   return {
-    capabilities: CAPABILITIES,
+    capabilities: WHAPI_CAPABILITIES,
 
     async sendText(jid, text, _ctx) {
       try {
@@ -68,12 +76,12 @@ export function createWhapiAdapter(input: CreateWhapiAdapterInput): ChannelAdapt
     },
 
     async sendChoice(jid, prompt, choice, _ctx) {
-      const safeOptions = (choice.options || []).slice(0, CAPABILITIES.maxButtons);
+      const safeOptions = (choice.options || []).slice(0, WHAPI_CAPABILITIES.maxButtons);
       // Whapi suporta botão real e lista — preferimos o que o caller pediu.
       // `list` ainda é renderizado via `sendButtons` legado por enquanto;
       // quando a Phase D introduzir `dispatch-choice.ts` puro, esse caminho
       // passará por lá. Por ora, replicamos o comportamento atual.
-      if (choice.preferred === "button" && CAPABILITIES.supportsButtons && safeOptions.length > 0) {
+      if (choice.preferred === "button" && WHAPI_CAPABILITIES.supportsButtons && safeOptions.length > 0) {
         try {
           const ok = await sender.sendButtons(jid, prompt, safeOptions);
           return toResult(ok);

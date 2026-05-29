@@ -104,8 +104,8 @@ export async function runEngineV3IfEnabled(
 
     try {
       const [{ loadContext }, { runEngine }, channels] = await Promise.all([
-        import("./v3-loader.ts"),
-        import("./v3-runner.ts"),
+        import("./loader.ts"),
+        import("./runner.ts"),
         import("../channels/index.ts"),
       ]);
 

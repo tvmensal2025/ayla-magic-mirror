@@ -28,7 +28,7 @@ import type {
   MediaOrderEntry,
   OutboundMessage,
   VariantStrategy,
-} from "../v3-types.ts";
+} from "../types.ts";
 
 /**
  * Compose a non-empty idempotency string for an outbound. The runner

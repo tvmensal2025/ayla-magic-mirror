@@ -29,10 +29,10 @@ import type {
   EngineConfig,
   EngineHooks,
   InboundEvent,
-} from "./v3-types.ts";
-import { loadContext } from "./v3-loader.ts";
-import { runEngine } from "./v3-runner.ts";
-import { executeActions } from "./v3-dispatcher.ts";
+} from "./types.ts";
+import { loadContext } from "./loader.ts";
+import { runEngine } from "./runner.ts";
+import { executeActions } from "../dispatcher/index.ts";
 import { defaultHooks, withCapturesExtractor } from "./hooks.ts";
 import { syncDealStageFromStep } from "../crm-stage-sync.ts";
 import {
@@ -285,7 +285,7 @@ function buildInboundLog(parsed: V3WebhookEntryInbound):
   return null;
 }
 
-export async function runEngineV3WebhookEntry(
+export async function runUnifiedEngineWebhookEntry(
   args: V3WebhookEntryArgs,
 ): Promise<V3WebhookEntryResult> {
   try {

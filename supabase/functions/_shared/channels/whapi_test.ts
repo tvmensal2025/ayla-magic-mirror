@@ -14,6 +14,10 @@ Deno.test("whapi adapter: capabilities estáticas estão corretas", () => {
   assertEquals(c.maxButtons, 3);
   assertEquals(c.supportsList, true);
   assertEquals(c.supportsAudio, true);
+  assertEquals(c.supportsVideo, true);
+  assertEquals(c.supportsTypingPresence, true);
+  assertEquals(c.supportsReactions, true);
+  assertEquals(c.inboundIdField, "messageId");
 });
 
 Deno.test("whapi parseInbound: texto puro", () => {

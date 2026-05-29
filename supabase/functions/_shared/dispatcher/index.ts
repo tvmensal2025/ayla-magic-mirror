@@ -28,7 +28,7 @@ import type {
   EngineOutput,
   OutboundMessage,
   StructuredLog,
-} from "./v3-types.ts";
+} from "../engine/types.ts";
 import { persistFlowState } from "../customer-flow-state.ts";
 import { renderChoice } from "../channels/dispatch-choice.ts";
 import { renderTemplateVars } from "../render-vars.ts";

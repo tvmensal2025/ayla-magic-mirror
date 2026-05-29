@@ -29,7 +29,7 @@ import type {
   InboundEvent,
   MediaOrderEntry,
   TransitionSpec,
-} from "../v3-types.ts";
+} from "../types.ts";
 
 // ─── Primitive enum arbitraries ─────────────────────────────────────────
 
@@ -216,7 +216,7 @@ function arbFallback(allStepIds: string[]): fc.Arbitrary<FallbackSpec> {
  * Builds a `BotFlowStep` arbitrary whose `transitions[].goto_step_id`
  * and `fallback.goto_step_id` only reference ids in `allStepIds`. The
  * generated step's `reachableStepIds` is set to exactly `allStepIds`,
- * matching the engine invariant in v3-types §"BotFlowStep".
+ * matching the engine invariant in types §"BotFlowStep".
  *
  * `flowId` and the step's own `id` are passed in by the caller so a
  * full flow's steps share a `flowId` and the id set is closed.

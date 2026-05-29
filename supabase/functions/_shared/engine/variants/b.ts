@@ -23,7 +23,7 @@
  *    (numbered text list) since variant B is the no-frills variant.
  */
 
-import type { OutboundMessage, VariantStrategy } from "../v3-types.ts";
+import type { OutboundMessage, VariantStrategy } from "../types.ts";
 import { buildIdempotencyContent } from "./a.ts";
 
 export const variantB: VariantStrategy = {

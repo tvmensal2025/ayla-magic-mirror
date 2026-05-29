@@ -25,7 +25,7 @@ import type {
   FallbackSpec,
   MediaOrderEntry,
   TransitionSpec,
-} from "./v3-types.ts";
+} from "./types.ts";
 
 export interface LoadedContext {
   state: CustomerSnapshot;
@@ -35,7 +35,7 @@ export interface LoadedContext {
    * Avisos não-fatais detectados durante o load (ex: slot de áudio sem URL).
    * O dispatcher injeta-os em `engine_logs` junto com `result.logs`.
    */
-  warnings?: import("./v3-types.ts").StructuredLog[];
+  warnings?: import("./types.ts").StructuredLog[];
 }
 
 export interface LoadContextArgs {
@@ -169,7 +169,7 @@ export async function loadContext(args: LoadContextArgs): Promise<LoadedContext>
   //   3) step.step_key without leading "d_" (welcome, como_funciona)
   //   4) step.step_key without leading "v_a_" / "v_b_" / "v_d_" prefixes
   // The slot_key for ai_media_library lookup uses the same chain.
-  const warnings: import("./v3-types.ts").StructuredLog[] = [];
+  const warnings: import("./types.ts").StructuredLog[] = [];
   const nowIso = new Date().toISOString();
   const mediaOrderByStepKey: Record<string, MediaOrderEntry[]> = {};
   for (const stepRow of stepsRaw as any[]) {

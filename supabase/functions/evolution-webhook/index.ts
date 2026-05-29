@@ -1199,7 +1199,7 @@ Deno.serve(async (req) => {
     // entre whapi-webhook (produção) e evolution-webhook (espelho).
     // Fail-open: erro no v3 nunca bloqueia o caminho legado.
     try {
-      const { runEngineV3IfEnabled } = await import("../_shared/flow-engine/webhook-hook.ts");
+      const { runEngineV3IfEnabled } = await import("../_shared/engine/webhook-hook.ts");
       await runEngineV3IfEnabled({
         supabase,
         customerId: customer.id,
@@ -1331,9 +1331,9 @@ Deno.serve(async (req) => {
       // a consultor is explicitly opted in (Phase 1+ of rollout). On v3
       // errors, the helper pauses the customer + inserts a handoff
       // alert (NEVER falls through to legacy) per the safety contract.
-      const { isEngineV3Enabled } = await import("../_shared/flow-engine/router.ts");
+      const { isEngineV3Enabled } = await import("../_shared/engine/router.ts");
       if (await isEngineV3Enabled(supabase as any, instanceData.consultant_id)) {
-        const { runEngineV3WebhookEntry } = await import("../_shared/flow-engine/v3-webhook-entry.ts");
+        const { runUnifiedEngineWebhookEntry } = await import("../_shared/engine/webhook-entry.ts");
         const { getAdapter } = await import("../_shared/channels/index.ts");
         const v3Adapter = getAdapter({
           kind: "evolution",
@@ -1344,7 +1344,7 @@ Deno.serve(async (req) => {
             connectedPhone: instanceData.connected_phone,
           },
         });
-        const v3Outcome = await runEngineV3WebhookEntry({
+        const v3Outcome = await runUnifiedEngineWebhookEntry({
           supabase: supabase as any,
           adapter: v3Adapter,
           customerId: customer.id,

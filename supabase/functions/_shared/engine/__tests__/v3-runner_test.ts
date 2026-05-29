@@ -13,7 +13,7 @@
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import fc from "https://esm.sh/fast-check@3.23.2";
 
-import { runEngine } from "../v3-runner.ts";
+import { runEngine } from "../runner.ts";
 import type {
   BotFlow,
   BotFlowStep,
@@ -25,7 +25,7 @@ import type {
   InboundEvent,
   OutboundMessage,
   StructuredLog,
-} from "../v3-types.ts";
+} from "../types.ts";
 
 // ─── Test fixtures ──────────────────────────────────────────────────────
 

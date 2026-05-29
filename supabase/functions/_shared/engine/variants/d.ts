@@ -22,7 +22,7 @@
  * only variant that consumes them.
  */
 
-import type { OutboundMessage, VariantStrategy } from "../v3-types.ts";
+import type { OutboundMessage, VariantStrategy } from "../types.ts";
 import { variantA } from "./a.ts";
 
 export const variantD: VariantStrategy = {

@@ -28,7 +28,7 @@ import type {
   LogKind,
   OutboundMessage,
   StructuredLog,
-} from "./v3-types.ts";
+} from "./types.ts";
 import { pickVariant } from "./helpers.ts";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
