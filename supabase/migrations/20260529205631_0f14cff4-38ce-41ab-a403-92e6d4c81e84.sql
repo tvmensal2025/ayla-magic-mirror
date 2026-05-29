@@ -1,0 +1,1 @@
+UPDATE public.customers SET status='data_complete', conversation_step='data_complete', finalized_at=NULL, error_message=NULL WHERE id='482c0262-e5e0-4716-82f1-f3f4528b2e79';
