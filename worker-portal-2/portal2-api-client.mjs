@@ -82,23 +82,255 @@ const formatCep = c => {
   return d.length === 8 ? `${d.slice(0, 5)}-${d.slice(5)}` : d;
 };
 const formatPhone = c => {
-  const d = onlyDigits(c);
+  let d = onlyDigits(c);
+  // Remove DDI 55 quando presente (números BR sempre 11 ou 10 dígitos no
+  // formato (DD) X XXXX-XXXX). Ex: "5511971254913" → "11971254913".
+  if (d.length === 13 && d.startsWith('55')) d = d.slice(2);
+  if (d.length === 12 && d.startsWith('55')) d = d.slice(2);
   if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
   if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
   return c;
 };
 function safeJson(s) { try { return JSON.parse(s); } catch { return null; } }
 
+// ─── Tabelas de mapeamento ──────────────────────────────────────────────────
+//
+// Áreas de concessão da ANEEL: cada cidade pertence a uma única
+// distribuidora. Quando o cliente informa apenas CEP/cidade, a gente já
+// resolve sem precisar de OCR ou input do consultor.
+//
+// IMPORTANTE: as tabelas abaixo refletem APENAS as distribuidoras que a
+// iGreen efetivamente atende (descoberto via /bonus/distributors). Áreas
+// fora dessa cobertura retornam null e devem ser tratadas como não-elegíveis
+// pelo caller.
+//
+// Cobertura iGreen (verificado em 2026-05-29 via API):
+//   SP: CPFL, CPFL PIRATININGA, CPFL SANTA CRUZ, ELEKTRO, ENERGISA SUL SUDESTE
+//        (NÃO atende ENEL SP capital, NÃO atende EDP Vale)
+//   RJ: ENEL, ENERGISA MINAS RIO
+//        (NÃO atende LIGHT — capital+baixada não elegíveis)
+//   MG: CEMIG-D, CPFL SANTA CRUZ, ENERGISA MINAS RIO, ENERGISA SUL SUDESTE
+//   RS: CEEE, RGE          PR: COPEL, CPFL SANTA CRUZ
+//   SC: CELESC             BA: COELBA          CE: ENEL
+//   PE: NEO ENERGIA        GO: EQUATORIAL      MT: ENERGISA
+//   MS: ELEKTRO, ENERGISA  ES: EDP             PA: EQUATORIAL PA
+//   MA/AL/PI: EQUATORIAL   PB: ENERGISA PB     RN: COSERN
+//   SE: ENERGISA           TO: ENERGISA TOCANTINS
+//   Sem cobertura: DF, AM, AP, AC, RO, RR
+const CITY_HINT = {
+  SP: {
+    // Áreas urbanas conurbadas + interior litoral norte/oeste
+    'CPFL PIRATININGA': new Set([
+      // Sorocaba e região
+      'SOROCABA', 'SALTO', 'ITU', 'BOITUVA', 'PORTO FELIZ', 'TIETÊ', 'TIETE',
+      'CAPELA DO ALTO', 'ARAÇOIABA DA SERRA', 'ARACOIABA DA SERRA',
+      'ALUMÍNIO', 'ALUMINIO', 'MAIRINQUE', 'IPERÓ', 'IPERO',
+      // Jundiaí/Indaiatuba
+      'JUNDIAI', 'JUNDIAÍ', 'INDAIATUBA', 'CABREÚVA', 'CABREUVA',
+      'ITUPEVA', 'CAJAMAR', 'CAIEIRAS',
+      // Baixada Santista
+      'SANTOS', 'SAO VICENTE', 'SÃO VICENTE', 'GUARUJA', 'GUARUJÁ',
+      'CUBATAO', 'CUBATÃO', 'PRAIA GRANDE', 'BERTIOGA', 'PERUIBE', 'PERUÍBE',
+      'ITANHAEM', 'ITANHAÉM', 'MONGAGUA', 'MONGAGUÁ',
+      // Sul
+      'ITAPETININGA', 'ITAPEVA', 'TATUI', 'TATUÍ', 'CERQUILHO',
+      'CESARIO LANGE', 'CESÁRIO LANGE', 'PORANGABA',
+    ]),
+    'CPFL SANTA CRUZ': new Set([
+      'SANTA CRUZ DO RIO PARDO', 'OURINHOS', 'AVARE', 'AVARÉ',
+      'SAO MANUEL', 'SÃO MANUEL', 'BOTUCATU', 'AGUDOS',
+      'CHAVANTES', 'IPAUSSU', 'PIRAJU', 'TIMBURI',
+    ]),
+    'ELEKTRO': new Set([
+      // ELEKTRO atende grande parte do interior SP (~228 cidades)
+      'CAMPINAS', 'LIMEIRA', 'PIRACICABA', 'AMERICANA', 'SUMARÉ', 'SUMARE',
+      'HORTOLANDIA', 'HORTOLÂNDIA', 'PAULINIA', 'PAULÍNIA',
+      'NOVA ODESSA', 'COSMÓPOLIS', 'COSMOPOLIS', 'ENGENHEIRO COELHO',
+      'ARTUR NOGUEIRA', 'JAGUARIUNA', 'JAGUARIÚNA', 'PEDREIRA', 'AMPARO',
+      'SAO JOSE DO RIO PRETO', 'SÃO JOSÉ DO RIO PRETO', 'CATANDUVA',
+      'BARRETOS', 'JABOTICABAL', 'LINS', 'BAURU', 'JAU', 'JAÚ',
+      'MARILIA', 'MARÍLIA', 'PRESIDENTE PRUDENTE', 'ASSIS',
+      'ARARAQUARA', 'SAO CARLOS', 'SÃO CARLOS', 'RIO CLARO',
+    ]),
+    // CPFL Paulista (Campinas-leste/Ribeirão Preto/Franca/Mogi-Guaçu)
+    'CPFL': new Set([
+      'RIBEIRAO PRETO', 'RIBEIRÃO PRETO', 'FRANCA', 'BATATAIS',
+      'SERTAOZINHO', 'SERTÃOZINHO', 'CRAVINHOS', 'BRODOWSKI',
+      'BEBEDOURO',
+      'ARARAS', 'MOGI MIRIM', 'MOGI GUACU', 'MOGI GUAÇU',
+      'LEME', 'PIRASSUNUNGA', 'SAO JOAO DA BOA VISTA',
+      'SÃO JOÃO DA BOA VISTA',
+    ]),
+    // ⚠ NÃO ATENDIDOS pela iGreen (caem em null, lead não-elegível):
+    //   - ENEL SP capital + Grande SP (São Paulo, Guarulhos, Osasco etc.)
+    //   - EDP Vale do Paraíba (SJ Campos, Taubaté etc.)
+  },
+  RJ: {
+    // ENEL RJ — Norte/Noroeste fluminense + Sul + Niterói
+    'ENEL': new Set([
+      'NITEROI', 'NITERÓI', 'SAO GONCALO', 'SÃO GONÇALO',
+      'MARICA', 'MARICÁ', 'ITABORAI', 'ITABORAÍ', 'TANGUA', 'TANGUÁ',
+      'CAMPOS DOS GOYTACAZES', 'MACAE', 'MACAÉ', 'CABO FRIO',
+      'ARRAIAL DO CABO', 'BUZIOS', 'BÚZIOS', 'SAQUAREMA', 'ARARUAMA',
+      'IGUABA', 'TERESÓPOLIS', 'TERESOPOLIS', 'NOVA FRIBURGO',
+      'CACHOEIRAS DE MACACU', 'RIO BONITO', 'CASIMIRO DE ABREU',
+      'PETROPOLIS', 'PETRÓPOLIS', 'MAGE', 'MAGÉ', 'GUAPIMIRIM',
+    ]),
+    // ⚠ NÃO ATENDIDOS pela iGreen:
+    //   - LIGHT (Rio capital, Duque, São João Meriti, Nova Iguaçu, Volta
+    //     Redonda etc.)
+  },
+  MG: {
+    // CPFL SANTA CRUZ atende um pequeno bolsão no sul de MG
+    'CPFL SANTA CRUZ': new Set([
+      'POÇOS DE CALDAS', 'POCOS DE CALDAS', 'CALDAS', 'IBITIURA DE MINAS',
+      'IPUIUNA', 'IPUIÚNA', 'BOTELHOS',
+    ]),
+    // ENERGISA MINAS RIO
+    'ENERGISA MINAS RIO': new Set([
+      'CATAGUASES', 'LEOPOLDINA', 'MURIAE', 'MURIAÉ',
+    ]),
+    // ENERGISA SUL SUDESTE — sul/sudoeste de MG
+    'ENERGISA SUL SUDESTE': new Set([
+      'POUSO ALEGRE', 'ITAJUBA', 'ITAJUBÁ', 'OURO FINO',
+    ]),
+    // CEMIG-D atende todo o resto de MG (default UF)
+  },
+  RS: {
+    // CEEE-D (capital + sul + fronteira)
+    'CEEE': new Set([
+      'PORTO ALEGRE', 'PELOTAS', 'RIO GRANDE', 'GRAVATAÍ', 'GRAVATAI',
+      'CACHOEIRINHA', 'ALVORADA', 'VIAMÃO', 'VIAMAO', 'CANOAS',
+      'ESTEIO', 'SAPUCAIA DO SUL', 'NOVO HAMBURGO', 'SÃO LEOPOLDO',
+      'SAO LEOPOLDO', 'JAGUARÃO', 'JAGUARAO', 'BAGE', 'BAGÉ',
+      'CAMAQUÃ', 'CAMAQUA', 'SANTA VITORIA DO PALMAR',
+    ]),
+    // RGE (norte/serra) — default UF
+  },
+  PR: {
+    // CPFL SANTA CRUZ tem pequeno bolsão fronteira com SP
+    'CPFL SANTA CRUZ': new Set([
+      'JOAQUIM TAVORA', 'JOAQUIM TÁVORA', 'JUNDIAI DO SUL',
+      'JUNDIAÍ DO SUL', 'SANTO ANTONIO DA PLATINA',
+      'SANTO ANTÔNIO DA PLATINA', 'CARLOPOLIS', 'CARLÓPOLIS',
+    ]),
+    // COPEL atende quase todo PR — default UF
+  },
+  MS: {
+    // ELEKTRO atende sul de MS
+    'ELEKTRO': new Set([
+      'TRES LAGOAS', 'TRÊS LAGOAS', 'BRASILANDIA', 'BRASILÂNDIA',
+      'AGUA CLARA', 'ÁGUA CLARA',
+    ]),
+    // ENERGISA MS — default
+  },
+};
+
+// UFs com 1 distribuidora dominante. Quando cidade não cai em CITY_HINT
+// (ou nem temos cidade), aqui é a aposta. Os tokens precisam aparecer no
+// retorno de /bonus/distributors da iGreen pra UF.
+//
+// IMPORTANTE: UFs sem cobertura (DF, AM, AP, AC, RO, RR) não têm default —
+// caem em null e o lead não é elegível.
+const UF_DEFAULT = {
+  // UFs com 1 distribuidora dominante
+  AL: 'EQUATORIAL',
+  BA: 'COELBA',
+  CE: 'ENEL',
+  ES: 'EDP',
+  GO: 'EQUATORIAL',
+  MA: 'EQUATORIAL',
+  MG: 'CEMIG-D',
+  MT: 'ENERGISA',
+  PA: 'EQUATORIAL PA',
+  PB: 'ENERGISA PB',
+  PE: 'NEO ENERGIA',
+  PI: 'EQUATORIAL',
+  PR: 'COPEL',
+  RN: 'COSERN',
+  RS: 'RGE',       // norte/serra (capital cai em CEEE via CITY_HINT)
+  SC: 'CELESC',
+  SE: 'ENERGISA',
+  TO: 'ENERGISA TOCANTINS',
+  // SP/RJ/MS são ambíguas — sem default seguro, dependem do CITY_HINT
+};
+
+// UFs sem cobertura iGreen — sinaliza pro caller que o lead é não-elegível.
+const UF_NAO_ATENDIDA = new Set(['DF', 'AM', 'AP', 'AC', 'RO', 'RR']);
+
+// Aliases por nome comercial: regex no nome digitado/OCR → token oficial.
+const COMMERCIAL_TO_TOKEN = [
+  // CPFL: "Energia"/"Paulista" caem em "CPFL"; Piratininga e Santa Cruz têm
+  // nomes próprios. Tolerância pra OCR quebrada: "PRA TININGA"/"PIR TININGA".
+  { match: /^CPFL.*PIRA?\s*TININGA/, token: 'CPFL PIRATININGA' },
+  { match: /^CPFL.*SANTA\s*CRUZ/,   token: 'CPFL SANTA CRUZ' },
+  { match: /PIRA?\s*TININGA/,        token: 'CPFL PIRATININGA' },
+  { match: /^CPFL/,                  token: 'CPFL' },
+  // Cemig (MG)
+  { match: /^CEMIG/,                 token: 'CEMIG-D' },
+  // Enel (SP/RJ/CE) e antigas Eletropaulo/Ampla/Coelce
+  { match: /^ENEL/,                  token: 'ENEL' },
+  { match: /^ELETROPAULO/,           token: 'ENEL' },
+  { match: /^AMPLA/,                 token: 'ENEL' },
+  { match: /^COELCE/,                token: 'ENEL' },
+  // Energisa (MT/MS/SE/PB/MG/SP/AC/RO/TO)
+  { match: /^ENERGISA\s*MINAS\s*RIO/,    token: 'ENERGISA MINAS RIO' },
+  { match: /^ENERGISA\s*SUL\s*SUDESTE/,  token: 'ENERGISA SUL SUDESTE' },
+  { match: /^ENERGISA\s*PARAIBA|^ENERGISA\s*PB/, token: 'ENERGISA PB' },
+  { match: /^ENERGISA\s*TOCANTINS/,      token: 'ENERGISA TOCANTINS' },
+  { match: /^ENERGISA/,                  token: 'ENERGISA' },
+  // EDP (SP/ES) — antiga Bandeirante/Escelsa
+  { match: /^EDP/,                   token: 'EDP' },
+  { match: /^BANDEIRANTE/,           token: 'EDP' },
+  { match: /^ESCELSA/,               token: 'EDP' },
+  // Equatorial (MA/PA/AL/PI/GO/RJ)
+  { match: /^EQUATORIAL\s*PA/,       token: 'EQUATORIAL PA' },
+  { match: /^EQUATORIAL/,            token: 'EQUATORIAL' },
+  { match: /^CELPA/,                 token: 'EQUATORIAL PA' },
+  { match: /^CEMAR/,                 token: 'EQUATORIAL' },
+  { match: /^CEPISA/,                token: 'EQUATORIAL' },
+  { match: /^CELG/,                  token: 'EQUATORIAL' },
+  { match: /^CEAL/,                  token: 'EQUATORIAL' },
+  // Coelba (BA), Cosern (RN), Celpe (PE) — grupo Neoenergia
+  { match: /^COELBA/,                token: 'COELBA' },
+  { match: /^COSERN/,                token: 'COSERN' },
+  { match: /^NEO\s*ENERGIA|^CELPE/,  token: 'NEO ENERGIA' },
+  // Light (RJ)
+  { match: /^LIGHT/,                 token: 'LIGHT' },
+  // Celesc (SC/PR)
+  { match: /^CELESC/,                token: 'CELESC' },
+  // Copel (PR)
+  { match: /^COPEL/,                 token: 'COPEL' },
+  // CEEE / RGE (RS)
+  { match: /^CEEE/,                  token: 'CEEE' },
+  { match: /^RGE/,                   token: 'RGE' },
+  // Elektro (SP/MS)
+  { match: /^ELEKTRO/,               token: 'ELEKTRO' },
+  // Amazonas Energia (AM), Roraima Energia (RR)
+  { match: /^AMAZONAS/,              token: 'AMAZONAS' },
+  { match: /^RORAIMA/,               token: 'RORAIMA' },
+];
+
 // ─── Client ──────────────────────────────────────────────────────────────────
 export class Portal2Client {
-  constructor({ idconsultor, baseUrl = BASE_URL } = {}) {
+  constructor({ idconsultor, baseUrl = BASE_URL, tracer = null } = {}) {
     if (!idconsultor) throw new Error('idconsultor é obrigatório');
     this.idconsultor = Number(idconsultor);
     this.baseUrl = baseUrl;
+    // Tracer opcional: se setado, recebe { method, path, request, response,
+    // status, duration_ms, error } a cada call. Usado pra auditoria IA dos
+    // primeiros cadastros (PORTAL2_AI_AUDIT_LIMIT).
+    this.tracer = tracer;
+  }
+
+  _emitTrace(event) {
+    if (!this.tracer) return;
+    try { this.tracer.push(event); } catch {}
   }
 
   // ──── HTTP core via page.evaluate ──────────────────────────────────────────
   async _fetch(method, path, { body, query } = {}) {
+    const t0 = Date.now();
     const page = await _ensurePage(this.idconsultor);
     const url = new URL(this.baseUrl + path);
     if (query) for (const [k, v] of Object.entries(query)) {
@@ -120,8 +352,20 @@ export class Portal2Client {
       } catch (e) { return { err: String(e) }; }
     }, { url: url.toString(), method, headers, body });
 
-    if (result.err) throw new Error(`fetch in-page falhou: ${result.err}`);
+    const duration_ms = Date.now() - t0;
+
+    if (result.err) {
+      this._emitTrace({ method, path: pathname, query: query || null, request: body ?? null,
+                        response: null, status: 0, duration_ms, error: result.err });
+      throw new Error(`fetch in-page falhou: ${result.err}`);
+    }
     const data = result.ct.includes('json') ? safeJson(result.body) : null;
+    this._emitTrace({
+      method, path: pathname, query: query || null, request: body ?? null,
+      response: data ?? (typeof result.body === 'string' ? result.body.slice(0, 2000) : null),
+      status: result.status, duration_ms,
+      error: result.status >= 400 ? (data?.error?.message || data?.message || result.body.slice(0, 300)) : null,
+    });
     if (result.status < 200 || result.status >= 300) {
       const msg = data?.error?.message || data?.message || result.body.slice(0, 300);
       const err = new Error(`${method} ${pathname} -> ${result.status}: ${msg}`);
@@ -137,6 +381,7 @@ export class Portal2Client {
    * fileBuffer: Buffer ou Uint8Array (vamos converter pra base64 e remontar no browser).
    */
   async _fetchMultipart(method, path, { fields = {}, file } = {}) {
+    const t0 = Date.now();
     const page = await _ensurePage(this.idconsultor);
     const url = new URL(this.baseUrl + path);
     const pathname = url.pathname;
@@ -170,8 +415,21 @@ export class Portal2Client {
       fileB64, fileName: file?.filename, fileMime: file?.mime,
     });
 
-    if (result.err) throw new Error(`upload in-page falhou: ${result.err}`);
+    const duration_ms = Date.now() - t0;
+    const fileSummary = file ? { filename: file.filename, mime: file.mime, bytes: file.buffer?.length } : null;
+
+    if (result.err) {
+      this._emitTrace({ method, path: pathname, request: { fields, file: fileSummary },
+                        response: null, status: 0, duration_ms, error: result.err });
+      throw new Error(`upload in-page falhou: ${result.err}`);
+    }
     const data = result.ct.includes('json') ? safeJson(result.body) : null;
+    this._emitTrace({
+      method, path: pathname, request: { fields, file: fileSummary },
+      response: data ?? (typeof result.body === 'string' ? result.body.slice(0, 2000) : null),
+      status: result.status, duration_ms,
+      error: result.status >= 400 ? (data?.error?.message || data?.message || result.body.slice(0, 300)) : null,
+    });
     if (result.status < 200 || result.status >= 300) {
       const msg = data?.error?.message || data?.message || result.body.slice(0, 300);
       const err = new Error(`${method} ${pathname} -> ${result.status}: ${msg}`);
@@ -241,6 +499,213 @@ export class Portal2Client {
     return this._fetch('GET', '/form-config', { query: { state, distributor, supplier } });
   }
 
+  /**
+   * Normaliza nome de concessionária local pra o nome oficial aceito pela iGreen.
+   *
+   * Exemplos cobertos (nome comercial na fatura → enum iGreen):
+   *   "CPFL Energia" / "CPFL Paulista" → "CPFL"
+   *   "CPFL Piratininga" → "CPFL PIRATININGA"
+   *   "Cemig Distribuição" / "Cemig D" → "CEMIG-D"
+   *   "Enel Distribuição São Paulo" → "ENEL"
+   *   "Coelba" → "COELBA"
+   *   "Light SA" / "Light Energia" → "LIGHT"
+   *   "Energisa Mato Grosso" → "ENERGISA"
+   *
+   * Quando passado `cidade`, desambigua casos como "CPFL ENERGIA" em SP
+   * (Salto/Sorocaba/Itu → Piratininga; Campinas/Ribeirão Preto → CPFL).
+   *
+   * Estratégia:
+   *   1. Hint por cidade (resolve antes do alias genérico)
+   *   2. Match exato case-insensitive
+   *   3. Tabela de aliases comerciais (CPFL/CEMIG/ENEL/...)
+   *   4. Match por startsWith (mais específico vence)
+   *   5. Match por primeira palavra
+   *   6. Sem match: retorna `null`
+   */
+  async resolveConcessionaria(uf, nome, cidade) {
+    if (!uf) return null;
+    // Normaliza removendo diacríticos pra match consistente
+    // ("São Paulo" === "SAO PAULO", "Niterói" === "NITEROI").
+    const norm = s => String(s || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase().trim().replace(/\s+/g, ' ');
+    const target = norm(nome);
+    const targetCidade = norm(cidade);
+
+    // Lista oficial pra essa UF
+    const list = await this.getDistributors(uf).catch(() => []);
+    const officials = (Array.isArray(list) ? list : [])
+      .map(d => (typeof d === 'string' ? d : d?.concessionaria))
+      .filter(Boolean);
+
+    if (officials.length === 0) return null;
+
+    // 0. Hint por cidade — sempre tenta primeiro, mesmo sem nome.
+    //    Em UFs com áreas de concessão definidas (ANEEL), cidade já é
+    //    suficiente pra resolver. Os Sets do CITY_HINT podem ter entradas
+    //    com/sem acento — comparamos sempre normalizado em ambos os lados.
+    const cityMap = CITY_HINT[uf?.toUpperCase()];
+    if (cityMap && targetCidade) {
+      for (const [official, cidades] of Object.entries(cityMap)) {
+        const normalizedSet = new Set([...cidades].map(norm));
+        if (!normalizedSet.has(targetCidade)) continue;
+        const officialMatch = officials.find(o => norm(o) === norm(official));
+        if (!officialMatch) continue;
+        // Sem nome ou família compatível -> retorna; senão deixa cair pros
+        // próximos passos (caso o customer informe nome divergente da cidade).
+        if (!target) return officialMatch;
+        const family = official.split(' ')[0];
+        if (target.startsWith(family) || target.includes(family) || norm(officialMatch).includes(target)) {
+          return officialMatch;
+        }
+      }
+    }
+
+    if (!target) {
+      // Sem nome e cidade não resolveu: se a UF tem 1 distribuidora dominante
+      // (default), usa.
+      const def = UF_DEFAULT[uf?.toUpperCase()];
+      if (def) {
+        const hit = officials.find(o => norm(o) === norm(def))
+                 || officials.find(o => norm(o).startsWith(norm(def)));
+        if (hit) return hit;
+      }
+      return null;
+    }
+
+    // 1. Match exato case-insensitive
+    const exact = officials.find(o => norm(o) === target);
+    if (exact) return exact;
+
+    // 2. Aliases por nome comercial: primeiro pattern que casa wins
+    for (const { match, token } of COMMERCIAL_TO_TOKEN) {
+      if (!match.test(target)) continue;
+      // Pega o nome oficial mais próximo do token (case-insensitive)
+      const hit = officials.find(o => norm(o) === norm(token))
+                || officials.find(o => norm(o).startsWith(norm(token)));
+      if (hit) return hit;
+    }
+
+    // 3. startsWith fuzzy (mais específico vence)
+    const starts = officials
+      .filter(o => target.startsWith(norm(o)) || norm(o).startsWith(target))
+      .sort((a, b) => norm(b).length - norm(a).length);
+    if (starts.length) return starts[0];
+
+    // 4. Primeira palavra em comum
+    const targetFirst = target.split(' ')[0];
+    if (targetFirst.length >= 3) {
+      const byToken = officials.find(o => norm(o).split(' ')[0] === targetFirst);
+      if (byToken) return byToken;
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolve a concessionária a partir do CEP, sem depender de OCR ou input do
+   * consultor. Estratégia:
+   *   1. ViaCEP → cidade + UF
+   *   2. CITY_HINT[uf][cidade] → distribuidora
+   *   3. UF_DEFAULT[uf] → distribuidora dominante (fallback)
+   *   4. Match contra /bonus/distributors da UF (prefere o dominante quando tem só um)
+   *
+   * Retorna `{uf, cidade, concessionaria, viacep}` quando resolve.
+   * Retorna `{uf, cidade, concessionaria: null, naoAtendida: true}` quando o
+   *   CEP é válido mas iGreen não atende a região (ex: Rio capital, SP capital,
+   *   DF, AM, AP, AC, RO, RR).
+   * Retorna `null` quando CEP inválido ou ViaCEP indisponível.
+   */
+  async resolveConcessionariaByCep(cep) {
+    const digits = onlyDigits(cep);
+    if (digits.length !== 8) return null;
+    const cepInfo = await this.viacep(digits).catch(() => null);
+    if (!cepInfo?.uf) return null;
+    const uf = cepInfo.uf.toUpperCase();
+    const cidade = cepInfo.localidade || '';
+
+    if (UF_NAO_ATENDIDA.has(uf)) {
+      return { uf, cidade, concessionaria: null, naoAtendida: true, viacep: cepInfo };
+    }
+
+    const resolved = await this.resolveConcessionaria(uf, '', cidade);
+    if (resolved) return { uf, cidade, concessionaria: resolved, viacep: cepInfo };
+
+    // Sem match em CITY_HINT/UF_DEFAULT — provavelmente região fora da
+    // cobertura iGreen mesmo com UF presente (ex: SP capital, RJ capital).
+    return { uf, cidade, concessionaria: null, naoAtendida: true, viacep: cepInfo };
+  }
+
+  /**
+   * Escolhe a melhor regra de bônus pra um cadastro a partir do retorno
+   * de `/bonus/rules`.
+   *
+   * Schema de cada regra (descoberto via probe):
+   *   { idbonus, uf, concessionaria, fornecedora,
+   *     tipo_bonus: 'A'|'B'|'C'|'D',          // tier (A=padrão menor desc, D=maior)
+   *     desconto_cliente: '8'|'10'|'12'|'14', // string com %
+   *     desconto_padrao: bool,                // tier "padrão" da combinação
+   *     kwh_min, kwh_max,                     // faixa de consumo (kWh_max=null = sem limite)
+   *     dtvalidade_ini, dtvalidade_fim,       // janela de validade
+   *     active: bool,                         // ⚠️ NÃO é "ativo"
+   *     ... outros: bonus_direto, fatorcalculo, posvenda, injection_deadline, ... }
+   *
+   * Regra de negócio (definida pelo cliente):
+   *   "O desconto sempre vai ser o mais BAIXO da região."
+   *
+   * Critério:
+   *   1. Filtra `active=true`
+   *   2. Filtra janela de validade (hoje entre dtvalidade_ini e dtvalidade_fim)
+   *   3. Filtra faixa de consumo (kwh_min <= consumo <= kwh_max, se setados)
+   *   4. Prefere `desconto_padrao=true` (tier "A" = menor desconto)
+   *   5. Fallback: MENOR `desconto_cliente` (tier mais conservador)
+   *
+   * Se nenhuma regra casa com a faixa exata, relaxa o filtro de consumo
+   * (o backend ainda aceita) e tenta com active+validade.
+   */
+  _pickActiveBonusRule(rules, consumoMedio) {
+    if (!Array.isArray(rules) || rules.length === 0) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    const consumo = Number(consumoMedio) || 0;
+
+    const isActiveAndValid = (r) => {
+      if (r.active === false) return false;
+      if (r.dtvalidade_ini && today < r.dtvalidade_ini) return false;
+      if (r.dtvalidade_fim && today > r.dtvalidade_fim) return false;
+      return true;
+    };
+
+    const inRange = (r) => {
+      const kmin = Number(r.kwh_min ?? 0);
+      const kmax = r.kwh_max == null ? Infinity : Number(r.kwh_max);
+      if (consumo <= 0) return true; // sem consumo: aceita qualquer faixa
+      return consumo >= kmin && consumo <= kmax;
+    };
+
+    const pickLowest = (list) => {
+      // Preferência 1: desconto_padrao=true (tier A oficial)
+      const padrao = list.find(r => r.desconto_padrao === true);
+      if (padrao) return padrao;
+      // Preferência 2: menor desconto_cliente numericamente (mais baixo da região)
+      return [...list].sort((a, b) => {
+        const da = Number(String(a.desconto_cliente || '99').replace(',', '.'));
+        const db = Number(String(b.desconto_cliente || '99').replace(',', '.'));
+        return da - db;
+      })[0];
+    };
+
+    // 1. Tenta com filtro de consumo
+    const valid = rules.filter(r => isActiveAndValid(r) && inRange(r));
+    if (valid.length > 0) return pickLowest(valid);
+
+    // 2. Relaxa faixa de consumo (mantém active+validade)
+    const relaxed = rules.filter(isActiveAndValid);
+    if (relaxed.length > 0) return pickLowest(relaxed);
+
+    // 3. Last resort: ignora active também (backend pode aceitar)
+    return pickLowest(rules);
+  }
+
   // ──── Validação / OCR ──────────────────────────────────────────────────────
   initValidation() { return this._fetch('POST', '/extractor/init-validation'); }
   extractDocument({ fileBuffer, filename, mime = 'image/jpeg', idsolcontratovalidacao, pdfPassword }) {
@@ -286,11 +751,16 @@ export class Portal2Client {
   /**
    * Cadastro end-to-end. Retorna { idcliente, idsolcontratovalidacao }.
    * Veja docs/portal-api/PORTAL2_API_COMPLETO.md pro schema do `dados`.
+   *
+   * Se `dados.idsolcontratovalidacao` já vier preenchido, reaproveita
+   * (significa que initValidation/extractReceipt já rodaram externamente,
+   * tipicamente pra extrair o consumo da fatura).
    */
   async cadastrarCliente(dados) {
-    let idsolcontratovalidacao = null;
+    let idsolcontratovalidacao = dados.idsolcontratovalidacao || null;
 
-    if (dados.docFile || dados.billFile) {
+    // Só roda initValidation se ainda não tem idsol e tem algum arquivo pra subir
+    if (!idsolcontratovalidacao && (dados.docFile || dados.billFile)) {
       const init = await this.initValidation();
       idsolcontratovalidacao = init?.idsolcontratovalidacao || null;
     }
@@ -334,15 +804,60 @@ export class Portal2Client {
     }
 
     let { concessionaria, fornecedora, desconto_cliente } = dados;
+
+    // Resolve concessionária via /bonus/distributors quando o nome do customer
+    // não bate com a nomenclatura oficial da iGreen. Ex: "CPFL ENERGIA" → "CPFL".
+    // Cidade ajuda a desambiguar (ex: Salto/SP → CPFL PIRATININGA).
+    if (concessionaria && dados.uf) {
+      try {
+        const official = await this.resolveConcessionaria(dados.uf, concessionaria, dados.cidade);
+        if (official && official !== concessionaria) {
+          console.log(`  ↳ concessionária normalizada: "${concessionaria}" → "${official}"`);
+          concessionaria = official;
+        }
+      } catch (e) {
+        console.warn(`  ⚠ falha ao normalizar concessionária: ${e.message}`);
+      }
+    }
+
     if (!fornecedora) {
-      const rules = await this.getBonusRules({
-        uf: dados.uf, concessionaria,
-        consumo_medio: dados.consumoMedio,
-        idsolcontratovalidacao,
-      });
+      let rules;
+      try {
+        rules = await this.getBonusRules({
+          uf: dados.uf, concessionaria,
+          consumo_medio: dados.consumoMedio,
+          idsolcontratovalidacao,
+        });
+      } catch (e) {
+        // Se 404 mesmo após normalizar, tenta cada concessionária listada da UF
+        if (e.status === 404 && dados.uf) {
+          console.warn(`  ⚠ /bonus/rules 404 com "${concessionaria}" — fallback iterando distribuidoras da UF`);
+          const distList = await this.getDistributors(dados.uf).catch(() => []);
+          for (const d of (Array.isArray(distList) ? distList : [])) {
+            const candidate = d.concessionaria || d;
+            if (!candidate || candidate === concessionaria) continue;
+            try {
+              rules = await this.getBonusRules({
+                uf: dados.uf, concessionaria: candidate,
+                consumo_medio: dados.consumoMedio,
+                idsolcontratovalidacao,
+              });
+              const list = Array.isArray(rules) ? rules : (rules?.rules ?? []);
+              if (this._pickActiveBonusRule(list, dados.consumoMedio)) {
+                console.log(`  ↳ concessionária ajustada: "${concessionaria}" → "${candidate}"`);
+                concessionaria = candidate;
+                break;
+              }
+            } catch {}
+          }
+          if (!rules) throw e;
+        } else {
+          throw e;
+        }
+      }
       const list = Array.isArray(rules) ? rules : (rules?.rules ?? []);
-      const match = list.find(r => r.disponibilidade && r.ativo);
-      if (!match) throw new Error(`Sem regra ativa pra UF=${dados.uf} consumo=${dados.consumoMedio}`);
+      const match = this._pickActiveBonusRule(list, dados.consumoMedio);
+      if (!match) throw new Error(`Sem regra ativa pra UF=${dados.uf} concessionaria=${concessionaria} consumo=${dados.consumoMedio}`);
       concessionaria = concessionaria || match.concessionaria;
       fornecedora = match.fornecedora;
       desconto_cliente = desconto_cliente ?? Number(String(match.desconto_cliente || '8').split(',')[0].trim());
@@ -351,7 +866,21 @@ export class Portal2Client {
     const payload = this.montarPayloadCadastro({
       ...dados, concessionaria, fornecedora, desconto_cliente, idsolcontratovalidacao,
     });
-    const created = await this.createCustomer(payload);
+    const created = await this.createCustomer(payload).catch(e => {
+      // 400 do /customers traz o detalhe dos campos inválidos no body — extrai
+      // pra mensagem de erro ficar acionável (e não só "Erro de validação").
+      const detail = e.body && typeof e.body === 'object'
+        ? (e.body.errors || e.body.error?.errors || e.body.error?.details
+           || e.body.fields || e.body.details || e.body)
+        : null;
+      if (detail) {
+        const msg = typeof detail === 'string' ? detail
+          : Array.isArray(detail) ? detail.map(d => d?.message || d?.field || JSON.stringify(d)).join('; ')
+          : JSON.stringify(detail).slice(0, 600);
+        e.message = `${e.message} | detail=${msg}`;
+      }
+      throw e;
+    });
     const idcliente = created?.idcliente;
     if (!idcliente) throw new Error(`createCustomer retornou sem idcliente: ${JSON.stringify(created)}`);
 

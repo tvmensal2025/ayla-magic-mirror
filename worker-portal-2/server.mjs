@@ -19,6 +19,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 import { Portal2Client, fileFromPath, closeBrowser } from './portal2-api-client.mjs';
+import { runAuditPipeline, getAuditCount } from './ai-audit.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, '.env') });
@@ -29,6 +30,10 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const REDIS_URL = process.env.REDIS_URL || 'redis://evolution-api-redis:6379';
 const QUEUE_NAME = 'portal-worker-2-leads';
+// Auditoria IA dos primeiros N cadastros (default 10). Set 0 pra desligar.
+// A edge function `portal2-ai-audit` é quem chama o Gemini — o worker só
+// manda o trace e recebe a análise (assim a chave Gemini fica isolada).
+const AI_AUDIT_LIMIT = Number(process.env.PORTAL2_AI_AUDIT_LIMIT ?? 10);
 
 const supabase = (() => {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -159,31 +164,45 @@ async function processLead(job) {
   const { customer_id, dados } = job.data;
   console.log(`▶ [job ${job.id}] cadastrando customer=${customer_id} idconsultor=${dados.idconsultor}`);
 
-  const c = new Portal2Client({ idconsultor: dados.idconsultor });
+  // Decide se vai auditar este lead. Limite controlado por env pra não
+  // gastar token Gemini em todos os cadastros (só os primeiros N pra mapear
+  // pontos cegos). Quando AI_AUDIT_LIMIT=0, desliga totalmente.
+  let shouldAudit = false;
+  if (AI_AUDIT_LIMIT > 0 && SUPABASE_URL) {
+    try {
+      const count = await getAuditCount(supabase);
+      shouldAudit = count < AI_AUDIT_LIMIT;
+      if (shouldAudit) console.log(`  🔍 auditoria IA ativa (${count + 1}/${AI_AUDIT_LIMIT})`);
+    } catch {}
+  }
+
+  const trace = shouldAudit ? [] : null;
+  const t0 = Date.now();
+  const c = new Portal2Client({ idconsultor: dados.idconsultor, tracer: trace });
+  let cadastroResult = null;
+  let cadastroError = null;
+
   try {
-    const result = await c.cadastrarCliente(dados);
-    console.log(`✓ [job ${job.id}] customer=${customer_id} → idcliente=${result.idcliente}`);
+    cadastroResult = await c.cadastrarCliente(dados);
+    console.log(`✓ [job ${job.id}] customer=${customer_id} → idcliente=${cadastroResult.idcliente}`);
 
     // Link único de validação de código + facial + assinatura
-    const validationLink = buildValidationLink(result.idcliente, dados.idconsultor);
+    const validationLink = buildValidationLink(cadastroResult.idcliente, dados.idconsultor);
     console.log(`  🔗 link: ${validationLink}`);
 
     // Persistir no banco (best-effort) — popula tanto colunas portal2_* quanto
     // campos canônicos (link_facial / link_assinatura) que o resto do sistema usa.
     if (supabase && customer_id) {
       const updates = {
-        portal2_idcliente: result.idcliente,
-        portal2_idsolcontratovalidacao: result.idsolcontratovalidacao,
+        portal2_idcliente: cadastroResult.idcliente,
+        portal2_idsolcontratovalidacao: cadastroResult.idsolcontratovalidacao,
         portal2_status: 'created',
         portal2_created_at: new Date().toISOString(),
         portal2_contract_link: validationLink,
-        // Campos canônicos do sistema (já usados pelo CRM, painel, e mensagens
-        // automáticas existentes). Manter em sync evita ter código duplicado
-        // procurando o link por tipo de portal.
         link_facial: validationLink,
         link_assinatura: validationLink,
         igreen_link: validationLink,
-        igreen_code: String(result.idcliente),
+        igreen_code: String(cadastroResult.idcliente),
         status: 'awaiting_otp',
         conversation_step: 'aguardando_otp',
         portal_submitted_at: new Date().toISOString(),
@@ -197,7 +216,7 @@ async function processLead(job) {
     // Disparar geração de OTP (a iGreen manda WhatsApp pro cliente com o código)
     let otpGenerated = false;
     try {
-      await c.generateVerificationCode(result.idcliente);
+      await c.generateVerificationCode(cadastroResult.idcliente);
       otpGenerated = true;
       console.log(`  ✓ OTP requisitado pra customer=${customer_id} (cliente recebe via WhatsApp da iGreen)`);
       if (supabase && customer_id) {
@@ -218,8 +237,28 @@ async function processLead(job) {
       console.warn(`  ⚠ envio do link falhou: ${e.message}`);
     }
 
-    return { success: true, validationLink, otpGenerated, ...result };
+    const finalResult = { success: true, validationLink, otpGenerated, ...cadastroResult };
+
+    // Auditoria IA — fire & forget pra não bloquear retorno do job
+    if (shouldAudit) {
+      runAuditPipeline({
+        supabase, supabaseUrl: SUPABASE_URL, workerSecret: SECRET,
+        customer_id, job_id: job.id, idconsultor: dados.idconsultor,
+        status: 'success', trace, input: dados, result: finalResult,
+        duration_ms: Date.now() - t0,
+      }).then(ai => {
+        if (ai?.summary) console.log(`  🔍 IA: ${ai.summary}`);
+        if (ai?.findings?.length) {
+          for (const f of ai.findings) {
+            console.log(`     ${f.severity?.toUpperCase() || '?'} [${f.category}] ${f.title}`);
+          }
+        }
+      }, () => {});
+    }
+
+    return finalResult;
   } catch (e) {
+    cadastroError = e;
     console.error(`✗ [job ${job.id}] customer=${customer_id} erro: ${e.message}`);
     if (supabase && customer_id) {
       await supabase.from('customers').update({
@@ -227,6 +266,29 @@ async function processLead(job) {
         portal2_error: e.message.slice(0, 500),
       }).eq('id', customer_id).then(() => {}, () => {});
     }
+
+    // Auditoria IA também na falha — esses são os mais valiosos pra revisar
+    if (shouldAudit) {
+      runAuditPipeline({
+        supabase, supabaseUrl: SUPABASE_URL, workerSecret: SECRET,
+        customer_id, job_id: job.id, idconsultor: dados.idconsultor,
+        status: 'failed', trace, input: dados,
+        result: e.body ? { error_body: e.body } : null,
+        error: e.message, duration_ms: Date.now() - t0,
+      }).then(ai => {
+        if (ai?.summary) console.log(`  🔍 IA: ${ai.summary}`);
+        if (ai?.findings?.length) {
+          for (const f of ai.findings) {
+            console.log(`     ${f.severity?.toUpperCase() || '?'} [${f.category}] ${f.title} — ${f.detail?.slice(0, 200)}`);
+          }
+        }
+        if (ai?.next_actions?.length) {
+          console.log(`  🔧 sugestões IA:`);
+          for (const a of ai.next_actions) console.log(`     • ${a}`);
+        }
+      }, () => {});
+    }
+
     throw e; // bullmq faz retry
   }
 }
@@ -331,6 +393,98 @@ app.post('/submit-lead', authRequired, async (req, res) => {
   }
 });
 
+// ─── Helpers de parsing da resposta /extractor/extract-receipt ─────────────
+//
+// O endpoint não tem schema fixo. Variações conhecidas:
+//   - Fatura/conta de luz: { data: { consumomedio, fornecedora_energia, ... }}
+//   - BOLETO de pagamento: { data: { tipo_comprovante: 'BOLETO', valor_pago,
+//     beneficiario: 'CPFL PIRATININGA', ... }}     ← sem consumomedio
+// Esse helper garimpa as variantes conhecidas + faz scan recursivo no JSON.
+
+// Walk genérico: percorre um objeto/array procurando por chaves cujo nome
+// case-insensitive bate com algum dos `keys`. Retorna o primeiro match.
+function _findInResponse(resp, keys) {
+  if (!resp || typeof resp !== 'object') return null;
+  const lowered = keys.map(k => k.toLowerCase());
+  const seen = new WeakSet();
+  const stack = [resp];
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || typeof node !== 'object' || seen.has(node)) continue;
+    seen.add(node);
+    if (Array.isArray(node)) { for (const v of node) stack.push(v); continue; }
+    for (const [k, v] of Object.entries(node)) {
+      if (lowered.includes(k.toLowerCase()) && v != null && v !== '') return v;
+      if (v && typeof v === 'object') stack.push(v);
+    }
+  }
+  return null;
+}
+
+function _kwhFromReceiptResponse(resp) {
+  const raw = _findInResponse(resp, [
+    'consumomedio', 'consumo_medio', 'consumoMedio', 'mediaConsumo',
+    'media_consumo', 'kwh', 'kWh', 'consumo',
+  ]);
+  if (raw == null) return null;
+  const n = Number(String(raw).replace(/[^\d.,-]/g, '').replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
+// Distribuidora/concessionária. A iGreen pode retornar em vários campos:
+//   - `beneficiario` (BOLETO): nome do destinatário do pagamento (ex: "CPFL
+//     PIRATININGA")
+//   - `concessionaria` / `distribuidora` / `fornecedora_energia` (fatura)
+//   - `empresa` / `cedente` em alguns variantes
+function _distribuidoraFromReceiptResponse(resp) {
+  const raw = _findInResponse(resp, [
+    'concessionaria', 'distribuidora', 'fornecedora_energia',
+    'beneficiario', 'cedente', 'empresa',
+  ]);
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  // Filtra valores claramente não-distribuidora (banco, CEP, etc.)
+  if (!trimmed || /^\d+$/.test(trimmed) || trimmed.length > 80) return null;
+  return trimmed;
+}
+
+// valor pago/total na fatura — usado pra estimar kWh quando OCR não trouxe
+// consumomedio (caso BOLETO).
+function _valorFromReceiptResponse(resp) {
+  const raw = _findInResponse(resp, [
+    'valor_pago', 'valorPago', 'valor_total', 'valorTotal',
+    'valor', 'total', 'amount',
+  ]);
+  if (raw == null) return null;
+  const n = Number(String(raw).replace(/[^\d.,-]/g, '').replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// Decodifica bill_base64 (pode vir como data URL ou base64 puro) em Buffer + mime.
+function _decodeBillBase64(b64) {
+  if (!b64 || typeof b64 !== 'string') return null;
+  let mime = 'application/pdf';
+  let payload = b64;
+  const m = b64.match(/^data:([^;]+);base64,(.+)$/);
+  if (m) { mime = m[1]; payload = m[2]; }
+  // sniff: se base64 puro mas começa com /9j/ é JPEG, iVBOR é PNG, JVBE é PDF
+  try {
+    const buffer = Buffer.from(payload, 'base64');
+    if (buffer.length < 100) return null;
+    if (!m) {
+      const head = buffer.slice(0, 4).toString('hex').toLowerCase();
+      if (head.startsWith('ffd8')) mime = 'image/jpeg';
+      else if (head.startsWith('8950')) mime = 'image/png';
+      else if (head.startsWith('2550')) mime = 'application/pdf';
+    }
+    const ext = mime === 'application/pdf' ? 'pdf'
+              : mime === 'image/png' ? 'png'
+              : mime === 'image/jpeg' ? 'jpg'
+              : 'bin';
+    return { buffer, mime, filename: `conta.${ext}` };
+  } catch { return null; }
+}
+
 // ─── Helper: monta payload a partir do customers do Supabase ─────────────────
 async function fetchDadosFromSupabase(customerId) {
   const { data: c, error } = await supabase
@@ -343,8 +497,10 @@ async function fetchDadosFromSupabase(customerId) {
       email,
       cep, address_street, address_number, address_complement,
       address_neighborhood, address_city, address_state,
-      numero_instalacao, media_consumo,
+      numero_instalacao, media_consumo, electricity_bill_value,
       distribuidora, debitos_aberto, possui_procurador,
+      bill_base64, electricity_bill_photo_url,
+      document_front_base64, document_front_url,
       referral_partner_id, consultant_id,
       consultants:consultant_id(igreen_id, name, portal_kind),
       referral_partners:referral_partner_id(cli)
@@ -357,6 +513,148 @@ async function fetchDadosFromSupabase(customerId) {
   const partner = c.referral_partners;
   const igreenId = consultant?.igreen_id ? Number(consultant.igreen_id) : null;
   if (!igreenId) return null;
+
+  // ── Decodifica anexos do customer ───────────────────────────────────────
+  // bill_base64 / document_front_base64 podem vir como data URL ou base64 puro.
+  // O *_url também pode ser data URL (fallback inline quando MinIO está off).
+  const billRaw = c.bill_base64
+    || (typeof c.electricity_bill_photo_url === 'string' && c.electricity_bill_photo_url.startsWith('data:')
+        ? c.electricity_bill_photo_url : null);
+  const docRaw = c.document_front_base64
+    || (typeof c.document_front_url === 'string' && c.document_front_url.startsWith('data:')
+        ? c.document_front_url : null);
+  const billFile = _decodeBillBase64(billRaw);
+  const docFile = _decodeBillBase64(docRaw);
+
+  // ── Distribuidora — prioridade: ──────────────────────────────────────────
+  //   1. CEP → ViaCEP → CITY_HINT/UF_DEFAULT (mais confiável; sem OCR)
+  //   2. customers.distribuidora (digitado ou herdado da UI)
+  //   3. OCR do beneficiario na fatura/boleto
+  //
+  //   Em todos os casos, passamos pelo resolveConcessionaria pra normalizar
+  //   pro nome oficial aceito pela iGreen.
+  let distribuidora = c.distribuidora || '';
+  let cidadeResolvida = c.address_city || '';
+  let ufResolvida = c.address_state || '';
+  let cepResolveTried = false;
+  if (c.cep) {
+    cepResolveTried = true;
+    try {
+      const tmpClient = new Portal2Client({ idconsultor: igreenId });
+      const cepResult = await tmpClient.resolveConcessionariaByCep(c.cep);
+      if (cepResult?.concessionaria) {
+        const before = distribuidora;
+        distribuidora = cepResult.concessionaria;
+        ufResolvida = cepResult.uf || ufResolvida;
+        cidadeResolvida = cepResult.cidade || cidadeResolvida;
+        console.log(`  📮 CEP ${c.cep} → ${ufResolvida}/${cidadeResolvida} → "${distribuidora}"${before && before !== distribuidora ? ` (era "${before}")` : ''}`);
+        // Persiste pra próximas execuções
+        if (before !== distribuidora) {
+          await supabase.from('customers').update({ distribuidora }).eq('id', customerId)
+            .then(() => {}, () => {});
+        }
+      }
+    } catch (e) {
+      console.warn(`  ⚠ resolveConcessionariaByCep falhou: ${e.message}`);
+    }
+  }
+
+  // ── Consumo médio (kWh) — prioridade: ────────────────────────────────────
+  //   1. customers.media_consumo (já preenchido por OCR anterior ou manual)
+  //   2. OCR oficial da iGreen via /extractor/extract-receipt no PDF da fatura
+  //   3. Estimativa pela tarifa (último fallback, só se não der pra extrair)
+  let consumoMedio = Number(c.media_consumo || 0);
+  let ocrIdsol = null;
+  let ocrBillExtracted = false;
+
+  if (billFile) {
+    console.log(`  📄 OCR fatura: chamando /extractor/extract-receipt (${billFile.mime}, ${billFile.buffer.length}B)`);
+    try {
+      const tmpClient = new Portal2Client({ idconsultor: igreenId });
+      const init = await tmpClient.initValidation().catch(() => null);
+      ocrIdsol = init?.idsolcontratovalidacao || null;
+      const resp = await tmpClient.extractReceipt({
+        fileBuffer: billFile.buffer,
+        filename: billFile.filename,
+        mime: billFile.mime,
+        idsolcontratovalidacao: ocrIdsol,
+      });
+      ocrBillExtracted = true;
+
+      // 1. Distribuidora — só sobrescreve se CEP não resolveu (CEP é a
+      //    fonte mais confiável). Caso contrário, OCR é só corroboração.
+      const ocrDistRaw = _distribuidoraFromReceiptResponse(resp);
+      const uf = ufResolvida || c.address_state || '';
+      const cidade = cidadeResolvida || c.address_city || '';
+      if (!distribuidora && ocrDistRaw && uf) {
+        const resolved = await tmpClient.resolveConcessionaria(uf, ocrDistRaw, cidade).catch(() => null);
+        if (resolved) {
+          distribuidora = resolved;
+          console.log(`  ↳ OCR distribuidora: "${ocrDistRaw}" → "${resolved}" (UF=${uf}, cidade=${cidade})`);
+          await supabase.from('customers').update({ distribuidora: resolved }).eq('id', customerId)
+            .then(() => {}, () => {});
+        }
+      } else if (ocrDistRaw && distribuidora) {
+        // Apenas log de divergência (não age) — pode ajudar debug
+        const ocrResolved = await tmpClient.resolveConcessionaria(uf, ocrDistRaw, cidade).catch(() => null);
+        if (ocrResolved && ocrResolved !== distribuidora) {
+          console.log(`  ℹ OCR sugere "${ocrResolved}" mas CEP/customer já resolveu "${distribuidora}" — mantendo`);
+        }
+      }
+
+      // 2. Consumo médio — fatura traz `consumomedio`; boleto não.
+      const kwh = _kwhFromReceiptResponse(resp);
+      if (kwh) {
+        consumoMedio = kwh;
+        console.log(`  ↳ OCR consumomedio=${kwh} kWh (idsol=${ocrIdsol})`);
+        await supabase.from('customers').update({ media_consumo: kwh }).eq('id', customerId)
+          .then(() => {}, () => {});
+      } else if (!consumoMedio) {
+        const valorOcr = _valorFromReceiptResponse(resp);
+        const valor = valorOcr || Number(c.electricity_bill_value || 0);
+        if (valor > 0) {
+          // Tarifa B1 residencial BR ~R$1,10/kWh com tributos. Clampa em
+          // 100..2000 kWh (cobre tier A/B e C/D das regras).
+          const TARIFA = 1.10;
+          const estimado = Math.round(valor / TARIFA);
+          consumoMedio = Math.max(100, Math.min(2000, estimado));
+          const fonte = valorOcr ? 'OCR valor_pago' : 'electricity_bill_value';
+          const tipo = resp?.data?.tipo_comprovante || resp?.tipo_comprovante;
+          console.warn(`  ⚠ OCR sem consumomedio${tipo ? ' (' + tipo + ')' : ''}. Estimando ${consumoMedio} kWh via ${fonte}=R$${valor}`);
+        }
+      }
+    } catch (e) {
+      console.warn(`  ⚠ OCR fatura falhou: ${e.message}`);
+    }
+  } else if (!consumoMedio) {
+    console.warn(`  ⚠ media_consumo vazio e bill_base64 ausente — OCR não disponível`);
+  }
+
+  // Fallback final: sem OCR e sem media_consumo, estima pelo valor da conta.
+  if (!consumoMedio) {
+    const TARIFA = 1.10;
+    const valorConta = Number(c.electricity_bill_value || 0);
+    if (valorConta > 0) {
+      const estimado = Math.round(valorConta / TARIFA);
+      consumoMedio = Math.max(100, Math.min(2000, estimado));
+      console.warn(`  ⚠ usando estimativa: ${consumoMedio} kWh a partir de R$${valorConta}`);
+    } else {
+      consumoMedio = 350;
+      console.warn(`  ⚠ sem dados de consumo — assumindo 350 kWh`);
+    }
+  }
+
+  return _buildDadosObject(c, consultant, partner, igreenId,
+    consumoMedio, distribuidora, billFile, docFile,
+    ocrIdsol, ocrBillExtracted);
+}
+
+// Extraído pra eliminar duplicação. Quando billAlreadyExtracted=true,
+// cadastrarCliente reaproveita o idsolcontratovalidacao e pula extractReceipt.
+function _buildDadosObject(c, consultant, partner, igreenId,
+                            consumoMedio, distribuidora,
+                            billFile, docFile,
+                            idsolcontratovalidacao, billAlreadyExtracted) {
   return {
     idconsultor: igreenId,
     indcli: partner?.cli ? Number(partner.cli) : 0,
@@ -373,8 +671,14 @@ async function fetchDadosFromSupabase(customerId) {
     cidade: c.address_city || '',
     uf: c.address_state || '',
     numeroInstalacao: c.numero_instalacao || '',
-    consumoMedio: Number(c.media_consumo || 0),
-    concessionaria: c.distribuidora || '',
+    consumoMedio,
+    concessionaria: distribuidora || '',
+    // Anexos pra reaproveitar dentro de cadastrarCliente. Quando
+    // billAlreadyExtracted=true, o cliente sabe que já fizemos extractReceipt
+    // (evita upload + OCR redundantes).
+    billFile: billFile && !billAlreadyExtracted ? billFile : undefined,
+    docFile: docFile || undefined,
+    idsolcontratovalidacao: idsolcontratovalidacao || undefined,
     possuiPlacas: false,
     sendcontract: true,
   };
