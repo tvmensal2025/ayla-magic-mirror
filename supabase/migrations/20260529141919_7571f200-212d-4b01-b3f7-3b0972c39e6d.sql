@@ -1,0 +1,1 @@
+UPDATE public.ai_agent_config SET enabled = true, updated_at = now() WHERE consultant_id = '0c2711ad-4836-41e6-afba-edd94f698ae3';
