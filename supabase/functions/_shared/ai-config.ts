@@ -105,8 +105,9 @@ const MODEL_MATRIX: Record<AiProfile, Record<AiProvider, Record<string, { primar
   },
   balanced: {
     google: {
-      intent_classify:      { primary: "gemini-3.5-flash", fallback: "gemini-2.5-flash-lite" },
-      button_intent:        { primary: "gemini-3.5-flash", fallback: "gemini-2.5-flash-lite" },
+      // PREMIUM upgrade: balanced agora usa Pro para classificação de intent
+      intent_classify:      { primary: "gemini-3.1-pro",   fallback: "gemini-3.5-flash" },
+      button_intent:        { primary: "gemini-3.1-pro",   fallback: "gemini-3.5-flash" },
       faq_answer:           { primary: "gemini-3.5-flash", fallback: "gemini-2.5-flash" },
       duvida_handler:       { primary: "gemini-3.5-flash", fallback: "gemini-2.5-flash" },
       knowledge_synthesis:  { primary: "gemini-3.5-flash", fallback: "gemini-2.5-flash" },
@@ -121,8 +122,9 @@ const MODEL_MATRIX: Record<AiProfile, Record<AiProvider, Record<string, { primar
       captacao_intel:       { primary: "gemini-3.5-flash", fallback: "gemini-2.5-flash-lite" },
     },
     openai: {
-      intent_classify:      { primary: "gpt-5-mini",       fallback: "gpt-5-nano" },
-      button_intent:        { primary: "gpt-5-mini",       fallback: "gpt-5-nano" },
+      // PREMIUM upgrade: balanced openai sobe para gpt-5 na classificação
+      intent_classify:      { primary: "gpt-5",            fallback: "gpt-5-mini" },
+      button_intent:        { primary: "gpt-5",            fallback: "gpt-5-mini" },
       faq_answer:           { primary: "gpt-5",            fallback: "gpt-5-mini" },
       duvida_handler:       { primary: "gpt-5",            fallback: "gpt-5-mini" },
       knowledge_synthesis:  { primary: "gpt-5",            fallback: "gpt-5-mini" },
