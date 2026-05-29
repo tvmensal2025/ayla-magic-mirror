@@ -83,9 +83,39 @@ function buildValidationLink(idcliente, idconsultor) {
  * Best-effort: erros são logados mas não quebram o cadastro.
  */
 async function sendValidationLinkToCustomer(customerId, link) {
+  return _sendMessageToCustomer(customerId, ({ firstName }) =>
+    `Oi ${firstName}! 🎉\n\n` +
+    `Seu cadastro foi enviado pra iGreen. 🌱\n\n` +
+    `📲 Em instantes você vai receber *aqui no WhatsApp* uma mensagem da iGreen ` +
+    `com um *código de verificação* (6 dígitos).\n\n` +
+    `Quando chegar, é só *me responder aqui mesmo com esse código*. ` +
+    `Eu cuido de digitar pra você no portal — assim você não precisa abrir nada. ✅\n\n` +
+    `Depois eu te mando o link da *validação facial* (uma selfie rápida) ` +
+    `pra finalizar.`,
+  );
+}
+
+/**
+ * Envia o link da validação facial pro cliente após o OTP ter sido validado.
+ * Mensagem foca SÓ na selfie — o código já foi resolvido via API.
+ */
+async function sendFacialLinkToCustomer(customerId, link) {
+  return _sendMessageToCustomer(customerId, ({ firstName }) =>
+    `Tudo certo, ${firstName}! ✅\n\n` +
+    `*Código validado.* Agora falta só uma coisinha: a *validação facial*.\n\n` +
+    `📸 Abre o link no celular e segue as instruções (basicamente uma selfie):\n` +
+    `${link}\n\n` +
+    `Quando terminar, me responde aqui *PRONTO* que eu fecho seu cadastro. 💚`,
+  );
+}
+
+/**
+ * Helper interno: monta destinatário, escolhe canal (Evolution → Whapi) e
+ * envia a mensagem retornada pelo `messageBuilder`.
+ */
+async function _sendMessageToCustomer(customerId, messageBuilder) {
   if (!supabase || !customerId) return { skipped: 'no_supabase_or_customer_id' };
 
-  // Carrega settings + customer + instance
   const [{ data: settingsRows }, { data: customer }] = await Promise.all([
     supabase.from('settings').select('*'),
     supabase
@@ -102,15 +132,7 @@ async function sendValidationLinkToCustomer(customerId, link) {
   const phone = String(customer.phone_whatsapp).replace(/\D/g, '');
   const normalized = phone.startsWith('55') ? phone : `55${phone}`;
   const firstName = String(customer.name || '').trim().split(/\s+/)[0] || 'tudo bem';
-
-  const text =
-    `Oi ${firstName}! 🎉\n\n` +
-    `📲 Você receberá em instantes uma mensagem da iGreen aqui no WhatsApp ` +
-    `com um *código de verificação*.\n\n` +
-    `Quando chegar, é só clicar no link abaixo e digitar o código:\n` +
-    `${link}\n\n` +
-    `No mesmo link você também faz a *validação facial* e a *assinatura do contrato*. ` +
-    `Tudo em um lugar só! ✅`;
+  const text = messageBuilder({ firstName, phone: normalized, customer });
 
   // 1. Evolution API (instância do consultor)
   let instanceName = null;
@@ -692,22 +714,64 @@ app.post('/confirm-otp', authRequired, async (req, res) => {
   try {
     const c = new Portal2Client({ idconsultor });
     const result = await c.validateVerificationCode({ idcliente, code });
+    console.log(`✓ OTP validado idcliente=${idcliente} customer=${customer_id}`);
+
+    // Após validar OTP, busca o link DIRETO de assinatura (já com facial embutida).
+    // O backend iGreen gera esse link logo após OTP+terms aceitos. Como pode ter
+    // pequena latência, fazemos polling curto antes de devolver.
+    let signatureLink = null;
+    let contractInfo = null;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try {
+        contractInfo = await c.getContractGenerated(idcliente);
+        signatureLink = contractInfo?.linkassinatura
+          || contractInfo?.link_assinatura
+          || contractInfo?.linkAssinatura
+          || null;
+        if (signatureLink) break;
+      } catch (e) { /* segue tentando */ }
+      await new Promise(r => setTimeout(r, 1500));
+    }
+    // Fallback: se o backend não devolveu o link direto, usa o canônico
+    // (ele tem sendcontract=true e funciona após OTP, mas exige o cliente
+    // digitar o código de novo — não é o ideal).
+    const fallbackLink = buildValidationLink(idcliente, idconsultor);
+    const finalLink = signatureLink || fallbackLink;
+    const linkSource = signatureLink ? 'igreen-direct' : 'fallback-canonico';
+    console.log(`  🔗 link facial/assinatura (${linkSource}): ${finalLink}`);
 
     // Best-effort: atualiza estado no banco
     if (supabase && customer_id) {
-      const validationLink = buildValidationLink(idcliente, idconsultor);
       await supabase.from('customers').update({
         portal2_status: 'otp_validated',
         portal2_otp_validated_at: new Date().toISOString(),
-        portal2_contract_link: validationLink,
-        link_assinatura: validationLink,
+        portal2_contract_link: finalLink,
+        link_facial: finalLink,
+        link_assinatura: finalLink,
         otp_code: String(code).slice(0, 12),
         otp_validated_at: new Date().toISOString(),
-        status: 'validating_otp',
+        status: 'awaiting_signature',
         conversation_step: 'aguardando_facial',
       }).eq('id', customer_id).then(() => {}, () => {});
     }
-    return res.json({ ok: true, result });
+
+    // Envia o link da facial pro cliente via WhatsApp (best-effort).
+    if (customer_id) {
+      try {
+        const sendResult = await sendFacialLinkToCustomer(customer_id, finalLink);
+        console.log(`  📲 link facial WhatsApp: ${JSON.stringify(sendResult)}`);
+      } catch (e) {
+        console.warn(`  ⚠ envio do link facial falhou: ${e.message}`);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      result,
+      link: finalLink,
+      link_source: linkSource,
+      contract: contractInfo,
+    });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   }
