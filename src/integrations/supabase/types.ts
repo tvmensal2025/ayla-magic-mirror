@@ -1270,6 +1270,7 @@ export type Database = {
       }
       app_settings: {
         Row: {
+          bot_engine_production_mode: boolean
           bot_global_enabled: boolean
           id: string
           minio_alert_threshold_pct: number
@@ -1280,6 +1281,7 @@ export type Database = {
           updated_by: string | null
         }
         Insert: {
+          bot_engine_production_mode?: boolean
           bot_global_enabled?: boolean
           id?: string
           minio_alert_threshold_pct?: number
@@ -1290,6 +1292,7 @@ export type Database = {
           updated_by?: string | null
         }
         Update: {
+          bot_engine_production_mode?: boolean
           bot_global_enabled?: boolean
           id?: string
           minio_alert_threshold_pct?: number
@@ -2091,6 +2094,7 @@ export type Database = {
           ai_profile: string
           ai_provider_pref: string
           approved: boolean | null
+          bot_engine_mode: string
           cadastro_url: string
           conversational_flow_enabled: boolean
           created_at: string | null
@@ -2122,6 +2126,7 @@ export type Database = {
           ai_profile?: string
           ai_provider_pref?: string
           approved?: boolean | null
+          bot_engine_mode?: string
           cadastro_url: string
           conversational_flow_enabled?: boolean
           created_at?: string | null
@@ -2153,6 +2158,7 @@ export type Database = {
           ai_profile?: string
           ai_provider_pref?: string
           approved?: boolean | null
+          bot_engine_mode?: string
           cadastro_url?: string
           conversational_flow_enabled?: boolean
           created_at?: string | null
@@ -5293,6 +5299,16 @@ export type Database = {
           phase: string | null
           selfcheck_blocks: number | null
           tool_called: string | null
+        }
+        Relationships: []
+      }
+      v_bot_engine_health: {
+        Row: {
+          channel: string | null
+          consultant_id: string | null
+          kind: string | null
+          mode: string | null
+          occurrences: number | null
         }
         Relationships: []
       }
