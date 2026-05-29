@@ -2514,7 +2514,10 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     case "qualificacao": {
-      const capturedName = normalizeLeadName(messageText);
+      // 🛡️ Clique de botão NUNCA é nome — ignora capture quando isButton=true
+      // (título do botão "Quero simular" virava name="Quero Simular").
+      // Bug confirmado em sandbox 2026-05-29.
+      const capturedName = !isButton ? normalizeLeadName(messageText) : null;
       if (capturedName) {
         updates.name = capturedName;
         updates.name_source = "self_introduced";
@@ -2636,6 +2639,15 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     // ─── 2. AGUARDANDO CONTA ──────────────
     case "aguardando_conta": {
+      // 🛡️ Clique de botão (welcome residual) chegando em aguardando_conta:
+      // re-emite prompt da conta em vez de tratar título como texto livre.
+      // Bug confirmado em sandbox 2026-05-29.
+      if (isButton) {
+        const _firstName = ((customer as any).name || "").split(/\s+/)[0];
+        const _v = _firstName ? `${_firstName}, ` : "";
+        reply = `${_v}me manda uma *foto* (ou PDF) da sua conta de luz, por favor 📸\n\nSe estiver sem a conta agora, é só me dizer o valor médio que você paga.`;
+        break;
+      }
       if (!isFile) {
         const txt = String(messageText || "").trim();
         const first = ((customer as any).name || "").split(/\s+/)[0];

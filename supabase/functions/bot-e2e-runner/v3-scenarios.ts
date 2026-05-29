@@ -45,7 +45,7 @@
  * (Requirement 11.1) — it is read by `router.ts` per request.
  */
 
-import { runEngine } from "../_shared/flow-engine/v3-runner.ts";
+import { runEngine } from "../_shared/engine/runner.ts";
 import type {
   BotFlow,
   BotFlowStep,
@@ -59,7 +59,7 @@ import type {
   MediaOrderEntry,
   OutboundMessage,
   StructuredLog,
-} from "../_shared/flow-engine/v3-types.ts";
+} from "../_shared/engine/types.ts";
 
 // ─── Public surface ──────────────────────────────────────────────────────────
 

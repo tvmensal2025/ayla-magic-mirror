@@ -942,17 +942,45 @@ Deno.serve(async (req) => {
     // O consultor controla o próximo tile. Texto livre do lead não deve rodar
     // o motor conversacional nem avançar automaticamente para o próximo passo.
     //
-    // Engine V3 aposentado (Fase 1 da limpeza de motores) — sempre inativo.
-    const _v3Active = false;
+    // EXCEÇÃO: quando engine v3 está ativo para o consultor, o v3 toma
+    // posse do turno e o helper `runUnifiedEngineWebhookEntry` zera o
+    // `capture_mode` para "auto" antes de chamar o engine. Por isso
+    // aqui pulamos o short-circuit quando a flag está ON — o ramo v3
+    // mais adiante neste mesmo handler vai responder.
+    let _v3Active = false;
+    try {
+      const { isEngineV3Enabled: _isV3 } = await import("../_shared/engine/router.ts");
+      _v3Active = await _isV3(supabase as any, superAdminConsultantId);
+    } catch (_) {/* swallow */}
     if (!_v3Active && (customer as any).capture_mode === "manual" && !hasAudio && !isFile && !isButton && messageText) {
-      // Fluxo D é 100% automático (welcome com botões → capture conta → OCR → ...).
-      // Nunca aplicar o short-circuit "manual_capture_text_saved_no_auto_flow"
-      // para leads em variant D — isso engasga a transição entre passos
-      // (ex.: cliente clica "📸 Quero simular" e o flow para porque
-      // capture_mode='manual' herdado do trigger customers_default_capture_mode).
+      // Fluxos A/B/C/D com bot_flow_steps ativos são 100% automáticos —
+      // nunca aplicar o short-circuit "manual_capture_text_saved_no_auto_flow"
+      // pra leads em variant cuja consultor tem flow desenhado. Isso quebra
+      // a transição entre passos (ex.: cliente manda "oi" e o welcome do
+      // FlowBuilder não dispara porque capture_mode='manual' herdado do
+      // trigger customers_default_capture_mode).
+      //
+      // Trigger SQL marca capture_mode='manual' para qualquer lead novo
+      // sem name+cpf. Bypass de variant D não cobria A/B/C — leads desses
+      // ficavam mudos respondendo "manual_capture_text_saved_no_auto_flow"
+      // até o consultor intervir manualmente. Bug confirmado em produção:
+      // 133 leads (132 A + 1 C) afetados nos últimos 30 dias.
       const _flowVariant = String((customer as any)?.flow_variant || "").toUpperCase();
-      if (_flowVariant === "D") {
-        console.log(`[manual-capture-stop] BYPASS — customer=${customer.id} flow_variant=D (flow automático)`);
+      let _hasActiveFlow = false;
+      if (_flowVariant !== "D") {
+        // D já é bypass por padrão; checa se A/B/C têm bot_flow ativo do consultor.
+        try {
+          const { count } = await supabase
+            .from("bot_flows")
+            .select("id", { count: "exact", head: true })
+            .eq("consultant_id", superAdminConsultantId)
+            .eq("is_active", true)
+            .eq("variant", _flowVariant || "A");
+          _hasActiveFlow = (count ?? 0) > 0;
+        } catch (_) { /* fail-open: assume sem flow → mantém bypass desligado */ }
+      }
+      if (_flowVariant === "D" || _hasActiveFlow) {
+        console.log(`[manual-capture-stop] BYPASS — customer=${customer.id} flow_variant=${_flowVariant} hasActiveFlow=${_hasActiveFlow}`);
       } else {
       try {
         const multi = extractMultiField(messageText);
@@ -1177,10 +1205,23 @@ Deno.serve(async (req) => {
     }
 
     if (!_v3Active && (customer as any).capture_mode === "manual" && hasAudio && messageText && !isFile) {
-      // Mesmo bypass do bloco de texto: variant D é flow automático.
+      // Mesmo bypass do bloco de texto: A/B/C/D com flow ativo do consultor
+      // são automáticos — não cair no short-circuit que silencia o bot.
       const _flowVariantA = String((customer as any)?.flow_variant || "").toUpperCase();
-      if (_flowVariantA === "D") {
-        console.log(`[manual-capture-stop-audio] BYPASS — customer=${customer.id} flow_variant=D`);
+      let _hasActiveFlowA = false;
+      if (_flowVariantA !== "D") {
+        try {
+          const { count } = await supabase
+            .from("bot_flows")
+            .select("id", { count: "exact", head: true })
+            .eq("consultant_id", superAdminConsultantId)
+            .eq("is_active", true)
+            .eq("variant", _flowVariantA || "A");
+          _hasActiveFlowA = (count ?? 0) > 0;
+        } catch (_) { /* fail-open */ }
+      }
+      if (_flowVariantA === "D" || _hasActiveFlowA) {
+        console.log(`[manual-capture-stop-audio] BYPASS — customer=${customer.id} flow_variant=${_flowVariantA} hasActiveFlow=${_hasActiveFlowA}`);
       } else {
       try {
         const multi = extractMultiField(messageText);
@@ -1254,8 +1295,51 @@ Deno.serve(async (req) => {
     let updates: Record<string, any> = {};
     let engineUsed: "sys" | "flow" = "sys";
     try {
-      // Engine V3 aposentado (Fase 1 da limpeza de motores) — gate removido.
-
+      // ─── Engine v3 gate (FIRST — before any legacy routing) ──────────
+      // When v3 is enabled for the consultant, it takes FULL ownership of
+      // the turn. No legacy routing, no auto-cure, no "FONTE ÚNICA DE
+      // VERDADE" block. The v3 entry helper handles everything: load
+      // context, run engine, dispatch outbounds, persist state.
+      const { isEngineV3Enabled } = await import("../_shared/engine/router.ts");
+      if (await isEngineV3Enabled(supabase as any, superAdminConsultantId)) {
+        const { runUnifiedEngineWebhookEntry } = await import("../_shared/engine/webhook-entry.ts");
+        const { getAdapter } = await import("../_shared/channels/index.ts");
+        const v3Adapter = getAdapter({
+          kind: "whapi",
+          input: { apiToken: whapiToken },
+        });
+        const v3Outcome = await runUnifiedEngineWebhookEntry({
+          supabase: supabase as any,
+          adapter: v3Adapter,
+          customerId: customer.id,
+          consultantId: superAdminConsultantId,
+          jid: remoteJid,
+          inbound: {
+            messageText,
+            buttonId,
+            isFile,
+            isButton,
+            hasImage,
+            hasAudio,
+            hasDocument,
+            messageId,
+          },
+          testRunId: testMode ? testRunId : null,
+          testTurn: testMode ? Number(testTurn || 1) : null,
+        });
+        jsonLog(v3Outcome.ok ? "info" : "warn", "engine_v3_handled", {
+          customer_id: customer.id,
+          consultant_id: superAdminConsultantId,
+          ok: v3Outcome.ok,
+          sent: v3Outcome.sent,
+          failed: v3Outcome.failed,
+          error: v3Outcome.error,
+        });
+        return new Response(
+          JSON.stringify({ ok: true, mode: "engine_v3", v3: v3Outcome }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
 
       const customerOverride = (customer as any).conversational_flow_enabled;
       const consultantFlag = (consultantData as any)?.conversational_flow_enabled === true;
@@ -1408,9 +1492,28 @@ Deno.serve(async (req) => {
           }
         : sender;
 
-      // Engine V3 aposentado (Fase 1 da limpeza de motores) — hook removido.
+      // ─── Engine v3 — hook compartilhado (Semana 1 do rollout v3) ──
+      // Mesma chamada do evolution-webhook. Fail-open: nunca bloqueia o
+      // caminho legado, apenas observa e loga para validação dark→canary→on.
+      try {
+        const { runEngineV3IfEnabled } = await import("../_shared/engine/webhook-hook.ts");
+        await runEngineV3IfEnabled({
+          supabase,
+          customerId: customer.id,
+          consultantId: superAdminConsultantId,
+          legacyStep: stepBefore,
+          inboundKind: isButton ? "button_click" : (hasImage || hasDocument || hasAudio ? "media" : "text"),
+          inboundText: messageText ?? null,
+          inboundButtonId: buttonId ?? null,
+          inboundMediaKind: hasAudio ? "audio" : hasImage ? "image" : hasDocument ? "document" : null,
+          inboundMessageId: messageId ?? null,
+        });
+      } catch (e: any) {
+        console.warn("[engine-v3-hook] erro não-bloqueante:", e?.message);
+      }
 
-
+      // ─── Engine v3 gate (Task 29 — flow-engine-v3-rewrite) ──────────
+      // When `consultants.use_engine_v3 = true`, the v3 engine takes
       const runEngine = async () => engine === "flow"
         ? await runConversationalFlow({
             supabase, sender: engineSender, customer, consultorId, nomeRepresentante,

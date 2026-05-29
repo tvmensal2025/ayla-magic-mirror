@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "left": "supabase/functions/whapi-webhook/handlers/conversational/index.ts",
+  "right": "supabase/functions/evolution-webhook/handlers/conversational/index.ts",
+  "left_lines_total": 2553,
+  "right_lines_total": 2281,
+  "left_lines_normalized": 1992,
+  "right_lines_normalized": 1825,
+  "diff_lines_total": 399
+}

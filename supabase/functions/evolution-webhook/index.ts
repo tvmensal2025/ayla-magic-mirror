@@ -1194,8 +1194,26 @@ Deno.serve(async (req) => {
     let updates: Record<string, any> = {};
     let engineUsed: "sys" | "flow" = "sys";
 
-    // Engine V3 aposentado (Fase 1 da limpeza de motores) — hook removido.
-
+    // ─── 7.6) Engine v3 — hook compartilhado (Semana 1 do rollout v3) ──
+    // Helper único em `_shared/flow-engine/webhook-hook.ts` evita drift
+    // entre whapi-webhook (produção) e evolution-webhook (espelho).
+    // Fail-open: erro no v3 nunca bloqueia o caminho legado.
+    try {
+      const { runEngineV3IfEnabled } = await import("../_shared/engine/webhook-hook.ts");
+      await runEngineV3IfEnabled({
+        supabase,
+        customerId: customer.id,
+        consultantId: instanceData.consultant_id,
+        legacyStep: stepBefore,
+        inboundKind: isButton ? "button_click" : (hasImage || hasDocument || hasAudio ? "media" : "text"),
+        inboundText: messageText ?? null,
+        inboundButtonId: buttonId ?? null,
+        inboundMediaKind: hasAudio ? "audio" : hasImage ? "image" : hasDocument ? "document" : null,
+        inboundMessageId: messageId ?? null,
+      });
+    } catch (e: any) {
+      console.warn("[engine-v3-hook] erro não-bloqueante:", e?.message);
+    }
 
     try {
       const customerOverride = (customer as any).conversational_flow_enabled;
@@ -1302,9 +1320,63 @@ Deno.serve(async (req) => {
       }
       engineUsed = engine;
 
-      // Engine V3 aposentado (Fase 1 da limpeza de motores) — gate removido.
-
-
+      // ─── Engine v3 gate (Task 29 — flow-engine-v3-rewrite) ──────────
+      // When `consultants.use_engine_v3 = true`, the v3 engine takes
+      // full ownership of this turn: load context, run the pure runner,
+      // and dispatch outbounds via the channel adapter. The legacy
+      // `runConversationalFlow` / `runBotFlow` path is bypassed entirely
+      // for v3-enabled consultors.
+      //
+      // Default flag value is FALSE — zero leads route through v3 until
+      // a consultor is explicitly opted in (Phase 1+ of rollout). On v3
+      // errors, the helper pauses the customer + inserts a handoff
+      // alert (NEVER falls through to legacy) per the safety contract.
+      const { isEngineV3Enabled } = await import("../_shared/engine/router.ts");
+      if (await isEngineV3Enabled(supabase as any, instanceData.consultant_id)) {
+        const { runUnifiedEngineWebhookEntry } = await import("../_shared/engine/webhook-entry.ts");
+        const { getAdapter } = await import("../_shared/channels/index.ts");
+        const v3Adapter = getAdapter({
+          kind: "evolution",
+          input: {
+            apiUrl: EVOLUTION_API_URL,
+            apiKey: EVOLUTION_API_KEY,
+            instanceName,
+            connectedPhone: instanceData.connected_phone,
+          },
+        });
+        const v3Outcome = await runUnifiedEngineWebhookEntry({
+          supabase: supabase as any,
+          adapter: v3Adapter,
+          customerId: customer.id,
+          consultantId: instanceData.consultant_id,
+          jid: remoteJid,
+          inbound: {
+            messageText,
+            buttonId,
+            isFile,
+            isButton,
+            hasImage,
+            hasAudio,
+            hasDocument,
+            mediaKind,
+            messageId,
+          },
+          testRunId: null,
+          testTurn: null,
+        });
+        jsonLog(v3Outcome.ok ? "info" : "warn", "engine_v3_handled", {
+          customer_id: customer.id,
+          consultant_id: instanceData.consultant_id,
+          ok: v3Outcome.ok,
+          sent: v3Outcome.sent,
+          failed: v3Outcome.failed,
+          error: v3Outcome.error,
+        });
+        return new Response(
+          JSON.stringify({ ok: true, mode: "engine_v3", v3: v3Outcome }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
 
       const result = engine === "flow"
         ? await runConversationalFlow({

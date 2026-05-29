@@ -36,7 +36,7 @@ const AdTemplatesPanel = lazy(() => import("@/components/superadmin/AdTemplatesP
 const AILearningHealthPanel = lazy(() => import("@/components/admin/super/AILearningHealthPanel").then(m => ({ default: m.AILearningHealthPanel })));
 const CaptacaoTab = lazy(() => import("@/components/superadmin/CaptacaoTab").then(m => ({ default: m.CaptacaoTab })));
 const AdManagersTab = lazy(() => import("@/components/superadmin/AdManagersTab").then(m => ({ default: m.AdManagersTab })));
-// RolloutPanel removido: Engine V3 aposentado (Fase 1 da limpeza de motores)
+const RolloutPanel = lazy(() => import("@/components/superadmin/RolloutPanel").then(m => ({ default: m.RolloutPanel })));
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { logAdminAction } from "@/hooks/useAdminAudit";
 
@@ -71,7 +71,7 @@ const SuperAdmin = () => {
   const [loadingData, setLoadingData] = useState(true);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [resettingId, setResettingId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"consultores" | "captacao" | "gestores_ads" | "ia" | "ia_aprendendo" | "crm" | "auditoria" | "funil" | "worker" | "plataforma_fb" | "financeiro" | "templates_ads" | "saude_rede">("consultores");
+  const [activeTab, setActiveTab] = useState<"consultores" | "captacao" | "gestores_ads" | "ia" | "ia_aprendendo" | "crm" | "auditoria" | "funil" | "worker" | "plataforma_fb" | "financeiro" | "templates_ads" | "saude_rede" | "rollout">("consultores");
   const [searchTerm, setSearchTerm] = useState("");
   const accessDeniedToastShownRef = useRef(false);
   const { isAdmin, loading: roleLoading } = useUserRole(userId);
@@ -258,7 +258,7 @@ const SuperAdmin = () => {
     { id: "plataforma_fb" as const, label: "Plataforma FB", icon: Megaphone },
     { id: "templates_ads" as const, label: "Templates de Anúncio", icon: Sparkles },
     { id: "financeiro" as const, label: "Financeiro / P&L", icon: BarChart3 },
-    
+    { id: "rollout" as const, label: "Rollout V3", icon: Activity },
   ];
 
   const formatActivity = (lastAct: string | null) => {
@@ -546,7 +546,7 @@ const SuperAdmin = () => {
         {activeTab === "financeiro" && <PlatformPnLCard />}
         {activeTab === "saude_rede" && <NetworkHealthPanel />}
         {activeTab === "ia_aprendendo" && <AILearningHealthPanel />}
-        {/* aba rollout removida — Engine V3 aposentado */}
+        {activeTab === "rollout" && <RolloutPanel />}
         </Suspense>
       </main>
     </div>

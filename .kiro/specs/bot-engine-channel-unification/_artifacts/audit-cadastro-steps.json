@@ -1,0 +1,1660 @@
+{
+  "version": 1,
+  "repo_root": "/home/dev/Documents/IGREEN-OFICIAL/ayla-magic-mirror",
+  "items": [
+    {
+      "step_key": "aguardando_conta",
+      "categoria_proposta": "híbrido",
+      "matches_total_whapi": 42,
+      "matches_total_evolution": 39,
+      "found_in_conversational": true,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            428,
+            454,
+            1367,
+            1499,
+            1596,
+            1827,
+            1864,
+            1970,
+            2056,
+            2093,
+            2116,
+            2117,
+            2118,
+            2137,
+            2244,
+            2262,
+            2272,
+            2427,
+            2435,
+            2438,
+            2468,
+            2601,
+            2705,
+            2850,
+            2886,
+            2888,
+            2900,
+            2951,
+            2994,
+            3011,
+            3030,
+            3038,
+            3126,
+            3132,
+            3177,
+            3196,
+            3313,
+            3327,
+            3640,
+            3670,
+            5023,
+            5124
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            443,
+            469,
+            1244,
+            1376,
+            1473,
+            1703,
+            1734,
+            1820,
+            1857,
+            1880,
+            1881,
+            1882,
+            1901,
+            2008,
+            2026,
+            2036,
+            2191,
+            2199,
+            2202,
+            2248,
+            2338,
+            2472,
+            2551,
+            2594,
+            2611,
+            2630,
+            2638,
+            2717,
+            2723,
+            2756,
+            2769,
+            2857,
+            2883,
+            2894,
+            2920,
+            3083,
+            3111,
+            4407,
+            4508
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "processando_ocr_conta",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 4,
+      "matches_total_evolution": 4,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            454,
+            2438,
+            3107,
+            4885
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            469,
+            2202,
+            2701,
+            4278
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "confirmando_dados_conta",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 14,
+      "matches_total_evolution": 13,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            400,
+            444,
+            454,
+            1870,
+            2439,
+            3258,
+            3335,
+            4215,
+            4238,
+            4251,
+            4264,
+            4277,
+            4290,
+            4303
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            415,
+            459,
+            469,
+            2203,
+            2834,
+            2928,
+            3670,
+            3693,
+            3706,
+            3719,
+            3732,
+            3745,
+            3758
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_tipo_documento",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            403,
+            427,
+            456,
+            1866,
+            2443,
+            3774,
+            3871
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            418,
+            442,
+            471,
+            2207,
+            3211,
+            3308
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "aguardando_doc_auto",
+      "categoria_proposta": "híbrido",
+      "matches_total_whapi": 18,
+      "matches_total_evolution": 16,
+      "found_in_conversational": true,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            431,
+            455,
+            1864,
+            2171,
+            2173,
+            2428,
+            2442,
+            2469,
+            2602,
+            2851,
+            3055,
+            3690,
+            3712,
+            3714,
+            3728,
+            3874,
+            3883,
+            4808
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            446,
+            470,
+            1935,
+            1937,
+            2192,
+            2206,
+            2249,
+            2473,
+            2649,
+            3131,
+            3153,
+            3155,
+            3169,
+            3311,
+            3320,
+            4218
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "aguardando_doc_frente",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            429,
+            455,
+            1864,
+            2442,
+            3790,
+            3888,
+            4145
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            444,
+            470,
+            2206,
+            3227,
+            3325,
+            3598
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "aguardando_doc_verso",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 10,
+      "matches_total_evolution": 11,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            430,
+            455,
+            1864,
+            2442,
+            3862,
+            3967,
+            3973,
+            3997,
+            4092,
+            4106
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            445,
+            470,
+            2206,
+            3299,
+            3404,
+            3410,
+            3434,
+            3496,
+            3522,
+            3533,
+            3559
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "confirmando_dados_doc",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 14,
+      "matches_total_evolution": 13,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            401,
+            445,
+            456,
+            1870,
+            2443,
+            3850,
+            3953,
+            4041,
+            4114,
+            4329,
+            4349,
+            4362,
+            4375,
+            4388
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            416,
+            460,
+            471,
+            2207,
+            3287,
+            3390,
+            3478,
+            3567,
+            3784,
+            3804,
+            3817,
+            3830,
+            3843
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "confirmar_titularidade",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            402,
+            446,
+            456,
+            1870,
+            2448,
+            4121,
+            4163
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            417,
+            461,
+            471,
+            2212,
+            3574,
+            3616
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_name",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 8,
+      "matches_total_evolution": 8,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            380,
+            415,
+            457,
+            1865,
+            2445,
+            4398,
+            5127,
+            5131
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            395,
+            430,
+            472,
+            2209,
+            2772,
+            3853,
+            4511,
+            4515
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_cpf",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 11,
+      "matches_total_evolution": 10,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            362,
+            416,
+            457,
+            1865,
+            2445,
+            3843,
+            3946,
+            4028,
+            4142,
+            4409,
+            5115
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            377,
+            431,
+            472,
+            2209,
+            3280,
+            3383,
+            3465,
+            3595,
+            3864,
+            4499
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_rg",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            384,
+            417,
+            457,
+            1866,
+            2447,
+            4421,
+            5116
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            399,
+            432,
+            472,
+            2211,
+            3876,
+            4500
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_birth_date",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 6,
+      "matches_total_evolution": 5,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            368,
+            418,
+            457,
+            1865,
+            2445,
+            4431
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            383,
+            433,
+            472,
+            2209,
+            3886
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_phone_confirm",
+      "categoria_proposta": "híbrido",
+      "matches_total_whapi": 16,
+      "matches_total_evolution": 14,
+      "found_in_conversational": true,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            372,
+            420,
+            457,
+            1865,
+            2430,
+            2445,
+            2471,
+            2604,
+            2853,
+            3644,
+            4442,
+            4501,
+            5111,
+            5135,
+            5136,
+            5241
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            387,
+            435,
+            472,
+            2194,
+            2209,
+            2251,
+            2475,
+            3087,
+            3897,
+            3944,
+            4495,
+            4519,
+            4520,
+            4622
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_phone",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 8,
+      "matches_total_evolution": 7,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            371,
+            419,
+            457,
+            1865,
+            2445,
+            4495,
+            4498,
+            4512
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            386,
+            434,
+            472,
+            2209,
+            3938,
+            3941,
+            3955
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_email",
+      "categoria_proposta": "híbrido",
+      "matches_total_whapi": 16,
+      "matches_total_evolution": 14,
+      "found_in_conversational": true,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            390,
+            421,
+            458,
+            1370,
+            1865,
+            2093,
+            2371,
+            2429,
+            2447,
+            2470,
+            2603,
+            2852,
+            3642,
+            4571,
+            4610,
+            5105
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            405,
+            436,
+            473,
+            1247,
+            1857,
+            2135,
+            2193,
+            2211,
+            2250,
+            2474,
+            3085,
+            4014,
+            4046,
+            4489
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_cep",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 12,
+      "matches_total_evolution": 11,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            170,
+            365,
+            422,
+            458,
+            1371,
+            1865,
+            2093,
+            2446,
+            4619,
+            5117,
+            5121,
+            5122
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            177,
+            380,
+            437,
+            473,
+            1248,
+            1857,
+            2210,
+            4054,
+            4501,
+            4505,
+            4506
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_number",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            392,
+            423,
+            458,
+            1866,
+            2446,
+            4653,
+            5119
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            407,
+            438,
+            473,
+            2210,
+            4074,
+            4503
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_complement",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            394,
+            424,
+            458,
+            1866,
+            2447,
+            4662,
+            5247
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            409,
+            439,
+            473,
+            2211,
+            4083,
+            4626
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_installation_number",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 6,
+      "matches_total_evolution": 5,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            377,
+            425,
+            459,
+            1866,
+            2446,
+            4708
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            392,
+            440,
+            474,
+            2210,
+            4129
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_bill_value",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            374,
+            426,
+            459,
+            1866,
+            2446,
+            4719,
+            5123
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            389,
+            441,
+            474,
+            2210,
+            4140,
+            4507
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_doc_frente_manual",
+      "categoria_proposta": "híbrido",
+      "matches_total_whapi": 3,
+      "matches_total_evolution": 3,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            460,
+            4731,
+            5125
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            475,
+            4152,
+            4509
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_doc_verso_manual",
+      "categoria_proposta": "híbrido",
+      "matches_total_whapi": 3,
+      "matches_total_evolution": 3,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            460,
+            4750,
+            5126
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            475,
+            4171,
+            4510
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_quero_cadastrar",
+      "categoria_proposta": "híbrido",
+      "matches_total_whapi": 5,
+      "matches_total_evolution": 5,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            3607,
+            3613,
+            3661,
+            3664,
+            4770
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            3053,
+            3058,
+            3102,
+            3105,
+            4191
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "ask_finalizar",
+      "categoria_proposta": "híbrido",
+      "matches_total_whapi": 8,
+      "matches_total_evolution": 7,
+      "found_in_conversational": true,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            460,
+            2447,
+            3581,
+            3632,
+            3638,
+            4605,
+            4698,
+            4822
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            475,
+            2211,
+            3034,
+            3075,
+            3081,
+            4119,
+            4231
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "finalizando",
+      "categoria_proposta": "híbrido",
+      "matches_total_whapi": 13,
+      "matches_total_evolution": 10,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            461,
+            1871,
+            2431,
+            2449,
+            2472,
+            2605,
+            2854,
+            2868,
+            4606,
+            4699,
+            4828,
+            5035,
+            5072
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            476,
+            2195,
+            2213,
+            2252,
+            2476,
+            2488,
+            4120,
+            4237,
+            4419,
+            4456
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "portal_submitting",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 4,
+      "matches_total_evolution": 4,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            461,
+            4838,
+            5148,
+            5149
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            476,
+            4247,
+            4532,
+            4533
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "aguardando_otp",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 5,
+      "matches_total_evolution": 3,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            461,
+            4841,
+            4851,
+            4904,
+            5154
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            476,
+            4252,
+            4294
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "validando_otp",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 2,
+      "matches_total_evolution": 2,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            461,
+            4894
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            476,
+            4284
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "aguardando_facial",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 4,
+      "matches_total_evolution": 2,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            1871,
+            2450,
+            4860,
+            4926
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            2214,
+            4316
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "aguardando_assinatura",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 2,
+      "matches_total_evolution": 2,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            462,
+            4927
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            477,
+            4317
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "cadastro_em_analise",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 3,
+      "matches_total_evolution": 3,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            2450,
+            4937,
+            4950
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            2214,
+            4323,
+            4335
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "complete",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 3,
+      "matches_total_evolution": 3,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            462,
+            2449,
+            4958
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            477,
+            2213,
+            4343
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "aguardando_humano",
+      "categoria_proposta": "híbrido",
+      "matches_total_whapi": 12,
+      "matches_total_evolution": 20,
+      "found_in_conversational": true,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            462,
+            695,
+            1843,
+            2067,
+            2278,
+            2345,
+            2451,
+            2692,
+            2751,
+            3015,
+            3026,
+            5087
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            477,
+            699,
+            1719,
+            1831,
+            2042,
+            2109,
+            2215,
+            2335,
+            2384,
+            2615,
+            2626,
+            2877,
+            2878,
+            2914,
+            2915,
+            3516,
+            3517,
+            3553,
+            3554,
+            4471
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_conta_menu",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            396,
+            432,
+            463,
+            1867,
+            2439,
+            3673,
+            4193
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            411,
+            447,
+            478,
+            2203,
+            3114,
+            3648
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_conta_nome",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 8,
+      "matches_total_evolution": 7,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            381,
+            434,
+            463,
+            1867,
+            2439,
+            3248,
+            4196,
+            4233
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            396,
+            449,
+            478,
+            2203,
+            2824,
+            3651,
+            3688
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_conta_endereco",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 9,
+      "matches_total_evolution": 8,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            387,
+            435,
+            463,
+            1867,
+            2439,
+            4197,
+            4247,
+            5118,
+            5120
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            402,
+            450,
+            478,
+            2203,
+            3652,
+            3702,
+            4502,
+            4504
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_conta_cep",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            366,
+            436,
+            464,
+            1867,
+            2440,
+            4198,
+            4260
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            381,
+            451,
+            479,
+            2204,
+            3653,
+            3715
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_conta_distribuidora",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            388,
+            437,
+            464,
+            1868,
+            2440,
+            4199,
+            4273
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            403,
+            452,
+            479,
+            2204,
+            3654,
+            3728
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_conta_instalacao",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            378,
+            438,
+            464,
+            1868,
+            2440,
+            4200,
+            4286
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            393,
+            453,
+            479,
+            2204,
+            3655,
+            3741
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_conta_valor",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 8,
+      "matches_total_evolution": 7,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            375,
+            439,
+            464,
+            1868,
+            2441,
+            3253,
+            4201,
+            4299
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            390,
+            454,
+            479,
+            2205,
+            2829,
+            3656,
+            3754
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_doc_menu",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 8,
+      "matches_total_evolution": 7,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            398,
+            433,
+            465,
+            1869,
+            2443,
+            4149,
+            4179,
+            4313
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            413,
+            448,
+            480,
+            2207,
+            3602,
+            3634,
+            3768
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_doc_nome",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            382,
+            440,
+            465,
+            1869,
+            2443,
+            4316,
+            4344
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            397,
+            455,
+            480,
+            2207,
+            3771,
+            3799
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_doc_cpf",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            363,
+            441,
+            465,
+            1869,
+            2444,
+            4317,
+            4358
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            378,
+            456,
+            480,
+            2208,
+            3772,
+            3813
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_doc_rg",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            385,
+            442,
+            465,
+            1869,
+            2444,
+            4318,
+            4371
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            400,
+            457,
+            480,
+            2208,
+            3773,
+            3826
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_doc_nascimento",
+      "categoria_proposta": "cadastro-only",
+      "matches_total_whapi": 7,
+      "matches_total_evolution": 6,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": [
+            369,
+            443,
+            466,
+            1869,
+            2444,
+            4319,
+            4384
+          ]
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": [
+            384,
+            458,
+            481,
+            2208,
+            3774,
+            3839
+          ]
+        }
+      ]
+    },
+    {
+      "step_key": "editing_doc_pai",
+      "categoria_proposta": "indeterminado",
+      "matches_total_whapi": 0,
+      "matches_total_evolution": 0,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": []
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": []
+        }
+      ]
+    },
+    {
+      "step_key": "editing_doc_mae",
+      "categoria_proposta": "indeterminado",
+      "matches_total_whapi": 0,
+      "matches_total_evolution": 0,
+      "found_in_conversational": false,
+      "evidencia_em_codigo": [
+        {
+          "path": "supabase/functions/whapi-webhook/handlers/bot-flow.ts",
+          "lines": []
+        },
+        {
+          "path": "supabase/functions/evolution-webhook/handlers/bot-flow.ts",
+          "lines": []
+        }
+      ]
+    }
+  ]
+}

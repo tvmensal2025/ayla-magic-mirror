@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "window_hours": 72,
+  "generated_at": "2026-05-28T19:01:29Z",
+  "source": "supabase_mcp_sql_equivalent",
+  "note": "Script v3-vs-legacy-metrics.py exige SUPABASE_SERVICE_ROLE_KEY. .env local possui apenas SUPABASE_PUBLISHABLE_KEY (anon), e engine_logs tem RLS service_role_all (anon retorna 401). Resultado abaixo replica fielmente as queries do script via Supabase MCP (apply_migration/execute_sql) com mesmas janelas e kinds.",
+  "consultants_dark": [
+    {"id": "2dcea94d-d6c5-4896-b31e-c1bb18df56f1", "name": "Carlos Magna", "flag": "dark"},
+    {"id": "c4fd877b-79a7-4913-a66b-6ad2b733e800", "name": "silvamoraesfilho", "flag": "dark"},
+    {"id": "6ffedf8d-1695-4e5e-94a5-5ba72645bad3", "name": "lenealiaad", "flag": "dark"},
+    {"id": "be9a9c31-6f66-47b2-a74a-c516957942b5", "name": "abrao.edsonabrao36", "flag": "dark"},
+    {"id": "b567a9af-a32f-42da-89eb-2e9014a16245", "name": "brunabwk", "flag": "dark"},
+    {"id": "813a2068-385c-4d4a-a735-aaf85d71b7bb", "name": "Sirlene de Freitas Correa", "flag": "dark"},
+    {"id": "67b56fea-134c-4a4e-894e-4b2c523cf5e1", "name": "Mauricio Santo Garcia de Godoi", "flag": "dark"},
+    {"id": "cef4c34f-62b5-48cc-920f-1bc07b623902", "name": "Francisco Melquiades ", "flag": "dark"},
+    {"id": "9ab51476-1a30-4aad-b2d9-4eb8d316bc09", "name": "Elaine Sousa", "flag": "dark"},
+    {"id": "31e5afae-5c62-4eb3-9d55-39de6e21af2f", "name": "Horacio consultor de energia ", "flag": "dark"},
+    {"id": "ef2f76c8-eff8-4bfc-922e-f573bb39daa8", "name": "nowimportsapple", "flag": "dark"}
+  ],
+  "overall_counts": {
+    "engine_step_enter": 43,
+    "engine_invalid_step": 10,
+    "engine_no_match": 10,
+    "engine_safe_text": 10,
+    "engine_handoff": 6
+  },
+  "by_consultant": [
+    {
+      "consultant_id": "0c2711ad-4836-41e6-afba-edd94f698ae3",
+      "consultant_name": "Nilma tavares",
+      "flag": "off",
+      "counts": {
+        "engine_step_enter": 43,
+        "engine_invalid_step": 10,
+        "engine_no_match": 10,
+        "engine_handoff": 6
+      }
+    }
+  ],
+  "metrics": {
+    "taxa_divergencia_proxy_pct": 46.51,
+    "engine_invalid_step_pct": 23.26,
+    "engine_no_match_pct": 23.26
+  },
+  "thresholds": {
+    "promote_v3_max_invalid_pct": 2.0,
+    "promote_v3_max_no_match_pct": 5.0
+  },
+  "decision_hint": "retire_v3_or_extend_dark",
+  "observations": {
+    "data_window": "engine_logs entre 2026-05-26 09:59:24 UTC e 2026-05-26 19:19:23 UTC (todas as 79 linhas das ultimas 72h foram emitidas em ~9h de um unico consultor)",
+    "consultants_dark_with_traffic_in_window": 0,
+    "consultants_with_traffic_in_window": 1,
+    "interpretacao": "Nenhum consultor em Modo_Dark gerou engine_logs nas ultimas 72h. Todo o trafego registrado pertence a 'Nilma tavares' com flow_engine_v3=off. Sem trafego de consultores dark, a metrica de divergencia em Modo_Dark nao tem amostra estatisticamente representativa para Decisao_Engine_V3.",
+    "alerta_rollout": "decision_hint=retire_v3_or_extend_dark refere-se ao trafego total observado, nao a consultores dark. Recomendacao: estender Modo_Dark ate haver amostra >= N consultores dark com trafego."
+  }
+}

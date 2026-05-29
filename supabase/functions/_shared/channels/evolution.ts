@@ -9,15 +9,18 @@
 //   4. Implementa `sendChoice` decidindo botão real vs lista numerada
 //      conforme `capabilities` (Task D do design — channel-aware).
 //
-// Capabilities deliberadas:
-//   - `supportsButtons=true`: a Evolution suporta `message/sendButtons`,
-//     mas falha em vários cenários. O sender legado tem fallback automático
-//     para texto numerado, e mantemos esse comportamento dentro do `sendChoice`
-//     do adapter — o caller (engine/dispatcher) sempre vê uma renderização
-//     determinística e um log `kind="channel_choice_downgrade"` quando aplica.
-//   - `supportsList=false`: Evolution não tem suporte estável a List Messages.
+// Capabilities deliberadas (bot-engine-channel-unification §Design 2):
+//   - `supportsButtons=false`, `maxButtons=0` — política do projeto:
+//     hoje renderizamos lista numerada por estabilidade do Baileys/Evolution
+//     (sendButtons falha em vários cenários reais). O motor entrega
+//     `kind="choice"` e o adapter/dispatcher faz Rendering_Numbered.
+//   - `supportsList=true` — `sendList` é estável (reservado para fluxos
+//     futuros; o caminho atual usa lista numerada em texto plano).
 //   - `supportsAudio=true`: `sendAudio` existe e funciona.
 //   - `supportsTypingPresence=true`: `chat/sendPresence` está disponível.
+//   - `supportsReactions=false`: emoji-em-mensagem não é confiável.
+//   - `inboundIdField="wa_id"` — Evolution entrega `data.key.id` mas o
+//     campo canônico do payload Baileys é `wa_id` (vide design §2).
 
 import type {
   ChannelAdapter,
@@ -35,17 +38,23 @@ import {
 } from "../evolution-api.ts";
 import { normalizePhone } from "../utils.ts";
 
-// ─── Capabilities (estáticas — NUNCA dependem de runtime) ──────────────
-const CAPABILITIES: ChannelCapabilities = {
+/**
+ * Capabilities estáticas do canal Evolution. Exportado como named constant
+ * para consumo direto pelo motor (`_shared/engine/`), pelos PBT
+ * (`__tests__/arb.ts → arbCapabilities`) e por scripts de E2E
+ * (`bot-e2e-runner/v3-scenarios.ts`). Spec:
+ * `.kiro/specs/bot-engine-channel-unification/design.md` §2.
+ */
+export const EVOLUTION_CAPABILITIES: ChannelCapabilities = {
   channel: "evolution",
-  supportsButtons: true,
-  maxButtons: 3,
-  supportsList: false,
+  supportsButtons: false,
+  maxButtons: 0,
+  supportsList: true,
   supportsAudio: true,
   supportsVideo: true,
   supportsTypingPresence: true,
   supportsReactions: false,
-  inboundIdField: "messageId",
+  inboundIdField: "wa_id",
 };
 
 export interface CreateEvolutionAdapterInput {
@@ -71,7 +80,7 @@ export function createEvolutionAdapter(input: CreateEvolutionAdapterInput): Chan
   }
 
   return {
-    capabilities: CAPABILITIES,
+    capabilities: EVOLUTION_CAPABILITIES,
 
     async sendText(jid, text, _ctx) {
       try {
@@ -88,8 +97,11 @@ export function createEvolutionAdapter(input: CreateEvolutionAdapterInput): Chan
       //            interno se a Evolution falhar — comportamento preservado.
       //   list   → não suportado: fallback para texto numerado.
       //   number → texto numerado direto.
-      const safeOptions = (choice.options || []).slice(0, CAPABILITIES.maxButtons);
-      if (choice.preferred === "button" && CAPABILITIES.supportsButtons && safeOptions.length > 0) {
+      const safeOptions = (choice.options || []).slice(0, EVOLUTION_CAPABILITIES.maxButtons);
+      if (
+        choice.preferred === "button" && EVOLUTION_CAPABILITIES.supportsButtons &&
+        safeOptions.length > 0
+      ) {
         try {
           const ok = await sender.sendButtons(jid, prompt, safeOptions);
           return toResult(ok);

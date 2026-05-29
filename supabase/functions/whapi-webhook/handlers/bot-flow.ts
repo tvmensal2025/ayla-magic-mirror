@@ -2914,7 +2914,12 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
     }
 
     case "qualificacao": {
-      const capturedName = normalizeLeadName(messageText);
+      // 🛡️ Clique de botão NUNCA é nome — ignora capture quando isButton=true
+      // (título do botão "Quero simular" virava name="Quero Simular").
+      // Bug confirmado em sandbox 2026-05-29: lead clicava botão e o nome do
+      // customer era sobrescrito pelo título do botão. Mantém a guarda das
+      // outras subdivisões deste case (capture de valor numérico, etc).
+      const capturedName = !isButton ? normalizeLeadName(messageText) : null;
       if (capturedName) {
         updates.name = capturedName;
         updates.name_source = "self_introduced";
@@ -3036,6 +3041,19 @@ export async function runBotFlow(ctx: BotContext): Promise<BotResult> {
 
     // ─── 2. AGUARDANDO CONTA ──────────────
     case "aguardando_conta": {
+      // 🛡️ Clique de botão (welcome residual) chegando em aguardando_conta:
+      // o lead já avançou pra esperar foto, mas o chat antigo dele ainda mostra
+      // os botões do welcome. Em vez de tratar como texto livre (que o regex
+      // captura como valor numérico ou nome), apenas re-emite o prompt da conta.
+      // Bug confirmado em sandbox 2026-05-29: cliques nos botões "Quero simular"/
+      // "Como funciona" depois do customer já estar em aguardando_conta caíam no
+      // anti-dup silencioso e o lead via mensagem fantasma.
+      if (isButton) {
+        const _firstName = ((customer as any).name || "").split(/\s+/)[0];
+        const _v = _firstName ? `${_firstName}, ` : "";
+        reply = `${_v}me manda uma *foto* (ou PDF) da sua conta de luz, por favor 📸\n\nSe estiver sem a conta agora, é só me dizer o valor médio que você paga.`;
+        break;
+      }
       // 🔍 DEBUG diagnóstico (2026-05-25): persiste qual caminho o handler tomou
       try {
         await supabase.from("customers").update({
