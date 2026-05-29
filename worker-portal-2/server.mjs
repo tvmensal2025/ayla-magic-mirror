@@ -343,7 +343,7 @@ async function fetchDadosFromSupabase(customerId) {
       email,
       cep, address_street, address_number, address_complement,
       address_neighborhood, address_city, address_state,
-      numero_instalacao, media_consumo,
+      numero_instalacao, media_consumo, electricity_bill_value,
       distribuidora, debitos_aberto, possui_procurador,
       referral_partner_id, consultant_id,
       consultants:consultant_id(igreen_id, name, portal_kind),
@@ -357,6 +357,20 @@ async function fetchDadosFromSupabase(customerId) {
   const partner = c.referral_partners;
   const igreenId = consultant?.igreen_id ? Number(consultant.igreen_id) : null;
   if (!igreenId) return null;
+
+  // Estimativa de consumo médio (kWh) quando o customer só tem o valor da fatura
+  // em R$. Tarifa média BR ~R$0,90/kWh em 2026 (varia 0.75-1.05 por distribuidora).
+  // É só pra desbloquear o /bonus/rules — backend re-calcula com a fatura real.
+  const TARIFA_MEDIA_KWH = 0.9;
+  let consumoMedio = Number(c.media_consumo || 0);
+  if (!consumoMedio) {
+    const valorConta = Number(c.electricity_bill_value || 0);
+    if (valorConta > 0) {
+      consumoMedio = Math.max(50, Math.round(valorConta / TARIFA_MEDIA_KWH));
+      console.log(`  ↳ media_consumo null; estimando ${consumoMedio} kWh a partir de R$${valorConta}`);
+    }
+  }
+
   return {
     idconsultor: igreenId,
     indcli: partner?.cli ? Number(partner.cli) : 0,
@@ -373,7 +387,7 @@ async function fetchDadosFromSupabase(customerId) {
     cidade: c.address_city || '',
     uf: c.address_state || '',
     numeroInstalacao: c.numero_instalacao || '',
-    consumoMedio: Number(c.media_consumo || 0),
+    consumoMedio,
     concessionaria: c.distribuidora || '',
     possuiPlacas: false,
     sendcontract: true,

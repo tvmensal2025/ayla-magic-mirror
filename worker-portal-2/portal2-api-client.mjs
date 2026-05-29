@@ -241,6 +241,149 @@ export class Portal2Client {
     return this._fetch('GET', '/form-config', { query: { state, distributor, supplier } });
   }
 
+  /**
+   * Normaliza nome de concessionária local pra o nome oficial aceito pela iGreen.
+   *
+   * Exemplos cobertos (nome comercial na fatura → enum iGreen):
+   *   "CPFL Energia" / "CPFL Paulista" → "CPFL"
+   *   "CPFL Piratininga" → "CPFL PIRATININGA"
+   *   "Cemig Distribuição" / "Cemig D" → "CEMIG-D"
+   *   "Enel Distribuição São Paulo" → "ENEL"
+   *   "Coelba" → "COELBA"
+   *   "Light SA" / "Light Energia" → "LIGHT"
+   *   "Energisa Mato Grosso" → "ENERGISA"
+   *
+   * Quando passado `cidade`, desambigua casos como "CPFL ENERGIA" em SP
+   * (Salto/Sorocaba/Itu → Piratininga; Campinas/Ribeirão Preto → CPFL).
+   *
+   * Estratégia:
+   *   1. Hint por cidade (resolve antes do alias genérico)
+   *   2. Match exato case-insensitive
+   *   3. Tabela de aliases comerciais (CPFL/CEMIG/ENEL/...)
+   *   4. Match por startsWith (mais específico vence)
+   *   5. Match por primeira palavra
+   *   6. Sem match: retorna `null`
+   */
+  async resolveConcessionaria(uf, nome, cidade) {
+    if (!nome) return null;
+    const norm = s => String(s || '').toUpperCase().trim().replace(/\s+/g, ' ');
+    const target = norm(nome);
+    const targetCidade = norm(cidade);
+
+    // Hint por cidade — só quando o nome é ambíguo. SP é o caso mais crítico
+    // porque tem CPFL (Paulista), CPFL Piratininga e CPFL Santa Cruz.
+    // Fonte: áreas de concessão ANEEL.
+    const CITY_HINT = {
+      SP: {
+        'CPFL PIRATININGA': new Set([
+          'SALTO', 'SOROCABA', 'ITU', 'BOITUVA', 'PORTO FELIZ', 'JUNDIAI',
+          'JUNDIAÍ', 'INDAIATUBA', 'SANTOS', 'SAO VICENTE', 'SÃO VICENTE',
+          'GUARUJA', 'GUARUJÁ', 'CUBATAO', 'CUBATÃO', 'PRAIA GRANDE',
+          'BERTIOGA', 'ITAPETININGA', 'ITAPEVA', 'TATUI', 'TATUÍ',
+        ]),
+        'CPFL SANTA CRUZ': new Set([
+          'SANTA CRUZ DO RIO PARDO', 'OURINHOS', 'AVARE', 'AVARÉ',
+          'SAO MANUEL', 'SÃO MANUEL', 'BOTUCATU',
+        ]),
+      },
+    };
+
+    // Aliases que sabemos por nome comercial (independente da UF) -- mapeia
+    // pra TOKEN que precisa estar na lista oficial da UF.
+    const COMMERCIAL_TO_TOKEN = [
+      // CPFL: "Energia", "Paulista" e outras subsidiárias caem em "CPFL"
+      // (exceto Piratininga e Santa Cruz que tem nomes próprios na iGreen).
+      { match: /^CPFL\s*PIRATININGA/, token: 'CPFL PIRATININGA' },
+      { match: /^CPFL\s*SANTA\s*CRUZ/, token: 'CPFL SANTA CRUZ' },
+      { match: /^CPFL/,                token: 'CPFL' },
+      // Cemig (MG): nome comercial varia (D, Distribuição etc)
+      { match: /^CEMIG/,               token: 'CEMIG-D' },
+      // Enel (SP/RJ/CE): subsidiárias varias
+      { match: /^ENEL/,                token: 'ENEL' },
+      // Energisa (MT/MS/SE/PB/MG/SP): cai sempre em ENERGISA + UF
+      { match: /^ENERGISA\s*MINAS\s*RIO/, token: 'ENERGISA MINAS RIO' },
+      { match: /^ENERGISA\s*SUL\s*SUDESTE/, token: 'ENERGISA SUL SUDESTE' },
+      { match: /^ENERGISA\s*PARAIBA|^ENERGISA\s*PB/, token: 'ENERGISA PB' },
+      { match: /^ENERGISA\s*TOCANTINS/, token: 'ENERGISA TOCANTINS' },
+      { match: /^ENERGISA/,            token: 'ENERGISA' },
+      // EDP (SP/ES)
+      { match: /^EDP/,                 token: 'EDP' },
+      // Equatorial (MA/PA/AL/PI/GO/RJ)
+      { match: /^EQUATORIAL\s*PA/,     token: 'EQUATORIAL PA' },
+      { match: /^EQUATORIAL/,          token: 'EQUATORIAL' },
+      // Coelba (BA)
+      { match: /^COELBA/,              token: 'COELBA' },
+      // Cosern (RN)
+      { match: /^COSERN/,              token: 'COSERN' },
+      // Light (RJ)
+      { match: /^LIGHT/,               token: 'LIGHT' },
+      // Celesc (SC/PR)
+      { match: /^CELESC/,              token: 'CELESC' },
+      // Copel (PR)
+      { match: /^COPEL/,               token: 'COPEL' },
+      // CEEE (RS) e RGE (RS)
+      { match: /^CEEE/,                token: 'CEEE' },
+      { match: /^RGE/,                 token: 'RGE' },
+      // Elektro (SP/MS)
+      { match: /^ELEKTRO/,             token: 'ELEKTRO' },
+      // Neoenergia / Celpe (PE)
+      { match: /^NEO\s*ENERGIA|^CELPE/, token: 'NEO ENERGIA' },
+    ];
+
+    // Lista oficial pra essa UF
+    const list = await this.getDistributors(uf).catch(() => []);
+    const officials = (Array.isArray(list) ? list : [])
+      .map(d => (typeof d === 'string' ? d : d?.concessionaria))
+      .filter(Boolean);
+
+    if (officials.length === 0) return null;
+
+    // 0. Hint por cidade — quando o nome é ambíguo (ex: "CPFL ENERGIA" em SP),
+    // desambigua usando a área de concessão. Só aplica se o token base ainda
+    // for um match plausível pro nome.
+    const cityMap = CITY_HINT[uf?.toUpperCase()];
+    if (cityMap && targetCidade) {
+      for (const [official, cidades] of Object.entries(cityMap)) {
+        if (!cidades.has(targetCidade)) continue;
+        const officialMatch = officials.find(o => norm(o) === norm(official));
+        if (!officialMatch) continue;
+        // Confirma que o nome também é compatível (mesma família).
+        const family = official.split(' ')[0];
+        if (target.startsWith(family) || norm(target).includes(family)) {
+          return officialMatch;
+        }
+      }
+    }
+
+    // 1. Match exato case-insensitive
+    const exact = officials.find(o => norm(o) === target);
+    if (exact) return exact;
+
+    // 2. Aliases por nome comercial: primeiro pattern que casa wins
+    for (const { match, token } of COMMERCIAL_TO_TOKEN) {
+      if (!match.test(target)) continue;
+      // Pega o nome oficial mais próximo do token (case-insensitive)
+      const hit = officials.find(o => norm(o) === norm(token))
+                || officials.find(o => norm(o).startsWith(norm(token)));
+      if (hit) return hit;
+    }
+
+    // 3. startsWith fuzzy (mais específico vence)
+    const starts = officials
+      .filter(o => target.startsWith(norm(o)) || norm(o).startsWith(target))
+      .sort((a, b) => norm(b).length - norm(a).length);
+    if (starts.length) return starts[0];
+
+    // 4. Primeira palavra em comum
+    const targetFirst = target.split(' ')[0];
+    if (targetFirst.length >= 3) {
+      const byToken = officials.find(o => norm(o).split(' ')[0] === targetFirst);
+      if (byToken) return byToken;
+    }
+
+    return null;
+  }
+
   // ──── Validação / OCR ──────────────────────────────────────────────────────
   initValidation() { return this._fetch('POST', '/extractor/init-validation'); }
   extractDocument({ fileBuffer, filename, mime = 'image/jpeg', idsolcontratovalidacao, pdfPassword }) {
@@ -334,15 +477,60 @@ export class Portal2Client {
     }
 
     let { concessionaria, fornecedora, desconto_cliente } = dados;
+
+    // Resolve concessionária via /bonus/distributors quando o nome do customer
+    // não bate com a nomenclatura oficial da iGreen. Ex: "CPFL ENERGIA" → "CPFL".
+    // Cidade ajuda a desambiguar (ex: Salto/SP → CPFL PIRATININGA).
+    if (concessionaria && dados.uf) {
+      try {
+        const official = await this.resolveConcessionaria(dados.uf, concessionaria, dados.cidade);
+        if (official && official !== concessionaria) {
+          console.log(`  ↳ concessionária normalizada: "${concessionaria}" → "${official}"`);
+          concessionaria = official;
+        }
+      } catch (e) {
+        console.warn(`  ⚠ falha ao normalizar concessionária: ${e.message}`);
+      }
+    }
+
     if (!fornecedora) {
-      const rules = await this.getBonusRules({
-        uf: dados.uf, concessionaria,
-        consumo_medio: dados.consumoMedio,
-        idsolcontratovalidacao,
-      });
+      let rules;
+      try {
+        rules = await this.getBonusRules({
+          uf: dados.uf, concessionaria,
+          consumo_medio: dados.consumoMedio,
+          idsolcontratovalidacao,
+        });
+      } catch (e) {
+        // Se 404 mesmo após normalizar, tenta cada concessionária listada da UF
+        if (e.status === 404 && dados.uf) {
+          console.warn(`  ⚠ /bonus/rules 404 com "${concessionaria}" — fallback iterando distribuidoras da UF`);
+          const distList = await this.getDistributors(dados.uf).catch(() => []);
+          for (const d of (Array.isArray(distList) ? distList : [])) {
+            const candidate = d.concessionaria || d;
+            if (!candidate || candidate === concessionaria) continue;
+            try {
+              rules = await this.getBonusRules({
+                uf: dados.uf, concessionaria: candidate,
+                consumo_medio: dados.consumoMedio,
+                idsolcontratovalidacao,
+              });
+              const list = Array.isArray(rules) ? rules : (rules?.rules ?? []);
+              if (list.some(r => r.disponibilidade && r.ativo)) {
+                console.log(`  ↳ concessionária ajustada: "${concessionaria}" → "${candidate}"`);
+                concessionaria = candidate;
+                break;
+              }
+            } catch {}
+          }
+          if (!rules) throw e;
+        } else {
+          throw e;
+        }
+      }
       const list = Array.isArray(rules) ? rules : (rules?.rules ?? []);
       const match = list.find(r => r.disponibilidade && r.ativo);
-      if (!match) throw new Error(`Sem regra ativa pra UF=${dados.uf} consumo=${dados.consumoMedio}`);
+      if (!match) throw new Error(`Sem regra ativa pra UF=${dados.uf} concessionaria=${concessionaria} consumo=${dados.consumoMedio}`);
       concessionaria = concessionaria || match.concessionaria;
       fornecedora = match.fornecedora;
       desconto_cliente = desconto_cliente ?? Number(String(match.desconto_cliente || '8').split(',')[0].trim());
